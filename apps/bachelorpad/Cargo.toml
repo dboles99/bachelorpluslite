@@ -1,0 +1,11 @@
+[package]
+name = "bachelorpad"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+bp-core = { path = "../../crates/bp-core" }
