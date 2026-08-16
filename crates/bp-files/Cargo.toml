@@ -5,3 +5,10 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+bp-core = { path = "../bp-core" }
+bp-naming = { path = "../bp-naming" }
+tempfile.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+time = { workspace = true, features = ["macros"] }

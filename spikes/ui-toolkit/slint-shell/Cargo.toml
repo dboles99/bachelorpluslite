@@ -1,0 +1,25 @@
+[workspace]
+# Standalone workspace on purpose. The spike must not drag a full GUI
+# dependency tree into `cargo check --workspace` for a toolkit that is still
+# a candidate -- one of these two shells gets deleted once ADR-0015 lands.
+
+[package]
+name = "spike-slint-shell"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[dependencies]
+slint = "1.17"
+
+[build-dependencies]
+slint-build = "1.17"
+
+# Identical to the egui spike. Comparing release profiles that differ would
+# make the binary-size and startup numbers meaningless.
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true

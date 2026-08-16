@@ -39,6 +39,24 @@ G:\dev2\bachelorpadplus_rust
 
 The installer is conservative: it will not silently overwrite an existing repository. It creates a timestamped backup if you explicitly use `-BackupExisting`.
 
+## Development
+
+```powershell
+./scripts/Install-GitHooks.ps1   # once per clone
+./scripts/Invoke-LocalCI.ps1     # format, check, clippy, test
+```
+
+This project has **no hosted CI**. `scripts/Invoke-LocalCI.ps1` is the
+authoritative gate and runs from `pre-commit` and `pre-push`. See
+[docs/governance/LOCAL_CI.md](docs/governance/LOCAL_CI.md) and ADR-0016.
+
+Current state: the core model (`bp-core`), filename grammar (`bp-naming`) and
+atomic save path (`bp-files`) are implemented and tested. The UI toolkit has
+been benchmarked but not yet committed to — see
+[ADR-0015](docs/decisions/ADR-0015.md), which is *Proposed*, and the
+measurements in [artifacts/ui/](artifacts/ui/). The remaining `bp-*` crates
+are placeholders.
+
 ## Governance hierarchy
 
 Where logical and useful, work follows:

@@ -1,4 +1,7 @@
 /target
+# Spike workspaces are standalone, so each has its own target directory that
+# the root-anchored rule above does not cover.
+spikes/**/target/
 **/*.rs.bk
 .env
 .env.*
@@ -18,3 +21,6 @@ Thumbs.db
 .vscode/*
 !.vscode/extensions.json
 !.vscode/settings.json
+# Per-run local CI records. Benchmark results under artifacts/benchmarks/ are
+# deliberately NOT ignored -- they are the evidence behind ADR-0015.
+artifacts/test-evidence/*.json

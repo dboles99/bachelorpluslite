@@ -5,3 +5,8 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+time.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+time = { workspace = true, features = ["macros"] }

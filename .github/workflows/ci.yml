@@ -1,8 +1,24 @@
+# DORMANT -- GitHub Actions is not available for this project.
+#
+# The authoritative gate is local: scripts/Invoke-LocalCI.ps1, wired into
+# pre-commit and pre-push by scripts/Install-GitHooks.ps1. See
+# docs/governance/LOCAL_CI.md.
+#
+# This file is kept, and kept correct, so hosted CI can be switched back on
+# without rebuilding it. The trigger is `workflow_dispatch` only, so pushes
+# do not queue runs that cannot execute. To re-enable, restore:
+#
+#   on:
+#     push:
+#     pull_request:
+#
+# Keep the steps below in sync with Invoke-LocalCI.ps1 -- two gates that
+# disagree are worse than one.
+
 name: CI
 
 on:
-  push:
-  pull_request:
+  workflow_dispatch:
 
 jobs:
   check:
@@ -15,9 +31,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
       - name: Format
         run: cargo fmt --all -- --check
       - name: Check
-        run: cargo check --workspace
+        run: cargo check --workspace --all-targets --locked
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Test
+        run: cargo test --workspace

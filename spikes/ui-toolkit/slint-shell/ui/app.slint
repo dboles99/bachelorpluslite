@@ -1,0 +1,215 @@
+// BachelorPad+ Phase 1 UI toolkit spike -- Slint shell.
+//
+// Renders the same shell as the egui spike so the two are comparable: menu
+// bar, tab strip, editor pane, and the two-line status bar from specs.md
+// section 3. Click the theme cell in the status bar to cycle the four themes.
+
+export global Palette {
+    in-out property <int> theme: 2;
+
+    out property <color> shell:
+        theme == 0 ? #e8e6e1 : theme == 1 ? #23262b : theme == 2 ? #2f261c : #08160c;
+    out property <color> panel:
+        theme == 0 ? #f7f6f3 : theme == 1 ? #1a1d21 : theme == 2 ? #3a2f22 : #0d2312;
+    out property <color> edge:
+        theme == 0 ? #c2bdb4 : theme == 1 ? #3a3f47 : theme == 2 ? #5a4a34 : #1c4a28;
+    out property <color> ink:
+        theme == 0 ? #1b1b1b : theme == 1 ? #e6e6e6 : theme == 2 ? #f0e4d2 : #b8f5c4;
+    out property <color> ink-dim:
+        theme == 0 ? #5f5f5f : theme == 1 ? #9aa0a8 : theme == 2 ? #b9a184 : #6fbf82;
+    out property <color> accent:
+        theme == 0 ? #b8541f : theme == 1 ? #4c9be8 : theme == 2 ? #d98829 : #3ddc6a;
+    out property <string> name:
+        theme == 0 ? "Light" : theme == 1 ? "Dark" : theme == 2 ? "Organic" : "Green";
+}
+
+component MenuLabel inherits Rectangle {
+    in property <string> label;
+    height: 26px;
+    width: txt.preferred-width + 22px;
+    background: ta.has-hover ? Palette.edge : transparent;
+
+    txt := Text {
+        text: root.label;
+        color: Palette.ink;
+        font-size: 13px;
+        vertical-alignment: center;
+        horizontal-alignment: center;
+    }
+
+    ta := TouchArea { }
+}
+
+component Tab inherits Rectangle {
+    in property <string> label;
+    in property <bool> active;
+    height: 30px;
+    width: 170px;
+    background: root.active ? Palette.panel : Palette.shell;
+    border-color: Palette.edge;
+    border-width: 1px;
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 10px;
+        spacing: 8px;
+
+        Text {
+            text: root.label;
+            color: root.active ? Palette.ink : Palette.ink-dim;
+            font-size: 13px;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+        }
+
+        Text {
+            text: "×";
+            color: Palette.ink-dim;
+            font-size: 15px;
+            vertical-alignment: center;
+        }
+    }
+}
+
+component StatusText inherits Text {
+    color: Palette.ink-dim;
+    font-size: 12px;
+    vertical-alignment: center;
+}
+
+export component AppWindow inherits Window {
+    title: "BachelorPad+";
+    preferred-width: 1000px;
+    preferred-height: 680px;
+    background: Palette.shell;
+
+    in-out property <string> doc-text;
+    in property <string> save-state: "● Never saved";
+    in property <string> full-path: "Location not assigned";
+
+    VerticalLayout {
+        // --- menu bar ---------------------------------------------------
+        Rectangle {
+            height: 28px;
+            background: Palette.panel;
+            HorizontalLayout {
+                padding-left: 6px;
+                alignment: start;
+                MenuLabel { label: "File"; }
+                MenuLabel { label: "Edit"; }
+                MenuLabel { label: "View"; }
+                MenuLabel { label: "Insert"; }
+                MenuLabel { label: "Format"; }
+                MenuLabel { label: "Data"; }
+                MenuLabel { label: "Note"; }
+                MenuLabel { label: "Notebook"; }
+                MenuLabel { label: "Organize"; }
+                MenuLabel { label: "Research"; }
+                MenuLabel { label: "Run"; }
+                MenuLabel { label: "Security"; }
+                MenuLabel { label: "Tools"; }
+                MenuLabel { label: "Help"; }
+            }
+        }
+
+        Rectangle { height: 1px; background: Palette.edge; }
+
+        // --- tab strip --------------------------------------------------
+        Rectangle {
+            height: 32px;
+            background: Palette.shell;
+            HorizontalLayout {
+                padding-left: 6px;
+                spacing: 2px;
+                alignment: start;
+                Tab { label: "Untitled"; active: true; }
+                MenuLabel { label: "+"; }
+            }
+        }
+
+        Rectangle { height: 1px; background: Palette.edge; }
+
+        // --- editor pane ------------------------------------------------
+        Rectangle {
+            background: Palette.panel;
+            vertical-stretch: 1;
+
+            HorizontalLayout {
+                padding: 10px;
+                spacing: 10px;
+
+                // Gutter. Static in the spike -- it exists to prove the
+                // toolkit can put a themed fixed column beside live text.
+                Text {
+                    text: "1\n2\n3\n4\n5\n6\n7\n8";
+                    color: Palette.ink-dim;
+                    font-family: "Consolas";
+                    font-size: 14px;
+                    horizontal-alignment: right;
+                    width: 28px;
+                }
+
+                TextInput {
+                    text <=> root.doc-text;
+                    color: Palette.ink;
+                    font-family: "Consolas";
+                    font-size: 14px;
+                    single-line: false;
+                    wrap: word-wrap;
+                    horizontal-stretch: 1;
+                }
+            }
+        }
+
+        Rectangle { height: 1px; background: Palette.edge; }
+
+        // --- status bar (specs.md section 3) ----------------------------
+        Rectangle {
+            height: 42px;
+            background: Palette.panel;
+
+            VerticalLayout {
+                padding-left: 10px;
+                padding-right: 10px;
+                padding-top: 3px;
+                padding-bottom: 3px;
+
+                HorizontalLayout {
+                    spacing: 10px;
+                    alignment: start;
+
+                    Text {
+                        text: root.save-state;
+                        color: Palette.accent;
+                        font-size: 12px;
+                        vertical-alignment: center;
+                    }
+                    StatusText { text: "│ TXT"; }
+                    StatusText { text: "│ UTF-8"; }
+                    StatusText { text: "│ CRLF"; }
+                    StatusText { text: "│ Ln 1, Col 1"; }
+                    StatusText { text: "│ 100%"; }
+
+                    themecell := Rectangle {
+                        width: tl.preferred-width + 16px;
+                        background: tt.has-hover ? Palette.edge : transparent;
+                        tl := Text {
+                            text: "│ " + Palette.name;
+                            color: Palette.accent;
+                            font-size: 12px;
+                            vertical-alignment: center;
+                            horizontal-alignment: center;
+                        }
+                        tt := TouchArea {
+                            clicked => {
+                                Palette.theme = Palette.theme == 3 ? 0 : Palette.theme + 1;
+                            }
+                        }
+                    }
+                }
+
+                StatusText { text: root.full-path; }
+            }
+        }
+    }
+}
