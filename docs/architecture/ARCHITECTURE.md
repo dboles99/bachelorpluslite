@@ -96,7 +96,7 @@ Two deliberate non-dependencies:
 ## Inside `bp-ui`
 
 The shell was one 2,675-line file and the single-writer bottleneck for every
-piece of wiring work. It is now four, split along seams the file already had
+piece of wiring work. It is now five, split along seams the file already had
 as comment banners:
 
 | Module | Owns |
@@ -107,8 +107,31 @@ as comment banners:
 | `menus.rs` | Menu contents and the action-id map |
 | `lib.rs` | `run_with`, `refresh`, and the Slint callback wiring |
 
-**`ui/app.slint` is now the bottleneck instead**, at ~1,200 lines and one
-file. Nearly every remaining wiring item touches it.
+`ui/app.slint` took the same treatment for the same reason, and is now seven
+files rather than one 1,189-line one:
+
+| File | Owns |
+| --- | --- |
+| `types.slint` | The five structs and the `Palette` global — the boundary `slint-build` generates into Rust |
+| `menu.slint` | `MenuLabel`, `MenuRow`, `MenuPopup` |
+| `editor_surface.slint` | `EditorSurface`: the custom view's drawing, measurement and input |
+| `tab.slint` | One tab |
+| `find_bar.slint` | Find and replace, including `focus-query` |
+| `results_panel.slint` | Cross-file search results |
+| `status_bar.slint` | Both status rows |
+| `app.slint` | The window's properties and callbacks, the shortcut bindings, the menu bar and its popups, both editor views, the tab strip, and the layout |
+
+Three things stayed in `app.slint` deliberately, and they are what a wiring
+item may still have to serialise on:
+
+- **The menu bar and its popups.** A `PopupWindow`'s position is relative to
+  its parent element, and the popups are placed from their labels' `x`. Moving
+  both into a component changes the coordinate parent — a visual change
+  nothing in the gate can catch.
+- **Both editor views**, because `dispatch`, `select-range` and
+  `forward-focus` name `editor` and `surface` directly, and a parent cannot
+  name an element inside a child component.
+- **The tab strip**, a `for` over `root.tabs` and three lines of layout.
 
 Two rules the modules run on:
 

@@ -1,0 +1,68 @@
+// One tab in the strip.
+//
+// The strip itself stays in `app.slint`: it is a `for` over `root.tabs` and
+// three lines of layout, and pulling it out would move the loop away from the
+// property it reads without removing anything worth removing.
+
+import { Palette } from "types.slint";
+
+export component Tab inherits Rectangle {
+    in property <string> label;
+    in property <bool> dirty;
+    in property <bool> active;
+    callback selected();
+    callback closed();
+
+    height: 30px;
+    width: 190px;
+    background: root.active ? Palette.panel : Palette.shell;
+    border-color: Palette.edge;
+    border-width: 1px;
+
+    select-area := TouchArea {
+        clicked => {
+            root.selected();
+        }
+    }
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 8px;
+        spacing: 6px;
+
+        // A dot rather than the usual asterisk: it matches the status bar's
+        // unsaved marker, so one symbol means "not on disk" everywhere.
+        Text {
+            text: root.dirty ? "●" : "";
+            color: Palette.accent;
+            font-size: 13px;
+            vertical-alignment: center;
+        }
+
+        Text {
+            text: root.label;
+            color: root.active ? Palette.ink : Palette.ink-dim;
+            font-size: 13px;
+            overflow: elide;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+        }
+
+        Rectangle {
+            width: 18px;
+            background: close-area.has-hover ? Palette.edge : transparent;
+            Text {
+                text: "×";
+                color: Palette.ink-dim;
+                font-size: 15px;
+                vertical-alignment: center;
+                horizontal-alignment: center;
+            }
+            close-area := TouchArea {
+                clicked => {
+                    root.closed();
+                }
+            }
+        }
+    }
+}

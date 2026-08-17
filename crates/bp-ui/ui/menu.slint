@@ -1,0 +1,104 @@
+// The menu primitives: a bar label, a row, and the popup that holds rows.
+//
+// `MenuLabel` is not only used by the menu bar. It is the shell's general
+// clickable-label shape, so the find bar's arrows and the panel close buttons
+// use it too -- one hover treatment everywhere rather than three that drift.
+
+import { MenuItem, Palette } from "types.slint";
+
+export component MenuLabel inherits Rectangle {
+    in property <string> label;
+    in property <bool> open;
+    callback clicked();
+    height: 26px;
+    width: txt.preferred-width + 22px;
+    background: root.open || ta.has-hover ? Palette.edge : transparent;
+
+    txt := Text {
+        text: root.label;
+        color: Palette.ink;
+        font-size: 13px;
+        vertical-alignment: center;
+        horizontal-alignment: center;
+    }
+
+    ta := TouchArea {
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+export component MenuRow inherits Rectangle {
+    in property <MenuItem> item;
+    callback chosen(int);
+    height: 28px;
+    background: root.item.enabled && ta.has-hover ? Palette.edge : Palette.panel;
+
+    HorizontalLayout {
+        padding-left: 14px;
+        padding-right: 14px;
+        spacing: 24px;
+
+        Text {
+            text: root.item.label;
+            // Greyed when inert, so "not implemented" is visible rather than
+            // discovered by clicking.
+            color: root.item.enabled ? Palette.ink : Palette.ink-dim;
+            font-size: 13px;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+        }
+
+        Text {
+            text: root.item.shortcut;
+            color: Palette.ink-dim;
+            font-size: 12px;
+            vertical-alignment: center;
+        }
+    }
+
+    ta := TouchArea {
+        clicked => {
+            if (root.item.enabled) {
+                root.chosen(root.item.action);
+            }
+        }
+    }
+}
+
+export component MenuPopup inherits PopupWindow {
+    in property <[MenuItem]> items;
+    in property <length> menu-width: 280px;
+    callback chosen(int);
+
+    width: root.menu-width;
+    height: content.preferred-height;
+
+    Rectangle {
+        background: Palette.panel;
+        border-color: Palette.edge;
+        border-width: 1px;
+
+        content := VerticalLayout {
+            padding: 4px;
+            for item in root.items: VerticalLayout {
+                MenuRow {
+                    item: item;
+                    chosen(action) => {
+                        root.chosen(action);
+                    }
+                }
+
+                if item.separator-after: Rectangle {
+                    height: 5px;
+                    Rectangle {
+                        height: 1px;
+                        y: 2px;
+                        background: Palette.edge;
+                    }
+                }
+            }
+        }
+    }
+}

@@ -1,379 +1,39 @@
 // BachelorPad+ application shell.
 //
-// This file deliberately contains no colour literals. Every colour comes from
-// the `Palette` global, which Rust fills from `bp-theme` -- ADR-0009 requires
-// themes to be data, and a hex code in here would be a theme that a user
-// could never override.
-
-export struct TabInfo {
-    id: int,
-    label: string,
-    dirty: bool,
-    active: bool,
-}
-
-// One row in a menu. `action` is dispatched by number: ids below 100 are
-// handled in Rust, 100 and above are editor functions Slint owns (undo, cut,
-// paste and friends live on TextInput, not in our state).
+// This file owns the window: its properties, the callbacks Rust binds to, the
+// shortcut bindings, and the layout that puts the pieces in order. The pieces
+// themselves live beside it -- `menu.slint`, `editor_surface.slint`,
+// `tab.slint`, `find_bar.slint`, `results_panel.slint`, `status_bar.slint` --
+// so that adding a row to one of them is not an edit to the same file as
+// everything else.
 //
-// `enabled: false` renders the row greyed and inert. Menus for subsystems that
-// do not exist yet list their contents that way rather than being labels that
-// swallow a click -- a menu that does nothing when clicked reads as broken,
-// while a menu of greyed items reads as "not yet", which is the truth.
-export struct MenuItem {
-    label: string,
-    shortcut: string,
-    action: int,
-    enabled: bool,
-    separator-after: bool,
-}
-
-/// One row in the cross-file search results.
-export struct SearchHit {
-    label: string,
-    detail: string,
-    index: int,
-}
-
-/// One visible line of the document, as `EditorSurface` draws it.
-///
-/// The gutter number arrives already formatted: which lines are on screen is
-/// Rust's decision, and having Slint recompute it from an index would be a
-/// second implementation of the same arithmetic.
-export struct EditorRow {
-    number: string,
-    text: string,
-}
-
-/// One line's worth of selection highlight, in **visual** columns -- after
-/// tabs have expanded, which is the only measure that lines up with the text.
-export struct SelectionBox {
-    row: int,
-    start: int,
-    end: int,
-}
-
-export global Palette {
-    in property <color> shell;
-    in property <color> panel;
-    in property <color> edge;
-    in property <color> ink;
-    in property <color> ink-dim;
-    in property <color> accent;
-}
-
-component MenuLabel inherits Rectangle {
-    in property <string> label;
-    in property <bool> open;
-    callback clicked();
-    height: 26px;
-    width: txt.preferred-width + 22px;
-    background: root.open || ta.has-hover ? Palette.edge : transparent;
-
-    txt := Text {
-        text: root.label;
-        color: Palette.ink;
-        font-size: 13px;
-        vertical-alignment: center;
-        horizontal-alignment: center;
-    }
-
-    ta := TouchArea {
-        clicked => {
-            root.clicked();
-        }
-    }
-}
-
-component MenuRow inherits Rectangle {
-    in property <MenuItem> item;
-    callback chosen(int);
-    height: 28px;
-    background: root.item.enabled && ta.has-hover ? Palette.edge : Palette.panel;
-
-    HorizontalLayout {
-        padding-left: 14px;
-        padding-right: 14px;
-        spacing: 24px;
-
-        Text {
-            text: root.item.label;
-            // Greyed when inert, so "not implemented" is visible rather than
-            // discovered by clicking.
-            color: root.item.enabled ? Palette.ink : Palette.ink-dim;
-            font-size: 13px;
-            vertical-alignment: center;
-            horizontal-stretch: 1;
-        }
-
-        Text {
-            text: root.item.shortcut;
-            color: Palette.ink-dim;
-            font-size: 12px;
-            vertical-alignment: center;
-        }
-    }
-
-    ta := TouchArea {
-        clicked => {
-            if (root.item.enabled) {
-                root.chosen(root.item.action);
-            }
-        }
-    }
-}
-
-component MenuPopup inherits PopupWindow {
-    in property <[MenuItem]> items;
-    in property <length> menu-width: 280px;
-    callback chosen(int);
-
-    width: root.menu-width;
-    height: content.preferred-height;
-
-    Rectangle {
-        background: Palette.panel;
-        border-color: Palette.edge;
-        border-width: 1px;
-
-        content := VerticalLayout {
-            padding: 4px;
-            for item in root.items: VerticalLayout {
-                MenuRow {
-                    item: item;
-                    chosen(action) => {
-                        root.chosen(action);
-                    }
-                }
-
-                if item.separator-after: Rectangle {
-                    height: 5px;
-                    Rectangle {
-                        height: 1px;
-                        y: 2px;
-                        background: Palette.edge;
-                    }
-                }
-            }
-        }
-    }
-}
-
-// The custom editor surface.
+// Three things stay here on purpose:
 //
-// Slint's `TextInput` owns its own text, caret and undo stack, which is the
-// single fact blocking three separate things: the rope in `bp-buffer` cannot
-// be the storage, `bp-editor`'s undo cannot be the authority, and the status
-// bar cannot show Ln/Col. This component exists to own none of those either
-// -- it draws what Rust hands it and reports what the user did. Every
-// decision lives in `bp-editor`, which is tested without a window.
+// - **The menu bar and its popups.** A `PopupWindow`'s position is relative to
+//   its parent element, and the popups are placed from their labels' `x`.
+//   Moving both into a component would change the coordinate parent, which is
+//   a visual change no test in this repository can catch.
+// - **Both editor views.** `dispatch`, `select-range` and `forward-focus` all
+//   name `editor` or `surface` directly, and a parent cannot name an element
+//   inside a child component.
+// - **The tab strip**, which is a `for` over `root.tabs` and three lines of
+//   layout.
 //
-// Only the visible rows are ever built, so a 100,000-line document costs the
-// same to draw as a ten-line one.
-component EditorSurface inherits Rectangle {
-    in property <[EditorRow]> rows;
-    in property <[SelectionBox]> selection;
-    /// Viewport row of the caret, or -1 when it is scrolled out of sight.
-    in property <int> caret-row: -1;
-    in property <int> caret-column;
-    in property <bool> show-gutter: true;
-    in property <length> font-size: 14px;
-    in property <length> line-height: 18px;
+// No colour literals anywhere in `ui/`: every colour comes from the `Palette`
+// global, which Rust fills from `bp-theme`. ADR-0009 requires themes to be
+// data, and a hex code here would be a theme a user could never override.
 
-    /// text, control, shift, alt. Returns whether the editor claimed it --
-    /// anything it does not claim must bubble up, or Ctrl+S stops saving.
-    callback key(string, bool, bool, bool) -> bool;
-    /// row, visual column, extend-selection.
-    callback pressed(int, int, bool);
-    callback dragged(int, int);
-    /// Lines to scroll; positive is toward the end of the document.
-    callback scrolled(int);
-    /// How many rows now fit.
-    callback resized(int);
+import { MenuLabel, MenuPopup } from "menu.slint";
+import { EditorSurface } from "editor_surface.slint";
+import { FindBar } from "find_bar.slint";
+import { ResultsPanel } from "results_panel.slint";
+import { StatusBar } from "status_bar.slint";
+import { Tab } from "tab.slint";
+import { EditorRow, MenuItem, Palette, SearchHit, SelectionBox, TabInfo } from "types.slint";
 
-    // The character advance is measured, not assumed. A hard-coded ratio
-    // drifts the caret one fraction of a pixel further from its character
-    // with every column, which is invisible until someone types a long line
-    // and then unusable. Twenty characters so the division dilutes rounding;
-    // the fallback only applies before the first layout pass, when
-    // `preferred-width` is still zero.
-    probe := Text {
-        text: "MMMMMMMMMMMMMMMMMMMM";
-        font-family: "Consolas";
-        font-size: root.font-size;
-        opacity: 0;
-    }
-    property <length> advance: probe.preferred-width > 0
-        ? probe.preferred-width / 20
-        : root.font-size * 0.6;
-
-    property <length> pad: 10px;
-    property <length> gutter-width: root.show-gutter ? 46px : 0px;
-    property <length> text-left: root.pad + root.gutter-width;
-
-    property <int> fitting-rows: max(1, floor((self.height - 2 * root.pad) / root.line-height));
-    changed fitting-rows => {
-        root.resized(self.fitting-rows);
-    }
-
-    function row-at(y: length) -> int {
-        return max(0, floor((y - root.pad) / root.line-height));
-    }
-    // Rounded, not floored: clicking the right half of a character puts the
-    // caret after it, which is what every editor does and what makes
-    // click-to-place feel accurate rather than one character left.
-    function column-at(x: length) -> int {
-        return max(0, round((x - root.text-left) / root.advance));
-    }
-
-    background: Palette.panel;
-    forward-focus: keys;
-
-    keys := FocusScope {
-        key-pressed(event) => {
-            if (root.key(event.text, event.modifiers.control, event.modifiers.shift, event.modifiers.alt)) {
-                return EventResult.accept;
-            }
-            return EventResult.reject;
-        }
-    }
-
-    // Selection first, so the text draws over it.
-    for box in root.selection: Rectangle {
-        x: root.text-left + box.start * root.advance;
-        y: root.pad + box.row * root.line-height;
-        width: (box.end - box.start) * root.advance;
-        height: root.line-height;
-        background: Palette.accent;
-    }
-
-    for row[i] in root.rows: Text {
-        x: root.text-left;
-        y: root.pad + i * root.line-height;
-        height: root.line-height;
-        text: row.text;
-        color: Palette.ink;
-        font-family: "Consolas";
-        font-size: root.font-size;
-        vertical-alignment: center;
-    }
-
-    if root.show-gutter: Rectangle {
-        for row[i] in root.rows: Text {
-            x: root.pad;
-            y: root.pad + i * root.line-height;
-            width: root.gutter-width - 10px;
-            height: root.line-height;
-            text: row.number;
-            color: Palette.ink-dim;
-            font-family: "Consolas";
-            font-size: root.font-size;
-            horizontal-alignment: right;
-            vertical-alignment: center;
-        }
-    }
-
-    // Hidden when the surface is not focused, so it is clear which of the
-    // find box and the document a keystroke would reach.
-    Rectangle {
-        visible: root.caret-row >= 0 && keys.has-focus;
-        x: root.text-left + root.caret-column * root.advance;
-        y: root.pad + root.caret-row * root.line-height;
-        width: 2px;
-        height: root.line-height;
-        background: Palette.ink;
-    }
-
-    // Last, so it sits above the drawing and receives the pointer.
-    touch := TouchArea {
-        mouse-cursor: text;
-
-        pointer-event(event) => {
-            if (event.kind == PointerEventKind.down) {
-                keys.focus();
-                root.pressed(root.row-at(self.mouse-y), root.column-at(self.mouse-x), event.modifiers.shift);
-            }
-        }
-        moved => {
-            if (self.pressed) {
-                root.dragged(root.row-at(self.mouse-y), root.column-at(self.mouse-x));
-            }
-        }
-        scroll-event(event) => {
-            // A wheel notch is reported in pixels; a line is the unit the
-            // document is virtualised in.
-            root.scrolled(-round(event.delta-y / root.line-height));
-            return EventResult.accept;
-        }
-    }
-}
-
-component Tab inherits Rectangle {
-    in property <string> label;
-    in property <bool> dirty;
-    in property <bool> active;
-    callback selected();
-    callback closed();
-
-    height: 30px;
-    width: 190px;
-    background: root.active ? Palette.panel : Palette.shell;
-    border-color: Palette.edge;
-    border-width: 1px;
-
-    select-area := TouchArea {
-        clicked => {
-            root.selected();
-        }
-    }
-
-    HorizontalLayout {
-        padding-left: 12px;
-        padding-right: 8px;
-        spacing: 6px;
-
-        // A dot rather than the usual asterisk: it matches the status bar's
-        // unsaved marker, so one symbol means "not on disk" everywhere.
-        Text {
-            text: root.dirty ? "●" : "";
-            color: Palette.accent;
-            font-size: 13px;
-            vertical-alignment: center;
-        }
-
-        Text {
-            text: root.label;
-            color: root.active ? Palette.ink : Palette.ink-dim;
-            font-size: 13px;
-            overflow: elide;
-            vertical-alignment: center;
-            horizontal-stretch: 1;
-        }
-
-        Rectangle {
-            width: 18px;
-            background: close-area.has-hover ? Palette.edge : transparent;
-            Text {
-                text: "×";
-                color: Palette.ink-dim;
-                font-size: 15px;
-                vertical-alignment: center;
-                horizontal-alignment: center;
-            }
-            close-area := TouchArea {
-                clicked => {
-                    root.closed();
-                }
-            }
-        }
-    }
-}
-
-component StatusText inherits Text {
-    color: Palette.ink-dim;
-    font-size: 12px;
-    vertical-alignment: center;
-}
+// Re-exported because `slint-build` generates Rust types only for what the
+// compiled entry file exports. `bp-ui` names all six.
+export { EditorRow, MenuItem, Palette, SearchHit, SelectionBox, TabInfo }
 
 export component AppWindow inherits Window {
     title: "BachelorPad+";
@@ -495,8 +155,7 @@ export component AppWindow inherits Window {
 
     public function focus-find() {
         root.find-open = true;
-        find-input.focus();
-        find-input.select-all();
+        find-bar.focus-query();
     }
 
     /// Put the caret back in whichever editor is in use.
@@ -817,255 +476,61 @@ export component AppWindow inherits Window {
                 }
             }
 
-            // --- find and replace ---------------------------------------
-            // Collapsed rather than conditional: an element inside an `if` is
-            // out of scope for `focus-find`, and Ctrl+F has to be able to put
-            // the caret in the box it just opened.
-            Rectangle {
-                height: root.find-open ? 34px : 0px;
-                visible: root.find-open;
-                background: Palette.shell;
+            find-bar := FindBar {
+                open: root.find-open;
+                find-query <=> root.find-query;
+                replace-query <=> root.replace-query;
+                find-status: root.find-status;
 
-                HorizontalLayout {
-                    padding-left: 10px;
-                    padding-right: 10px;
-                    padding-top: 4px;
-                    padding-bottom: 4px;
-                    spacing: 8px;
-
-                    Text {
-                        text: "Find";
-                        color: Palette.ink-dim;
-                        font-size: 12px;
-                        vertical-alignment: center;
-                    }
-
-                    Rectangle {
-                        width: 220px;
-                        background: Palette.panel;
-                        border-color: Palette.edge;
-                        border-width: 1px;
-                        HorizontalLayout {
-                            padding-left: 6px;
-                            padding-right: 6px;
-                            find-input := TextInput {
-                                text <=> root.find-query;
-                                color: Palette.ink;
-                                selection-background-color: Palette.accent;
-                                font-size: 13px;
-                                single-line: true;
-                                vertical-alignment: center;
-                                edited => {
-                                    root.find-changed();
-                                }
-                                accepted => {
-                                    root.find-next();
-                                }
-                            }
-                        }
-                    }
-
-                    MenuLabel {
-                        label: "◂";
-                        clicked => {
-                            root.find-previous();
-                        }
-                    }
-                    MenuLabel {
-                        label: "▸";
-                        clicked => {
-                            root.find-next();
-                        }
-                    }
-
-                    Text {
-                        text: root.find-status;
-                        color: Palette.ink-dim;
-                        font-size: 12px;
-                        vertical-alignment: center;
-                        width: 110px;
-                    }
-
-                    Text {
-                        text: "Replace";
-                        color: Palette.ink-dim;
-                        font-size: 12px;
-                        vertical-alignment: center;
-                    }
-
-                    Rectangle {
-                        width: 200px;
-                        background: Palette.panel;
-                        border-color: Palette.edge;
-                        border-width: 1px;
-                        HorizontalLayout {
-                            padding-left: 6px;
-                            padding-right: 6px;
-                            TextInput {
-                                text <=> root.replace-query;
-                                color: Palette.ink;
-                                selection-background-color: Palette.accent;
-                                font-size: 13px;
-                                single-line: true;
-                                vertical-alignment: center;
-                            }
-                        }
-                    }
-
-                    MenuLabel {
-                        label: "Replace All";
-                        clicked => {
-                            root.replace-all();
-                        }
-                    }
-
-                    MenuLabel {
-                        label: "In Folder...";
-                        clicked => {
-                            root.search-folder();
-                        }
-                    }
-
-                    Rectangle { horizontal-stretch: 1; }
-
-                    MenuLabel {
-                        label: "×";
-                        clicked => {
-                            root.find-open = false;
-                            root.focus-editor();
-                        }
-                    }
+                find-changed => {
+                    root.find-changed();
+                }
+                find-next => {
+                    root.find-next();
+                }
+                find-previous => {
+                    root.find-previous();
+                }
+                replace-all => {
+                    root.replace-all();
+                }
+                search-folder => {
+                    root.search-folder();
+                }
+                closed => {
+                    root.find-open = false;
+                    root.focus-editor();
                 }
             }
 
-            // --- cross-file search results ------------------------------
-            Rectangle {
-                height: root.results-open ? 180px : 0px;
-                visible: root.results-open;
-                background: Palette.panel;
+            ResultsPanel {
+                open: root.results-open;
+                hits: root.search-hits;
+                summary: root.results-summary;
 
-                VerticalLayout {
-                    padding: 6px;
-                    spacing: 4px;
-
-                    HorizontalLayout {
-                        spacing: 8px;
-                        Text {
-                            text: root.results-summary;
-                            color: Palette.ink-dim;
-                            font-size: 12px;
-                            vertical-alignment: center;
-                            horizontal-stretch: 1;
-                        }
-                        MenuLabel {
-                            label: "×";
-                            clicked => {
-                                root.results-open = false;
-                            }
-                        }
-                    }
-
-                    Flickable {
-                        viewport-height: hits.preferred-height;
-
-                        hits := VerticalLayout {
-                            alignment: start;
-
-                            for hit in root.search-hits: Rectangle {
-                                height: 22px;
-                                background: hit-area.has-hover ? Palette.edge : transparent;
-
-                                HorizontalLayout {
-                                    padding-left: 6px;
-                                    padding-right: 6px;
-                                    spacing: 10px;
-
-                                    Text {
-                                        text: hit.label;
-                                        color: Palette.accent;
-                                        font-size: 12px;
-                                        vertical-alignment: center;
-                                        width: 260px;
-                                        overflow: elide;
-                                    }
-                                    Text {
-                                        text: hit.detail;
-                                        color: Palette.ink-dim;
-                                        font-family: "Consolas";
-                                        font-size: 12px;
-                                        vertical-alignment: center;
-                                        overflow: elide;
-                                        horizontal-stretch: 1;
-                                    }
-                                }
-
-                                hit-area := TouchArea {
-                                    clicked => {
-                                        root.open-hit(hit.index);
-                                    }
-                                }
-                            }
-                        }
-                    }
+                open-hit(index) => {
+                    root.open-hit(index);
+                }
+                closed => {
+                    root.results-open = false;
                 }
             }
 
             Rectangle { height: 1px; background: Palette.edge; }
 
-            // --- status bar (specs.md section 3) ------------------------
-            Rectangle {
-                height: 44px;
-                background: Palette.panel;
+            StatusBar {
+                save-state: root.save-state;
+                is-dirty: root.is-dirty;
+                format-label: root.format-label;
+                encoding-label: root.encoding-label;
+                line-ending-label: root.line-ending-label;
+                cursor-label: root.cursor-label;
+                theme-name: root.theme-name;
+                location: root.location;
+                error-message: root.error-message;
 
-                VerticalLayout {
-                    padding-left: 10px;
-                    padding-right: 10px;
-                    padding-top: 4px;
-                    padding-bottom: 4px;
-                    spacing: 2px;
-
-                    HorizontalLayout {
-                        spacing: 10px;
-                        alignment: start;
-
-                        Text {
-                            text: root.save-state;
-                            // Dirty is the state worth noticing, so it gets
-                            // the accent; a clean save is unremarkable.
-                            color: root.is-dirty ? Palette.accent : Palette.ink-dim;
-                            font-size: 12px;
-                            vertical-alignment: center;
-                        }
-                        StatusText { text: "│ " + root.format-label; }
-                        StatusText { text: "│ " + root.encoding-label; }
-                        StatusText { text: "│ " + root.line-ending-label; }
-                        StatusText { text: "│ " + root.cursor-label; }
-
-                        Rectangle {
-                            width: theme-label.preferred-width + 16px;
-                            background: theme-area.has-hover ? Palette.edge : transparent;
-                            theme-label := Text {
-                                text: "│ " + root.theme-name;
-                                color: Palette.accent;
-                                font-size: 12px;
-                                vertical-alignment: center;
-                                horizontal-alignment: center;
-                            }
-                            theme-area := TouchArea {
-                                clicked => {
-                                    root.cycle-theme();
-                                }
-                            }
-                        }
-                    }
-
-                    Text {
-                        text: root.error-message == "" ? root.location : root.error-message;
-                        color: root.error-message == "" ? Palette.ink-dim : Palette.accent;
-                        font-size: 12px;
-                        overflow: elide;
-                        vertical-alignment: center;
-                    }
+                cycle-theme => {
+                    root.cycle-theme();
                 }
             }
         }

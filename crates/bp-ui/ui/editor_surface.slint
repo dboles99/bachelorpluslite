@@ -1,0 +1,151 @@
+// The custom editor surface.
+//
+// Slint's `TextInput` owns its own text, caret and undo stack, which is the
+// single fact blocking three separate things: the rope in `bp-buffer` cannot
+// be the storage, `bp-editor`'s undo cannot be the authority, and the status
+// bar cannot show Ln/Col. This component exists to own none of those either
+// -- it draws what Rust hands it and reports what the user did. Every
+// decision lives in `bp-editor`, which is tested without a window.
+//
+// Only the visible rows are ever built, so a 100,000-line document costs the
+// same to draw as a ten-line one.
+
+import { EditorRow, SelectionBox, Palette } from "types.slint";
+
+export component EditorSurface inherits Rectangle {
+    in property <[EditorRow]> rows;
+    in property <[SelectionBox]> selection;
+    /// Viewport row of the caret, or -1 when it is scrolled out of sight.
+    in property <int> caret-row: -1;
+    in property <int> caret-column;
+    in property <bool> show-gutter: true;
+    in property <length> font-size: 14px;
+    in property <length> line-height: 18px;
+
+    /// text, control, shift, alt. Returns whether the editor claimed it --
+    /// anything it does not claim must bubble up, or Ctrl+S stops saving.
+    callback key(string, bool, bool, bool) -> bool;
+    /// row, visual column, extend-selection.
+    callback pressed(int, int, bool);
+    callback dragged(int, int);
+    /// Lines to scroll; positive is toward the end of the document.
+    callback scrolled(int);
+    /// How many rows now fit.
+    callback resized(int);
+
+    // The character advance is measured, not assumed. A hard-coded ratio
+    // drifts the caret one fraction of a pixel further from its character
+    // with every column, which is invisible until someone types a long line
+    // and then unusable. Twenty characters so the division dilutes rounding;
+    // the fallback only applies before the first layout pass, when
+    // `preferred-width` is still zero.
+    probe := Text {
+        text: "MMMMMMMMMMMMMMMMMMMM";
+        font-family: "Consolas";
+        font-size: root.font-size;
+        opacity: 0;
+    }
+    property <length> advance: probe.preferred-width > 0
+        ? probe.preferred-width / 20
+        : root.font-size * 0.6;
+
+    property <length> pad: 10px;
+    property <length> gutter-width: root.show-gutter ? 46px : 0px;
+    property <length> text-left: root.pad + root.gutter-width;
+
+    property <int> fitting-rows: max(1, floor((self.height - 2 * root.pad) / root.line-height));
+    changed fitting-rows => {
+        root.resized(self.fitting-rows);
+    }
+
+    function row-at(y: length) -> int {
+        return max(0, floor((y - root.pad) / root.line-height));
+    }
+    // Rounded, not floored: clicking the right half of a character puts the
+    // caret after it, which is what every editor does and what makes
+    // click-to-place feel accurate rather than one character left.
+    function column-at(x: length) -> int {
+        return max(0, round((x - root.text-left) / root.advance));
+    }
+
+    background: Palette.panel;
+    forward-focus: keys;
+
+    keys := FocusScope {
+        key-pressed(event) => {
+            if (root.key(event.text, event.modifiers.control, event.modifiers.shift, event.modifiers.alt)) {
+                return EventResult.accept;
+            }
+            return EventResult.reject;
+        }
+    }
+
+    // Selection first, so the text draws over it.
+    for box in root.selection: Rectangle {
+        x: root.text-left + box.start * root.advance;
+        y: root.pad + box.row * root.line-height;
+        width: (box.end - box.start) * root.advance;
+        height: root.line-height;
+        background: Palette.accent;
+    }
+
+    for row[i] in root.rows: Text {
+        x: root.text-left;
+        y: root.pad + i * root.line-height;
+        height: root.line-height;
+        text: row.text;
+        color: Palette.ink;
+        font-family: "Consolas";
+        font-size: root.font-size;
+        vertical-alignment: center;
+    }
+
+    if root.show-gutter: Rectangle {
+        for row[i] in root.rows: Text {
+            x: root.pad;
+            y: root.pad + i * root.line-height;
+            width: root.gutter-width - 10px;
+            height: root.line-height;
+            text: row.number;
+            color: Palette.ink-dim;
+            font-family: "Consolas";
+            font-size: root.font-size;
+            horizontal-alignment: right;
+            vertical-alignment: center;
+        }
+    }
+
+    // Hidden when the surface is not focused, so it is clear which of the
+    // find box and the document a keystroke would reach.
+    Rectangle {
+        visible: root.caret-row >= 0 && keys.has-focus;
+        x: root.text-left + root.caret-column * root.advance;
+        y: root.pad + root.caret-row * root.line-height;
+        width: 2px;
+        height: root.line-height;
+        background: Palette.ink;
+    }
+
+    // Last, so it sits above the drawing and receives the pointer.
+    touch := TouchArea {
+        mouse-cursor: text;
+
+        pointer-event(event) => {
+            if (event.kind == PointerEventKind.down) {
+                keys.focus();
+                root.pressed(root.row-at(self.mouse-y), root.column-at(self.mouse-x), event.modifiers.shift);
+            }
+        }
+        moved => {
+            if (self.pressed) {
+                root.dragged(root.row-at(self.mouse-y), root.column-at(self.mouse-x));
+            }
+        }
+        scroll-event(event) => {
+            // A wheel notch is reported in pixels; a line is the unit the
+            // document is virtualised in.
+            root.scrolled(-round(event.delta-y / root.line-height));
+            return EventResult.accept;
+        }
+    }
+}

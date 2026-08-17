@@ -1,0 +1,151 @@
+// The find and replace bar.
+//
+// Collapsed rather than conditional: an element inside a Slint `if` is out of
+// scope for anything outside it, and Ctrl+F has to be able to put the caret in
+// the box it has just opened. `open` therefore drives height and visibility,
+// and the query box always exists.
+//
+// That is also why `focus-query` is a function here rather than the window
+// reaching in: the input is this component's business, and a parent cannot
+// name an element inside a child.
+
+import { MenuLabel } from "menu.slint";
+import { Palette } from "types.slint";
+
+export component FindBar inherits Rectangle {
+    in property <bool> open;
+    in-out property <string> find-query;
+    in-out property <string> replace-query;
+    /// "3 of 12", "no matches", or a bad-pattern message.
+    in property <string> find-status;
+
+    callback find-changed();
+    callback find-next();
+    callback find-previous();
+    callback replace-all();
+    callback search-folder();
+    /// The × was clicked. The window owns what "closed" means -- clearing the
+    /// flag and deciding where the caret goes -- because it owns both editors.
+    callback closed();
+
+    /// Put the caret in the query box and select what is there, so that Ctrl+F
+    /// on an open bar replaces the previous query rather than appending to it.
+    public function focus-query() {
+        find-input.focus();
+        find-input.select-all();
+    }
+
+    height: root.open ? 34px : 0px;
+    visible: root.open;
+    background: Palette.shell;
+
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        padding-top: 4px;
+        padding-bottom: 4px;
+        spacing: 8px;
+
+        Text {
+            text: "Find";
+            color: Palette.ink-dim;
+            font-size: 12px;
+            vertical-alignment: center;
+        }
+
+        Rectangle {
+            width: 220px;
+            background: Palette.panel;
+            border-color: Palette.edge;
+            border-width: 1px;
+            HorizontalLayout {
+                padding-left: 6px;
+                padding-right: 6px;
+                find-input := TextInput {
+                    text <=> root.find-query;
+                    color: Palette.ink;
+                    selection-background-color: Palette.accent;
+                    font-size: 13px;
+                    single-line: true;
+                    vertical-alignment: center;
+                    edited => {
+                        root.find-changed();
+                    }
+                    accepted => {
+                        root.find-next();
+                    }
+                }
+            }
+        }
+
+        MenuLabel {
+            label: "◂";
+            clicked => {
+                root.find-previous();
+            }
+        }
+        MenuLabel {
+            label: "▸";
+            clicked => {
+                root.find-next();
+            }
+        }
+
+        Text {
+            text: root.find-status;
+            color: Palette.ink-dim;
+            font-size: 12px;
+            vertical-alignment: center;
+            width: 110px;
+        }
+
+        Text {
+            text: "Replace";
+            color: Palette.ink-dim;
+            font-size: 12px;
+            vertical-alignment: center;
+        }
+
+        Rectangle {
+            width: 200px;
+            background: Palette.panel;
+            border-color: Palette.edge;
+            border-width: 1px;
+            HorizontalLayout {
+                padding-left: 6px;
+                padding-right: 6px;
+                TextInput {
+                    text <=> root.replace-query;
+                    color: Palette.ink;
+                    selection-background-color: Palette.accent;
+                    font-size: 13px;
+                    single-line: true;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        MenuLabel {
+            label: "Replace All";
+            clicked => {
+                root.replace-all();
+            }
+        }
+
+        MenuLabel {
+            label: "In Folder...";
+            clicked => {
+                root.search-folder();
+            }
+        }
+
+        Rectangle { horizontal-stretch: 1; }
+
+        MenuLabel {
+            label: "×";
+            clicked => {
+                root.closed();
+            }
+        }
+    }
+}
