@@ -165,7 +165,7 @@ impl Editor {
     /// Ends a typing run: text typed, then typed again somewhere else, is two
     /// separate things to undo.
     pub fn set_cursor(&mut self, char_idx: usize) {
-        let idx = char_idx.min(self.buffer.len_chars());
+        let idx = self.caret_position(char_idx);
         self.cursor = idx;
         self.anchor = idx;
         self.coalesce = Coalesce::Closed;
@@ -174,11 +174,32 @@ impl Editor {
 
     /// Set caret and selection anchor together.
     pub fn select(&mut self, anchor: usize, cursor: usize) {
-        let max = self.buffer.len_chars();
-        self.anchor = anchor.min(max);
-        self.cursor = cursor.min(max);
+        self.anchor = self.caret_position(anchor);
+        self.cursor = self.caret_position(cursor);
         self.coalesce = Coalesce::Closed;
         self.goal_column = None;
+    }
+
+    /// The nearest index a caret may legitimately occupy.
+    ///
+    /// Clamps past the end, as everything reached from UI code here does, and
+    /// additionally refuses to sit *between* the `\r` and the `\n` of a CRLF
+    /// pair. That position looks harmless and is not: the two characters are
+    /// one line break, so a caret inside them belongs to no line, and any
+    /// operation that reasons in whole lines -- moving one, duplicating one,
+    /// selecting one -- then works from a line boundary that is half a
+    /// character out. Moving a line from there used to invent a blank line at
+    /// the top of the document.
+    ///
+    /// It snaps backwards, to just before the `\r`, because that is the end
+    /// of the line's content -- the same place `Motion::LineEnd` stops and
+    /// the same convention `line_len_chars` uses.
+    fn caret_position(&self, char_idx: usize) -> usize {
+        let idx = char_idx.min(self.buffer.len_chars());
+        let splits_a_pair = idx > 0
+            && self.buffer.char_at(idx) == Some('\n')
+            && self.buffer.char_at(idx - 1) == Some('\r');
+        if splits_a_pair { idx - 1 } else { idx }
     }
 
     pub fn select_all(&mut self) {
@@ -255,6 +276,10 @@ impl Editor {
             _ => self.target_of(motion),
         };
 
+        // Every motion above already produces a legitimate position; this is
+        // the one place they all pass through, so it is also the cheapest
+        // place to be sure of it.
+        let target = self.caret_position(target);
         self.cursor = target;
         if !select {
             self.anchor = target;
@@ -271,8 +296,26 @@ impl Editor {
     fn target_of(&mut self, motion: Motion) -> usize {
         let end = self.buffer.len_chars();
         match motion {
-            Motion::Left => self.cursor.saturating_sub(1),
-            Motion::Right => (self.cursor + 1).min(end),
+            // A CRLF pair is one line break and therefore one step, in
+            // either direction. Treating it as two puts the caret between the
+            // carriage return and the newline, which is a position on no
+            // line at all.
+            Motion::Left => match self.cursor.checked_sub(2) {
+                Some(before)
+                    if self.buffer.char_at(before) == Some('\r')
+                        && self.buffer.char_at(before + 1) == Some('\n') =>
+                {
+                    before
+                }
+                _ => self.cursor.saturating_sub(1),
+            },
+            Motion::Right => {
+                let step = usize::from(
+                    self.buffer.char_at(self.cursor) == Some('\r')
+                        && self.buffer.char_at(self.cursor + 1) == Some('\n'),
+                ) + 1;
+                (self.cursor + step).min(end)
+            }
             Motion::WordLeft => self.word_boundary_before(self.cursor),
             Motion::WordRight => self.word_boundary_after(self.cursor),
             Motion::LineStart => {
