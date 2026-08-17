@@ -38,6 +38,12 @@ Adding a decision means adding both.
   says which providers are acceptable.
 - **YAML parser** (phase 6). `serde_yaml` is deprecated. Picking a replacement
   is a dependency decision with a long tail.
+- **Whether `bp-storage` may record extracted titles before phase 14 exists**
+  (phase 9). ADR-0019 currently says no, and that is why the crate is built
+  and unreachable. Everything phase 9 wants -- related notes, duplicate
+  detection -- needs something recorded about each document, so this decision
+  gates the phase rather than merely delaying it. Reversing it is allowed;
+  doing so by accident is not.
 - **specs.md section 22's warm-start target** (75 ms) is still unverified —
   the software renderer's time to first interaction cannot be measured, so
   half of ADR-0017's target has no number behind it.
@@ -65,12 +71,18 @@ Adding a decision means adding both.
   extracted title — is a summary of what the user wrote. ADR-0011 says the
   document's profile governs all three.
 - **The custom editor view has never been typed into.** Its rules are covered
-  by 91 tests in `bp-editor`; the widget has been verified to exactly one
+  by 147 tests in `bp-editor`; the widget has been verified to exactly one
   standard, that it renders a frame with a real file open without panicking.
   Whether keys arrive, whether the caret lands under the pointer and which
   way the wheel scrolls are all open. `project/NEXT_SESSION.md` has the
-  checklist. It is opt-in behind `--editor-view`, so nothing depends on the
-  answers yet.
+  checklist.
+
+  This used to carry "nothing depends on the answers yet". **That is no
+  longer true.** Duplicate Line and Move Line Up/Down are enabled only under
+  `--editor-view`, and Go to Line will be, so features now inherit whatever
+  that caret does. The default is still `TextInput`, so nothing is *broken*
+  by the answer being bad -- but a growing set of the product is unusable
+  until somebody gives it.
 - **A clipboard menu row can act on a different entry than the one it
   names.** Row ids are decoded against the clipboard history as it is at the
   moment of the click, not as it was when the menu was built, and a 1.2 s
@@ -78,7 +90,7 @@ Adding a decision means adding both.
   rows and applies equally to plain paste. Fixing it properly means freezing
   a snapshot of the history while a menu is open, which is a design question
   rather than a patch.
-- **Most of the product has not been used.** 393 tests cover the pieces in
+- **Most of the product has not been used.** 542 tests cover the pieces in
   isolation. One manual pass found two defects no test caught: a menu bar
   where twelve of fourteen menus swallowed clicks, and Save As defaulting to
   the process working directory, which wrote real documents into a git

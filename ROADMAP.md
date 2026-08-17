@@ -2,8 +2,14 @@
 
 This is not an MVP roadmap. Each phase contributes to the full v1 target.
 
-Status as of **2026-08-17**. "Started" means a real, tested slice exists and
-is wired into the application — not that the phase is finished.
+Status as of **2026-08-17**. Three words, meaning three different things:
+
+- **Done** — the phase's work is finished.
+- **Started** — a real, tested slice exists *and is reachable from the
+  application*. Not that the phase is finished.
+- **Built, unwired** — the library work exists and is tested, but nothing in
+  the application calls it. Used where that is a deliberate decision rather
+  than an unfinished job, and the reason is always recorded.
 
 | # | Phase | Status | Tasks | Crates |
 | --- | --- | --- | --- | --- |
@@ -15,7 +21,7 @@ is wired into the application — not that the phase is finished.
 | 6 | Structured formats | **Started** | [05-formats](project/tasks/05-formats/) | `bp-data` |
 | 7 | Search engine | **Started** | [06-search](project/tasks/06-search/) | `bp-search` |
 | 8 | Semantic foundation and naming | **Started** | [07-semantic](project/tasks/07-semantic/) | `bp-semantic`, `bp-naming` |
-| 9 | Organization and related-note graph | **Started** | [07-semantic](project/tasks/07-semantic/) | `bp-storage` |
+| 9 | Organization and related-note graph | **Built, unwired** | [07-semantic](project/tasks/07-semantic/) | `bp-storage` |
 | 10 | Semantic/hybrid search | Not started | [07-semantic](project/tasks/07-semantic/) | — |
 | 11 | Clipboard system | **Started** | [08-clipboard](project/tasks/08-clipboard/) | `bp-clipboard` |
 | 12 | Notebook/execution system | Not started | [09-notebook](project/tasks/09-notebook/) | — |
@@ -43,17 +49,27 @@ that points at them for no gain.
 ## Where the work actually is
 
 Phases 1 and 3 are complete. Phases 2, 5, 6, 7, 8, 11 and 17 each have a
-tested slice in the product.
+tested slice reachable in the product. Phase 9 has its foundation and no way
+in, on purpose.
 
-**The item that gated three sessions is no longer gating.** The rope is now
-the editor's storage, `bp-editor` owns caret, motion and undo, and a custom
-editor view exists behind `--editor-view` (ADR-0018). What remains before it
-can be the default is parity — word wrap and input-method composition — and a
-person actually typing into it. Phase 4's large-file work is unblocked either
-way, because the storage question is settled.
+**The item that gated three sessions is no longer gating.** The rope is the
+editor's storage, `bp-editor` owns caret, motion, undo and the line
+operations, and a custom editor view exists behind `--editor-view`
+(ADR-0018). Phase 4's large-file work is unblocked either way, because the
+storage question is settled independently of which view draws.
 
-The other structural gap is **security profiles** (phase 14). Two shipped
-features already hold sensitive data — the recovery journal writes unsaved
-text to disk in plaintext, and clipboard history keeps copied secrets in
-memory — and ADR-0011 says the document's security profile should govern both.
-Neither is wrong today; both are waiting on a subsystem that does not exist.
+What stands between that view and being the default is two parity items —
+word wrap and input-method composition — and one thing no amount of code
+fixes: **nobody has typed into it yet.** Its rules are covered by 147 tests
+in `bp-editor`; the widget has been shown to render a frame without
+panicking, and nothing more. Several phase-2 features shipped since depend on
+that caret and inherit whatever is wrong with it.
+
+**Security profiles (phase 14) are now the largest structural gap**, and they
+have gone from two dependants to three. The recovery journal writes unsaved
+text to disk in plaintext; clipboard history holds copied secrets in memory;
+and `bp-storage` is built, tested and deliberately unreachable because the
+useful thing to record — a document's extracted title — is a summary of what
+the user wrote. ADR-0011 says the document's profile governs all three.
+None of them is wrong today. The third is *waiting*, which is different from
+the first two, which are *running*.

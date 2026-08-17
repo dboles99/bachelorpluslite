@@ -29,19 +29,19 @@ and this table carries the intent until then.
 | Crate | Status | Purpose | Phase |
 | --- | --- | --- | --- |
 | `bp-core` | **live** | Document, Workspace, SaveState, encoding and line endings. Holds no text. | 1 |
-| `bp-naming` | **live** | Semantic filename grammar (ADR-0003). Pure: no filesystem, no clock. | 1 |
+| `bp-naming` | **live** | Semantic filename grammar (ADR-0003), and the date and time formats the Insert menu writes into documents. Pure: no filesystem, no clock. | 1 |
 | `bp-files` | **live** | Atomic save, load, encoding detection, external-change stamps (ADR-0007). | 1, 3 |
 | `bp-theme` | **live** | Palettes as data (ADR-0009). Green is the default. | 1, 17 |
 | `bp-config` | **live** | Settings precedence, config file, recent-files list, recovery from bad input. | 1 |
-| `bp-ui` | **live** | The Slint application shell (ADR-0015). | 1 |
+| `bp-ui` | **live** | The Slint application shell (ADR-0015). Split into modules — see below. | 1 |
 | `bp-buffer` | **live** | Rope buffer, character indices, line/column maths. | 2, 4 |
 | `bp-editor` | **live** | Caret, selection, motion, transaction-based undo/redo, line operations, key-to-command mapping, document-to-screen geometry. The editor's storage — see below. | 2 |
 | `bp-history` | **live** | Crash-safe recovery journal and autosave checkpoints. | 3 |
 | `bp-formats` | **live** | Format detection and profiles (ADR-0008). | 5 |
 | `bp-data` | **live** | Structured-data operations: validate, format, minify, convert, report. | 6 |
 | `bp-search` | **live** | Literal and regex find/replace, plus recursive cross-file search. | 7 |
-| `bp-semantic` | **live** | Deterministic extraction: titles, keywords, summaries, outlines. Layer one only. | 8 |
-| `bp-clipboard` | **live** | Clipboard history and kind detection (ADR-0010). In memory only. | 11 |
+| `bp-semantic` | **live** | Deterministic extraction: titles, keywords, summaries, outlines, document statistics. Layer one only. | 8 |
+| `bp-clipboard` | **live** | Clipboard history, kind detection and format-aware paste transformations (ADR-0010). In memory only. | 11 |
 | `bp-organize` | planned | Projects, topics, tags, related notes, duplicate detection. | 9 |
 | `bp-storage` | **live** | SQLite metadata store and migrations (ADR-0019). Documents, tags. Nothing writes to it yet. | 9 |
 | `bp-notebook` | planned | Cell model, `.ipynb` import/export. | 12 |
@@ -92,6 +92,33 @@ Two deliberate non-dependencies:
 - `bp-semantic` does not depend on `bp-formats`. Extraction reads text; asking
   it what kind of file it is would couple two layers that have no reason to
   know about each other.
+
+## Inside `bp-ui`
+
+The shell was one 2,675-line file and the single-writer bottleneck for every
+piece of wiring work. It is now four, split along seams the file already had
+as comment banners:
+
+| Module | Owns |
+| --- | --- |
+| `state.rs` | `AppState`: documents, workspace, saving, reloading, format detection, status labels, find matches |
+| `editor_view.rs` | The custom surface: key translation, caret placement, what to draw, `TAB_WIDTH` |
+| `dispatch.rs` | The menu-action match, and the dialogs its arms share |
+| `menus.rs` | Menu contents and the action-id map |
+| `lib.rs` | `run_with`, `refresh`, and the Slint callback wiring |
+
+**`ui/app.slint` is now the bottleneck instead**, at ~1,200 lines and one
+file. Nearly every remaining wiring item touches it.
+
+Two rules the modules run on:
+
+- **Action ids are blocks, and the dispatch matches ranges.** An id in the
+  wrong block silently does something else. Every range arm is bounded at both
+  ends; the unbounded one that used to exist would have swallowed any id
+  allocated above 300.
+- **`bp-ui` connects; it does not decide.** An `if` in here about what a
+  feature should *do* belongs in a library crate, where it can be tested
+  without a window.
 
 ## The editor-view boundary
 

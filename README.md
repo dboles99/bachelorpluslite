@@ -76,7 +76,8 @@ saves atomically, and does rather more than that:
 Startup, with the software renderer ([ADR-0017](docs/decisions/ADR-0017.md)):
 **36 ms to window, 19.2 MB idle**, against targets of 150 ms and 50 MB.
 
-Configuration precedence: command line (`--theme=`, `--renderer=`, `--log=`),
+Configuration precedence: command line (`--theme=`, `--renderer=`, `--log=`,
+`--font-size=`, `--tab-width=`, `--indent-spaces=`),
 environment (`BACHELORPAD_*`), a TOML file
 (`%APPDATA%\bachelorpad\config.toml`, or `$XDG_CONFIG_HOME` on Linux), then
 defaults. Broken config warns and falls back; it never stops the editor
@@ -84,23 +85,37 @@ starting.
 
 ### Known gaps
 
-- **The custom editor view is opt-in and has barely been used.** `--editor-view`
-  gives Ln/Col, our own undo, and a view that draws only the lines on screen.
-  It does not yet do word wrap or input-method composition, which is why the
-  default is still Slint's `TextInput`. Its rules are covered by tests; whether
-  the caret lands under the pointer is not something a test can say. See
-  [ADR-0018](docs/decisions/ADR-0018.md).
+- **Nobody has typed into the custom editor view.** `--editor-view` gives
+  Ln/Col, our own undo, and a view that draws only the lines on screen. Its
+  rules are covered by 147 tests in `bp-editor`; the widget has been shown to
+  render a frame with a real file open and exit cleanly, and nothing beyond
+  that. Whether the caret lands under the pointer is not a thing a test can
+  say. Duplicate Line and Move Line Up/Down are enabled only there, so they
+  inherit the answer. See [ADR-0018](docs/decisions/ADR-0018.md).
+- **Word wrap and input-method composition do not work under
+  `--editor-view`**, which is why the default is still Slint's `TextInput`.
+  Both are parity conditions for switching; soft wrap is the deep one, because
+  it makes a visual line differ from a document line.
+- **Some rows are built but not reachable**: zoom, indentation settings, date
+  and time insertion, document statistics, go-to-line. Each is a tested
+  library function waiting for a menu row.
+  [MENU_MAP.md](docs/product/MENU_MAP.md) marks which is which.
 - **Little of this has been used in anger.** The tests cover the pieces in
-  isolation; the integrated behaviour has had one manual pass.
-- **Two features hold sensitive data without a security profile governing
-  them**: the recovery journal writes unsaved text to disk in plaintext, and
-  clipboard history keeps copied secrets in memory. Both are waiting on
-  phase 14.
+  isolation; the integrated behaviour has had one manual pass, several
+  sessions ago.
+- **Three things hold or would hold sensitive data with no security profile
+  governing them**: the recovery journal writes unsaved text to disk in
+  plaintext, clipboard history keeps copied secrets in memory, and
+  `bp-storage` is built and deliberately unwired because the useful thing to
+  record is a summary of what the user wrote. All three want phase 14.
 
 [ROADMAP.md](ROADMAP.md) has per-phase status;
+[MENU_MAP.md](docs/product/MENU_MAP.md) says which menu rows are real;
 [ARCHITECTURE.md](docs/architecture/ARCHITECTURE.md) has the crate map and the
-editor-view constraint; [NEXT_SESSION.md](project/NEXT_SESSION.md) is the plan
-for picking this up again.
+editor-view constraint; [WORK_QUEUE.md](project/WORK_QUEUE.md) lists what is
+ready to take and what cannot run in parallel;
+[NEXT_SESSION.md](project/NEXT_SESSION.md) is the plan for picking this up
+again.
 
 ## Governance hierarchy
 
