@@ -141,19 +141,42 @@ try {
         $exe = Join-Path $Root 'target/debug/bachelorpad.exe'
         $out = Join-Path ([System.IO.Path]::GetTempPath()) "bpad-selfcheck-$PID.txt"
 
-        # Run the binary directly rather than through Start-Process.
-        # Start-Process with -RedirectStandardOutput on a console-subsystem
-        # executable sometimes reports an empty ExitCode even when the process
-        # exited cleanly, which made this stage fail with "exit 0x" while the
-        # binary was actually fine. The call operator gives a reliable
-        # $LASTEXITCODE and still lets us capture stdout.
-        & $exe --self-check > $out 2>&1
-        $code = $LASTEXITCODE
+        $proc = Start-Process -FilePath $exe -ArgumentList '--self-check' `
+            -PassThru -NoNewWindow -RedirectStandardOutput $out
 
+        # Bounded, and it has to stay bounded: the hang this guards against is
+        # the one described above, where the binary opens a window instead of
+        # answering and never exits. Running it synchronously would turn that
+        # failure into a gate that never returns, which is worse -- a red run
+        # tells you something; a hung one tells you nothing and blocks the
+        # commit anyway.
+        if (-not $proc.WaitForExit(30000)) {
+            $proc.Kill()
+            $proc.WaitForExit()
+            Remove-Item $out -ErrorAction SilentlyContinue
+            throw 'did not exit within 30s'
+        }
+        # The no-argument overload as well, once the bounded one has confirmed
+        # the process is gone. It additionally waits for the redirected output
+        # to be flushed and for ExitCode to settle -- without it,
+        # -RedirectStandardOutput can leave ExitCode unreadable on a process
+        # that exited perfectly cleanly, which is what made this stage report
+        # "exit 0x" against a working binary.
+        $proc.WaitForExit()
+
+        # The marker is the real assertion: only a binary that loaded and
+        # reached `main` can have printed it. The exit code corroborates that
+        # where the platform gives us one, so it is checked when known rather
+        # than being the thing the stage stands on.
         $ok = (Test-Path $out) -and (Select-String -Path $out -Pattern 'BACHELORPAD_SELF_CHECK_OK' -Quiet)
+        $code = $proc.ExitCode
         Remove-Item $out -ErrorAction SilentlyContinue
-        if ($code -ne 0 -or -not $ok) {
-            throw "binary did not start (exit 0x$('{0:X}' -f $code))"
+
+        if (-not $ok) {
+            throw "binary did not print the self-check marker (exit code $code)"
+        }
+        if ($null -ne $code -and $code -ne 0) {
+            throw "binary exited with 0x$('{0:X}' -f $code)"
         }
         $global:LASTEXITCODE = 0
     }
