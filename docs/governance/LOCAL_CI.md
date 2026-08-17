@@ -99,6 +99,15 @@ performance.
 `workflow_dispatch` only so that pushes do not queue runs that cannot execute.
 It exists so hosted CI can be switched back on without rebuilding it.
 
+Actions is also **disabled at the repository level**, because editing the
+trigger only protects branches carrying the edit — pushing an older branch
+still queued a run. To re-enable hosted CI later you need both:
+
+```bash
+gh api -X PUT repos/:owner/:repo/actions/permissions -F enabled=true
+# then restore `on: push` / `on: pull_request` in the workflow
+```
+
 **Keep it in step with `Invoke-LocalCI.ps1`.** Two gates that disagree are
 worse than one.
 
