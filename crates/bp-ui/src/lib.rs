@@ -5,19 +5,26 @@
 //! `bp-theme`. The rule from `docs/architecture/ARCHITECTURE.md` runs one
 //! way: the UI may call those, and none of them know this crate exists.
 //!
-//! Text is held as a `HashMap<DocumentId, String>` rather than in
-//! `bp-buffer`'s rope, deliberately. Slint's `TextInput` owns its own text
-//! and caret: it hands the whole buffer back on every edit, keeps its own
-//! undo stack, and exposes the caret only through a property marked
-//! "internal, undocumented, only exposed for tests". A rope behind that
-//! widget would be converted to `String` on every push -- worse than the
-//! `String` it replaced.
+//! Text is held in `bp-editor`'s rope -- `HashMap<DocumentId, Editor>` --
+//! whichever view is drawing (ADR-0018). It was a `HashMap<DocumentId,
+//! String>` once, and why that changed is worth keeping: Slint's `TextInput`
+//! owns its own text and caret, hands the whole buffer back on every edit,
+//! keeps its own undo stack, and exposes the caret only through a property
+//! marked "internal, undocumented, only exposed for tests". The rope became
+//! the storage independently of which view draws, which is what let the two
+//! be separated at all.
 //!
-//! That one fact also keeps `bp-editor`'s undo out of the shell and Ln/Col
-//! out of the status bar. All three unblock together, with a custom editor
-//! view that owns its own text. Measured, the current path stays inside a
-//! frame budget to roughly 40 MB; see `--latency-probe` and
-//! `docs/architecture/ARCHITECTURE.md`.
+//! So there are two views over one model. Under `TextInput`, still the
+//! default, text arriving from the widget lands in the rope as a single
+//! undoable replacement rather than as keystrokes, undo is Slint's, and the
+//! status bar can offer only a line count. Under `--editor-view` this crate
+//! owns the caret, `bp-editor`'s transactions are the undo, and the status
+//! bar shows Ln/Col; `editor_view.rs` owns that path.
+//!
+//! Both costs are measured. The `TextInput` path copies the document on
+//! every keystroke, so it stays inside a frame budget only to roughly 40 MB;
+//! the rope path does not care how large the document is. See
+//! `--latency-probe`, ADR-0018 and `docs/architecture/ARCHITECTURE.md`.
 
 // `deny` rather than `forbid`: Slint's build script generates the window's
 // item tree into this crate, and that generated code needs `unsafe` with a
@@ -800,11 +807,13 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
 /// gutter. It deliberately does **not** include rasterisation or presentation,
 /// which need a capture rig to measure and are the renderer's contribution.
 ///
-/// It is faithful in one uncomfortable way: Slint's `edited` callback hands us
-/// the entire buffer as a fresh string, so a keystroke copies the document.
-/// That is the real cost today and the reason `bp-buffer` exists on the
-/// roadmap -- the numbers here should grow linearly with document size, and
-/// if they do, that is the finding, not a flaw in the probe.
+/// The two tables are the two views. The first is the `TextInput` path, and
+/// it is faithful in one uncomfortable way: Slint's `edited` callback hands
+/// us the entire buffer as a fresh string, so a keystroke copies the
+/// document. Those numbers should grow linearly with document size, and if
+/// they do, that is the finding, not a flaw in the probe. The second is the
+/// `--editor-view` path, where the rope is written at the caret and size
+/// stops mattering -- which is the case ADR-0018 was decided on.
 pub fn latency_probe() {
     const SAMPLES: usize = 300;
     const SIZES: [usize; 4] = [1_000, 10_000, 100_000, 1_000_000];
@@ -846,7 +855,7 @@ pub fn latency_probe() {
     }
 
     println!();
-    println!("rope insert at the caret (what a custom editor view would cost)");
+    println!("rope insert at the caret (what --editor-view costs)");
     println!(
         "{:>12}  {:>10}  {:>10}  {:>10}",
         "doc chars", "p50", "p95", "max"
@@ -881,8 +890,8 @@ pub fn latency_probe() {
     println!();
     println!("Perceptible-latency threshold is roughly 16ms (16000µs) per frame.");
     println!("The first table grows with document size because Slint hands back the");
-    println!("whole buffer on every edit. The second is what that becomes once the");
-    println!("editor view owns its own text.");
+    println!("whole buffer on every edit -- that is the default view. The second is");
+    println!("the same keystroke under --editor-view, which writes the rope directly.");
 }
 
 /// Save, escalating to Save As when the document has no path yet, and asking
