@@ -26,23 +26,19 @@
 #![deny(unsafe_code)]
 
 use std::cell::RefCell;
-use std::collections::HashMap;
-use std::fmt::Write as _;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::rc::Rc;
 
-use bp_config::Recent;
-use bp_core::{Document, DocumentId, Encoding, LineEnding, UNTITLED, Workspace};
-use bp_files::{DiskState, FileStamp, SaveOptions, atomic_write, load};
-use bp_formats::Format;
-use bp_naming::SemanticName;
+use bp_core::{Document, DocumentId};
 use bp_theme::{Palette as ThemePalette, ThemeId};
-use time::OffsetDateTime;
 
 slint::include_modules!();
 
 mod menus;
-use menus::action;
+
+mod dispatch;
+mod editor_view;
+mod state;
 
 /// Crate identity used by workspace smoke tests and diagnostics.
 pub const CRATE_NAME: &str = "bp-ui";
@@ -51,801 +47,6 @@ pub const CRATE_NAME: &str = "bp-ui";
 pub enum UiError {
     #[error("could not start the user interface: {0}")]
     Platform(#[from] slint::PlatformError),
-}
-
-/// Local wall-clock time, falling back to UTC.
-///
-/// `now_local` can fail on Unix in a multithreaded process. A timestamp in
-/// the wrong zone is a small wrong; refusing to record the save at all would
-/// be a large one.
-fn now() -> OffsetDateTime {
-    OffsetDateTime::now_local().unwrap_or_else(|_| OffsetDateTime::now_utc())
-}
-
-/// `8:05 PM`, as specs.md section 3 shows it.
-fn clock(t: OffsetDateTime) -> String {
-    let (hour, meridiem) = match t.hour() {
-        0 => (12, "AM"),
-        h @ 1..=11 => (h, "AM"),
-        12 => (12, "PM"),
-        h => (h - 12, "PM"),
-    };
-    format!("{hour}:{:02} {meridiem}", t.minute())
-}
-
-/// Encode the buffer for disk, honouring the document's encoding and line
-/// endings.
-///
-/// Round-tripping matters: a file opened as CRLF with a BOM must be written
-/// back that way, or saving silently rewrites every line of someone's file.
-fn encode(text: &str, encoding: Encoding, line_ending: LineEnding) -> Result<Vec<u8>, String> {
-    if matches!(encoding, Encoding::Utf16Le | Encoding::Utf16Be) {
-        return Err(format!("saving {} is not supported yet", encoding.label()));
-    }
-    // Normalise to LF first so mixed input converges on one convention.
-    let lf = text.replace("\r\n", "\n");
-    let body = match line_ending {
-        LineEnding::Lf => lf,
-        LineEnding::CrLf => lf.replace('\n', "\r\n"),
-    };
-    let mut out = encoding.bom().to_vec();
-    out.extend_from_slice(body.as_bytes());
-    Ok(out)
-}
-
-/// How a save attempt ended.
-///
-/// Three cases, not two: a close-on-quit flow must not treat "needs a path"
-/// or "the disk refused" as success and then discard the buffer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SaveResult {
-    Saved,
-    /// No path yet. The caller should escalate to Save As.
-    NeedsPath,
-    /// Attempted and refused; `AppState::error` explains why.
-    Failed,
-}
-
-/// What a Note-menu action decided to do.
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum NoteOutcome {
-    /// Report something to the user.
-    Show {
-        title: String,
-        body: String,
-    },
-    /// Offer to save under a suggested name.
-    SaveAs,
-    Nothing,
-}
-
-/// How much of a document is enough to answer a question about its start.
-///
-/// Format detection sniffs the beginning, and `refresh` asks on every
-/// keystroke. Copying a whole document to look at its first line would put
-/// the document's size back into the typing path, which is the cost the rope
-/// exists to remove.
-const PREFIX_CHARS: usize = 4096;
-
-struct AppState {
-    workspace: Workspace,
-    /// One editor per document: the rope is the storage, and the caret,
-    /// selection and undo stack belong to us.
-    ///
-    /// True whichever view is drawing. `TextInput` still owns *its* caret and
-    /// undo when it is the one on screen, but the text it hands back lands
-    /// here as a single undoable replacement, so there is one document.
-    editors: HashMap<DocumentId, bp_editor::Editor>,
-    /// Draw with the custom surface rather than Slint's `TextInput`.
-    editor_view: bool,
-    /// First document line the surface is showing.
-    first_line: usize,
-    /// How many lines fit in it. Slint measures and tells us.
-    visible_rows: usize,
-    theme: ThemeId,
-    error: Option<String>,
-    /// Cached gutter text, and the line count it was built for.
-    ///
-    /// Rebuilding this on every keystroke was the single largest avoidable
-    /// cost in the typing path: it allocates proportionally to the document
-    /// on each character typed, while the content only changes when a line is
-    /// added or removed. `usize::MAX` is a sentinel meaning "never built",
-    /// since 0 is a line count `max(1)` can never produce.
-    gutter: String,
-    gutter_lines: usize,
-    show_gutter: bool,
-    wrap_text: bool,
-    /// What each document's file looked like when we last read or wrote it,
-    /// so an edit made by another program can be noticed.
-    stamps: HashMap<DocumentId, FileStamp>,
-    recent: Recent,
-    /// Standing warning about the file on disk. Distinct from `error`, which
-    /// reports something that just failed; this persists until resolved.
-    disk_warning: Option<String>,
-    /// Matches for the current find query, and which one is selected.
-    matches: Vec<bp_search::Match>,
-    match_index: usize,
-    find_status: String,
-    journal: bp_history::Journal,
-    /// Cross-file search results, indexed by the row the user clicks.
-    file_hits: Vec<bp_search::FileHit>,
-    clips: bp_clipboard::History,
-}
-
-impl AppState {
-    fn new() -> Self {
-        let mut workspace = Workspace::new();
-        let id = workspace.open_new(now());
-        let mut editors = HashMap::new();
-        editors.insert(id, bp_editor::Editor::default());
-        Self {
-            workspace,
-            editors,
-            editor_view: false,
-            first_line: 0,
-            // Replaced by Slint's own measurement as soon as the surface has
-            // a height; only Page Up before the first frame would see this.
-            visible_rows: 30,
-            theme: ThemeId::default(),
-            error: None,
-            gutter: String::new(),
-            gutter_lines: usize::MAX,
-            show_gutter: true,
-            wrap_text: false,
-            stamps: HashMap::new(),
-            recent: bp_config::load_recent(),
-            disk_warning: None,
-            matches: Vec::new(),
-            match_index: 0,
-            find_status: String::new(),
-            journal: bp_history::Journal::new(recovery_dir()),
-            file_hits: Vec::new(),
-            clips: bp_clipboard::History::new(),
-        }
-    }
-
-    /// Write a recovery checkpoint for every unsaved document, and clear the
-    /// journal for those that are now clean.
-    ///
-    /// specs.md section 3 is emphatic that a checkpoint is not a save, and
-    /// `bp-core` enforces that: `record_checkpoint` deliberately leaves the
-    /// document dirty.
-    fn checkpoint_all(&mut self) {
-        let ids: Vec<DocumentId> = self.workspace.iter().map(Document::id).collect();
-        let at = now();
-
-        for id in ids {
-            let Some(doc) = self.workspace.get(id) else {
-                continue;
-            };
-            if !doc.is_dirty() {
-                // Clean means the file holds the work; the journal must not
-                // linger and offer to "recover" a stale copy.
-                let _ = self.journal.discard(id.get());
-                continue;
-            }
-
-            let entry = bp_history::Checkpoint {
-                path: doc.path().map(Path::to_path_buf),
-                name: doc.display_name().to_owned(),
-                text: self.text_of(id).to_owned(),
-                written_at: bp_history::now_unix(),
-            };
-            if self.journal.checkpoint(id.get(), &entry).is_ok()
-                && let Some(doc) = self.workspace.get_mut(id)
-            {
-                doc.record_checkpoint(at);
-            }
-        }
-    }
-
-    /// Open recovered documents as unsaved tabs.
-    fn restore(&mut self, entries: Vec<(u64, bp_history::Checkpoint)>) {
-        for (_, entry) in entries {
-            let id = match entry.path {
-                Some(path) => self.workspace.open_path(path, now()),
-                None => self.workspace.open_new(now()),
-            };
-            self.editors.insert(id, bp_editor::Editor::new(&entry.text));
-            // Recovered work is by definition not on disk yet.
-            if let Some(doc) = self.workspace.get_mut(id) {
-                doc.mark_modified();
-            }
-        }
-    }
-
-    /// Recompute matches for `query` against the active document.
-    ///
-    /// Returns the range to select, if there is one.
-    fn find(&mut self, query: &bp_search::Query) -> Option<std::ops::Range<usize>> {
-        self.match_index = 0;
-        if query.is_empty() {
-            self.matches.clear();
-            self.find_status.clear();
-            return None;
-        }
-        let text = self.active_text();
-        match bp_search::find_all(&text, query) {
-            Ok(found) => {
-                self.matches = found;
-                self.find_status = if self.matches.is_empty() {
-                    "no matches".to_owned()
-                } else {
-                    format!("1 of {}", self.matches.len())
-                };
-                self.matches.first().map(|m| m.range.clone())
-            }
-            Err(e) => {
-                // A half-typed regex is the normal case while typing, so this
-                // reports rather than alarms.
-                self.matches.clear();
-                self.find_status = e.to_string();
-                None
-            }
-        }
-    }
-
-    /// Step to the next or previous match, wrapping.
-    fn step_match(&mut self, forward: bool) -> Option<std::ops::Range<usize>> {
-        if self.matches.is_empty() {
-            return None;
-        }
-        let len = self.matches.len();
-        self.match_index = if forward {
-            (self.match_index + 1) % len
-        } else {
-            (self.match_index + len - 1) % len
-        };
-        self.find_status = format!("{} of {len}", self.match_index + 1);
-        Some(self.matches[self.match_index].range.clone())
-    }
-
-    /// Note that this document and its file are in step, and remember the
-    /// file as recently used.
-    fn mark_in_step(&mut self, id: DocumentId, path: &Path) {
-        if let Some(stamp) = FileStamp::of(path) {
-            self.stamps.insert(id, stamp);
-        }
-        self.disk_warning = None;
-        self.recent.push(path);
-        bp_config::save_recent(&self.recent);
-    }
-
-    /// How the active document's file compares with what we last saw.
-    fn disk_state(&self) -> Option<DiskState> {
-        let id = self.workspace.active_id()?;
-        let path = self.workspace.get(id)?.path()?;
-        Some(bp_files::check(path, *self.stamps.get(&id)?))
-    }
-
-    /// Refresh the standing warning about the file on disk.
-    fn poll_disk(&mut self) {
-        self.disk_warning = match self.disk_state() {
-            Some(DiskState::Modified) => {
-                Some("⚠ changed on disk by another program — File ▸ Reload from Disk".to_owned())
-            }
-            Some(DiskState::Missing) => {
-                Some("⚠ no longer on disk — Save will write it again".to_owned())
-            }
-            _ => None,
-        };
-    }
-
-    fn recent_path(&self, index: usize) -> Option<PathBuf> {
-        self.recent.paths().get(index).cloned()
-    }
-
-    /// Work out what a Note-menu action should do.
-    ///
-    /// Returns a decision rather than acting, so the extraction stays
-    /// testable without a window and the dialogs stay in one place.
-    fn note_action(&self, id: i32) -> NoteOutcome {
-        let text = self.active_text();
-        match id {
-            action::NOTE_TITLE => bp_semantic::suggest_title(&text).map_or(
-                NoteOutcome::Show {
-                    title: "Suggest title".to_owned(),
-                    body: "There is nothing in this document to take a title from.".to_owned(),
-                },
-                |title| NoteOutcome::Show {
-                    title: "Suggested title".to_owned(),
-                    body: format!("{title}\n\nUse Note ▸ Semantic Rename to save under this name."),
-                },
-            ),
-
-            // A physical rename needs explicit approval (PROJECT_MEMORY), so
-            // this offers a filename and lets the save dialog be the consent.
-            action::NOTE_RENAME => NoteOutcome::SaveAs,
-
-            action::NOTE_SUMMARY => {
-                let summary = bp_semantic::summary(&text, 400);
-                NoteOutcome::Show {
-                    title: "Summary".to_owned(),
-                    body: if summary.is_empty() {
-                        "No prose to summarise.".to_owned()
-                    } else {
-                        summary
-                    },
-                }
-            }
-
-            action::NOTE_KEYWORDS => {
-                let keywords = bp_semantic::keywords(&text, 12);
-                NoteOutcome::Show {
-                    title: "Keywords".to_owned(),
-                    body: if keywords.is_empty() {
-                        "No distinctive words found.".to_owned()
-                    } else {
-                        keywords.join(", ")
-                    },
-                }
-            }
-
-            action::NOTE_OUTLINE => {
-                let outline = bp_semantic::outline(&text);
-                NoteOutcome::Show {
-                    title: "Outline".to_owned(),
-                    body: if outline.is_empty() {
-                        "No headings in this document.".to_owned()
-                    } else {
-                        outline
-                            .iter()
-                            .map(|h| {
-                                format!(
-                                    "{}{}  (line {})",
-                                    "    ".repeat(h.level.saturating_sub(1)),
-                                    h.text,
-                                    h.line
-                                )
-                            })
-                            .collect::<Vec<_>>()
-                            .join("\n")
-                    },
-                }
-            }
-
-            _ => NoteOutcome::Nothing,
-        }
-    }
-
-    /// A filename suggested from the document's own content.
-    ///
-    /// Falls back to the document's title when there is nothing to extract,
-    /// so Save As always has something to offer.
-    fn semantic_filename(&self, id: DocumentId) -> Option<String> {
-        let doc = self.workspace.get(id)?;
-        let title = bp_semantic::suggest_title(&self.text_of(id))?;
-        let extension = doc
-            .path()
-            .and_then(Path::extension)
-            .and_then(|e| e.to_str())
-            .unwrap_or("txt");
-        Some(SemanticName::new(&title, doc.created_at().date(), extension).to_filename())
-    }
-
-    /// What the active document is, by extension then by content.
-    fn format(&self) -> Format {
-        let path = self.workspace.active().and_then(Document::path);
-        // A prefix, not the document: this is asked on every refresh, and
-        // detection only ever sniffs the beginning.
-        bp_formats::detect(path, &self.active_prefix())
-    }
-
-    /// Replace the active document's text with the result of a data
-    /// operation, leaving it unsaved.
-    ///
-    /// Applied as an ordinary edit: the user can undo it, and nothing reaches
-    /// disk until they save.
-    fn apply_to_active(&mut self, result: Result<String, bp_data::DataError>) {
-        match result {
-            Ok(text) => {
-                self.error = None;
-                self.edit(text);
-            }
-            Err(e) => self.error = Some(e.to_string()),
-        }
-    }
-
-    /// Apply a whole-document line operation.
-    ///
-    /// An ordinary edit, like the data operations: undoable, and nothing
-    /// reaches disk until the user saves. The caret-dependent members of the
-    /// family -- Duplicate Line, Move Line Up/Down -- are not here, because
-    /// the caret is not readable until the custom editor view exists.
-    fn run_line_action(&mut self, id: i32) {
-        use bp_editor::lines::{self, Order};
-
-        let text = self.active_text();
-        let changed = match id {
-            action::LINES_SORT_ASC => lines::sort(&text, Order::Ascending),
-            action::LINES_SORT_DESC => lines::sort(&text, Order::Descending),
-            action::LINES_DEDUPE => lines::remove_duplicates(&text),
-            action::LINES_REVERSE => lines::reverse(&text),
-            action::LINES_TRIM => lines::trim_trailing_whitespace(&text),
-            _ => return,
-        };
-        self.error = None;
-        self.edit(changed);
-    }
-
-    /// Run a data operation, reporting the outcome in the status bar.
-    fn run_data_action(&mut self, id: i32) {
-        let text = self.active_text().to_owned();
-        match (id, self.format()) {
-            (action::DATA_VALIDATE, Format::Json) => {
-                self.error = Some(match bp_data::json_validate(&text) {
-                    Ok(()) => "✓ valid JSON".to_owned(),
-                    Err(e) => format!("invalid JSON — {e}"),
-                });
-            }
-            (action::DATA_VALIDATE, Format::JsonLines) => {
-                self.error = Some(bp_data::jsonl_validate(&text).summary());
-            }
-            (action::DATA_VALIDATE, Format::Toml) => {
-                self.error = Some(match bp_data::toml_validate(&text) {
-                    Ok(()) => "✓ valid TOML".to_owned(),
-                    Err(e) => format!("invalid TOML — {e}"),
-                });
-            }
-            (action::DATA_FORMAT, Format::Json) => {
-                self.apply_to_active(bp_data::json_format(&text));
-            }
-            (action::DATA_FORMAT, Format::Toml) => {
-                self.apply_to_active(bp_data::toml_format(&text));
-            }
-            (action::DATA_MINIFY, Format::Json) => {
-                self.apply_to_active(bp_data::json_minify(&text));
-            }
-            (action::DATA_TO_JSONL, _) => self.apply_to_active(bp_data::json_to_jsonl(&text)),
-            (action::DATA_TO_JSON, _) => self.apply_to_active(bp_data::jsonl_to_json(&text)),
-            (action::DATA_REPORT, _) => {
-                self.error = Some(match bp_data::delimited_report(&text) {
-                    Ok(report) => report.summary(),
-                    Err(e) => format!("could not read as a table — {e}"),
-                });
-            }
-            // A row that does not apply to this format. The menu should not
-            // have offered it; doing nothing is better than guessing.
-            _ => {}
-        }
-    }
-
-    /// Discard edits and re-read the active document from disk.
-    fn reload(&mut self) {
-        self.error = None;
-        let Some(id) = self.workspace.active_id() else {
-            return;
-        };
-        let Some(path) = self
-            .workspace
-            .get(id)
-            .and_then(|d| d.path())
-            .map(Path::to_path_buf)
-        else {
-            return;
-        };
-        match load(&path) {
-            Ok(file) => {
-                if let Some(doc) = self.workspace.get_mut(id) {
-                    doc.set_encoding(file.encoding);
-                    doc.set_line_ending(file.line_ending);
-                    // Back in step with disk, so the document is clean again.
-                    doc.record_disk_save(now());
-                }
-                self.editors.insert(id, bp_editor::Editor::new(&file.text));
-                self.mark_in_step(id, &path);
-            }
-            Err(e) => self.error = Some(e.to_string()),
-        }
-    }
-
-    /// Change how the document will be written, and mark it unsaved.
-    ///
-    /// The bytes on disk no longer match the intent, which is exactly what
-    /// "unsaved" means -- leaving it clean would hide a pending change.
-    fn set_line_ending(&mut self, line_ending: LineEnding) {
-        if let Some(doc) = self.workspace.active_mut()
-            && doc.line_ending() != line_ending
-        {
-            doc.set_line_ending(line_ending);
-            doc.mark_modified();
-        }
-    }
-
-    fn set_encoding(&mut self, encoding: Encoding) {
-        if let Some(doc) = self.workspace.active_mut()
-            && doc.encoding() != encoding
-        {
-            doc.set_encoding(encoding);
-            doc.mark_modified();
-        }
-    }
-
-    fn active_editor(&self) -> Option<&bp_editor::Editor> {
-        self.workspace
-            .active_id()
-            .and_then(|id| self.editors.get(&id))
-    }
-
-    fn active_editor_mut(&mut self) -> Option<&mut bp_editor::Editor> {
-        self.workspace
-            .active_id()
-            .and_then(|id| self.editors.get_mut(&id))
-    }
-
-    /// The active document as one string.
-    ///
-    /// Allocates: a rope is not contiguous, so "the whole document as text"
-    /// costs a copy. That is the right trade -- saving, searching and format
-    /// conversion each want the whole thing once, while editing wants none of
-    /// it -- but it is why nothing on the typing path calls this.
-    fn active_text(&self) -> String {
-        self.active_editor()
-            .map(bp_editor::Editor::text)
-            .unwrap_or_default()
-    }
-
-    fn text_of(&self, id: DocumentId) -> String {
-        self.editors
-            .get(&id)
-            .map(bp_editor::Editor::text)
-            .unwrap_or_default()
-    }
-
-    /// The first [`PREFIX_CHARS`] characters of the active document.
-    fn active_prefix(&self) -> String {
-        self.active_editor().map_or_else(String::new, |editor| {
-            editor
-                .buffer()
-                .slice(0..PREFIX_CHARS.min(editor.buffer().len_chars()))
-        })
-    }
-
-    /// Whether the document has anything worth extracting a title from.
-    ///
-    /// Checks a prefix rather than the whole document, because this is asked
-    /// on every refresh. A document longer than the prefix and made entirely
-    /// of whitespace would answer wrongly, and is not worth a full scan.
-    fn active_has_content(&self) -> bool {
-        self.active_editor().is_some_and(|editor| {
-            editor.buffer().len_chars() > PREFIX_CHARS || !self.active_prefix().trim().is_empty()
-        })
-    }
-
-    /// Tab label for `id`, for use in prompts.
-    fn display_name(&self, id: DocumentId) -> String {
-        self.workspace
-            .get(id)
-            .map_or_else(|| UNTITLED.to_owned(), |d| d.display_name().to_owned())
-    }
-
-    fn is_dirty(&self, id: DocumentId) -> bool {
-        self.workspace.get(id).is_some_and(Document::is_dirty)
-    }
-
-    /// Rebuild the gutter only when the line count actually changed.
-    ///
-    /// Returns `true` if the cache changed and the UI needs the new value.
-    fn sync_gutter(&mut self) -> bool {
-        // From the rope, which already counts the line after a trailing
-        // newline -- unlike `str::lines()`, which ignores it and left every
-        // file ending in one with a gutter shorter than the text beside it.
-        let lines = self
-            .active_editor()
-            .map_or(1, |editor| editor.buffer().len_lines());
-        if self.gutter_lines == lines {
-            return false;
-        }
-        self.gutter_lines = lines;
-        self.gutter.clear();
-        for n in 1..=lines {
-            if n > 1 {
-                self.gutter.push('\n');
-            }
-            let _ = write!(self.gutter, "{n}");
-        }
-        true
-    }
-
-    fn new_document(&mut self) {
-        self.error = None;
-        let id = self.workspace.open_new(now());
-        self.editors.insert(id, bp_editor::Editor::default());
-    }
-
-    fn open(&mut self, path: PathBuf) {
-        self.error = None;
-        let path2 = path.clone();
-        match load(&path) {
-            Ok(file) => {
-                let id = self.workspace.open_path(path, now());
-                if let Some(doc) = self.workspace.get_mut(id) {
-                    doc.set_encoding(file.encoding);
-                    doc.set_line_ending(file.line_ending);
-                }
-                self.editors.insert(id, bp_editor::Editor::new(&file.text));
-                self.mark_in_step(id, &path2);
-            }
-            // The error types already render a message naming the file and
-            // what to do about it, which is exactly what the status bar wants.
-            Err(e) => self.error = Some(e.to_string()),
-        }
-    }
-
-    /// Outcome of a save attempt, so callers can tell the three cases apart.
-    ///
-    /// A close-on-quit flow must not treat "needs a path" or "the disk
-    /// refused" as success and then discard the buffer.
-    fn save_document(&mut self, id: DocumentId, path: Option<PathBuf>) -> SaveResult {
-        self.error = None;
-        let Some(doc) = self.workspace.get(id) else {
-            return SaveResult::Saved;
-        };
-
-        let Some(target) = path.or_else(|| doc.path().map(Path::to_path_buf)) else {
-            return SaveResult::NeedsPath;
-        };
-
-        let bytes = match encode(&self.text_of(id), doc.encoding(), doc.line_ending()) {
-            Ok(b) => b,
-            Err(message) => {
-                self.error = Some(message);
-                return SaveResult::Failed;
-            }
-        };
-
-        match atomic_write(&target, &bytes, SaveOptions::default()) {
-            Ok(_) => {
-                if let Some(doc) = self.workspace.get_mut(id) {
-                    doc.set_path(target.clone());
-                    // Only now, after a verified write, is the document clean.
-                    doc.record_disk_save(now());
-                }
-                // Re-stamp from what we just wrote, or our own save would
-                // look like somebody else's change on the next poll.
-                self.mark_in_step(id, &target);
-                SaveResult::Saved
-            }
-            Err(e) => {
-                self.error = Some(e.to_string());
-                SaveResult::Failed
-            }
-        }
-    }
-
-    /// True if `id`'s file changed underneath us since we last read or wrote
-    /// it — meaning a save would overwrite somebody else's work.
-    fn would_overwrite_external_change(&self, id: DocumentId) -> bool {
-        let Some(path) = self.workspace.get(id).and_then(Document::path) else {
-            return false;
-        };
-        let Some(stamp) = self.stamps.get(&id) else {
-            return false;
-        };
-        bp_files::check(path, *stamp) == DiskState::Modified
-    }
-
-    /// Where a file dialog should open.
-    ///
-    /// The active document's own folder, else the user's Documents folder.
-    /// Explicitly *not* the process working directory, which is wherever the
-    /// binary happened to be launched from -- during testing that was a git
-    /// checkout, and notes were saved straight into it.
-    fn dialog_directory(&self) -> PathBuf {
-        self.workspace
-            .active()
-            .and_then(Document::path)
-            .and_then(Path::parent)
-            .filter(|p| !p.as_os_str().is_empty())
-            .map(Path::to_path_buf)
-            .or_else(documents_dir)
-            .unwrap_or_else(|| PathBuf::from("."))
-    }
-
-    /// A default filename for Save As, in the grammar from ADR-0003.
-    ///
-    /// Prefers a title extracted from the document's own content — that is
-    /// the "Semantic Filing Apparatus" doing its job — and falls back to the
-    /// document's title when there is nothing to extract.
-    fn suggested_filename(&self, id: DocumentId) -> String {
-        self.semantic_filename(id).unwrap_or_else(|| {
-            self.workspace.get(id).map_or_else(
-                || "Untitled.txt".to_owned(),
-                |doc| SemanticName::new(doc.title(), doc.created_at().date(), "txt").to_filename(),
-            )
-        })
-    }
-
-    fn close(&mut self, id: DocumentId) {
-        self.error = None;
-        if self.workspace.close(id).is_some() {
-            self.editors.remove(&id);
-        }
-        // Never leave the user staring at an empty frame with no way back.
-        if self.workspace.is_empty() {
-            self.new_document();
-        }
-    }
-
-    /// Replace the active document's text as a single undoable edit.
-    ///
-    /// What a data operation, Replace All or a line operation does, and what
-    /// `TextInput` reports after every keystroke. Unchanged text is not an
-    /// edit: a Format that found nothing to reformat must not mark a saved
-    /// document unsaved.
-    fn edit(&mut self, text: String) {
-        let Some(id) = self.workspace.active_id() else {
-            return;
-        };
-        let changed = self
-            .editors
-            .get_mut(&id)
-            .is_some_and(|editor| editor.replace_all_text(&text));
-
-        if changed && let Some(doc) = self.workspace.get_mut(id) {
-            doc.mark_modified();
-        }
-    }
-
-    /// `Ln 42, Col 18` when we own the caret; the line count when we do not.
-    ///
-    /// specs.md section 3 asks for line and column. Under `TextInput` the
-    /// caret is reachable only through a property marked internal and
-    /// undocumented, so the honest answer there is the thing we do know.
-    fn cursor_label(&self) -> String {
-        let lines = self.gutter_lines;
-        if !self.editor_view {
-            return format!("{lines} lines");
-        }
-        self.active_editor().map_or_else(
-            || format!("{lines} lines"),
-            |editor| {
-                let position = editor.position();
-                format!("Ln {}, Col {}", position.line, position.column)
-            },
-        )
-    }
-
-    /// Scroll so the caret is on screen, moving as little as possible.
-    fn reveal_caret(&mut self) {
-        let rows = self.visible_rows.max(1);
-        let caret_line = self
-            .active_editor()
-            .map_or(0, |editor| editor.position().line - 1);
-        self.first_line = bp_editor::view::reveal(self.first_line, rows, caret_line);
-    }
-
-    /// Note that the active document was edited in place, through the caret.
-    fn mark_edited(&mut self) {
-        if let Some(id) = self.workspace.active_id()
-            && let Some(doc) = self.workspace.get_mut(id)
-        {
-            doc.mark_modified();
-        }
-    }
-}
-
-/// Status-bar save state, per specs.md section 3.
-fn save_state_label(doc: &Document) -> String {
-    if !doc.is_dirty() {
-        return doc.last_disk_save().map_or_else(
-            || "● Never saved".to_owned(),
-            |t| format!("✓ Saved {}", clock(t.get())),
-        );
-    }
-
-    // specs.md section 3's unsaved form: the recovery checkpoint and the last
-    // real disk save, side by side and never confused for one another. The
-    // whole reason `CheckpointTime` and `DiskSaveTime` are different types is
-    // so this line cannot accidentally claim the work is safe.
-    let mut parts = vec!["● Unsaved".to_owned()];
-    if let Some(checkpoint) = doc.last_checkpoint() {
-        parts.push(format!("Recovery {}", clock(checkpoint.get())));
-    }
-    if let Some(saved) = doc.last_disk_save() {
-        parts.push(format!("Last disk save {}", clock(saved.get())));
-    }
-    parts.join(" │ ")
 }
 
 fn apply_theme(ui: &AppWindow, theme: ThemeId) {
@@ -860,17 +61,7 @@ fn apply_theme(ui: &AppWindow, theme: ThemeId) {
     palette.set_accent(c(p.accent));
 }
 
-/// Whether the buffer text needs pushing back into the editor widget.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PushText {
-    /// The document changed underneath the widget: opened, switched, closed.
-    Yes,
-    /// The user typed. The widget already holds the text, and pushing it back
-    /// would clone the whole document on every keystroke to no effect.
-    No,
-}
-
-fn refresh(ui: &AppWindow, state: &mut AppState, push_text: PushText) {
+fn refresh(ui: &AppWindow, state: &mut state::AppState, push_text: state::PushText) {
     apply_theme(ui, state.theme);
     ui.set_theme_name(state.theme.name().into());
 
@@ -887,11 +78,11 @@ fn refresh(ui: &AppWindow, state: &mut AppState, push_text: PushText) {
         .collect();
     ui.set_tabs(Rc::new(slint::VecModel::from(tabs)).into());
 
-    if push_text == PushText::Yes {
+    if push_text == state::PushText::Yes {
         ui.set_doc_text(state.active_text().as_str().into());
     }
     if state.editor_view {
-        push_editor_view(ui, state);
+        editor_view::push_editor_view(ui, state);
     }
     if state.sync_gutter() {
         ui.set_gutter(state.gutter.as_str().into());
@@ -900,7 +91,7 @@ fn refresh(ui: &AppWindow, state: &mut AppState, push_text: PushText) {
     let format = state.format();
 
     if let Some(doc) = state.workspace.active() {
-        ui.set_save_state(save_state_label(doc).into());
+        ui.set_save_state(state::save_state_label(doc).into());
         ui.set_is_dirty(doc.is_dirty());
         ui.set_location(doc.location_label().into());
         ui.set_encoding_label(doc.encoding().label().into());
@@ -944,219 +135,6 @@ fn refresh(ui: &AppWindow, state: &mut AppState, push_text: PushText) {
     ui.set_edit_items(model(menus::edit(state.clips.entries())));
 }
 
-/// Tab stops the surface draws with. Four, matching this repository's Rust.
-///
-/// A constant rather than a setting for now: it has to be the same number on
-/// both sides of the boundary, and one place to change it is better than a
-/// setting nothing reads yet.
-const TAB_WIDTH: usize = 4;
-
-/// Hand the surface the lines it should draw, the caret and the selection.
-///
-/// Only the visible rows cross the boundary, which is the whole point: this
-/// costs the same on a 100,000-line document as on a ten-line one.
-fn push_editor_view(ui: &AppWindow, state: &mut AppState) {
-    state.reveal_caret();
-    draw_editor_view(ui, state);
-}
-
-/// Draw the surface exactly where it is now.
-///
-/// Separate from [`push_editor_view`] because scrolling deliberately moves
-/// the view away from the caret, and revealing it again would make the wheel
-/// snap straight back.
-fn draw_editor_view(ui: &AppWindow, state: &AppState) {
-    let rows = state.visible_rows.max(1);
-    let first = state.first_line;
-    let Some(editor) = state.active_editor() else {
-        return;
-    };
-    let buffer = editor.buffer();
-
-    let visible: Vec<EditorRow> = bp_editor::view::visible_lines(buffer, first, rows)
-        .into_iter()
-        .map(|(line, text)| EditorRow {
-            number: format!("{}", line + 1).into(),
-            text: text.as_str().into(),
-        })
-        .collect();
-    ui.set_editor_rows(Rc::new(slint::VecModel::from(visible)).into());
-
-    let boxes: Vec<SelectionBox> = editor
-        .selection()
-        .map(|range| {
-            bp_editor::view::selection_spans(
-                buffer,
-                &range,
-                bp_editor::view::Metrics {
-                    tab_width: TAB_WIDTH,
-                    ..bp_editor::view::Metrics::default()
-                },
-                first,
-                rows,
-            )
-        })
-        .unwrap_or_default()
-        .into_iter()
-        .map(|span| SelectionBox {
-            row: clamp_i32(span.row),
-            start: clamp_i32(span.columns.start),
-            end: clamp_i32(span.columns.end),
-        })
-        .collect();
-    ui.set_editor_selection(Rc::new(slint::VecModel::from(boxes)).into());
-
-    let (row, column) = bp_editor::view::caret_cell(buffer, first, editor.cursor(), TAB_WIDTH);
-    // A row outside the viewport is reported as -1 rather than drawn off the
-    // edge, which is what the surface checks before showing the caret.
-    let visible_row = usize::try_from(row)
-        .ok()
-        .filter(|row| *row < rows)
-        .map_or(-1, clamp_i32);
-    ui.set_caret_row(visible_row);
-    ui.set_caret_column(clamp_i32(column));
-}
-
-fn clamp_i32(value: usize) -> i32 {
-    i32::try_from(value).unwrap_or(i32::MAX)
-}
-
-/// Slint's key text as the editor understands it.
-///
-/// Slint reports named keys as private-use characters. `slint::platform::Key`
-/// gives them names, so this stays a readable list rather than a table of
-/// code points that nobody can check.
-fn translate_key(text: &str) -> Option<bp_editor::Key> {
-    use bp_editor::Key as Editor;
-    use slint::platform::Key as Slint;
-
-    let ch = text.chars().next()?;
-    let is = |key: Slint| char::from(key) == ch;
-
-    Some(if is(Slint::LeftArrow) {
-        Editor::Left
-    } else if is(Slint::RightArrow) {
-        Editor::Right
-    } else if is(Slint::UpArrow) {
-        Editor::Up
-    } else if is(Slint::DownArrow) {
-        Editor::Down
-    } else if is(Slint::Home) {
-        Editor::Home
-    } else if is(Slint::End) {
-        Editor::End
-    } else if is(Slint::PageUp) {
-        Editor::PageUp
-    } else if is(Slint::PageDown) {
-        Editor::PageDown
-    } else if is(Slint::Backspace) {
-        Editor::Backspace
-    } else if is(Slint::Delete) {
-        Editor::Delete
-    } else if is(Slint::Return) {
-        Editor::Enter
-    } else if is(Slint::Tab) {
-        Editor::Tab
-    } else if is(Slint::Escape) {
-        Editor::Escape
-    } else {
-        Editor::Char(ch)
-    })
-}
-
-/// Move the caret to a clicked cell, extending the selection if asked.
-fn place_caret(state: &mut AppState, row: i32, column: i32, extend: bool) {
-    let first = state.first_line;
-    let Some(editor) = state.active_editor_mut() else {
-        return;
-    };
-    let offset = bp_editor::view::offset_at_cell(
-        editor.buffer(),
-        first,
-        usize::try_from(row).unwrap_or(0),
-        usize::try_from(column).unwrap_or(0),
-        TAB_WIDTH,
-    );
-
-    if extend {
-        // Extend from the far end of any existing selection, so shift-click
-        // and drag both grow it rather than restarting it.
-        let anchor = editor.selection().map_or(editor.cursor(), |range| {
-            if editor.cursor() == range.start {
-                range.end
-            } else {
-                range.start
-            }
-        });
-        editor.select(anchor, offset);
-    } else {
-        editor.set_cursor(offset);
-    }
-}
-
-/// Carry out an editing command, reporting whether the editor claimed it.
-///
-/// The clipboard commands are handled here rather than in `bp-editor`: the
-/// OS clipboard is the shell's business, and a crate tested without a window
-/// has no way to reach one.
-fn apply_editor_command(state: &mut AppState, command: &bp_editor::Command) -> bool {
-    match command {
-        bp_editor::Command::Ignore => false,
-
-        bp_editor::Command::Copy => {
-            let selected = state
-                .active_editor()
-                .and_then(|editor| Some(editor.buffer().slice(editor.selection()?)));
-            // Copying nothing must not wipe what the user copied earlier.
-            if let Some(text) = selected.filter(|text| !text.is_empty()) {
-                set_os_clipboard(&text);
-            }
-            true
-        }
-
-        bp_editor::Command::Cut => {
-            let selected = state
-                .active_editor()
-                .and_then(|editor| Some(editor.buffer().slice(editor.selection()?)));
-            if let Some(text) = selected.filter(|text| !text.is_empty()) {
-                set_os_clipboard(&text);
-                if let Some(editor) = state.active_editor_mut() {
-                    editor.delete_selection();
-                }
-                state.mark_edited();
-            }
-            true
-        }
-
-        bp_editor::Command::Paste => {
-            if let Some(text) = os_clipboard_text().filter(|text| !text.is_empty()) {
-                if let Some(editor) = state.active_editor_mut() {
-                    editor.insert(&text);
-                }
-                state.mark_edited();
-            }
-            true
-        }
-
-        other => {
-            let changed = state
-                .active_editor_mut()
-                .is_some_and(|editor| editor.apply(other));
-            if changed {
-                state.mark_edited();
-            }
-            true
-        }
-    }
-}
-
-/// Whatever the OS clipboard holds, if it holds text.
-fn os_clipboard_text() -> Option<String> {
-    arboard::Clipboard::new()
-        .and_then(|mut clipboard| clipboard.get_text())
-        .ok()
-}
-
 /// Menus whose contents never change. Set once, not on every refresh.
 fn set_static_menus(ui: &AppWindow) {
     let model = |items: Vec<MenuItem>| slint::ModelRc::new(slint::VecModel::from(items));
@@ -1170,144 +148,29 @@ fn set_static_menus(ui: &AppWindow) {
     ui.set_tools_items(model(menus::planned_menu("Tools")));
 }
 
-/// Static information, shown in a native dialog rather than built as a
-/// bespoke window.
-fn show_info(title: &str, body: &str) {
-    rfd::MessageDialog::new()
-        .set_level(rfd::MessageLevel::Info)
-        .set_title(title)
-        .set_description(body)
-        .set_buttons(rfd::MessageButtons::Ok)
-        .show();
-}
-
-const SHORTCUTS: &str = "\
-Ctrl+N          New
-Ctrl+O          Open
-Ctrl+S          Save
-Ctrl+Shift+S    Save As
-Ctrl+W          Close tab
-Ctrl+Z / Ctrl+Y Undo / Redo
-Ctrl+X/C/V      Cut / Copy / Paste
-Ctrl+A          Select all";
-
-/// The user's Documents folder, if the platform names one.
-fn documents_dir() -> Option<PathBuf> {
-    if cfg!(windows) {
-        let profile = std::env::var_os("USERPROFILE")?;
-        let docs = PathBuf::from(profile).join("Documents");
-        docs.is_dir().then_some(docs)
-    } else {
-        // XDG_DOCUMENTS_DIR is set by user-dirs; fall back to the convention,
-        // then to the home directory itself.
-        if let Some(dir) = std::env::var_os("XDG_DOCUMENTS_DIR") {
-            let dir = PathBuf::from(dir);
-            if dir.is_dir() {
-                return Some(dir);
-            }
-        }
-        let home = PathBuf::from(std::env::var_os("HOME")?);
-        let docs = home.join("Documents");
-        Some(if docs.is_dir() { docs } else { home })
-    }
-}
-
 /// Open a file, starting in a sensible directory.
-fn pick_file(state: &AppState) -> Option<PathBuf> {
-    rfd::FileDialog::new()
-        .set_directory(state.dialog_directory())
-        .pick_file()
+pub(crate) fn pick_file(state: &state::AppState) -> Option<PathBuf> {
+    dispatch::pick_file(state)
 }
 
 /// Choose a save location, starting in a sensible directory with the
 /// ADR-0003 filename suggested.
-fn pick_save_path(state: &AppState, id: DocumentId) -> Option<PathBuf> {
-    rfd::FileDialog::new()
-        .set_directory(state.dialog_directory())
-        .set_file_name(state.suggested_filename(id))
-        .save_file()
+pub(crate) fn pick_save_path(state: &state::AppState, id: DocumentId) -> Option<PathBuf> {
+    dispatch::pick_save_path(state, id)
 }
 
-/// Where recovery checkpoints live: beside the config file, in `recovery/`.
-///
-/// The `.gitignore` already excludes `/recovery`, and this is deliberately a
-/// path the user can be told — it holds copies of their unsaved work.
-fn recovery_dir() -> PathBuf {
-    bp_config::config_path().map_or_else(
-        || PathBuf::from("recovery"),
-        |p| p.with_file_name("recovery"),
-    )
-}
-
+/// Whatever the OS clipboard holds, if it holds text.
 /// Read the OS clipboard, if it holds text.
 ///
 /// Failures are silent: a clipboard held open by another process is normal
 /// and momentary, and there is nothing useful to say about it.
-fn read_os_clipboard() -> Option<String> {
+pub(crate) fn read_os_clipboard() -> Option<String> {
     arboard::Clipboard::new().ok()?.get_text().ok()
 }
 
 /// Put text on the OS clipboard. Returns whether it worked.
-fn set_os_clipboard(text: &str) -> bool {
+pub(crate) fn set_os_clipboard(text: &str) -> bool {
     arboard::Clipboard::new().is_ok_and(|mut c| c.set_text(text.to_owned()).is_ok())
-}
-
-/// Select a character range in the editor.
-///
-/// Under the custom surface we own the selection, so this sets it and asks
-/// only for the focus back. Under `TextInput` the widget owns it, and the
-/// offsets are clamped into `i32` because that is what its API takes -- a
-/// document long enough to overflow one would have other problems first.
-fn select(ui: &AppWindow, state: &mut AppState, range: &std::ops::Range<usize>) {
-    if state.editor_view {
-        if let Some(editor) = state.active_editor_mut() {
-            editor.select(range.start, range.end);
-        }
-        state.reveal_caret();
-        draw_editor_view(ui, state);
-        ui.invoke_focus_editor();
-        return;
-    }
-    let start = i32::try_from(range.start).unwrap_or(i32::MAX);
-    let end = i32::try_from(range.end).unwrap_or(i32::MAX);
-    ui.invoke_select_range(start, end);
-}
-
-/// Show what Replace All would do, and ask before doing it.
-///
-/// specs.md section 6 wants the changes visible before they are applied.
-/// Replace All is the one search operation that rewrites the document in
-/// places the user cannot see, so it is also the one worth confirming --
-/// undo covers a mistake, but only if you notice you made one.
-///
-/// The listing is bounded: a preview of forty thousand replacements is not a
-/// preview, and a dialog taller than the screen has no buttons on it.
-fn confirm_replace(plan: &bp_search::ReplacePlan) -> bool {
-    const SHOWN: usize = 12;
-
-    rfd::MessageDialog::new()
-        .set_level(rfd::MessageLevel::Warning)
-        .set_title("Replace All")
-        .set_description(format!("{}\n\n{}", plan.summary(), plan.preview(SHOWN)))
-        .set_buttons(rfd::MessageButtons::OkCancel)
-        .show()
-        == rfd::MessageDialogResult::Ok
-}
-
-/// Ask about unsaved work before discarding it.
-///
-/// Blocking and native. The three-way answer matters: "Cancel" has to be
-/// distinguishable from "Discard", or the safe choice becomes the
-/// destructive one.
-fn ask_about_unsaved(name: &str) -> rfd::MessageDialogResult {
-    rfd::MessageDialog::new()
-        .set_level(rfd::MessageLevel::Warning)
-        .set_title("Unsaved changes")
-        .set_description(format!(
-            "{name} has unsaved changes.\n\nSave before closing?"
-        ))
-        .set_buttons(rfd::MessageButtons::YesNoCancel)
-        .show()
 }
 
 /// Which Slint renderer to ask for.
@@ -1374,7 +237,7 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
     }
 
     let ui = AppWindow::new()?;
-    let mut initial = AppState::new();
+    let mut initial = state::AppState::new();
     if let Some(theme) = options.theme {
         initial.theme = theme;
     }
@@ -1470,7 +333,7 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
                     $body
                 }
                 if let Some(ui) = weak.upgrade() {
-                    refresh(&ui, &mut cell.borrow_mut(), PushText::Yes);
+                    refresh(&ui, &mut cell.borrow_mut(), state::PushText::Yes);
                 }
             });
         }};
@@ -1510,12 +373,12 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
         ui.on_select_tab(move |raw| {
             {
                 let mut s = cell.borrow_mut();
-                if let Some(id) = find_id(&s.workspace, raw) {
+                if let Some(id) = state::find_id(&s.workspace, raw) {
                     s.workspace.set_active(id);
                 }
             }
             if let Some(ui) = weak.upgrade() {
-                refresh(&ui, &mut cell.borrow_mut(), PushText::Yes);
+                refresh(&ui, &mut cell.borrow_mut(), state::PushText::Yes);
             }
         });
     }
@@ -1534,7 +397,7 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
                 close_with_prompt(&cell, id);
             }
             if let Some(ui) = weak.upgrade() {
-                refresh(&ui, &mut cell.borrow_mut(), PushText::Yes);
+                refresh(&ui, &mut cell.borrow_mut(), state::PushText::Yes);
             }
         });
     }
@@ -1548,7 +411,7 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
                 close_with_prompt(&cell, id);
             }
             if let Some(ui) = weak.upgrade() {
-                refresh(&ui, &mut cell.borrow_mut(), PushText::Yes);
+                refresh(&ui, &mut cell.borrow_mut(), state::PushText::Yes);
             }
         });
     }
@@ -1563,7 +426,7 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
             if let Some(ui) = weak.upgrade() {
                 // PushText::No -- the widget already holds this text. Pushing
                 // it back would clone the document on every keystroke.
-                refresh(&ui, &mut cell.borrow_mut(), PushText::No);
+                refresh(&ui, &mut cell.borrow_mut(), state::PushText::No);
             }
         });
     }
@@ -1578,10 +441,10 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
 
             for id in dirty {
                 let name = cell.borrow().display_name(id);
-                match ask_about_unsaved(&name) {
+                match dispatch::ask_about_unsaved(&name) {
                     rfd::MessageDialogResult::Yes => {
                         let mut s = cell.borrow_mut();
-                        if save_with_prompt(&mut s, id) != SaveResult::Saved {
+                        if save_with_prompt(&mut s, id) != state::SaveResult::Saved {
                             // Save failed or was abandoned. Quitting now would
                             // discard exactly what the user asked to keep.
                             return slint::CloseRequestResponse::KeepWindowShown;
@@ -1601,186 +464,8 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
         let cell = Rc::clone(&state);
         let weak = ui.as_weak();
         ui.on_menu_action(move |id| {
-            let mut push = PushText::Yes;
-            match id {
-                action::NEW => cell.borrow_mut().new_document(),
-                action::OPEN => {
-                    let chosen = pick_file(&cell.borrow());
-                    if let Some(path) = chosen {
-                        cell.borrow_mut().open(path);
-                    }
-                }
-                action::SAVE => {
-                    let id = cell.borrow().workspace.active_id();
-                    if let Some(id) = id {
-                        save_with_prompt(&mut cell.borrow_mut(), id);
-                    }
-                }
-                action::SAVE_AS => {
-                    let target = cell.borrow().workspace.active_id();
-                    if let Some(id) = target {
-                        let chosen = pick_save_path(&cell.borrow(), id);
-                        if let Some(path) = chosen {
-                            cell.borrow_mut().save_document(id, Some(path));
-                        }
-                    }
-                }
-                action::SAVE_ALL => {
-                    let dirty: Vec<DocumentId> =
-                        cell.borrow().workspace.dirty().map(Document::id).collect();
-                    for id in dirty {
-                        // Stop at the first refusal rather than firing a
-                        // dialog per document at someone who just cancelled.
-                        if save_with_prompt(&mut cell.borrow_mut(), id) != SaveResult::Saved {
-                            break;
-                        }
-                    }
-                }
-                action::RELOAD => {
-                    let (dirty, name) = {
-                        let s = cell.borrow();
-                        let id = s.workspace.active_id();
-                        (
-                            id.is_some_and(|i| s.is_dirty(i)),
-                            id.map(|i| s.display_name(i)).unwrap_or_default(),
-                        )
-                    };
-                    // Reloading discards edits, so it asks like closing does.
-                    if dirty && ask_about_unsaved(&name) != rfd::MessageDialogResult::No {
-                        return;
-                    }
-                    cell.borrow_mut().reload();
-                }
-                action::CLOSE_TAB => {
-                    let id = cell.borrow().workspace.active_id();
-                    if let Some(id) = id {
-                        close_with_prompt(&cell, id);
-                    }
-                }
-
-                action::THEME_LIGHT => cell.borrow_mut().theme = ThemeId::Light,
-                action::THEME_DARK => cell.borrow_mut().theme = ThemeId::Dark,
-                action::THEME_ORGANIC => cell.borrow_mut().theme = ThemeId::Organic,
-                action::THEME_GREEN => cell.borrow_mut().theme = ThemeId::Green,
-
-                action::TOGGLE_GUTTER => {
-                    let mut s = cell.borrow_mut();
-                    s.show_gutter = !s.show_gutter;
-                    push = PushText::No;
-                }
-                action::TOGGLE_WRAP => {
-                    let mut s = cell.borrow_mut();
-                    s.wrap_text = !s.wrap_text;
-                    push = PushText::No;
-                }
-
-                action::LINE_ENDING_LF => cell.borrow_mut().set_line_ending(LineEnding::Lf),
-                action::LINE_ENDING_CRLF => cell.borrow_mut().set_line_ending(LineEnding::CrLf),
-                action::ENCODING_UTF8 => cell.borrow_mut().set_encoding(Encoding::Utf8),
-                action::ENCODING_UTF8_BOM => cell.borrow_mut().set_encoding(Encoding::Utf8Bom),
-
-                action::SHORTCUTS => show_info("Keyboard shortcuts", SHORTCUTS),
-                action::ABOUT => show_info(
-                    "About BachelorPad+",
-                    &format!(
-                        "BachelorPad+ {}\n\nNotepad when you want it. More when you need it.\n\n\
-                         Renderer: {}\nLicence: MIT OR Apache-2.0",
-                        env!("CARGO_PKG_VERSION"),
-                        std::env::var("SLINT_BACKEND").unwrap_or_else(|_| "software".to_owned()),
-                    ),
-                ),
-
-                // Only reachable with the custom surface. Under `TextInput`
-                // Slint handles these on the widget itself and they never get
-                // this far.
-                id if (action::UNDO..=action::SELECT_ALL).contains(&id) => {
-                    let command = match id {
-                        action::UNDO => bp_editor::Command::Undo,
-                        action::REDO => bp_editor::Command::Redo,
-                        action::CUT => bp_editor::Command::Cut,
-                        action::COPY => bp_editor::Command::Copy,
-                        action::PASTE => bp_editor::Command::Paste,
-                        _ => bp_editor::Command::SelectAll,
-                    };
-                    apply_editor_command(&mut cell.borrow_mut(), &command);
-                    push = PushText::No;
-                }
-
-                id if id >= action::CLIP_BASE => {
-                    let index = usize::try_from(id - action::CLIP_BASE).unwrap_or(0);
-                    let text = cell.borrow().clips.get(index).map(|e| e.text.clone());
-                    let Some(text) = text else { return };
-                    set_os_clipboard(&text);
-
-                    let owns_caret = cell.borrow().editor_view;
-                    if owns_caret {
-                        {
-                            let mut s = cell.borrow_mut();
-                            if let Some(editor) = s.active_editor_mut() {
-                                editor.insert(&text);
-                            }
-                            s.mark_edited();
-                        }
-                        if let Some(ui) = weak.upgrade() {
-                            refresh(&ui, &mut cell.borrow_mut(), PushText::No);
-                            ui.invoke_focus_editor();
-                        }
-                    } else if let Some(ui) = weak.upgrade() {
-                        // The OS clipboard now holds the entry, so the
-                        // widget's own paste puts it at the caret -- the one
-                        // way to insert there without caret access.
-                        ui.invoke_paste_from_clipboard();
-                    }
-                    return;
-                }
-
-                id if (action::NOTE_TITLE..=action::NOTE_OUTLINE).contains(&id) => {
-                    let outcome = cell.borrow().note_action(id);
-                    match outcome {
-                        NoteOutcome::Show { title, body } => show_info(&title, &body),
-                        NoteOutcome::SaveAs => {
-                            let target = cell.borrow().workspace.active_id();
-                            if let Some(doc_id) = target {
-                                let chosen = pick_save_path(&cell.borrow(), doc_id);
-                                if let Some(path) = chosen {
-                                    cell.borrow_mut().save_document(doc_id, Some(path));
-                                }
-                            }
-                        }
-                        NoteOutcome::Nothing => {}
-                    }
-                }
-
-                id if (action::DATA_VALIDATE..=action::DATA_REPORT).contains(&id) => {
-                    cell.borrow_mut().run_data_action(id);
-                }
-
-                id if (action::LINES_SORT_ASC..=action::LINES_TRIM).contains(&id) => {
-                    cell.borrow_mut().run_line_action(id);
-                }
-
-                // Recently opened files. Bounded by the length of the list
-                // rather than by the next block of ids: this arm used to
-                // claim everything up to 100, which was safe only because
-                // every other arm in that window happened to come first.
-                id if (action::RECENT_BASE
-                    ..action::RECENT_BASE + i32::try_from(bp_config::MAX_RECENT).unwrap_or(0))
-                    .contains(&id) =>
-                {
-                    let index = usize::try_from(id - action::RECENT_BASE).unwrap_or(0);
-                    let path = cell.borrow().recent_path(index);
-                    if let Some(path) = path {
-                        cell.borrow_mut().open(path);
-                    }
-                }
-
-                // action::NONE and anything unrecognised: a row that exists
-                // to describe what is coming.
-                _ => return,
-            }
-            if let Some(ui) = weak.upgrade() {
-                refresh(&ui, &mut cell.borrow_mut(), push);
-            }
+            let Some(ui) = weak.upgrade() else { return };
+            let _ = dispatch::handle_menu_action(&ui, &cell, id);
         });
     }
 
@@ -1808,16 +493,16 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
                 let command = if text.chars().count() > 1 && !modifiers.control {
                     bp_editor::Command::Insert(text.to_string())
                 } else {
-                    match translate_key(&text) {
+                    match editor_view::translate_key(&text) {
                         Some(key) => bp_editor::keys::command_for(key, modifiers, rows),
                         None => bp_editor::Command::Ignore,
                     }
                 };
-                apply_editor_command(&mut s, &command)
+                editor_view::apply_editor_command(&mut s, &command)
             };
 
             if handled {
-                refresh(&ui, &mut cell.borrow_mut(), PushText::No);
+                refresh(&ui, &mut cell.borrow_mut(), state::PushText::No);
             }
             handled
         });
@@ -1828,8 +513,8 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
         let weak = ui.as_weak();
         ui.on_editor_pressed(move |row, column, extend| {
             let Some(ui) = weak.upgrade() else { return };
-            place_caret(&mut cell.borrow_mut(), row, column, extend);
-            refresh(&ui, &mut cell.borrow_mut(), PushText::No);
+            editor_view::place_caret(&mut cell.borrow_mut(), row, column, extend);
+            refresh(&ui, &mut cell.borrow_mut(), state::PushText::No);
         });
     }
 
@@ -1839,8 +524,8 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
         ui.on_editor_dragged(move |row, column| {
             let Some(ui) = weak.upgrade() else { return };
             // A drag always extends -- that is what dragging means.
-            place_caret(&mut cell.borrow_mut(), row, column, true);
-            refresh(&ui, &mut cell.borrow_mut(), PushText::No);
+            editor_view::place_caret(&mut cell.borrow_mut(), row, column, true);
+            refresh(&ui, &mut cell.borrow_mut(), state::PushText::No);
         });
     }
 
@@ -1864,7 +549,7 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
             // Drawn where it now is rather than through `refresh`: scrolling
             // away from the caret is exactly what the user asked for, and
             // revealing it again would snap the wheel straight back.
-            draw_editor_view(&ui, &s);
+            editor_view::draw_editor_view(&ui, &s);
         });
     }
 
@@ -1874,7 +559,7 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
         ui.on_editor_resized(move |rows| {
             let Some(ui) = weak.upgrade() else { return };
             cell.borrow_mut().visible_rows = usize::try_from(rows).unwrap_or(1).max(1);
-            refresh(&ui, &mut cell.borrow_mut(), PushText::No);
+            refresh(&ui, &mut cell.borrow_mut(), state::PushText::No);
         });
     }
 
@@ -1888,7 +573,7 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
             let selection = cell.borrow_mut().find(&query);
             ui.set_find_status(cell.borrow().find_status.as_str().into());
             if let Some(range) = selection {
-                select(&ui, &mut cell.borrow_mut(), &range);
+                dispatch::select(&ui, &mut cell.borrow_mut(), &range);
             }
         });
     }
@@ -1901,7 +586,7 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
             let selection = cell.borrow_mut().step_match(forward);
             ui.set_find_status(cell.borrow().find_status.as_str().into());
             if let Some(range) = selection {
-                select(&ui, &mut cell.borrow_mut(), &range);
+                dispatch::select(&ui, &mut cell.borrow_mut(), &range);
             }
         };
         if forward {
@@ -1934,7 +619,7 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
                 Ok(plan) if plan.is_empty() => {
                     cell.borrow_mut().find_status = "no matches".to_owned();
                 }
-                Ok(plan) if !confirm_replace(&plan) => {
+                Ok(plan) if !dispatch::confirm_replace(&plan) => {
                     cell.borrow_mut().find_status = "cancelled".to_owned();
                 }
                 Ok(plan) => {
@@ -1948,7 +633,7 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
                 }
             }
             ui.set_find_status(cell.borrow().find_status.as_str().into());
-            refresh(&ui, &mut cell.borrow_mut(), PushText::Yes);
+            refresh(&ui, &mut cell.borrow_mut(), state::PushText::Yes);
         });
     }
 
@@ -2019,10 +704,10 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
             let Some(hit) = hit else { return };
 
             cell.borrow_mut().open(hit.path);
-            refresh(&ui, &mut cell.borrow_mut(), PushText::Yes);
+            refresh(&ui, &mut cell.borrow_mut(), state::PushText::Yes);
             // Select the match so the editor scrolls to it, rather than
             // opening the file at the top and leaving the user to hunt.
-            select(&ui, &mut cell.borrow_mut(), &(hit.offset..hit.offset));
+            dispatch::select(&ui, &mut cell.borrow_mut(), &(hit.offset..hit.offset));
         });
     }
 
@@ -2042,7 +727,7 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
                 // repaint -- but a checkpoint is not a save and the save
                 // state must not move.
                 if let Some(ui) = weak.upgrade() {
-                    refresh(&ui, &mut cell.borrow_mut(), PushText::No);
+                    refresh(&ui, &mut cell.borrow_mut(), state::PushText::No);
                 }
             },
         );
@@ -2067,7 +752,7 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
                 let added = cell.borrow_mut().clips.push(&text);
                 // Only rebuild the menus when the history actually changed.
                 if added && let Some(ui) = weak.upgrade() {
-                    refresh(&ui, &mut cell.borrow_mut(), PushText::No);
+                    refresh(&ui, &mut cell.borrow_mut(), state::PushText::No);
                 }
             },
         );
@@ -2094,14 +779,14 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
                 // Only touch the UI when the answer actually changed; a
                 // two-second repaint of an unchanged status bar is waste.
                 if changed && let Some(ui) = weak.upgrade() {
-                    refresh(&ui, &mut cell.borrow_mut(), PushText::No);
+                    refresh(&ui, &mut cell.borrow_mut(), state::PushText::No);
                 }
             },
         );
     }
 
     set_static_menus(&ui);
-    refresh(&ui, &mut state.borrow_mut(), PushText::Yes);
+    refresh(&ui, &mut state.borrow_mut(), state::PushText::Yes);
     ui.run()?;
     drop(disk_timer);
     Ok(())
@@ -2136,7 +821,7 @@ pub fn latency_probe() {
             .map(|i| if i % 80 == 79 { '\n' } else { 'x' })
             .collect();
 
-        let mut state = AppState::new();
+        let mut state = state::AppState::new();
         state.edit(text.clone());
         state.sync_gutter();
 
@@ -2205,7 +890,7 @@ pub fn latency_probe() {
 ///
 /// Save on a never-saved document must not silently do nothing, and Save on a
 /// file somebody else edited must not silently discard their work.
-fn save_with_prompt(state: &mut AppState, id: DocumentId) -> SaveResult {
+fn save_with_prompt(state: &mut state::AppState, id: DocumentId) -> state::SaveResult {
     if state.would_overwrite_external_change(id) {
         let name = state.display_name(id);
         let answer = rfd::MessageDialog::new()
@@ -2220,17 +905,17 @@ fn save_with_prompt(state: &mut AppState, id: DocumentId) -> SaveResult {
         if answer != rfd::MessageDialogResult::Yes {
             // Not a failure -- a refusal. Nothing was written either way, so
             // the caller must not treat it as saved.
-            return SaveResult::NeedsPath;
+            return state::SaveResult::NeedsPath;
         }
     }
 
     match state.save_document(id, None) {
-        SaveResult::NeedsPath => {
-            match pick_save_path(state, id) {
+        state::SaveResult::NeedsPath => {
+            match dispatch::pick_save_path(state, id) {
                 Some(path) => state.save_document(id, Some(path)),
                 // The user dismissed the dialog. Nothing was written, and the
                 // caller must not treat that as saved.
-                None => SaveResult::NeedsPath,
+                None => state::SaveResult::NeedsPath,
             }
         }
         other => other,
@@ -2242,17 +927,17 @@ fn save_with_prompt(state: &mut AppState, id: DocumentId) -> SaveResult {
 /// Borrows are scoped tightly around each step: the dialogs block, and
 /// holding a `RefCell` borrow across one would panic the moment any other
 /// callback ran.
-fn close_with_prompt(cell: &Rc<RefCell<AppState>>, id: DocumentId) {
+fn close_with_prompt(cell: &Rc<RefCell<state::AppState>>, id: DocumentId) {
     let (dirty, name) = {
         let s = cell.borrow();
         (s.is_dirty(id), s.display_name(id))
     };
 
     if dirty {
-        match ask_about_unsaved(&name) {
+        match dispatch::ask_about_unsaved(&name) {
             rfd::MessageDialogResult::Yes => {
                 let mut s = cell.borrow_mut();
-                if save_with_prompt(&mut s, id) != SaveResult::Saved {
+                if save_with_prompt(&mut s, id) != state::SaveResult::Saved {
                     // Keep the tab open rather than discard unsaved work.
                     return;
                 }
@@ -2263,413 +948,4 @@ fn close_with_prompt(cell: &Rc<RefCell<AppState>>, id: DocumentId) {
         }
     }
     cell.borrow_mut().close(id);
-}
-
-/// Map a tab id from the UI back to a `DocumentId`.
-///
-/// Returns `None` for ids that are no longer open, which is what makes a
-/// stale click harmless rather than a panic.
-fn find_id(workspace: &Workspace, raw: i32) -> Option<DocumentId> {
-    workspace
-        .iter()
-        .map(Document::id)
-        .find(|id| i32::try_from(id.get()).unwrap_or(i32::MAX) == raw)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use time::macros::datetime;
-
-    #[test]
-    fn slints_named_keys_are_recognised() {
-        // The one place a Slint constant meets a bp-editor one. Slint reports
-        // named keys as private-use characters, so a mismatch here is silent:
-        // the arrow keys would type invisible glyphs into the document.
-        use slint::platform::Key as Slint;
-
-        let named = |key: Slint| translate_key(&char::from(key).to_string());
-        assert_eq!(named(Slint::LeftArrow), Some(bp_editor::Key::Left));
-        assert_eq!(named(Slint::RightArrow), Some(bp_editor::Key::Right));
-        assert_eq!(named(Slint::UpArrow), Some(bp_editor::Key::Up));
-        assert_eq!(named(Slint::DownArrow), Some(bp_editor::Key::Down));
-        assert_eq!(named(Slint::Home), Some(bp_editor::Key::Home));
-        assert_eq!(named(Slint::End), Some(bp_editor::Key::End));
-        assert_eq!(named(Slint::PageUp), Some(bp_editor::Key::PageUp));
-        assert_eq!(named(Slint::PageDown), Some(bp_editor::Key::PageDown));
-        assert_eq!(named(Slint::Backspace), Some(bp_editor::Key::Backspace));
-        assert_eq!(named(Slint::Delete), Some(bp_editor::Key::Delete));
-        assert_eq!(named(Slint::Return), Some(bp_editor::Key::Enter));
-        assert_eq!(named(Slint::Tab), Some(bp_editor::Key::Tab));
-        assert_eq!(named(Slint::Escape), Some(bp_editor::Key::Escape));
-    }
-
-    #[test]
-    fn ordinary_text_is_not_mistaken_for_a_named_key() {
-        assert_eq!(translate_key("a"), Some(bp_editor::Key::Char('a')));
-        assert_eq!(translate_key("日"), Some(bp_editor::Key::Char('日')));
-        assert_eq!(translate_key(""), None, "a key with no text is not one");
-    }
-
-    #[test]
-    fn typing_through_the_surface_edits_and_marks_the_document_unsaved() {
-        let mut state = AppState::new();
-        state.editor_view = true;
-
-        for ch in "hi".chars() {
-            let command = bp_editor::Command::Insert(ch.to_string());
-            assert!(apply_editor_command(&mut state, &command));
-        }
-
-        assert_eq!(state.active_text(), "hi");
-        assert!(state.workspace.active().unwrap().is_dirty());
-    }
-
-    #[test]
-    fn a_chord_the_editor_does_not_claim_is_left_for_the_window() {
-        // If this ever returns true, Ctrl+S stops saving.
-        let mut state = AppState::new();
-        assert!(!apply_editor_command(
-            &mut state,
-            &bp_editor::Command::Ignore
-        ));
-    }
-
-    #[test]
-    fn the_status_bar_shows_line_and_column_only_when_we_own_the_caret() {
-        let mut state = AppState::new();
-        state.edit("one\ntwo".to_owned());
-        state.sync_gutter();
-
-        assert_eq!(state.cursor_label(), "2 lines", "TextInput hides its caret");
-
-        state.editor_view = true;
-        state.active_editor_mut().unwrap().set_cursor(5);
-        assert_eq!(state.cursor_label(), "Ln 2, Col 2");
-    }
-
-    #[test]
-    fn clicking_puts_the_caret_where_the_click_was() {
-        let mut state = AppState::new();
-        state.editor_view = true;
-        state.edit("hello\nworld".to_owned());
-
-        place_caret(&mut state, 1, 3, false);
-        assert_eq!(state.active_editor().unwrap().cursor(), 9);
-        assert!(state.active_editor().unwrap().selection().is_none());
-
-        // Shift-clicking elsewhere extends rather than restarting.
-        place_caret(&mut state, 0, 1, true);
-        assert_eq!(state.active_editor().unwrap().selection(), Some(1..9));
-    }
-
-    #[test]
-    fn scrolling_far_past_the_end_still_shows_the_document() {
-        let mut state = AppState::new();
-        state.editor_view = true;
-        state.edit("a\nb\nc".to_owned());
-        state.visible_rows = 2;
-
-        state.first_line = 99;
-        state.reveal_caret();
-        assert!(
-            state.first_line < state.active_editor().unwrap().buffer().len_lines(),
-            "revealing the caret must bring the view back to the document"
-        );
-    }
-
-    #[test]
-    fn a_line_operation_is_an_ordinary_undoable_edit() {
-        let mut state = AppState::new();
-        state.edit("b\na\n".to_owned());
-        state.run_line_action(action::LINES_SORT_ASC);
-
-        assert_eq!(state.active_text(), "a\nb\n");
-        assert!(
-            state.workspace.active().unwrap().is_dirty(),
-            "nothing should reach disk on its own"
-        );
-    }
-
-    #[test]
-    fn an_action_that_is_not_a_line_operation_changes_nothing() {
-        let mut state = AppState::new();
-        state.edit("b\na".to_owned());
-        state.run_line_action(action::SAVE);
-
-        assert_eq!(state.active_text(), "b\na");
-    }
-
-    #[test]
-    fn no_menu_action_id_falls_inside_the_recent_files_window() {
-        // The dispatch arm for recent files is a *range*, so an id landing
-        // inside it opens a file instead of doing what its row says. That
-        // was previously prevented only by the order the arms happened to be
-        // written in.
-        let end = action::RECENT_BASE + i32::try_from(bp_config::MAX_RECENT).unwrap();
-        let window = action::RECENT_BASE..end;
-
-        for id in [
-            action::LINES_SORT_ASC,
-            action::LINES_SORT_DESC,
-            action::LINES_DEDUPE,
-            action::LINES_REVERSE,
-            action::LINES_TRIM,
-            action::DATA_VALIDATE,
-            action::DATA_REPORT,
-            action::NOTE_TITLE,
-            action::NOTE_OUTLINE,
-        ] {
-            assert!(!window.contains(&id), "id {id} collides with recent files");
-        }
-    }
-
-    #[test]
-    fn clock_uses_twelve_hour_time() {
-        assert_eq!(clock(datetime!(2026-08-16 20:05 UTC)), "8:05 PM");
-        assert_eq!(clock(datetime!(2026-08-16 08:05 UTC)), "8:05 AM");
-        assert_eq!(clock(datetime!(2026-08-16 00:30 UTC)), "12:30 AM");
-        assert_eq!(clock(datetime!(2026-08-16 12:00 UTC)), "12:00 PM");
-    }
-
-    #[test]
-    fn encode_round_trips_line_endings() {
-        assert_eq!(
-            encode("a\nb", Encoding::Utf8, LineEnding::CrLf).unwrap(),
-            b"a\r\nb"
-        );
-        assert_eq!(
-            encode("a\r\nb", Encoding::Utf8, LineEnding::Lf).unwrap(),
-            b"a\nb"
-        );
-    }
-
-    #[test]
-    fn encode_does_not_double_convert_existing_crlf() {
-        // Normalising to LF first is what stops "a\r\nb" becoming "a\r\r\nb".
-        assert_eq!(
-            encode("a\r\nb", Encoding::Utf8, LineEnding::CrLf).unwrap(),
-            b"a\r\nb"
-        );
-    }
-
-    #[test]
-    fn encode_writes_the_bom_back() {
-        assert_eq!(
-            encode("hi", Encoding::Utf8Bom, LineEnding::Lf).unwrap(),
-            b"\xEF\xBB\xBFhi"
-        );
-    }
-
-    #[test]
-    fn encode_refuses_utf16_rather_than_writing_mojibake() {
-        assert!(encode("hi", Encoding::Utf16Le, LineEnding::Lf).is_err());
-    }
-
-    #[test]
-    fn gutter_matches_line_count() {
-        let mut state = AppState::new();
-        assert!(state.sync_gutter());
-        assert_eq!(state.gutter, "1", "an empty buffer still has line 1");
-
-        state.edit("a\nb\nc".to_owned());
-        assert!(state.sync_gutter());
-        assert_eq!(state.gutter, "1\n2\n3");
-    }
-
-    #[test]
-    fn the_gutter_numbers_the_line_after_a_trailing_newline() {
-        // Regression: `str::lines()` reports "a\n" as one line, so the gutter
-        // was a line short for essentially every file on disk.
-        let mut state = AppState::new();
-        state.edit("a\n".to_owned());
-        state.sync_gutter();
-        assert_eq!(state.gutter, "1\n2");
-    }
-
-    #[test]
-    fn gutter_is_not_rebuilt_when_the_line_count_is_unchanged() {
-        // The whole point of the cache: typing within a line must not
-        // reallocate a string proportional to the document.
-        let mut state = AppState::new();
-        state.edit("hello".to_owned());
-        assert!(state.sync_gutter());
-
-        state.edit("hello world".to_owned());
-        assert!(
-            !state.sync_gutter(),
-            "same line count must not rebuild the gutter"
-        );
-
-        state.edit("hello\nworld".to_owned());
-        assert!(state.sync_gutter(), "a new line must rebuild it");
-        assert_eq!(state.gutter, "1\n2");
-    }
-
-    #[test]
-    fn a_new_document_reports_never_saved() {
-        let state = AppState::new();
-        let doc = state.workspace.active().unwrap();
-        assert_eq!(save_state_label(doc), "● Never saved");
-    }
-
-    #[test]
-    fn an_edited_document_reports_unsaved() {
-        let mut state = AppState::new();
-        state.edit("typing".to_owned());
-        let doc = state.workspace.active().unwrap();
-        assert_eq!(save_state_label(doc), "● Unsaved");
-        assert_eq!(state.active_text(), "typing");
-    }
-
-    #[test]
-    fn a_saved_document_reports_the_save_time() {
-        let mut state = AppState::new();
-        let id = state.workspace.active_id().unwrap();
-        state
-            .workspace
-            .get_mut(id)
-            .unwrap()
-            .record_disk_save(datetime!(2026-08-16 20:05 UTC));
-
-        assert_eq!(
-            save_state_label(state.workspace.active().unwrap()),
-            "✓ Saved 8:05 PM"
-        );
-    }
-
-    #[test]
-    fn a_recovery_checkpoint_shows_beside_the_disk_save_not_instead_of_it() {
-        // specs.md section 3. The failure this guards against is a status bar
-        // that says "saved" because a checkpoint happened.
-        let mut state = AppState::new();
-        let id = state.workspace.active_id().unwrap();
-        let doc = state.workspace.get_mut(id).unwrap();
-        doc.record_disk_save(datetime!(2026-08-16 20:01 UTC));
-        doc.mark_modified();
-        doc.record_checkpoint(datetime!(2026-08-16 20:05 UTC));
-
-        let label = save_state_label(state.workspace.active().unwrap());
-        assert_eq!(
-            label,
-            "● Unsaved │ Recovery 8:05 PM │ Last disk save 8:01 PM"
-        );
-        assert!(!label.contains("Saved 8:05"), "a checkpoint is not a save");
-    }
-
-    #[test]
-    fn a_checkpoint_alone_never_reads_as_saved() {
-        let mut state = AppState::new();
-        let id = state.workspace.active_id().unwrap();
-        state.edit("work".to_owned());
-        state
-            .workspace
-            .get_mut(id)
-            .unwrap()
-            .record_checkpoint(datetime!(2026-08-16 20:05 UTC));
-
-        let label = save_state_label(state.workspace.active().unwrap());
-        assert_eq!(label, "● Unsaved │ Recovery 8:05 PM");
-        assert!(!label.contains('✓'));
-    }
-
-    #[test]
-    fn editing_after_a_save_still_shows_the_last_disk_save() {
-        let mut state = AppState::new();
-        let id = state.workspace.active_id().unwrap();
-        state
-            .workspace
-            .get_mut(id)
-            .unwrap()
-            .record_disk_save(datetime!(2026-08-16 20:05 UTC));
-        state.edit("more".to_owned());
-
-        assert_eq!(
-            save_state_label(state.workspace.active().unwrap()),
-            "● Unsaved │ Last disk save 8:05 PM"
-        );
-    }
-
-    #[test]
-    fn save_without_a_path_reports_that_it_needs_one() {
-        let mut state = AppState::new();
-        let id = state.workspace.active_id().unwrap();
-        assert_eq!(
-            state.save_document(id, None),
-            SaveResult::NeedsPath,
-            "Save on an unsaved document must escalate to Save As, not no-op"
-        );
-    }
-
-    #[test]
-    fn a_failed_save_is_not_reported_as_saved() {
-        // The distinction close-on-quit depends on: if this returned Saved,
-        // the buffer would be discarded after a save that never happened.
-        let mut state = AppState::new();
-        let id = state.workspace.active_id().unwrap();
-        state.edit("work".to_owned());
-
-        let unwritable = std::path::PathBuf::from("no-such-dir-xyz").join("note.txt");
-        assert_eq!(
-            state.save_document(id, Some(unwritable)),
-            SaveResult::Failed
-        );
-        assert!(state.error.is_some(), "a failure must be explained");
-        assert!(state.is_dirty(id), "a failed save must not clear dirty");
-    }
-
-    #[test]
-    fn a_successful_save_clears_dirty() {
-        let dir = std::env::temp_dir().join(format!("bpad-ui-test-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("note.txt");
-
-        let mut state = AppState::new();
-        let id = state.workspace.active_id().unwrap();
-        state.edit("work".to_owned());
-
-        assert_eq!(
-            state.save_document(id, Some(path.clone())),
-            SaveResult::Saved
-        );
-        assert!(!state.is_dirty(id));
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), "work");
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn dirty_tracking_drives_the_close_prompt() {
-        let mut state = AppState::new();
-        let id = state.workspace.active_id().unwrap();
-
-        assert!(!state.is_dirty(id), "a fresh buffer needs no prompt");
-        state.edit("typed".to_owned());
-        assert!(state.is_dirty(id), "an edited buffer must prompt");
-        assert_eq!(state.display_name(id), UNTITLED);
-    }
-
-    #[test]
-    fn closing_the_last_tab_opens_a_fresh_one() {
-        let mut state = AppState::new();
-        let id = state.workspace.active_id().unwrap();
-        state.close(id);
-
-        assert_eq!(state.workspace.len(), 1);
-        assert!(state.workspace.active().is_some());
-        assert!(
-            !state.editors.contains_key(&id),
-            "closed text must be dropped"
-        );
-    }
-
-    #[test]
-    fn suggested_filename_follows_the_grammar() {
-        let state = AppState::new();
-        let id = state.workspace.active_id().unwrap();
-        let name = state.suggested_filename(id);
-        assert!(name.starts_with("Untitled_"), "got {name}");
-        assert!(name.ends_with(".txt"), "got {name}");
-        assert!(SemanticName::parse(&name).is_some(), "got {name}");
-    }
 }

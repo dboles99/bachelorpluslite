@@ -140,20 +140,17 @@ try {
 
         $exe = Join-Path $Root 'target/debug/bachelorpad.exe'
         $out = Join-Path ([System.IO.Path]::GetTempPath()) "bpad-selfcheck-$PID.txt"
-        $proc = Start-Process -FilePath $exe -ArgumentList '--self-check' `
-            -PassThru -NoNewWindow -RedirectStandardOutput $out
 
-        # Bounded: a self-check that hangs is a failure, not a reason to wait
-        # forever.
-        if (-not $proc.WaitForExit(30000)) {
-            $proc.Kill()
-            $proc.WaitForExit()
-            Remove-Item $out -ErrorAction SilentlyContinue
-            throw 'did not exit within 30s'
-        }
+        # Run the binary directly rather than through Start-Process.
+        # Start-Process with -RedirectStandardOutput on a console-subsystem
+        # executable sometimes reports an empty ExitCode even when the process
+        # exited cleanly, which made this stage fail with "exit 0x" while the
+        # binary was actually fine. The call operator gives a reliable
+        # $LASTEXITCODE and still lets us capture stdout.
+        & $exe --self-check > $out 2>&1
+        $code = $LASTEXITCODE
 
         $ok = (Test-Path $out) -and (Select-String -Path $out -Pattern 'BACHELORPAD_SELF_CHECK_OK' -Quiet)
-        $code = $proc.ExitCode
         Remove-Item $out -ErrorAction SilentlyContinue
         if ($code -ne 0 -or -not $ok) {
             throw "binary did not start (exit 0x$('{0:X}' -f $code))"
