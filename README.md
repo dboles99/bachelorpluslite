@@ -57,16 +57,16 @@ cargo run --release          # the app
 
 ## Current state (2026-08-17)
 
-**14 crates, 280 tests, green on Windows and Linux.** The app opens, edits and
+**14 crates, 327 tests, green on Windows and Linux.** The app opens, edits and
 saves atomically, and does rather more than that:
 
 | Area | What works |
 | --- | --- |
-| Editing | Tabs, four themes, honest save state, atomic save, undo/cut/copy/paste |
+| Editing | Tabs, four themes, honest save state, atomic save, undo/cut/copy/paste, sort / deduplicate / reverse / trim lines |
 | Safety | Unsaved-changes prompts, external-change detection, crash recovery journal |
 | Files | Open/Save/Save As/Save All/Reload, recent files, command-line file opening |
-| Search | Find and replace (literal or regex), recursive cross-file search |
-| Data | JSON / JSONL / TOML validate, format, minify, convert; CSV shape report |
+| Search | Find and replace (literal or regex) with the changes shown before they are applied, recursive cross-file search |
+| Data | JSON / JSONL / TOML validate, format, minify, convert; RFC 4180 CSV/TSV shape report |
 | Semantic | Title, keywords, summary and outline extracted from the document |
 | Clipboard | History with kind detection, paste from history |
 

@@ -35,7 +35,7 @@ and this table carries the intent until then.
 | `bp-config` | **live** | Settings precedence, config file, recent-files list, recovery from bad input. | 1 |
 | `bp-ui` | **live** | The Slint application shell (ADR-0015). | 1 |
 | `bp-buffer` | **live** | Rope buffer, character indices, line/column maths. Not yet the editor's storage — see below. | 2, 4 |
-| `bp-editor` | **live** | Caret, selection, edits, transaction-based undo/redo. Not yet wired — see below. | 2 |
+| `bp-editor` | **live** | Caret, selection, edits, transaction-based undo/redo, and whole-document line operations. Only `lines` is wired — see below. | 2 |
 | `bp-history` | **live** | Crash-safe recovery journal and autosave checkpoints. | 3 |
 | `bp-formats` | **live** | Format detection and profiles (ADR-0008). | 5 |
 | `bp-data` | **live** | Structured-data operations: validate, format, minify, convert, report. | 6 |
@@ -68,6 +68,7 @@ bachelorpad ──> bp-config
                          ├─> bp-clipboard
                          ├─> bp-config
                          ├─> bp-data
+                         ├─> bp-editor  (line operations only, for now)
                          ├─> bp-formats
                          ├─> bp-history
                          ├─> bp-naming
@@ -76,7 +77,7 @@ bachelorpad ──> bp-config
                          ├─> bp-theme
                          └─> slint, rfd, arboard
 
-bp-editor ──> bp-buffer          (built, not yet consumed by bp-ui)
+bp-editor ──> bp-buffer
 ```
 
 **Seven crates depend on nothing else in the workspace**: `bp-core`,
@@ -96,8 +97,10 @@ Two deliberate non-dependencies:
 
 ## The editor-view boundary
 
-`bp-buffer` and `bp-editor` exist, are tested, and are **not yet used by the
-shell**. That is deliberate, and it is one cause with three effects.
+`bp-buffer` and `bp-editor` exist and are tested. The shell uses
+`bp-editor::lines` — the whole-document line operations, which need no caret —
+and **none of the rest**. That is deliberate, and it is one cause with three
+effects.
 
 Slint's `TextInput` owns its own text and caret. It hands the entire buffer
 back on every edit, keeps its own undo stack, and exposes the caret only

@@ -99,6 +99,15 @@ impl Buffer {
         }
     }
 
+    /// The character at `char_idx`, or `None` at or past the end.
+    ///
+    /// Returning `Option` rather than panicking because caret arithmetic asks
+    /// about the position one past the last character constantly, and that is
+    /// a legitimate question with a legitimate answer.
+    pub fn char_at(&self, char_idx: usize) -> Option<char> {
+        (char_idx < self.len_chars()).then(|| self.rope.char(char_idx))
+    }
+
     pub fn slice(&self, range: Range<usize>) -> String {
         let end = range.end.min(self.len_chars());
         let start = range.start.min(end);
@@ -316,6 +325,16 @@ mod tests {
         assert_eq!(line_count("a"), 1);
         assert_eq!(line_count("a\n"), 2, "str::lines() says 1, and is wrong");
         assert_eq!(line_count("a\nb"), 2);
+    }
+
+    #[test]
+    fn char_at_answers_for_the_position_past_the_end() {
+        // Caret arithmetic asks about that position constantly.
+        let b = Buffer::from_text("hé");
+        assert_eq!(b.char_at(0), Some('h'));
+        assert_eq!(b.char_at(1), Some('é'), "chars, not bytes");
+        assert_eq!(b.char_at(2), None);
+        assert_eq!(b.char_at(999), None);
     }
 
     #[test]

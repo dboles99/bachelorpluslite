@@ -15,6 +15,12 @@ use std::ops::Range;
 
 use bp_buffer::{Buffer, Position};
 
+pub mod keys;
+pub mod lines;
+pub mod view;
+
+pub use keys::{Command, Key, Modifiers};
+
 /// Crate identity used by workspace smoke tests and diagnostics.
 pub const CRATE_NAME: &str = "bp-editor";
 
@@ -49,6 +55,46 @@ enum Coalesce {
     Closed,
 }
 
+/// Where to move the caret. Expressed as intent, so the view can say "page
+/// down" without the editor needing to know how tall the window is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Motion {
+    Left,
+    Right,
+    Up,
+    Down,
+    WordLeft,
+    WordRight,
+    LineStart,
+    LineEnd,
+    DocumentStart,
+    DocumentEnd,
+    /// A screenful, in lines. The view knows how many; the editor does not.
+    PageUp(usize),
+    PageDown(usize),
+}
+
+/// What kind of character this is, for word-wise movement.
+///
+/// Three classes rather than two: moving across `foo.bar` should stop at the
+/// dot, which is what every editor does and what two classes cannot express.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Class {
+    Whitespace,
+    Word,
+    Punctuation,
+}
+
+fn class(ch: char) -> Class {
+    if ch.is_whitespace() {
+        Class::Whitespace
+    } else if ch.is_alphanumeric() || ch == '_' {
+        Class::Word
+    } else {
+        Class::Punctuation
+    }
+}
+
 /// A document being edited.
 #[derive(Debug, Clone)]
 pub struct Editor {
@@ -59,6 +105,12 @@ pub struct Editor {
     undo: Vec<Transaction>,
     redo: Vec<Transaction>,
     coalesce: Coalesce,
+    /// Column to aim for while moving vertically.
+    ///
+    /// Without it, going down through a short line and back up lands in the
+    /// wrong place: the caret would take the short line's column with it and
+    /// never recover the one the user started from.
+    goal_column: Option<usize>,
 }
 
 impl Default for Editor {
@@ -76,6 +128,7 @@ impl Editor {
             undo: Vec::new(),
             redo: Vec::new(),
             coalesce: Coalesce::Closed,
+            goal_column: None,
         }
     }
 
@@ -116,6 +169,7 @@ impl Editor {
         self.cursor = idx;
         self.anchor = idx;
         self.coalesce = Coalesce::Closed;
+        self.goal_column = None;
     }
 
     /// Set caret and selection anchor together.
@@ -124,10 +178,158 @@ impl Editor {
         self.anchor = anchor.min(max);
         self.cursor = cursor.min(max);
         self.coalesce = Coalesce::Closed;
+        self.goal_column = None;
     }
 
     pub fn select_all(&mut self) {
         self.select(0, self.buffer.len_chars());
+    }
+
+    /// Move the caret, extending the selection when `select` is set.
+    ///
+    /// An unshifted Left or Right with a selection collapses to its near
+    /// edge rather than stepping from the caret. That is what every editor
+    /// does, and the alternative loses a character off the end of the
+    /// selection every time.
+    pub fn move_caret(&mut self, motion: Motion, select: bool) {
+        let vertical = matches!(
+            motion,
+            Motion::Up | Motion::Down | Motion::PageUp(_) | Motion::PageDown(_)
+        );
+
+        let target = match (self.selection(), select, motion) {
+            (Some(range), false, Motion::Left) => range.start,
+            (Some(range), false, Motion::Right) => range.end,
+            _ => self.target_of(motion),
+        };
+
+        self.cursor = target;
+        if !select {
+            self.anchor = target;
+        }
+        // Any deliberate movement ends a typing run: text typed, then typed
+        // again somewhere else, is two separate things to undo.
+        self.coalesce = Coalesce::Closed;
+        if !vertical {
+            self.goal_column = None;
+        }
+    }
+
+    /// Where `motion` lands, as a character index.
+    fn target_of(&mut self, motion: Motion) -> usize {
+        let end = self.buffer.len_chars();
+        match motion {
+            Motion::Left => self.cursor.saturating_sub(1),
+            Motion::Right => (self.cursor + 1).min(end),
+            Motion::WordLeft => self.word_boundary_before(self.cursor),
+            Motion::WordRight => self.word_boundary_after(self.cursor),
+            Motion::LineStart => {
+                let position = self.buffer.position_of(self.cursor);
+                self.buffer.line_start(position.line - 1)
+            }
+            Motion::LineEnd => {
+                let line = self.buffer.position_of(self.cursor).line - 1;
+                self.buffer.line_start(line) + self.buffer.line_len_chars(line)
+            }
+            Motion::DocumentStart => 0,
+            Motion::DocumentEnd => end,
+            Motion::Up => self.vertical(-1),
+            Motion::Down => self.vertical(1),
+            Motion::PageUp(rows) => self.vertical(-isize::try_from(rows).unwrap_or(1)),
+            Motion::PageDown(rows) => self.vertical(isize::try_from(rows).unwrap_or(1)),
+        }
+    }
+
+    /// Move `delta` lines, keeping the column the user is aiming for.
+    fn vertical(&mut self, delta: isize) -> usize {
+        let position = self.buffer.position_of(self.cursor);
+        let line = position.line - 1;
+        // Remember the column on the first vertical move of a run, so passing
+        // through a short line does not truncate it permanently.
+        let goal = *self.goal_column.get_or_insert(position.column - 1);
+
+        let last = self.buffer.len_lines().saturating_sub(1);
+        let target_line = line.saturating_add_signed(delta).min(last);
+
+        self.buffer.line_start(target_line) + goal.min(self.buffer.line_len_chars(target_line))
+    }
+
+    /// The start of the word before `from`, as Ctrl+Left means it.
+    ///
+    /// Skips any whitespace immediately behind the caret, then the whole run
+    /// of whatever class it lands in.
+    fn word_boundary_before(&self, from: usize) -> usize {
+        let mut index = from;
+        while index > 0
+            && self
+                .buffer
+                .char_at(index - 1)
+                .is_some_and(char::is_whitespace)
+        {
+            index -= 1;
+        }
+        let Some(kind) = index
+            .checked_sub(1)
+            .and_then(|i| self.buffer.char_at(i))
+            .map(class)
+        else {
+            return index;
+        };
+        while index > 0
+            && self
+                .buffer
+                .char_at(index - 1)
+                .is_some_and(|ch| class(ch) == kind)
+        {
+            index -= 1;
+        }
+        index
+    }
+
+    /// The start of the word after `from`, as Ctrl+Right means it.
+    fn word_boundary_after(&self, from: usize) -> usize {
+        let end = self.buffer.len_chars();
+        let mut index = from;
+        if let Some(kind) = self.buffer.char_at(index).map(class) {
+            while index < end
+                && self
+                    .buffer
+                    .char_at(index)
+                    .is_some_and(|ch| class(ch) == kind)
+            {
+                index += 1;
+            }
+        }
+        while index < end && self.buffer.char_at(index).is_some_and(char::is_whitespace) {
+            index += 1;
+        }
+        index
+    }
+
+    /// Delete the word before the caret, as Ctrl+Backspace does.
+    pub fn delete_word_backward(&mut self) {
+        if self.selection().is_some() {
+            self.delete_selection();
+            return;
+        }
+        let start = self.word_boundary_before(self.cursor);
+        if start < self.cursor {
+            self.select(start, self.cursor);
+            self.delete_selection();
+        }
+    }
+
+    /// Delete the word after the caret, as Ctrl+Delete does.
+    pub fn delete_word_forward(&mut self) {
+        if self.selection().is_some() {
+            self.delete_selection();
+            return;
+        }
+        let end = self.word_boundary_after(self.cursor);
+        if end > self.cursor {
+            self.select(self.cursor, end);
+            self.delete_selection();
+        }
     }
 
     /// Replace the current selection, if any, with `text`; otherwise insert
@@ -206,7 +408,8 @@ impl Editor {
         );
     }
 
-    fn delete_selection(&mut self) {
+    /// Delete the selection, if there is one.
+    pub fn delete_selection(&mut self) {
         let Some(range) = self.selection() else {
             return;
         };
@@ -230,6 +433,9 @@ impl Editor {
     fn commit(&mut self, ops: Vec<Op>, cursor_before: usize, typing: bool) {
         // Any new edit invalidates the redo branch.
         self.redo.clear();
+        // An edit re-establishes where the caret is; the column a vertical
+        // run was aiming for no longer means anything.
+        self.goal_column = None;
 
         // Only merge when this insert continues exactly where the previous one
         // stopped. Typing elsewhere is a separate edit even if nothing else
@@ -312,6 +518,48 @@ impl Editor {
         true
     }
 
+    /// Carry out a command, reporting whether the document changed.
+    ///
+    /// The clipboard commands are not here: the OS clipboard belongs to the
+    /// shell, and an editor that reached for it would drag a platform
+    /// dependency into a crate that is tested without one. They come back
+    /// `false` and the shell handles them.
+    pub fn apply(&mut self, command: &Command) -> bool {
+        match command {
+            Command::Insert(text) => {
+                self.insert(text);
+                true
+            }
+            Command::DeleteBackward => {
+                self.delete_backward();
+                true
+            }
+            Command::DeleteForward => {
+                self.delete_forward();
+                true
+            }
+            Command::DeleteWordBackward => {
+                self.delete_word_backward();
+                true
+            }
+            Command::DeleteWordForward => {
+                self.delete_word_forward();
+                true
+            }
+            Command::Undo => self.undo(),
+            Command::Redo => self.redo(),
+            Command::Move { motion, select } => {
+                self.move_caret(*motion, *select);
+                false
+            }
+            Command::SelectAll => {
+                self.select_all();
+                false
+            }
+            Command::Copy | Command::Cut | Command::Paste | Command::Ignore => false,
+        }
+    }
+
     /// Replace the whole document, as loading a file does.
     ///
     /// Clears history: undoing past a file load into the previous document's
@@ -323,6 +571,7 @@ impl Editor {
         self.undo.clear();
         self.redo.clear();
         self.coalesce = Coalesce::Closed;
+        self.goal_column = None;
     }
 }
 
@@ -557,5 +806,249 @@ mod tests {
         let mut e = Editor::new("abc");
         e.insert("");
         assert!(!e.can_undo());
+    }
+
+    // --- caret movement -------------------------------------------------
+
+    #[test]
+    fn arrows_step_one_character_and_stop_at_the_ends() {
+        let mut e = Editor::new("ab");
+        e.move_caret(Motion::Left, false);
+        assert_eq!(e.cursor(), 0, "already at the start");
+
+        e.move_caret(Motion::Right, false);
+        e.move_caret(Motion::Right, false);
+        e.move_caret(Motion::Right, false);
+        assert_eq!(e.cursor(), 2, "already at the end");
+    }
+
+    #[test]
+    fn an_unshifted_arrow_collapses_a_selection_to_its_near_edge() {
+        // Stepping from the caret instead would lose a character off the end
+        // of the selection every time.
+        let mut e = Editor::new("hello world");
+        e.select(2, 7);
+        e.move_caret(Motion::Left, false);
+        assert_eq!(e.cursor(), 2);
+        assert_eq!(e.selection(), None);
+
+        e.select(2, 7);
+        e.move_caret(Motion::Right, false);
+        assert_eq!(e.cursor(), 7);
+    }
+
+    #[test]
+    fn a_shifted_arrow_extends_from_the_anchor() {
+        let mut e = Editor::new("hello");
+        e.set_cursor(2);
+        e.move_caret(Motion::Right, true);
+        e.move_caret(Motion::Right, true);
+
+        assert_eq!(e.selection(), Some(2..4));
+    }
+
+    #[test]
+    fn vertical_movement_remembers_the_column_across_a_short_line() {
+        // The classic defect: down through "x" then back up must return to
+        // column 6, not to column 2.
+        let mut e = Editor::new("long line\nx\nanother line");
+        e.set_cursor(5);
+        assert_eq!(e.position(), Position::new(1, 6));
+
+        e.move_caret(Motion::Down, false);
+        assert_eq!(
+            e.position(),
+            Position::new(2, 2),
+            "clamped to the short line"
+        );
+
+        e.move_caret(Motion::Down, false);
+        assert_eq!(
+            e.position(),
+            Position::new(3, 6),
+            "the goal column survived"
+        );
+    }
+
+    #[test]
+    fn a_horizontal_move_forgets_the_goal_column() {
+        let mut e = Editor::new("long line\nx\nanother line");
+        e.set_cursor(5);
+        e.move_caret(Motion::Down, false);
+        e.move_caret(Motion::Left, false);
+        e.move_caret(Motion::Down, false);
+
+        assert_eq!(
+            e.position(),
+            Position::new(3, 1),
+            "column 1 is where the caret actually was"
+        );
+    }
+
+    #[test]
+    fn vertical_movement_stops_at_the_first_and_last_line() {
+        let mut e = Editor::new("one\ntwo");
+        e.set_cursor(1);
+        e.move_caret(Motion::Up, false);
+        assert_eq!(e.position(), Position::new(1, 2), "no line above");
+
+        e.move_caret(Motion::Down, false);
+        e.move_caret(Motion::Down, false);
+        assert_eq!(e.position(), Position::new(2, 2), "no line below");
+    }
+
+    #[test]
+    fn home_and_end_work_on_the_caret_s_own_line() {
+        let mut e = Editor::new("first\nsecond line");
+        e.set_cursor(9);
+
+        e.move_caret(Motion::LineStart, false);
+        assert_eq!(e.cursor(), 6);
+        e.move_caret(Motion::LineEnd, false);
+        assert_eq!(e.cursor(), 17, "before the end of the buffer, not past it");
+    }
+
+    #[test]
+    fn end_stops_before_the_line_break() {
+        let mut e = Editor::new("ab\ncd");
+        e.set_cursor(0);
+        e.move_caret(Motion::LineEnd, false);
+        assert_eq!(e.cursor(), 2, "on the newline would put it on line 2");
+    }
+
+    #[test]
+    fn word_movement_stops_at_punctuation() {
+        // Two classes would skip the dot and land past `bar`.
+        let mut e = Editor::new("foo.bar baz");
+        e.set_cursor(0);
+
+        e.move_caret(Motion::WordRight, false);
+        assert_eq!(e.cursor(), 3, "end of foo");
+        e.move_caret(Motion::WordRight, false);
+        assert_eq!(e.cursor(), 4, "past the dot");
+        e.move_caret(Motion::WordRight, false);
+        assert_eq!(e.cursor(), 8, "past bar and its trailing space");
+    }
+
+    #[test]
+    fn word_movement_backwards_skips_trailing_whitespace_first() {
+        let mut e = Editor::new("alpha beta");
+        e.set_cursor(10);
+
+        e.move_caret(Motion::WordLeft, false);
+        assert_eq!(e.cursor(), 6, "start of beta");
+        e.move_caret(Motion::WordLeft, false);
+        assert_eq!(e.cursor(), 0, "start of alpha, over the space");
+    }
+
+    #[test]
+    fn word_movement_terminates_at_the_document_edges() {
+        let mut e = Editor::new("   ");
+        e.set_cursor(3);
+        e.move_caret(Motion::WordLeft, false);
+        assert_eq!(e.cursor(), 0);
+
+        e.move_caret(Motion::WordRight, false);
+        assert_eq!(e.cursor(), 3);
+    }
+
+    #[test]
+    fn a_page_is_as_many_lines_as_the_view_says() {
+        let mut e = Editor::new("1\n2\n3\n4\n5\n6\n7\n8\n9\n10");
+        e.set_cursor(0);
+
+        e.move_caret(Motion::PageDown(4), false);
+        assert_eq!(e.position().line, 5);
+        e.move_caret(Motion::PageUp(2), false);
+        assert_eq!(e.position().line, 3);
+
+        e.move_caret(Motion::PageDown(500), false);
+        assert_eq!(e.position().line, 10, "clamped to the last line");
+    }
+
+    #[test]
+    fn document_start_and_end_go_to_the_edges() {
+        let mut e = Editor::new("a\nb\nc");
+        e.move_caret(Motion::DocumentEnd, false);
+        assert_eq!(e.cursor(), 5);
+        e.move_caret(Motion::DocumentStart, false);
+        assert_eq!(e.cursor(), 0);
+    }
+
+    #[test]
+    fn deleting_a_word_backwards_removes_one_word_per_press() {
+        let mut e = Editor::new("alpha beta gamma");
+        e.set_cursor(16);
+
+        e.delete_word_backward();
+        assert_eq!(e.text(), "alpha beta ");
+        e.delete_word_backward();
+        assert_eq!(e.text(), "alpha ");
+
+        e.undo();
+        assert_eq!(e.text(), "alpha beta ", "one press, one undo step");
+    }
+
+    #[test]
+    fn deleting_a_word_forwards_removes_the_word_and_its_trailing_space() {
+        let mut e = Editor::new("alpha beta");
+        e.set_cursor(0);
+        e.delete_word_forward();
+        assert_eq!(e.text(), "beta");
+    }
+
+    #[test]
+    fn deleting_a_word_with_a_selection_deletes_the_selection() {
+        let mut e = Editor::new("alpha beta gamma");
+        e.select(0, 5);
+        e.delete_word_backward();
+        assert_eq!(e.text(), " beta gamma");
+    }
+
+    #[test]
+    fn deleting_a_word_at_the_edges_does_nothing() {
+        let mut e = Editor::new("word");
+        e.set_cursor(0);
+        e.delete_word_backward();
+        assert_eq!(e.text(), "word");
+        assert!(!e.can_undo(), "a no-op must not create an undo entry");
+
+        e.set_cursor(4);
+        e.delete_word_forward();
+        assert_eq!(e.text(), "word");
+        assert!(!e.can_undo());
+    }
+
+    #[test]
+    fn movement_is_by_character_in_multibyte_text() {
+        let mut e = Editor::new("日本語");
+        e.move_caret(Motion::Right, false);
+        assert_eq!(e.cursor(), 1);
+        assert_eq!(e.position(), Position::new(1, 2));
+
+        e.move_caret(Motion::DocumentEnd, false);
+        assert_eq!(e.cursor(), 3);
+    }
+
+    #[test]
+    fn movement_in_an_empty_document_stays_put() {
+        let mut e = Editor::new("");
+        for motion in [
+            Motion::Left,
+            Motion::Right,
+            Motion::Up,
+            Motion::Down,
+            Motion::WordLeft,
+            Motion::WordRight,
+            Motion::LineStart,
+            Motion::LineEnd,
+            Motion::DocumentStart,
+            Motion::DocumentEnd,
+            Motion::PageUp(10),
+            Motion::PageDown(10),
+        ] {
+            e.move_caret(motion, false);
+            assert_eq!(e.cursor(), 0, "{motion:?} moved in an empty document");
+        }
     }
 }

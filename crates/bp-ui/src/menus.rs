@@ -56,6 +56,15 @@ pub mod action {
     pub const NOTE_KEYWORDS: i32 = 83;
     pub const NOTE_OUTLINE: i32 = 84;
 
+    /// Line operations that need no caret. The rest of the family --
+    /// Duplicate Line, Move Line Up/Down -- needs one, and waits for the
+    /// custom editor view.
+    pub const LINES_SORT_ASC: i32 = 90;
+    pub const LINES_SORT_DESC: i32 = 91;
+    pub const LINES_DEDUPE: i32 = 92;
+    pub const LINES_REVERSE: i32 = 93;
+    pub const LINES_TRIM: i32 = 94;
+
     pub const DATA_VALIDATE: i32 = 70;
     pub const DATA_FORMAT: i32 = 71;
     pub const DATA_MINIFY: i32 = 72;
@@ -216,9 +225,17 @@ pub fn edit(clips: &[bp_clipboard::Entry]) -> Vec<MenuItem> {
     }
 
     items.extend([
+        row("Sort Lines A → Z", "", action::LINES_SORT_ASC),
+        row("Sort Lines Z → A", "", action::LINES_SORT_DESC),
+        row("Remove Duplicate Lines", "", action::LINES_DEDUPE),
+        row("Reverse Lines", "", action::LINES_REVERSE),
+        row_end("Trim Trailing Whitespace", "", action::LINES_TRIM),
+        // Both need to know where the caret is, which Slint's TextInput does
+        // not expose. They arrive with the custom editor view.
+        planned("Duplicate Line"),
+        planned("Move Line Up / Down"),
         planned("Paste Special"),
-        planned("Line Operations"),
-        arrives("phase 11"),
+        arrives("phase 2"),
     ]);
     items
 }
@@ -645,14 +662,26 @@ mod tests {
             );
         }
 
-        // Within Edit, only the six widget operations belong to Slint; the
-        // clipboard-history rows must reach Rust.
+        // Edit is the one menu that legitimately contains widget operations,
+        // so it is checked against the six by name rather than by range.
+        // Every other enabled row there -- clipboard history, line operations
+        // and whatever comes next -- has to sit outside the window, or the
+        // focused TextInput swallows it.
+        let widget_rows = [
+            action::UNDO,
+            action::REDO,
+            action::CUT,
+            action::COPY,
+            action::PASTE,
+            action::SELECT_ALL,
+        ];
         for item in edit(&clips).iter().filter(|i| i.enabled) {
-            let is_clip = item.action >= action::CLIP_BASE;
-            assert_eq!(
-                editor_window.contains(&item.action),
-                !is_clip,
-                "'{}' ({}) is routed to the wrong side",
+            if widget_rows.contains(&item.action) {
+                continue;
+            }
+            assert!(
+                !editor_window.contains(&item.action),
+                "'{}' ({}) would be swallowed by the editor",
                 item.label,
                 item.action
             );

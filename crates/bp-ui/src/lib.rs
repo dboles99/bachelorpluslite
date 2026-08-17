@@ -418,6 +418,28 @@ impl AppState {
         }
     }
 
+    /// Apply a whole-document line operation.
+    ///
+    /// An ordinary edit, like the data operations: undoable, and nothing
+    /// reaches disk until the user saves. The caret-dependent members of the
+    /// family -- Duplicate Line, Move Line Up/Down -- are not here, because
+    /// the caret is not readable until the custom editor view exists.
+    fn run_line_action(&mut self, id: i32) {
+        use bp_editor::lines::{self, Order};
+
+        let text = self.active_text();
+        let changed = match id {
+            action::LINES_SORT_ASC => lines::sort(text, Order::Ascending),
+            action::LINES_SORT_DESC => lines::sort(text, Order::Descending),
+            action::LINES_DEDUPE => lines::remove_duplicates(text),
+            action::LINES_REVERSE => lines::reverse(text),
+            action::LINES_TRIM => lines::trim_trailing_whitespace(text),
+            _ => return,
+        };
+        self.error = None;
+        self.edit(changed);
+    }
+
     /// Run a data operation, reporting the outcome in the status bar.
     fn run_data_action(&mut self, id: i32) {
         let text = self.active_text().to_owned();
@@ -449,7 +471,10 @@ impl AppState {
             (action::DATA_TO_JSONL, _) => self.apply_to_active(bp_data::json_to_jsonl(&text)),
             (action::DATA_TO_JSON, _) => self.apply_to_active(bp_data::jsonl_to_json(&text)),
             (action::DATA_REPORT, _) => {
-                self.error = Some(bp_data::delimited_report(&text).summary());
+                self.error = Some(match bp_data::delimited_report(&text) {
+                    Ok(report) => report.summary(),
+                    Err(e) => format!("could not read as a table — {e}"),
+                });
             }
             // A row that does not apply to this format. The menu should not
             // have offered it; doing nothing is better than guessing.
@@ -911,6 +936,27 @@ fn select(ui: &AppWindow, range: &std::ops::Range<usize>) {
     ui.invoke_select_range(start, end);
 }
 
+/// Show what Replace All would do, and ask before doing it.
+///
+/// specs.md section 6 wants the changes visible before they are applied.
+/// Replace All is the one search operation that rewrites the document in
+/// places the user cannot see, so it is also the one worth confirming --
+/// undo covers a mistake, but only if you notice you made one.
+///
+/// The listing is bounded: a preview of forty thousand replacements is not a
+/// preview, and a dialog taller than the screen has no buttons on it.
+fn confirm_replace(plan: &bp_search::ReplacePlan) -> bool {
+    const SHOWN: usize = 12;
+
+    rfd::MessageDialog::new()
+        .set_level(rfd::MessageLevel::Warning)
+        .set_title("Replace All")
+        .set_description(format!("{}\n\n{}", plan.summary(), plan.preview(SHOWN)))
+        .set_buttons(rfd::MessageButtons::OkCancel)
+        .show()
+        == rfd::MessageDialogResult::Ok
+}
+
 /// Ask about unsaved work before discarding it.
 ///
 /// Blocking and native. The three-way answer matters: "Cancel" has to be
@@ -1334,8 +1380,18 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
                     cell.borrow_mut().run_data_action(id);
                 }
 
-                // Recently opened files.
-                id if (action::RECENT_BASE..100).contains(&id) => {
+                id if (action::LINES_SORT_ASC..=action::LINES_TRIM).contains(&id) => {
+                    cell.borrow_mut().run_line_action(id);
+                }
+
+                // Recently opened files. Bounded by the length of the list
+                // rather than by the next block of ids: this arm used to
+                // claim everything up to 100, which was safe only because
+                // every other arm in that window happened to come first.
+                id if (action::RECENT_BASE
+                    ..action::RECENT_BASE + i32::try_from(bp_config::MAX_RECENT).unwrap_or(0))
+                    .contains(&id) =>
+                {
                     let index = usize::try_from(id - action::RECENT_BASE).unwrap_or(0);
                     let path = cell.borrow().recent_path(index);
                     if let Some(path) = path {
@@ -1394,24 +1450,33 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
             let query = bp_search::Query::literal(&ui.get_find_query());
             let replacement = ui.get_replace_query().to_string();
 
-            let outcome = {
+            // Planned first, and the plan shown, before anything changes:
+            // specs.md section 6 wants the changes visible before they are
+            // applied. The borrow ends before the dialog blocks -- a native
+            // dialog can pump events, and holding a `RefCell` across one is
+            // how a re-entrant callback panics.
+            let planned = {
                 let s = cell.borrow();
-                bp_search::replace_all(s.active_text(), &query, &replacement)
+                bp_search::plan_replace_all(s.active_text(), &query, &replacement)
             };
-            match outcome {
-                Ok((text, 0)) => {
-                    let _ = text;
+
+            match planned {
+                Err(e) => cell.borrow_mut().find_status = e.to_string(),
+                Ok(plan) if plan.is_empty() => {
                     cell.borrow_mut().find_status = "no matches".to_owned();
                 }
-                Ok((text, n)) => {
+                Ok(plan) if !confirm_replace(&plan) => {
+                    cell.borrow_mut().find_status = "cancelled".to_owned();
+                }
+                Ok(plan) => {
+                    let n = plan.count();
                     let mut s = cell.borrow_mut();
                     // An ordinary edit, so it is undoable and nothing reaches
                     // disk until the user saves.
-                    s.edit(text);
+                    s.edit(plan.apply());
                     s.matches.clear();
                     s.find_status = format!("replaced {n}");
                 }
-                Err(e) => cell.borrow_mut().find_status = e.to_string(),
             }
             ui.set_find_status(cell.borrow().find_status.as_str().into());
             refresh(&ui, &mut cell.borrow_mut(), PushText::Yes);
@@ -1746,6 +1811,52 @@ fn find_id(workspace: &Workspace, raw: i32) -> Option<DocumentId> {
 mod tests {
     use super::*;
     use time::macros::datetime;
+
+    #[test]
+    fn a_line_operation_is_an_ordinary_undoable_edit() {
+        let mut state = AppState::new();
+        state.edit("b\na\n".to_owned());
+        state.run_line_action(action::LINES_SORT_ASC);
+
+        assert_eq!(state.active_text(), "a\nb\n");
+        assert!(
+            state.workspace.active().unwrap().is_dirty(),
+            "nothing should reach disk on its own"
+        );
+    }
+
+    #[test]
+    fn an_action_that_is_not_a_line_operation_changes_nothing() {
+        let mut state = AppState::new();
+        state.edit("b\na".to_owned());
+        state.run_line_action(action::SAVE);
+
+        assert_eq!(state.active_text(), "b\na");
+    }
+
+    #[test]
+    fn no_menu_action_id_falls_inside_the_recent_files_window() {
+        // The dispatch arm for recent files is a *range*, so an id landing
+        // inside it opens a file instead of doing what its row says. That
+        // was previously prevented only by the order the arms happened to be
+        // written in.
+        let end = action::RECENT_BASE + i32::try_from(bp_config::MAX_RECENT).unwrap();
+        let window = action::RECENT_BASE..end;
+
+        for id in [
+            action::LINES_SORT_ASC,
+            action::LINES_SORT_DESC,
+            action::LINES_DEDUPE,
+            action::LINES_REVERSE,
+            action::LINES_TRIM,
+            action::DATA_VALIDATE,
+            action::DATA_REPORT,
+            action::NOTE_TITLE,
+            action::NOTE_OUTLINE,
+        ] {
+            assert!(!window.contains(&id), "id {id} collides with recent files");
+        }
+    }
 
     #[test]
     fn clock_uses_twelve_hour_time() {

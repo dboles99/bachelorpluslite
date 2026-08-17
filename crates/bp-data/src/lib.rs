@@ -203,7 +203,8 @@ pub struct DelimitedReport {
     pub delimiter: char,
     pub rows: usize,
     pub columns: usize,
-    /// Rows whose field count differs from the header's.
+    /// Lines on which a row whose field count differs from the header's
+    /// begins.
     pub ragged: Vec<usize>,
 }
 
@@ -232,49 +233,130 @@ impl DelimitedReport {
     }
 }
 
-/// Guess the delimiter from the header line.
+/// One parsed row of a delimited file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Row {
+    /// 1-based line the row begins on.
+    ///
+    /// Not the row's ordinal: a quoted field may contain newlines, so row 3
+    /// can begin on line 7.
+    pub line: usize,
+    pub fields: Vec<String>,
+}
+
+/// The first non-empty record, as raw text.
 ///
-/// Whichever candidate appears most often in the first non-empty line. Naive
-/// on purpose: a wrong guess here is visible and correctable, and a clever
-/// heuristic that is wrong is harder to argue with.
+/// Not `lines().next()`: a quoted field may contain newlines, so the first
+/// record can span several lines. A quote toggles the state, which handles a
+/// doubled `""` correctly by toggling twice.
+fn first_record(text: &str) -> &str {
+    let mut in_quotes = false;
+    let mut start = 0;
+
+    for (index, ch) in text.char_indices() {
+        match ch {
+            '"' => in_quotes = !in_quotes,
+            '\n' if !in_quotes => {
+                let record = &text[start..index];
+                if !record.trim().is_empty() {
+                    return record;
+                }
+                start = index + 1;
+            }
+            _ => {}
+        }
+    }
+    &text[start..]
+}
+
+/// Occurrences of `delimiter` that are not inside a quoted field.
+fn count_outside_quotes(record: &str, delimiter: char) -> usize {
+    let mut in_quotes = false;
+    let mut count = 0;
+
+    for ch in record.chars() {
+        match ch {
+            '"' => in_quotes = !in_quotes,
+            c if c == delimiter && !in_quotes => count += 1,
+            _ => {}
+        }
+    }
+    count
+}
+
+/// Guess the delimiter from the header record.
+///
+/// Whichever candidate appears most often outside quotes. Quoted content is
+/// excluded because a single `"Doe, Jane"` in a semicolon-separated header is
+/// otherwise enough to pick the wrong delimiter for the whole file.
+///
+/// Still deliberately naive beyond that: a wrong guess is visible and
+/// correctable, and a clever heuristic that is wrong is harder to argue with.
 pub fn detect_delimiter(text: &str) -> char {
-    let header = text.lines().find(|l| !l.trim().is_empty()).unwrap_or("");
+    let header = first_record(text);
     [',', '\t', ';', '|']
         .into_iter()
-        .max_by_key(|d| header.matches(*d).count())
-        .filter(|d| header.contains(*d))
-        .unwrap_or(',')
+        .map(|d| (d, count_outside_quotes(header, d)))
+        .max_by_key(|(_, count)| *count)
+        .filter(|(_, count)| *count > 0)
+        .map_or(',', |(d, _)| d)
+}
+
+/// Parse a delimited document, honouring RFC 4180 quoting.
+///
+/// A quoted field may contain the delimiter, newlines, and doubled quotes
+/// (`""`) standing for one literal quote. Splitting on the delimiter -- which
+/// is what this used to do -- gets all three wrong, and gets them wrong
+/// silently: a row reported as ragged because one field contained a comma
+/// sends the user looking for a defect in their data.
+pub fn delimited_rows(text: &str, delimiter: char) -> Result<Vec<Row>, DataError> {
+    // The reader takes a single byte. Every delimiter `detect_delimiter` can
+    // return is ASCII, but this is public and a caller may not be.
+    if !delimiter.is_ascii() {
+        return Err(DataError::Other(format!(
+            "delimiter {delimiter:?} is not a single-byte character"
+        )));
+    }
+
+    let mut reader = csv::ReaderBuilder::new()
+        .delimiter(delimiter as u8)
+        // Every row is data here. This describes a file rather than binding
+        // fields to names, and treating the first row as headers would drop
+        // it from the count.
+        .has_headers(false)
+        // Ragged rows are what the report exists to surface, not an error
+        // that should stop the pass at the first one.
+        .flexible(true)
+        .from_reader(text.as_bytes());
+
+    let mut rows = Vec::new();
+    for result in reader.records() {
+        let record = result.map_err(|e| DataError::Other(e.to_string()))?;
+        rows.push(Row {
+            line: record.position().map_or(0, csv::Position::line) as usize,
+            fields: record.iter().map(str::to_owned).collect(),
+        });
+    }
+    Ok(rows)
 }
 
 /// Describe a delimited file: shape, and any rows that do not match it.
-///
-/// Does not handle quoted fields containing the delimiter -- a real CSV
-/// reader belongs here later. Until then this reports shape, and says so.
-pub fn delimited_report(text: &str) -> DelimitedReport {
+pub fn delimited_report(text: &str) -> Result<DelimitedReport, DataError> {
     let delimiter = detect_delimiter(text);
-    let mut rows = 0;
-    let mut columns = 0;
-    let mut ragged = Vec::new();
+    let rows = delimited_rows(text, delimiter)?;
+    let columns = rows.first().map_or(0, |row| row.fields.len());
 
-    for (index, line) in text.lines().enumerate() {
-        if line.trim().is_empty() {
-            continue;
-        }
-        rows += 1;
-        let count = line.split(delimiter).count();
-        if rows == 1 {
-            columns = count;
-        } else if count != columns {
-            ragged.push(index + 1);
-        }
-    }
-
-    DelimitedReport {
+    Ok(DelimitedReport {
         delimiter,
-        rows,
+        rows: rows.len(),
         columns,
-        ragged,
-    }
+        ragged: rows
+            .iter()
+            .skip(1)
+            .filter(|row| row.fields.len() != columns)
+            .map(|row| row.line)
+            .collect(),
+    })
 }
 
 #[cfg(test)]
@@ -410,9 +492,15 @@ mod tests {
     }
 
     #[test]
+    fn a_quoted_field_does_not_vote_for_its_own_delimiter() {
+        // Two semicolons outside quotes beat three commas inside one field.
+        assert_eq!(detect_delimiter(r#"a;"x,y,z,w";c"#), ';');
+    }
+
+    #[test]
     fn delimited_reports_shape_and_ragged_rows() {
         let text = "a,b,c\n1,2,3\n4,5\n6,7,8\n";
-        let report = delimited_report(text);
+        let report = delimited_report(text).unwrap();
 
         assert_eq!(report.rows, 4);
         assert_eq!(report.columns, 3);
@@ -422,16 +510,57 @@ mod tests {
 
     #[test]
     fn a_clean_table_reports_no_ragged_rows() {
-        let report = delimited_report("a,b\n1,2\n3,4\n");
+        let report = delimited_report("a,b\n1,2\n3,4\n").unwrap();
         assert!(report.ragged.is_empty());
         assert_eq!(report.summary(), "3 rows x 2 columns (comma-separated)");
+    }
+
+    #[test]
+    fn a_comma_inside_a_quoted_field_is_not_a_new_column() {
+        // The defect this reader replaces: splitting on the delimiter made
+        // row 2 look ragged and sent the user hunting a fault in clean data.
+        let text = "name,city\n\"Doe, Jane\",Leeds\n";
+        let report = delimited_report(text).unwrap();
+
+        assert_eq!(report.columns, 2);
+        assert!(report.ragged.is_empty(), "clean data must report clean");
+
+        let rows = delimited_rows(text, ',').unwrap();
+        assert_eq!(rows[1].fields, vec!["Doe, Jane", "Leeds"]);
+    }
+
+    #[test]
+    fn a_doubled_quote_is_one_literal_quote() {
+        let rows = delimited_rows("a\n\"He said \"\"hi\"\"\"\n", ',').unwrap();
+        assert_eq!(rows[1].fields, vec![r#"He said "hi""#]);
+    }
+
+    #[test]
+    fn a_newline_inside_a_quoted_field_does_not_start_a_row() {
+        // Two rows across three lines -- and the line numbers must follow the
+        // file, not the row count, or "ragged at row 3" points at the wrong
+        // place in the editor.
+        let text = "a,b\n\"line one\nline two\",x\n4\n";
+        let rows = delimited_rows(text, ',').unwrap();
+
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[1].fields[0], "line one\nline two");
+        assert_eq!(rows[1].line, 2);
+        assert_eq!(rows[2].line, 4, "the short row is on line 4, not line 3");
+
+        assert_eq!(delimited_report(text).unwrap().ragged, vec![4]);
+    }
+
+    #[test]
+    fn a_non_ascii_delimiter_is_refused_rather_than_truncated() {
+        assert!(delimited_rows("a\u{00A7}b", '\u{00A7}').is_err());
     }
 
     #[test]
     fn empty_input_does_not_panic_anywhere() {
         assert!(json_validate("").is_err());
         assert_eq!(jsonl_validate("").records, 0);
-        assert_eq!(delimited_report("").rows, 0);
+        assert_eq!(delimited_report("").unwrap().rows, 0);
         assert!(toml_validate("").is_ok(), "an empty TOML table is valid");
     }
 }
