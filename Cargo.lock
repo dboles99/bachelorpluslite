@@ -712,6 +712,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "bp-search"
+version = "0.1.0"
+dependencies = [
+ "regex",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "bp-theme"
 version = "0.1.0"
 dependencies = [
@@ -730,6 +738,7 @@ dependencies = [
  "bp-files",
  "bp-formats",
  "bp-naming",
+ "bp-search",
  "bp-theme",
  "rfd",
  "slint",

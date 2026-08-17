@@ -253,6 +253,32 @@ export component AppWindow inherits Window {
     /// Menu actions below 100. Ids from 100 up never reach Rust.
     callback menu-action(int);
 
+    // --- find and replace ---------------------------------------------
+    in-out property <bool> find-open;
+    in-out property <string> find-query;
+    in-out property <string> replace-query;
+    /// "3 of 12", "no matches", or a bad-pattern message.
+    in property <string> find-status;
+
+    callback find-changed();
+    callback find-next();
+    callback find-previous();
+    callback replace-all();
+
+    /// Select a range in the editor. Called from Rust once it has worked out
+    /// where the next match is -- `set-selection-offsets` is a function on
+    /// the widget, so only Slint can invoke it.
+    public function select-range(start: int, end: int) {
+        editor.set-selection-offsets(start, end);
+        editor.focus();
+    }
+
+    public function focus-find() {
+        root.find-open = true;
+        find-input.focus();
+        find-input.select-all();
+    }
+
     // Typing goes to the editor unless the user clicks elsewhere.
     forward-focus: editor;
 
@@ -315,6 +341,19 @@ export component AppWindow inherits Window {
             keys: @keys(Control + "w");
             activated => {
                 root.close-active-tab();
+            }
+        }
+        KeyBinding {
+            keys: @keys(Control + "f");
+            activated => {
+                root.focus-find();
+            }
+        }
+        KeyBinding {
+            keys: @keys(Escape);
+            activated => {
+                root.find-open = false;
+                editor.focus();
             }
         }
 
@@ -482,6 +521,120 @@ export component AppWindow inherits Window {
                             edited => {
                                 root.text-edited(self.text);
                             }
+                        }
+                    }
+                }
+            }
+
+            // --- find and replace ---------------------------------------
+            // Collapsed rather than conditional: an element inside an `if` is
+            // out of scope for `focus-find`, and Ctrl+F has to be able to put
+            // the caret in the box it just opened.
+            Rectangle {
+                height: root.find-open ? 34px : 0px;
+                visible: root.find-open;
+                background: Palette.shell;
+
+                HorizontalLayout {
+                    padding-left: 10px;
+                    padding-right: 10px;
+                    padding-top: 4px;
+                    padding-bottom: 4px;
+                    spacing: 8px;
+
+                    Text {
+                        text: "Find";
+                        color: Palette.ink-dim;
+                        font-size: 12px;
+                        vertical-alignment: center;
+                    }
+
+                    Rectangle {
+                        width: 220px;
+                        background: Palette.panel;
+                        border-color: Palette.edge;
+                        border-width: 1px;
+                        HorizontalLayout {
+                            padding-left: 6px;
+                            padding-right: 6px;
+                            find-input := TextInput {
+                                text <=> root.find-query;
+                                color: Palette.ink;
+                                selection-background-color: Palette.accent;
+                                font-size: 13px;
+                                single-line: true;
+                                vertical-alignment: center;
+                                edited => {
+                                    root.find-changed();
+                                }
+                                accepted => {
+                                    root.find-next();
+                                }
+                            }
+                        }
+                    }
+
+                    MenuLabel {
+                        label: "◂";
+                        clicked => {
+                            root.find-previous();
+                        }
+                    }
+                    MenuLabel {
+                        label: "▸";
+                        clicked => {
+                            root.find-next();
+                        }
+                    }
+
+                    Text {
+                        text: root.find-status;
+                        color: Palette.ink-dim;
+                        font-size: 12px;
+                        vertical-alignment: center;
+                        width: 110px;
+                    }
+
+                    Text {
+                        text: "Replace";
+                        color: Palette.ink-dim;
+                        font-size: 12px;
+                        vertical-alignment: center;
+                    }
+
+                    Rectangle {
+                        width: 200px;
+                        background: Palette.panel;
+                        border-color: Palette.edge;
+                        border-width: 1px;
+                        HorizontalLayout {
+                            padding-left: 6px;
+                            padding-right: 6px;
+                            TextInput {
+                                text <=> root.replace-query;
+                                color: Palette.ink;
+                                selection-background-color: Palette.accent;
+                                font-size: 13px;
+                                single-line: true;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+
+                    MenuLabel {
+                        label: "Replace All";
+                        clicked => {
+                            root.replace-all();
+                        }
+                    }
+
+                    Rectangle { horizontal-stretch: 1; }
+
+                    MenuLabel {
+                        label: "×";
+                        clicked => {
+                            root.find-open = false;
+                            editor.focus();
                         }
                     }
                 }

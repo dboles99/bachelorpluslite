@@ -14,6 +14,7 @@ members = [
     "crates/bp-editor",
     "crates/bp-formats",
     "crates/bp-naming",
+    "crates/bp-search",
     "crates/bp-files",
     "crates/bp-theme",
     "crates/bp-ui",

@@ -129,6 +129,10 @@ struct AppState {
     /// Standing warning about the file on disk. Distinct from `error`, which
     /// reports something that just failed; this persists until resolved.
     disk_warning: Option<String>,
+    /// Matches for the current find query, and which one is selected.
+    matches: Vec<bp_search::Match>,
+    match_index: usize,
+    find_status: String,
 }
 
 impl AppState {
@@ -149,7 +153,55 @@ impl AppState {
             stamps: HashMap::new(),
             recent: bp_config::load_recent(),
             disk_warning: None,
+            matches: Vec::new(),
+            match_index: 0,
+            find_status: String::new(),
         }
+    }
+
+    /// Recompute matches for `query` against the active document.
+    ///
+    /// Returns the range to select, if there is one.
+    fn find(&mut self, query: &bp_search::Query) -> Option<std::ops::Range<usize>> {
+        self.match_index = 0;
+        if query.is_empty() {
+            self.matches.clear();
+            self.find_status.clear();
+            return None;
+        }
+        match bp_search::find_all(self.active_text(), query) {
+            Ok(found) => {
+                self.matches = found;
+                self.find_status = if self.matches.is_empty() {
+                    "no matches".to_owned()
+                } else {
+                    format!("1 of {}", self.matches.len())
+                };
+                self.matches.first().map(|m| m.range.clone())
+            }
+            Err(e) => {
+                // A half-typed regex is the normal case while typing, so this
+                // reports rather than alarms.
+                self.matches.clear();
+                self.find_status = e.to_string();
+                None
+            }
+        }
+    }
+
+    /// Step to the next or previous match, wrapping.
+    fn step_match(&mut self, forward: bool) -> Option<std::ops::Range<usize>> {
+        if self.matches.is_empty() {
+            return None;
+        }
+        let len = self.matches.len();
+        self.match_index = if forward {
+            (self.match_index + 1) % len
+        } else {
+            (self.match_index + len - 1) % len
+        };
+        self.find_status = format!("{} of {len}", self.match_index + 1);
+        Some(self.matches[self.match_index].range.clone())
     }
 
     /// Note that this document and its file are in step, and remember the
@@ -653,6 +705,16 @@ fn pick_save_path(state: &AppState, id: DocumentId) -> Option<PathBuf> {
         .save_file()
 }
 
+/// Select a character range in the editor.
+///
+/// Offsets are clamped into `i32` because that is what Slint's model uses; a
+/// document long enough to overflow it would have other problems first.
+fn select(ui: &AppWindow, range: &std::ops::Range<usize>) {
+    let start = i32::try_from(range.start).unwrap_or(i32::MAX);
+    let end = i32::try_from(range.end).unwrap_or(i32::MAX);
+    ui.invoke_select_range(start, end);
+}
+
 /// Ask about unsaved work before discarding it.
 ///
 /// Blocking and native. The three-way answer matters: "Cancel" has to be
@@ -1029,6 +1091,71 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
             if let Some(ui) = weak.upgrade() {
                 refresh(&ui, &mut cell.borrow_mut(), push);
             }
+        });
+    }
+
+    // --- find and replace ---------------------------------------------
+    {
+        let cell = Rc::clone(&state);
+        let weak = ui.as_weak();
+        ui.on_find_changed(move || {
+            let Some(ui) = weak.upgrade() else { return };
+            let query = bp_search::Query::literal(&ui.get_find_query());
+            let selection = cell.borrow_mut().find(&query);
+            ui.set_find_status(cell.borrow().find_status.as_str().into());
+            if let Some(range) = selection {
+                select(&ui, &range);
+            }
+        });
+    }
+
+    for forward in [true, false] {
+        let cell = Rc::clone(&state);
+        let weak = ui.as_weak();
+        let step = move || {
+            let Some(ui) = weak.upgrade() else { return };
+            let selection = cell.borrow_mut().step_match(forward);
+            ui.set_find_status(cell.borrow().find_status.as_str().into());
+            if let Some(range) = selection {
+                select(&ui, &range);
+            }
+        };
+        if forward {
+            ui.on_find_next(step);
+        } else {
+            ui.on_find_previous(step);
+        }
+    }
+
+    {
+        let cell = Rc::clone(&state);
+        let weak = ui.as_weak();
+        ui.on_replace_all(move || {
+            let Some(ui) = weak.upgrade() else { return };
+            let query = bp_search::Query::literal(&ui.get_find_query());
+            let replacement = ui.get_replace_query().to_string();
+
+            let outcome = {
+                let s = cell.borrow();
+                bp_search::replace_all(s.active_text(), &query, &replacement)
+            };
+            match outcome {
+                Ok((text, 0)) => {
+                    let _ = text;
+                    cell.borrow_mut().find_status = "no matches".to_owned();
+                }
+                Ok((text, n)) => {
+                    let mut s = cell.borrow_mut();
+                    // An ordinary edit, so it is undoable and nothing reaches
+                    // disk until the user saves.
+                    s.edit(text);
+                    s.matches.clear();
+                    s.find_status = format!("replaced {n}");
+                }
+                Err(e) => cell.borrow_mut().find_status = e.to_string(),
+            }
+            ui.set_find_status(cell.borrow().find_status.as_str().into());
+            refresh(&ui, &mut cell.borrow_mut(), PushText::Yes);
         });
     }
 
