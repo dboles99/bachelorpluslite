@@ -173,8 +173,12 @@ export component AppWindow inherits Window {
     callback save-as-document();
     callback select-tab(int);
     callback close-tab(int);
+    callback close-active-tab();
     callback cycle-theme();
     callback text-edited(string);
+
+    // Typing goes to the editor unless the user clicks elsewhere.
+    forward-focus: editor;
 
     file-menu := PopupWindow {
         x: 4px;
@@ -220,6 +224,49 @@ export component AppWindow inherits Window {
             }
         }
     }
+
+    // Shortcuts live in a FocusScope that *wraps* the content, because key
+    // bindings are matched during the capture phase -- from the Window down
+    // toward the focused element. A FocusScope beside the editor rather than
+    // around it would never be on that path, and the focused TextInput would
+    // swallow Ctrl+S before anything saw it.
+    //
+    // It must not take focus itself, or clicking the shell would pull the
+    // caret out of the editor.
+    FocusScope {
+        focus-on-click: false;
+        focus-on-tab-navigation: false;
+
+        KeyBinding {
+            keys: @keys(Control + "n");
+            activated => {
+                root.new-document();
+            }
+        }
+        KeyBinding {
+            keys: @keys(Control + "o");
+            activated => {
+                root.open-document();
+            }
+        }
+        KeyBinding {
+            keys: @keys(Control + "s");
+            activated => {
+                root.save-document();
+            }
+        }
+        KeyBinding {
+            keys: @keys(Control + Shift + "s");
+            activated => {
+                root.save-as-document();
+            }
+        }
+        KeyBinding {
+            keys: @keys(Control + "w");
+            activated => {
+                root.close-active-tab();
+            }
+        }
 
     VerticalLayout {
         // --- menu bar ---------------------------------------------------
@@ -307,7 +354,7 @@ export component AppWindow inherits Window {
                         width: 40px;
                     }
 
-                    TextInput {
+                    editor := TextInput {
                         text <=> root.doc-text;
                         color: Palette.ink;
                         selection-background-color: Palette.accent;
@@ -382,5 +429,6 @@ export component AppWindow inherits Window {
                 }
             }
         }
+    }
     }
 }

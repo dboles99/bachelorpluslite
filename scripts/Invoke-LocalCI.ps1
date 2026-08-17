@@ -127,6 +127,40 @@ try {
     Invoke-Stage 'clippy' { cargo clippy --workspace --all-targets -- -D warnings }
     Invoke-Stage 'test' { cargo test --workspace }
 
+    # Actually load the linked binary. `cargo build` and `cargo test` never do
+    # -- a bad link-time feature or side-by-side manifest passes both and then
+    # fails before `main` with STATUS_ENTRYPOINT_NOT_FOUND, which is precisely
+    # what rfd's `common-controls-v6` feature did here.
+    Invoke-Stage 'launch' {
+        # Build first, unconditionally. A stale binary predating --self-check
+        # does not recognise the flag, falls through to opening the GUI, and
+        # then never exits -- the stage hangs instead of failing.
+        cargo build --workspace --quiet
+        if ($LASTEXITCODE -ne 0) { throw "build failed" }
+
+        $exe = Join-Path $Root 'target/debug/bachelorpad.exe'
+        $out = Join-Path ([System.IO.Path]::GetTempPath()) "bpad-selfcheck-$PID.txt"
+        $proc = Start-Process -FilePath $exe -ArgumentList '--self-check' `
+            -PassThru -NoNewWindow -RedirectStandardOutput $out
+
+        # Bounded: a self-check that hangs is a failure, not a reason to wait
+        # forever.
+        if (-not $proc.WaitForExit(30000)) {
+            $proc.Kill()
+            $proc.WaitForExit()
+            Remove-Item $out -ErrorAction SilentlyContinue
+            throw 'did not exit within 30s'
+        }
+
+        $ok = (Test-Path $out) -and (Select-String -Path $out -Pattern 'BACHELORPAD_SELF_CHECK_OK' -Quiet)
+        $code = $proc.ExitCode
+        Remove-Item $out -ErrorAction SilentlyContinue
+        if ($code -ne 0 -or -not $ok) {
+            throw "binary did not start (exit 0x$('{0:X}' -f $code))"
+        }
+        $global:LASTEXITCODE = 0
+    }
+
     # --- spikes --------------------------------------------------------
     $spikes = Get-ChildItem -Path (Join-Path $Root 'spikes') -Directory -ErrorAction SilentlyContinue |
         ForEach-Object { Get-ChildItem -Path $_.FullName -Directory } |

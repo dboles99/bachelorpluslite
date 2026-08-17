@@ -74,6 +74,39 @@ used shell redirection, which captures nothing from a release binary built with
 and timed the very lie it was there to catch. It now launches exactly like a
 measurement run.
 
+## Typing latency
+
+`bachelorpad --latency-probe`, release build, Windows. Measures the
+application's state path per keystroke — taking the edited text from the
+widget, storing it, marking the document modified, refreshing the gutter. It
+excludes rasterisation and presentation.
+
+| Document | p50 | p95 | max |
+| ---: | ---: | ---: | ---: |
+| 1 KB | 0.6 µs | 0.7 µs | 1.4 µs |
+| 10 KB | 4.0 µs | 4.1 µs | 9.0 µs |
+| 100 KB | 37.8 µs | 39.1 µs | 93.9 µs |
+| 1 MB | 376 µs | 387 µs | 857 µs |
+
+Linear in document size, and 1 MB costs 2% of a 16 ms frame. The linearity is
+inherent, not a bug in the probe: Slint's `edited` callback hands back the
+entire buffer, so a keystroke copies the document. Extrapolating, the frame
+budget is reached near 40 MB — which is what `bp-buffer` is for, and why it is
+a phase-4 concern rather than a phase-1 one.
+
+One avoidable cost was removed along the way: the gutter string was rebuilt on
+every keystroke, allocating proportionally to the document even when no line
+was added or removed. It is now rebuilt only when the line count changes.
+
+## A third mistake: a manifest that stopped the app launching
+
+Enabling rfd's `common-controls-v6` feature — which embeds a side-by-side
+manifest dependency on ComCtl32 v6 for prettier task dialogs — made the binary
+fail to start at all, with `STATUS_ENTRYPOINT_NOT_FOUND` (0xC0000139) before
+`main`. It was caught only because the latency probe produced no output; a
+window-only smoke test would have caught it too, but a `cargo build` and
+`cargo test` run will not, since neither loads the linked executable.
+
 ## Measurement caveats
 
 - Time to window is measured externally, from process spawn until the process

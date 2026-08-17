@@ -29,12 +29,20 @@ Re-run it after pulling a change to `scripts/hooks/`.
 | check (locked) | `cargo check --workspace --all-targets --locked` |
 | clippy | `cargo clippy --workspace --all-targets -- -D warnings` |
 | test | `cargo test --workspace` |
+| launch | Runs `bachelorpad --self-check` and asserts it starts |
 | spikes | fmt and clippy over each standalone workspace in `spikes/` |
 | linux (wsl) | fmt, clippy and test inside WSL |
 
 Every stage runs even after one fails, so a single run reports everything
 rather than making you fix problems one at a time. The exit code is non-zero
 if any stage failed.
+
+The `launch` stage exists because neither `cargo build` nor `cargo test` ever
+loads the linked executable. Enabling one rfd feature — which embedded a
+side-by-side manifest — produced a binary that failed with
+`STATUS_ENTRYPOINT_NOT_FOUND` before `main`, with the whole gate green.
+Anything that changes link-time features, manifests or linked libraries needs
+this stage.
 
 `-Quick` skips the locked dependency resolve, which is the slowest part of a
 cold run and cannot regress from an edit that does not touch a manifest.

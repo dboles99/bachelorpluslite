@@ -14,10 +14,15 @@ slint = "1.17"
 # not need a specific desktop environment installed just to open a file
 # (BP-ADR-0001). `pollster` supplies the executor the blocking API needs,
 # since the portal backend is async underneath.
+#
+# `common-controls-v6` is deliberately NOT enabled. It embeds a side-by-side
+# manifest dependency on ComCtl32 v6 for prettier task dialogs, and with it the
+# binary failed to start at all here -- STATUS_ENTRYPOINT_NOT_FOUND
+# (0xC0000139) before `main`. A nicer-looking dialog is not worth an
+# application that will not launch.
 rfd = { version = "0.17", default-features = false, features = [
     "xdg-portal",
     "pollster",
-    "common-controls-v6",
 ] }
 thiserror.workspace = true
 time.workspace = true

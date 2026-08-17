@@ -29,10 +29,13 @@ Adding a decision means adding both.
 - **Time to first interaction is unmeasurable under the software renderer.**
   Slint exposes no rendering notifier there, so half of the ADR-0017 startup
   target has no measurement behind it. A hole, not a pass.
-- **Typing latency and scroll smoothness under CPU rasterisation are
-  unmeasured.** This is the explicit revert condition on ADR-0017: if either
-  regresses, the default renderer changes back and the RAM target gets
-  revisited instead.
+- **Scroll smoothness under CPU rasterisation is unmeasured**, and needs a
+  capture rig. This is the standing revert condition on ADR-0017. The
+  application's own typing-path latency *is* now measured and is not a
+  problem: 376 µs p50 at 1 MB against a ~16 ms frame budget.
 - **Comparative startup timing on Linux is unmeasured.** The shell builds and
   runs there, but WSLg's compositor makes timing unrepresentative. Needs a
   native Linux machine.
+- **Keyboard shortcut delivery is unverified.** Wired and compiler-validated,
+  but never actually pressed — no interactive desktop in the build
+  environment.

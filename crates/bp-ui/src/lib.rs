@@ -18,10 +18,11 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-use bp_core::{Document, DocumentId, Encoding, LineEnding, Workspace};
+use bp_core::{Document, DocumentId, Encoding, LineEnding, UNTITLED, Workspace};
 use bp_files::{SaveOptions, atomic_write, load};
 use bp_naming::SemanticName;
 use bp_theme::{Palette as ThemePalette, ThemeId};
@@ -78,11 +79,33 @@ fn encode(text: &str, encoding: Encoding, line_ending: LineEnding) -> Result<Vec
     Ok(out)
 }
 
+/// How a save attempt ended.
+///
+/// Three cases, not two: a close-on-quit flow must not treat "needs a path"
+/// or "the disk refused" as success and then discard the buffer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SaveResult {
+    Saved,
+    /// No path yet. The caller should escalate to Save As.
+    NeedsPath,
+    /// Attempted and refused; `AppState::error` explains why.
+    Failed,
+}
+
 struct AppState {
     workspace: Workspace,
     texts: HashMap<DocumentId, String>,
     theme: ThemeId,
     error: Option<String>,
+    /// Cached gutter text, and the line count it was built for.
+    ///
+    /// Rebuilding this on every keystroke was the single largest avoidable
+    /// cost in the typing path: it allocates proportionally to the document
+    /// on each character typed, while the content only changes when a line is
+    /// added or removed. `usize::MAX` is a sentinel meaning "never built",
+    /// since 0 is a line count `max(1)` can never produce.
+    gutter: String,
+    gutter_lines: usize,
 }
 
 impl AppState {
@@ -96,6 +119,8 @@ impl AppState {
             texts,
             theme: ThemeId::default(),
             error: None,
+            gutter: String::new(),
+            gutter_lines: usize::MAX,
         }
     }
 
@@ -104,6 +129,40 @@ impl AppState {
             .active_id()
             .and_then(|id| self.texts.get(&id))
             .map_or("", String::as_str)
+    }
+
+    fn text_of(&self, id: DocumentId) -> &str {
+        self.texts.get(&id).map_or("", String::as_str)
+    }
+
+    /// Tab label for `id`, for use in prompts.
+    fn display_name(&self, id: DocumentId) -> String {
+        self.workspace
+            .get(id)
+            .map_or_else(|| UNTITLED.to_owned(), |d| d.display_name().to_owned())
+    }
+
+    fn is_dirty(&self, id: DocumentId) -> bool {
+        self.workspace.get(id).is_some_and(Document::is_dirty)
+    }
+
+    /// Rebuild the gutter only when the line count actually changed.
+    ///
+    /// Returns `true` if the cache changed and the UI needs the new value.
+    fn sync_gutter(&mut self) -> bool {
+        let lines = self.active_text().lines().count().max(1);
+        if self.gutter_lines == lines {
+            return false;
+        }
+        self.gutter_lines = lines;
+        self.gutter.clear();
+        for n in 1..=lines {
+            if n > 1 {
+                self.gutter.push('\n');
+            }
+            let _ = write!(self.gutter, "{n}");
+        }
+        true
     }
 
     fn new_document(&mut self) {
@@ -129,30 +188,25 @@ impl AppState {
         }
     }
 
-    /// Save the active document to `path`, or to its existing path.
+    /// Outcome of a save attempt, so callers can tell the three cases apart.
     ///
-    /// Returns `false` when there is no path to save to, so the caller can
-    /// escalate to Save As rather than this function silently doing nothing.
-    fn save(&mut self, path: Option<PathBuf>) -> bool {
+    /// A close-on-quit flow must not treat "needs a path" or "the disk
+    /// refused" as success and then discard the buffer.
+    fn save_document(&mut self, id: DocumentId, path: Option<PathBuf>) -> SaveResult {
         self.error = None;
-        let Some(id) = self.workspace.active_id() else {
-            return true;
-        };
         let Some(doc) = self.workspace.get(id) else {
-            return true;
+            return SaveResult::Saved;
         };
 
-        let target = match path.or_else(|| doc.path().map(Path::to_path_buf)) {
-            Some(p) => p,
-            None => return false,
+        let Some(target) = path.or_else(|| doc.path().map(Path::to_path_buf)) else {
+            return SaveResult::NeedsPath;
         };
 
-        let text = self.texts.get(&id).cloned().unwrap_or_default();
-        let bytes = match encode(&text, doc.encoding(), doc.line_ending()) {
+        let bytes = match encode(self.text_of(id), doc.encoding(), doc.line_ending()) {
             Ok(b) => b,
             Err(message) => {
                 self.error = Some(message);
-                return true;
+                return SaveResult::Failed;
             }
         };
 
@@ -163,15 +217,18 @@ impl AppState {
                     // Only now, after a verified write, is the document clean.
                     doc.record_disk_save(now());
                 }
+                SaveResult::Saved
             }
-            Err(e) => self.error = Some(e.to_string()),
+            Err(e) => {
+                self.error = Some(e.to_string());
+                SaveResult::Failed
+            }
         }
-        true
     }
 
     /// A default filename for Save As, in the grammar from ADR-0003.
-    fn suggested_filename(&self) -> String {
-        self.workspace.active().map_or_else(
+    fn suggested_filename(&self, id: DocumentId) -> String {
+        self.workspace.get(id).map_or_else(
             || "Untitled.txt".to_owned(),
             |doc| SemanticName::new(doc.title(), doc.created_at().date(), "txt").to_filename(),
         )
@@ -221,18 +278,6 @@ fn save_state_label(doc: &Document) -> String {
     }
 }
 
-fn gutter_for(text: &str) -> String {
-    let lines = text.lines().count().max(1);
-    let mut out = String::with_capacity(lines * 4);
-    for n in 1..=lines {
-        if n > 1 {
-            out.push('\n');
-        }
-        out.push_str(&n.to_string());
-    }
-    out
-}
-
 fn apply_theme(ui: &AppWindow, theme: ThemeId) {
     let p: ThemePalette = theme.palette();
     let c = |v: bp_theme::Rgb| slint::Color::from_rgb_u8(v.r, v.g, v.b);
@@ -245,7 +290,17 @@ fn apply_theme(ui: &AppWindow, theme: ThemeId) {
     palette.set_accent(c(p.accent));
 }
 
-fn refresh(ui: &AppWindow, state: &AppState) {
+/// Whether the buffer text needs pushing back into the editor widget.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PushText {
+    /// The document changed underneath the widget: opened, switched, closed.
+    Yes,
+    /// The user typed. The widget already holds the text, and pushing it back
+    /// would clone the whole document on every keystroke to no effect.
+    No,
+}
+
+fn refresh(ui: &AppWindow, state: &mut AppState, push_text: PushText) {
     apply_theme(ui, state.theme);
     ui.set_theme_name(state.theme.name().into());
 
@@ -260,13 +315,15 @@ fn refresh(ui: &AppWindow, state: &AppState) {
             active: Some(doc.id()) == active,
         })
         .collect();
-    ui.set_tabs(std::rc::Rc::new(slint::VecModel::from(tabs)).into());
+    ui.set_tabs(Rc::new(slint::VecModel::from(tabs)).into());
 
-    let text = state.active_text().to_owned();
-    if ui.get_doc_text() != text.as_str() {
-        ui.set_doc_text(text.as_str().into());
+    if push_text == PushText::Yes {
+        ui.set_doc_text(state.active_text().into());
     }
-    ui.set_gutter(gutter_for(&text).into());
+    if state.sync_gutter() {
+        ui.set_gutter(state.gutter.as_str().into());
+    }
+    let lines = state.gutter_lines;
 
     if let Some(doc) = state.workspace.active() {
         ui.set_save_state(save_state_label(doc).into());
@@ -275,10 +332,26 @@ fn refresh(ui: &AppWindow, state: &AppState) {
         ui.set_encoding_label(doc.encoding().label().into());
         ui.set_line_ending_label(doc.line_ending().label().into());
         ui.set_format_label("TXT".into());
-        ui.set_cursor_label(format!("{} lines", text.lines().count().max(1)).into());
+        ui.set_cursor_label(format!("{lines} lines").into());
     }
 
-    ui.set_error_message(state.error.clone().unwrap_or_default().into());
+    ui.set_error_message(state.error.as_deref().unwrap_or_default().into());
+}
+
+/// Ask about unsaved work before discarding it.
+///
+/// Blocking and native. The three-way answer matters: "Cancel" has to be
+/// distinguishable from "Discard", or the safe choice becomes the
+/// destructive one.
+fn ask_about_unsaved(name: &str) -> rfd::MessageDialogResult {
+    rfd::MessageDialog::new()
+        .set_level(rfd::MessageLevel::Warning)
+        .set_title("Unsaved changes")
+        .set_description(format!(
+            "{name} has unsaved changes.\n\nSave before closing?"
+        ))
+        .set_buttons(rfd::MessageButtons::YesNoCancel)
+        .show()
 }
 
 /// Which Slint renderer to ask for.
@@ -373,7 +446,7 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
                     $body
                 }
                 if let Some(ui) = weak.upgrade() {
-                    refresh(&ui, &cell.borrow());
+                    refresh(&ui, &mut cell.borrow_mut(), PushText::Yes);
                 }
             });
         }};
@@ -390,20 +463,17 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
     });
 
     wire!(on_save_document, |s| {
-        if !s.save(None) {
-            // No path yet, so Save means Save As. Falling through silently
-            // would look like a save that did nothing.
-            let suggested = s.suggested_filename();
-            if let Some(path) = rfd::FileDialog::new().set_file_name(suggested).save_file() {
-                s.save(Some(path));
-            }
+        if let Some(id) = s.workspace.active_id() {
+            save_with_prompt(&mut s, id);
         }
     });
 
     wire!(on_save_as_document, |s| {
-        let suggested = s.suggested_filename();
-        if let Some(path) = rfd::FileDialog::new().set_file_name(suggested).save_file() {
-            s.save(Some(path));
+        if let Some(id) = s.workspace.active_id() {
+            let suggested = s.suggested_filename(id);
+            if let Some(path) = rfd::FileDialog::new().set_file_name(suggested).save_file() {
+                s.save_document(id, Some(path));
+            }
         }
     });
 
@@ -422,7 +492,7 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
                 }
             }
             if let Some(ui) = weak.upgrade() {
-                refresh(&ui, &cell.borrow());
+                refresh(&ui, &mut cell.borrow_mut(), PushText::Yes);
             }
         });
     }
@@ -431,14 +501,31 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
         let cell = Rc::clone(&state);
         let weak = ui.as_weak();
         ui.on_close_tab(move |raw| {
-            {
-                let mut s = cell.borrow_mut();
-                if let Some(id) = find_id(&s.workspace, raw) {
-                    s.close(id);
-                }
+            let id = cell
+                .borrow()
+                .workspace
+                .iter()
+                .map(Document::id)
+                .find(|id| i32::try_from(id.get()).unwrap_or(i32::MAX) == raw);
+            if let Some(id) = id {
+                close_with_prompt(&cell, id);
             }
             if let Some(ui) = weak.upgrade() {
-                refresh(&ui, &cell.borrow());
+                refresh(&ui, &mut cell.borrow_mut(), PushText::Yes);
+            }
+        });
+    }
+
+    {
+        let cell = Rc::clone(&state);
+        let weak = ui.as_weak();
+        ui.on_close_active_tab(move || {
+            let id = cell.borrow().workspace.active_id();
+            if let Some(id) = id {
+                close_with_prompt(&cell, id);
+            }
+            if let Some(ui) = weak.upgrade() {
+                refresh(&ui, &mut cell.borrow_mut(), PushText::Yes);
             }
         });
     }
@@ -451,14 +538,146 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
                 cell.borrow_mut().edit(text.to_string());
             }
             if let Some(ui) = weak.upgrade() {
-                refresh(&ui, &cell.borrow());
+                // PushText::No -- the widget already holds this text. Pushing
+                // it back would clone the document on every keystroke.
+                refresh(&ui, &mut cell.borrow_mut(), PushText::No);
             }
         });
     }
 
-    refresh(&ui, &state.borrow());
+    // Closing the window must not be a quieter way to lose the same work
+    // that closing a tab prompts about.
+    {
+        let cell = Rc::clone(&state);
+        ui.window().on_close_requested(move || {
+            let dirty: Vec<DocumentId> =
+                cell.borrow().workspace.dirty().map(Document::id).collect();
+
+            for id in dirty {
+                let name = cell.borrow().display_name(id);
+                match ask_about_unsaved(&name) {
+                    rfd::MessageDialogResult::Yes => {
+                        let mut s = cell.borrow_mut();
+                        if save_with_prompt(&mut s, id) != SaveResult::Saved {
+                            // Save failed or was abandoned. Quitting now would
+                            // discard exactly what the user asked to keep.
+                            return slint::CloseRequestResponse::KeepWindowShown;
+                        }
+                    }
+                    rfd::MessageDialogResult::No => {}
+                    _ => return slint::CloseRequestResponse::KeepWindowShown,
+                }
+            }
+            slint::CloseRequestResponse::HideWindow
+        });
+    }
+
+    refresh(&ui, &mut state.borrow_mut(), PushText::Yes);
     ui.run()?;
     Ok(())
+}
+
+/// Measure the cost of one keystroke through the application's state path,
+/// at a range of document sizes.
+///
+/// This is the half of typing latency we control: taking the edited text from
+/// the widget, storing it, marking the document modified, and refreshing the
+/// gutter. It deliberately does **not** include rasterisation or presentation,
+/// which need a capture rig to measure and are the renderer's contribution.
+///
+/// It is faithful in one uncomfortable way: Slint's `edited` callback hands us
+/// the entire buffer as a fresh string, so a keystroke copies the document.
+/// That is the real cost today and the reason `bp-buffer` exists on the
+/// roadmap -- the numbers here should grow linearly with document size, and
+/// if they do, that is the finding, not a flaw in the probe.
+pub fn latency_probe() {
+    const SAMPLES: usize = 300;
+    const SIZES: [usize; 4] = [1_000, 10_000, 100_000, 1_000_000];
+
+    println!("typing-path latency (state update only, excludes rendering)");
+    println!(
+        "{:>12}  {:>10}  {:>10}  {:>10}",
+        "doc chars", "p50", "p95", "max"
+    );
+
+    for size in SIZES {
+        // A realistic-ish document: 80-column lines.
+        let mut text: String = (0..size)
+            .map(|i| if i % 80 == 79 { '\n' } else { 'x' })
+            .collect();
+
+        let mut state = AppState::new();
+        state.edit(text.clone());
+        state.sync_gutter();
+
+        let mut timings = Vec::with_capacity(SAMPLES);
+        for _ in 0..SAMPLES {
+            text.push('y');
+            let next = text.clone();
+            let start = std::time::Instant::now();
+            state.edit(next);
+            state.sync_gutter();
+            timings.push(start.elapsed());
+        }
+
+        timings.sort_unstable();
+        let at = |q: f64| timings[((timings.len() as f64 * q) as usize).min(timings.len() - 1)];
+        println!(
+            "{size:>12}  {:>8.1}µs  {:>8.1}µs  {:>8.1}µs",
+            at(0.50).as_secs_f64() * 1e6,
+            at(0.95).as_secs_f64() * 1e6,
+            timings[timings.len() - 1].as_secs_f64() * 1e6,
+        );
+    }
+
+    println!();
+    println!("Perceptible-latency threshold is roughly 16ms (16000µs) per frame.");
+}
+
+/// Save, escalating to Save As when the document has no path yet.
+///
+/// Save on a never-saved document must not silently do nothing.
+fn save_with_prompt(state: &mut AppState, id: DocumentId) -> SaveResult {
+    match state.save_document(id, None) {
+        SaveResult::NeedsPath => {
+            let suggested = state.suggested_filename(id);
+            match rfd::FileDialog::new().set_file_name(suggested).save_file() {
+                Some(path) => state.save_document(id, Some(path)),
+                // The user dismissed the dialog. Nothing was written, and the
+                // caller must not treat that as saved.
+                None => SaveResult::NeedsPath,
+            }
+        }
+        other => other,
+    }
+}
+
+/// Close a tab, asking first if it holds unsaved work.
+///
+/// Borrows are scoped tightly around each step: the dialogs block, and
+/// holding a `RefCell` borrow across one would panic the moment any other
+/// callback ran.
+fn close_with_prompt(cell: &Rc<RefCell<AppState>>, id: DocumentId) {
+    let (dirty, name) = {
+        let s = cell.borrow();
+        (s.is_dirty(id), s.display_name(id))
+    };
+
+    if dirty {
+        match ask_about_unsaved(&name) {
+            rfd::MessageDialogResult::Yes => {
+                let mut s = cell.borrow_mut();
+                if save_with_prompt(&mut s, id) != SaveResult::Saved {
+                    // Keep the tab open rather than discard unsaved work.
+                    return;
+                }
+            }
+            rfd::MessageDialogResult::No => {}
+            // Cancel, or the dialog was dismissed. Do nothing.
+            _ => return,
+        }
+    }
+    cell.borrow_mut().close(id);
 }
 
 /// Map a tab id from the UI back to a `DocumentId`.
@@ -521,9 +740,32 @@ mod tests {
 
     #[test]
     fn gutter_matches_line_count() {
-        assert_eq!(gutter_for(""), "1", "an empty buffer still has line 1");
-        assert_eq!(gutter_for("a"), "1");
-        assert_eq!(gutter_for("a\nb\nc"), "1\n2\n3");
+        let mut state = AppState::new();
+        assert!(state.sync_gutter());
+        assert_eq!(state.gutter, "1", "an empty buffer still has line 1");
+
+        state.edit("a\nb\nc".to_owned());
+        assert!(state.sync_gutter());
+        assert_eq!(state.gutter, "1\n2\n3");
+    }
+
+    #[test]
+    fn gutter_is_not_rebuilt_when_the_line_count_is_unchanged() {
+        // The whole point of the cache: typing within a line must not
+        // reallocate a string proportional to the document.
+        let mut state = AppState::new();
+        state.edit("hello".to_owned());
+        assert!(state.sync_gutter());
+
+        state.edit("hello world".to_owned());
+        assert!(
+            !state.sync_gutter(),
+            "same line count must not rebuild the gutter"
+        );
+
+        state.edit("hello\nworld".to_owned());
+        assert!(state.sync_gutter(), "a new line must rebuild it");
+        assert_eq!(state.gutter, "1\n2");
     }
 
     #[test]
@@ -578,10 +820,60 @@ mod tests {
     #[test]
     fn save_without_a_path_reports_that_it_needs_one() {
         let mut state = AppState::new();
-        assert!(
-            !state.save(None),
+        let id = state.workspace.active_id().unwrap();
+        assert_eq!(
+            state.save_document(id, None),
+            SaveResult::NeedsPath,
             "Save on an unsaved document must escalate to Save As, not no-op"
         );
+    }
+
+    #[test]
+    fn a_failed_save_is_not_reported_as_saved() {
+        // The distinction close-on-quit depends on: if this returned Saved,
+        // the buffer would be discarded after a save that never happened.
+        let mut state = AppState::new();
+        let id = state.workspace.active_id().unwrap();
+        state.edit("work".to_owned());
+
+        let unwritable = std::path::PathBuf::from("no-such-dir-xyz").join("note.txt");
+        assert_eq!(
+            state.save_document(id, Some(unwritable)),
+            SaveResult::Failed
+        );
+        assert!(state.error.is_some(), "a failure must be explained");
+        assert!(state.is_dirty(id), "a failed save must not clear dirty");
+    }
+
+    #[test]
+    fn a_successful_save_clears_dirty() {
+        let dir = std::env::temp_dir().join(format!("bpad-ui-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("note.txt");
+
+        let mut state = AppState::new();
+        let id = state.workspace.active_id().unwrap();
+        state.edit("work".to_owned());
+
+        assert_eq!(
+            state.save_document(id, Some(path.clone())),
+            SaveResult::Saved
+        );
+        assert!(!state.is_dirty(id));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "work");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn dirty_tracking_drives_the_close_prompt() {
+        let mut state = AppState::new();
+        let id = state.workspace.active_id().unwrap();
+
+        assert!(!state.is_dirty(id), "a fresh buffer needs no prompt");
+        state.edit("typed".to_owned());
+        assert!(state.is_dirty(id), "an edited buffer must prompt");
+        assert_eq!(state.display_name(id), UNTITLED);
     }
 
     #[test]
@@ -601,7 +893,8 @@ mod tests {
     #[test]
     fn suggested_filename_follows_the_grammar() {
         let state = AppState::new();
-        let name = state.suggested_filename();
+        let id = state.workspace.active_id().unwrap();
+        let name = state.suggested_filename(id);
         assert!(name.starts_with("Untitled_"), "got {name}");
         assert!(name.ends_with(".txt"), "got {name}");
         assert!(SemanticName::parse(&name).is_some(), "got {name}");
