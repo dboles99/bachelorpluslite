@@ -5,10 +5,19 @@
 //! `bp-theme`. The rule from `docs/architecture/ARCHITECTURE.md` runs one
 //! way: the UI may call those, and none of them know this crate exists.
 //!
-//! Text buffers are a `HashMap<DocumentId, String>` here, which is a
-//! placeholder. `bp-buffer` (phase 2) replaces it with a rope; until then the
-//! gutter is rebuilt on every keystroke, which is fine for notes and wrong
-//! for the large files specs.md section 5 promises.
+//! Text is held as a `HashMap<DocumentId, String>` rather than in
+//! `bp-buffer`'s rope, deliberately. Slint's `TextInput` owns its own text
+//! and caret: it hands the whole buffer back on every edit, keeps its own
+//! undo stack, and exposes the caret only through a property marked
+//! "internal, undocumented, only exposed for tests". A rope behind that
+//! widget would be converted to `String` on every push -- worse than the
+//! `String` it replaced.
+//!
+//! That one fact also keeps `bp-editor`'s undo out of the shell and Ln/Col
+//! out of the status bar. All three unblock together, with a custom editor
+//! view that owns its own text. Measured, the current path stays inside a
+//! frame budget to roughly 40 MB; see `--latency-probe` and
+//! `docs/architecture/ARCHITECTURE.md`.
 
 // `deny` rather than `forbid`: Slint's build script generates the window's
 // item tree into this crate, and that generated code needs `unsafe` with a
@@ -150,7 +159,10 @@ impl AppState {
     ///
     /// Returns `true` if the cache changed and the UI needs the new value.
     fn sync_gutter(&mut self) -> bool {
-        let lines = self.active_text().lines().count().max(1);
+        // `bp_buffer::line_count`, not `str::lines()`: the latter ignores a
+        // trailing newline, so every file ending in one -- which is most of
+        // them -- had a gutter one line shorter than the text beside it.
+        let lines = bp_buffer::line_count(self.active_text());
         if self.gutter_lines == lines {
             return false;
         }
@@ -641,7 +653,43 @@ pub fn latency_probe() {
     }
 
     println!();
+    println!("rope insert at the caret (what a custom editor view would cost)");
+    println!(
+        "{:>12}  {:>10}  {:>10}  {:>10}",
+        "doc chars", "p50", "p95", "max"
+    );
+
+    for size in SIZES {
+        let text: String = (0..size)
+            .map(|i| if i % 80 == 79 { '\n' } else { 'x' })
+            .collect();
+        let mut buffer = bp_buffer::Buffer::from_text(&text);
+        let mut timings = Vec::with_capacity(SAMPLES);
+
+        for i in 0..SAMPLES {
+            // Insert mid-document, the worst realistic case for a flat string
+            // and the case a rope exists to make cheap.
+            let at = buffer.len_chars() / 2 + i;
+            let start = std::time::Instant::now();
+            buffer.insert(at, "y");
+            timings.push(start.elapsed());
+        }
+
+        timings.sort_unstable();
+        let at = |q: f64| timings[((timings.len() as f64 * q) as usize).min(timings.len() - 1)];
+        println!(
+            "{size:>12}  {:>8.1}µs  {:>8.1}µs  {:>8.1}µs",
+            at(0.50).as_secs_f64() * 1e6,
+            at(0.95).as_secs_f64() * 1e6,
+            timings[timings.len() - 1].as_secs_f64() * 1e6,
+        );
+    }
+
+    println!();
     println!("Perceptible-latency threshold is roughly 16ms (16000µs) per frame.");
+    println!("The first table grows with document size because Slint hands back the");
+    println!("whole buffer on every edit. The second is what that becomes once the");
+    println!("editor view owns its own text.");
 }
 
 /// Save, escalating to Save As when the document has no path yet.
@@ -757,6 +805,16 @@ mod tests {
         state.edit("a\nb\nc".to_owned());
         assert!(state.sync_gutter());
         assert_eq!(state.gutter, "1\n2\n3");
+    }
+
+    #[test]
+    fn the_gutter_numbers_the_line_after_a_trailing_newline() {
+        // Regression: `str::lines()` reports "a\n" as one line, so the gutter
+        // was a line short for essentially every file on disk.
+        let mut state = AppState::new();
+        state.edit("a\n".to_owned());
+        state.sync_gutter();
+        assert_eq!(state.gutter, "1\n2");
     }
 
     #[test]

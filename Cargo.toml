@@ -7,8 +7,10 @@ resolver = "2"
 # when there is something to put in it.
 members = [
     "apps/bachelorpad",
+    "crates/bp-buffer",
     "crates/bp-config",
     "crates/bp-core",
+    "crates/bp-editor",
     "crates/bp-naming",
     "crates/bp-files",
     "crates/bp-theme",

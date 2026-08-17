@@ -1,0 +1,11 @@
+[package]
+name = "bp-buffer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+# 1.x rather than 2.0.0-beta. The buffer is the one component where a
+# mid-flight API break would ripple through everything above it, and
+# BP-ADR-0015 already weighed API stability heavily.
+ropey = "1"

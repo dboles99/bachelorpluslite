@@ -34,8 +34,8 @@ and this table carries the intent until then.
 | `bp-theme` | **live** | Palettes as data (ADR-0009). | 1 |
 | `bp-config` | **live** | Settings precedence, config file, recovery from bad input. | 1 |
 | `bp-ui` | **live** | The Slint application shell (ADR-0015). | 1 |
-| `bp-buffer` | planned | Rope buffer, memory mapping, huge-file mode. Replaces the `String` map in `bp-ui`. | 2, 4 |
-| `bp-editor` | planned | Editing operations, undo/redo, multi-cursor, line operations. | 2 |
+| `bp-buffer` | **live** | Rope buffer, character indices, line/column maths. Not yet the editor's storage — see below. | 2, 4 |
+| `bp-editor` | **live** | Caret, selection, edits, transaction-based undo/redo. Not yet wired — see below. | 2 |
 | `bp-history` | planned | Revision history, recovery journal, autosave checkpoints. | 3 |
 | `bp-formats` | planned | Format registry and profiles (ADR-0008). | 5 |
 | `bp-data` | planned | Structured-data operations: validate, convert, query, statistics. | 6 |
@@ -76,10 +76,31 @@ to entangle with the UI toolkit. `bp-config` deliberately does not depend on
 `bp-theme`: a theme name from a user's file has to be recoverable when it is
 wrong, so it stays a string until the app resolves it.
 
-## Known placeholders
+## The editor-view boundary
 
-- `bp-ui` stores document text in a `HashMap<DocumentId, String>` and rebuilds
-  the gutter on every keystroke. That is correct for notes and wrong for the
-  large files specs.md section 5 promises; `bp-buffer` replaces it in phase 2.
-- Cursor position in the status bar reports a line count, not a real cursor.
-  It needs editor state that lives in `bp-editor`.
+`bp-buffer` and `bp-editor` exist, are tested, and are **not yet used by the
+shell**. That is deliberate, and it is one cause with three effects.
+
+Slint's `TextInput` owns its own text and caret. It hands the entire buffer
+back on every edit, keeps its own undo stack, and exposes the caret only
+through a property marked *"internal, undocumented, only exposed for tests"*.
+Consequently:
+
+- the rope cannot become the storage — a rope behind that widget means
+  converting to `String` on every push, which is worse than the `String` it
+  would replace;
+- our undo cannot become the authority — two undo stacks over one document is
+  worse than one;
+- the status bar cannot show Ln/Col — the caret is not legitimately readable.
+
+All three unblock together when a custom, virtualised editor view owns the
+text and routes keys itself. Until then the shell keeps
+`HashMap<DocumentId, String>`, which measures fine to roughly 40 MB.
+
+Building the libraries first is the right order: their semantics are provable
+without a window, and the widget is the risky part.
+
+| Document | insert via `String` | insert via rope |
+| ---: | ---: | ---: |
+| 100 KB | 55.8 µs | 0.3 µs |
+| 1 MB | 563.7 µs | 0.3 µs |
