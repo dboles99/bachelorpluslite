@@ -106,6 +106,19 @@ enum SaveResult {
     Failed,
 }
 
+/// What a Note-menu action decided to do.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum NoteOutcome {
+    /// Report something to the user.
+    Show {
+        title: String,
+        body: String,
+    },
+    /// Offer to save under a suggested name.
+    SaveAs,
+    Nothing,
+}
+
 struct AppState {
     workspace: Workspace,
     texts: HashMap<DocumentId, String>,
@@ -133,6 +146,7 @@ struct AppState {
     matches: Vec<bp_search::Match>,
     match_index: usize,
     find_status: String,
+    journal: bp_history::Journal,
 }
 
 impl AppState {
@@ -156,6 +170,57 @@ impl AppState {
             matches: Vec::new(),
             match_index: 0,
             find_status: String::new(),
+            journal: bp_history::Journal::new(recovery_dir()),
+        }
+    }
+
+    /// Write a recovery checkpoint for every unsaved document, and clear the
+    /// journal for those that are now clean.
+    ///
+    /// specs.md section 3 is emphatic that a checkpoint is not a save, and
+    /// `bp-core` enforces that: `record_checkpoint` deliberately leaves the
+    /// document dirty.
+    fn checkpoint_all(&mut self) {
+        let ids: Vec<DocumentId> = self.workspace.iter().map(Document::id).collect();
+        let at = now();
+
+        for id in ids {
+            let Some(doc) = self.workspace.get(id) else {
+                continue;
+            };
+            if !doc.is_dirty() {
+                // Clean means the file holds the work; the journal must not
+                // linger and offer to "recover" a stale copy.
+                let _ = self.journal.discard(id.get());
+                continue;
+            }
+
+            let entry = bp_history::Checkpoint {
+                path: doc.path().map(Path::to_path_buf),
+                name: doc.display_name().to_owned(),
+                text: self.text_of(id).to_owned(),
+                written_at: bp_history::now_unix(),
+            };
+            if self.journal.checkpoint(id.get(), &entry).is_ok()
+                && let Some(doc) = self.workspace.get_mut(id)
+            {
+                doc.record_checkpoint(at);
+            }
+        }
+    }
+
+    /// Open recovered documents as unsaved tabs.
+    fn restore(&mut self, entries: Vec<(u64, bp_history::Checkpoint)>) {
+        for (_, entry) in entries {
+            let id = match entry.path {
+                Some(path) => self.workspace.open_path(path, now()),
+                None => self.workspace.open_new(now()),
+            };
+            self.texts.insert(id, entry.text);
+            // Recovered work is by definition not on disk yet.
+            if let Some(doc) = self.workspace.get_mut(id) {
+                doc.mark_modified();
+            }
         }
     }
 
@@ -237,6 +302,94 @@ impl AppState {
 
     fn recent_path(&self, index: usize) -> Option<PathBuf> {
         self.recent.paths().get(index).cloned()
+    }
+
+    /// Work out what a Note-menu action should do.
+    ///
+    /// Returns a decision rather than acting, so the extraction stays
+    /// testable without a window and the dialogs stay in one place.
+    fn note_action(&self, id: i32) -> NoteOutcome {
+        let text = self.active_text();
+        match id {
+            action::NOTE_TITLE => bp_semantic::suggest_title(text).map_or(
+                NoteOutcome::Show {
+                    title: "Suggest title".to_owned(),
+                    body: "There is nothing in this document to take a title from.".to_owned(),
+                },
+                |title| NoteOutcome::Show {
+                    title: "Suggested title".to_owned(),
+                    body: format!("{title}\n\nUse Note ▸ Semantic Rename to save under this name."),
+                },
+            ),
+
+            // A physical rename needs explicit approval (PROJECT_MEMORY), so
+            // this offers a filename and lets the save dialog be the consent.
+            action::NOTE_RENAME => NoteOutcome::SaveAs,
+
+            action::NOTE_SUMMARY => {
+                let summary = bp_semantic::summary(text, 400);
+                NoteOutcome::Show {
+                    title: "Summary".to_owned(),
+                    body: if summary.is_empty() {
+                        "No prose to summarise.".to_owned()
+                    } else {
+                        summary
+                    },
+                }
+            }
+
+            action::NOTE_KEYWORDS => {
+                let keywords = bp_semantic::keywords(text, 12);
+                NoteOutcome::Show {
+                    title: "Keywords".to_owned(),
+                    body: if keywords.is_empty() {
+                        "No distinctive words found.".to_owned()
+                    } else {
+                        keywords.join(", ")
+                    },
+                }
+            }
+
+            action::NOTE_OUTLINE => {
+                let outline = bp_semantic::outline(text);
+                NoteOutcome::Show {
+                    title: "Outline".to_owned(),
+                    body: if outline.is_empty() {
+                        "No headings in this document.".to_owned()
+                    } else {
+                        outline
+                            .iter()
+                            .map(|h| {
+                                format!(
+                                    "{}{}  (line {})",
+                                    "    ".repeat(h.level.saturating_sub(1)),
+                                    h.text,
+                                    h.line
+                                )
+                            })
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    },
+                }
+            }
+
+            _ => NoteOutcome::Nothing,
+        }
+    }
+
+    /// A filename suggested from the document's own content.
+    ///
+    /// Falls back to the document's title when there is nothing to extract,
+    /// so Save As always has something to offer.
+    fn semantic_filename(&self, id: DocumentId) -> Option<String> {
+        let doc = self.workspace.get(id)?;
+        let title = bp_semantic::suggest_title(self.text_of(id))?;
+        let extension = doc
+            .path()
+            .and_then(Path::extension)
+            .and_then(|e| e.to_str())
+            .unwrap_or("txt");
+        Some(SemanticName::new(&title, doc.created_at().date(), extension).to_filename())
     }
 
     /// What the active document is, by extension then by content.
@@ -490,11 +643,17 @@ impl AppState {
     }
 
     /// A default filename for Save As, in the grammar from ADR-0003.
+    ///
+    /// Prefers a title extracted from the document's own content — that is
+    /// the "Semantic Filing Apparatus" doing its job — and falls back to the
+    /// document's title when there is nothing to extract.
     fn suggested_filename(&self, id: DocumentId) -> String {
-        self.workspace.get(id).map_or_else(
-            || "Untitled.txt".to_owned(),
-            |doc| SemanticName::new(doc.title(), doc.created_at().date(), "txt").to_filename(),
-        )
+        self.semantic_filename(id).unwrap_or_else(|| {
+            self.workspace.get(id).map_or_else(
+                || "Untitled.txt".to_owned(),
+                |doc| SemanticName::new(doc.title(), doc.created_at().date(), "txt").to_filename(),
+            )
+        })
     }
 
     fn close(&mut self, id: DocumentId) {
@@ -528,17 +687,25 @@ impl AppState {
 
 /// Status-bar save state, per specs.md section 3.
 fn save_state_label(doc: &Document) -> String {
-    if doc.is_dirty() {
-        doc.last_disk_save().map_or_else(
-            || "● Unsaved".to_owned(),
-            |t| format!("● Unsaved │ Last disk save {}", clock(t.get())),
-        )
-    } else {
-        doc.last_disk_save().map_or_else(
+    if !doc.is_dirty() {
+        return doc.last_disk_save().map_or_else(
             || "● Never saved".to_owned(),
             |t| format!("✓ Saved {}", clock(t.get())),
-        )
+        );
     }
+
+    // specs.md section 3's unsaved form: the recovery checkpoint and the last
+    // real disk save, side by side and never confused for one another. The
+    // whole reason `CheckpointTime` and `DiskSaveTime` are different types is
+    // so this line cannot accidentally claim the work is safe.
+    let mut parts = vec!["● Unsaved".to_owned()];
+    if let Some(checkpoint) = doc.last_checkpoint() {
+        parts.push(format!("Recovery {}", clock(checkpoint.get())));
+    }
+    if let Some(saved) = doc.last_disk_save() {
+        parts.push(format!("Last disk save {}", clock(saved.get())));
+    }
+    parts.join(" │ ")
 }
 
 fn apply_theme(ui: &AppWindow, theme: ThemeId) {
@@ -630,6 +797,7 @@ fn refresh(ui: &AppWindow, state: &mut AppState, push_text: PushText) {
         ui.set_format_items(model(menus::format(doc.encoding(), doc.line_ending())));
     }
     ui.set_data_items(model(menus::data(format)));
+    ui.set_note_items(model(menus::note(!state.active_text().trim().is_empty())));
 }
 
 /// Menus whose contents never change. Set once, not on every refresh.
@@ -638,7 +806,6 @@ fn set_static_menus(ui: &AppWindow) {
     ui.set_edit_items(model(menus::edit()));
     ui.set_help_items(model(menus::help()));
     ui.set_insert_items(model(menus::planned_menu("Insert")));
-    ui.set_note_items(model(menus::planned_menu("Note")));
     ui.set_notebook_items(model(menus::planned_menu("Notebook")));
     ui.set_organize_items(model(menus::planned_menu("Organize")));
     ui.set_research_items(model(menus::planned_menu("Research")));
@@ -703,6 +870,17 @@ fn pick_save_path(state: &AppState, id: DocumentId) -> Option<PathBuf> {
         .set_directory(state.dialog_directory())
         .set_file_name(state.suggested_filename(id))
         .save_file()
+}
+
+/// Where recovery checkpoints live: beside the config file, in `recovery/`.
+///
+/// The `.gitignore` already excludes `/recovery`, and this is deliberately a
+/// path the user can be told — it holds copies of their unsaved work.
+fn recovery_dir() -> PathBuf {
+    bp_config::config_path().map_or_else(
+        || PathBuf::from("recovery"),
+        |p| p.with_file_name("recovery"),
+    )
 }
 
 /// Select a character range in the editor.
@@ -806,6 +984,37 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
             && initial.workspace.len() > 1
         {
             initial.close(blank);
+        }
+    }
+
+    // Offer to recover anything a previous session left unsaved, before the
+    // window appears — so nobody starts typing over work they have not been
+    // told about.
+    initial.journal.clean_temporaries();
+    let pending = initial.journal.pending();
+    if !pending.is_empty() {
+        let names: Vec<&str> = pending
+            .iter()
+            .map(|(_, c)| c.name.as_str())
+            .take(5)
+            .collect();
+        let answer = rfd::MessageDialog::new()
+            .set_level(rfd::MessageLevel::Warning)
+            .set_title("Unsaved work recovered")
+            .set_description(format!(
+                "BachelorPad+ closed with {} unsaved document(s):\n\n{}\n\nRestore them?",
+                pending.len(),
+                names.join("\n")
+            ))
+            .set_buttons(rfd::MessageButtons::YesNo)
+            .show();
+
+        if answer == rfd::MessageDialogResult::Yes {
+            initial.restore(pending);
+        } else {
+            // Declining is a decision; honour it rather than asking again
+            // every launch.
+            let _ = initial.journal.discard_all();
         }
     }
 
@@ -1071,6 +1280,23 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
                     ),
                 ),
 
+                id if (action::NOTE_TITLE..=action::NOTE_OUTLINE).contains(&id) => {
+                    let outcome = cell.borrow().note_action(id);
+                    match outcome {
+                        NoteOutcome::Show { title, body } => show_info(&title, &body),
+                        NoteOutcome::SaveAs => {
+                            let target = cell.borrow().workspace.active_id();
+                            if let Some(doc_id) = target {
+                                let chosen = pick_save_path(&cell.borrow(), doc_id);
+                                if let Some(path) = chosen {
+                                    cell.borrow_mut().save_document(doc_id, Some(path));
+                                }
+                            }
+                        }
+                        NoteOutcome::Nothing => {}
+                    }
+                }
+
                 id if (action::DATA_VALIDATE..=action::DATA_REPORT).contains(&id) => {
                     cell.borrow_mut().run_data_action(id);
                 }
@@ -1157,6 +1383,28 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
             ui.set_find_status(cell.borrow().find_status.as_str().into());
             refresh(&ui, &mut cell.borrow_mut(), PushText::Yes);
         });
+    }
+
+    // Autosave to the recovery journal. Separate from the disk watcher
+    // because they answer different questions on different clocks: "did
+    // someone else change this file" and "is my work safe if the power goes".
+    let journal_timer = slint::Timer::default();
+    {
+        let cell = Rc::clone(&state);
+        let weak = ui.as_weak();
+        journal_timer.start(
+            slint::TimerMode::Repeated,
+            std::time::Duration::from_secs(5),
+            move || {
+                cell.borrow_mut().checkpoint_all();
+                // The status bar shows the checkpoint time, so it has to
+                // repaint -- but a checkpoint is not a save and the save
+                // state must not move.
+                if let Some(ui) = weak.upgrade() {
+                    refresh(&ui, &mut cell.borrow_mut(), PushText::No);
+                }
+            },
+        );
     }
 
     // Watch the file on disk. Polling two numbers every couple of seconds is
@@ -1479,6 +1727,41 @@ mod tests {
             save_state_label(state.workspace.active().unwrap()),
             "✓ Saved 8:05 PM"
         );
+    }
+
+    #[test]
+    fn a_recovery_checkpoint_shows_beside_the_disk_save_not_instead_of_it() {
+        // specs.md section 3. The failure this guards against is a status bar
+        // that says "saved" because a checkpoint happened.
+        let mut state = AppState::new();
+        let id = state.workspace.active_id().unwrap();
+        let doc = state.workspace.get_mut(id).unwrap();
+        doc.record_disk_save(datetime!(2026-08-16 20:01 UTC));
+        doc.mark_modified();
+        doc.record_checkpoint(datetime!(2026-08-16 20:05 UTC));
+
+        let label = save_state_label(state.workspace.active().unwrap());
+        assert_eq!(
+            label,
+            "● Unsaved │ Recovery 8:05 PM │ Last disk save 8:01 PM"
+        );
+        assert!(!label.contains("Saved 8:05"), "a checkpoint is not a save");
+    }
+
+    #[test]
+    fn a_checkpoint_alone_never_reads_as_saved() {
+        let mut state = AppState::new();
+        let id = state.workspace.active_id().unwrap();
+        state.edit("work".to_owned());
+        state
+            .workspace
+            .get_mut(id)
+            .unwrap()
+            .record_checkpoint(datetime!(2026-08-16 20:05 UTC));
+
+        let label = save_state_label(state.workspace.active().unwrap());
+        assert_eq!(label, "● Unsaved │ Recovery 8:05 PM");
+        assert!(!label.contains('✓'));
     }
 
     #[test]

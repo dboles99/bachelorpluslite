@@ -10,7 +10,9 @@ bp-config = { path = "../bp-config" }
 bp-core = { path = "../bp-core" }
 bp-data = { path = "../bp-data" }
 bp-formats = { path = "../bp-formats" }
+bp-history = { path = "../bp-history" }
 bp-search = { path = "../bp-search" }
+bp-semantic = { path = "../bp-semantic" }
 bp-files = { path = "../bp-files" }
 bp-naming = { path = "../bp-naming" }
 bp-theme = { path = "../bp-theme" }

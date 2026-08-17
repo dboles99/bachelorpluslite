@@ -704,6 +704,15 @@ name = "bp-formats"
 version = "0.1.0"
 
 [[package]]
+name = "bp-history"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "bp-naming"
 version = "0.1.0"
 dependencies = [
@@ -718,6 +727,10 @@ dependencies = [
  "regex",
  "thiserror 2.0.20",
 ]
+
+[[package]]
+name = "bp-semantic"
+version = "0.1.0"
 
 [[package]]
 name = "bp-theme"
@@ -737,8 +750,10 @@ dependencies = [
  "bp-data",
  "bp-files",
  "bp-formats",
+ "bp-history",
  "bp-naming",
  "bp-search",
+ "bp-semantic",
  "bp-theme",
  "rfd",
  "slint",

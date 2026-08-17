@@ -70,8 +70,11 @@ pub struct Palette {
 pub enum ThemeId {
     Light,
     Dark,
-    #[default]
     Organic,
+    /// The default. Changing this changes what every new installation opens
+    /// to, so it is pinned by a test rather than left to whichever variant
+    /// happens to be listed first.
+    #[default]
     Green,
 }
 
@@ -228,6 +231,12 @@ mod tests {
             let delta = (lum(p.ink) - lum(p.panel)).abs();
             assert!(delta > 80.0, "{} ink/panel delta only {delta}", id.name());
         }
+    }
+
+    #[test]
+    fn the_default_theme_is_green() {
+        // What a new installation opens to. Deliberate, not incidental.
+        assert_eq!(ThemeId::default(), ThemeId::Green);
     }
 
     #[test]

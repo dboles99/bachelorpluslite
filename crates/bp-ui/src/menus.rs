@@ -43,6 +43,12 @@ pub mod action {
     pub const SHORTCUTS: i32 = 50;
     pub const ABOUT: i32 = 51;
 
+    pub const NOTE_TITLE: i32 = 80;
+    pub const NOTE_RENAME: i32 = 81;
+    pub const NOTE_SUMMARY: i32 = 82;
+    pub const NOTE_KEYWORDS: i32 = 83;
+    pub const NOTE_OUTLINE: i32 = 84;
+
     pub const DATA_VALIDATE: i32 = 70;
     pub const DATA_FORMAT: i32 = 71;
     pub const DATA_MINIFY: i32 = 72;
@@ -266,6 +272,42 @@ pub fn data(format: Format) -> Vec<MenuItem> {
             items
         }
     }
+}
+
+/// The Note menu: what the document says about itself.
+///
+/// Everything here is deterministic extraction (specs.md section 10, layer
+/// one). Nothing needs a model or a network, per ADR-0006.
+pub fn note(has_content: bool) -> Vec<MenuItem> {
+    vec![
+        MenuItem {
+            enabled: has_content,
+            ..row("Suggest Title", "", action::NOTE_TITLE)
+        },
+        MenuItem {
+            enabled: has_content,
+            // "Rename" is really Save As with a suggested name: a physical
+            // rename needs explicit approval (PROJECT_MEMORY), and a file
+            // dialog *is* that approval.
+            ..row_end("Semantic Rename...", "", action::NOTE_RENAME)
+        },
+        MenuItem {
+            enabled: has_content,
+            ..row("Summary", "", action::NOTE_SUMMARY)
+        },
+        MenuItem {
+            enabled: has_content,
+            ..row("Keywords", "", action::NOTE_KEYWORDS)
+        },
+        MenuItem {
+            enabled: has_content,
+            ..row_end("Outline", "", action::NOTE_OUTLINE)
+        },
+        planned("Tags"),
+        planned("Related Notes"),
+        planned("Revision History"),
+        arrives("phase 9"),
+    ]
 }
 
 pub fn help() -> Vec<MenuItem> {
