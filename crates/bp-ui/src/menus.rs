@@ -10,6 +10,7 @@
 //! names the phase it arrives in, so the UI doubles as the roadmap.
 
 use bp_core::{Encoding, LineEnding};
+use bp_formats::Format;
 use bp_theme::ThemeId;
 
 use crate::MenuItem;
@@ -41,6 +42,13 @@ pub mod action {
 
     pub const SHORTCUTS: i32 = 50;
     pub const ABOUT: i32 = 51;
+
+    pub const DATA_VALIDATE: i32 = 70;
+    pub const DATA_FORMAT: i32 = 71;
+    pub const DATA_MINIFY: i32 = 72;
+    pub const DATA_TO_JSONL: i32 = 73;
+    pub const DATA_TO_JSON: i32 = 74;
+    pub const DATA_REPORT: i32 = 75;
 
     /// Recently-opened files occupy `RECENT_BASE .. RECENT_BASE + MAX_RECENT`.
     /// The range is sized to the list so a longer list cannot silently run
@@ -224,6 +232,40 @@ pub fn format(encoding: Encoding, line_ending: LineEnding) -> Vec<MenuItem> {
         planned("Indentation"),
         arrives("phase 5"),
     ]
+}
+
+/// The Data menu, which depends entirely on what the document is.
+///
+/// Offering "Minify" on a note would be noise, and offering it greyed on
+/// every note would be worse. A format that has no data operations gets the
+/// planned list instead.
+pub fn data(format: Format) -> Vec<MenuItem> {
+    match format {
+        Format::Json => vec![
+            row_end("Validate", "", action::DATA_VALIDATE),
+            row("Format", "", action::DATA_FORMAT),
+            row("Minify", "", action::DATA_MINIFY),
+            row_end("Sort Keys", "", action::DATA_FORMAT),
+            row("Convert to JSON Lines", "", action::DATA_TO_JSONL),
+        ],
+        Format::JsonLines => vec![
+            row_end("Validate", "", action::DATA_VALIDATE),
+            row("Convert to JSON", "", action::DATA_TO_JSON),
+        ],
+        Format::Toml => vec![
+            row_end("Validate", "", action::DATA_VALIDATE),
+            row("Format", "", action::DATA_FORMAT),
+        ],
+        Format::Csv | Format::Tsv => vec![row("Report Shape", "", action::DATA_REPORT)],
+        _ => {
+            let mut items = planned_menu("Data");
+            items.insert(
+                0,
+                planned(&format!("— nothing for {} documents", format.label())),
+            );
+            items
+        }
+    }
 }
 
 pub fn help() -> Vec<MenuItem> {

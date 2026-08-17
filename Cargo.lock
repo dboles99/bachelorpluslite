@@ -672,6 +672,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "bp-data"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "toml",
+]
+
+[[package]]
 name = "bp-editor"
 version = "0.1.0"
 dependencies = [
@@ -688,6 +698,10 @@ dependencies = [
  "thiserror 2.0.20",
  "time",
 ]
+
+[[package]]
+name = "bp-formats"
+version = "0.1.0"
 
 [[package]]
 name = "bp-naming"
@@ -712,7 +726,9 @@ dependencies = [
  "bp-buffer",
  "bp-config",
  "bp-core",
+ "bp-data",
  "bp-files",
+ "bp-formats",
  "bp-naming",
  "bp-theme",
  "rfd",

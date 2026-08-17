@@ -34,6 +34,7 @@ use std::rc::Rc;
 use bp_config::Recent;
 use bp_core::{Document, DocumentId, Encoding, LineEnding, UNTITLED, Workspace};
 use bp_files::{DiskState, FileStamp, SaveOptions, atomic_write, load};
+use bp_formats::Format;
 use bp_naming::SemanticName;
 use bp_theme::{Palette as ThemePalette, ThemeId};
 use time::OffsetDateTime;
@@ -184,6 +185,66 @@ impl AppState {
 
     fn recent_path(&self, index: usize) -> Option<PathBuf> {
         self.recent.paths().get(index).cloned()
+    }
+
+    /// What the active document is, by extension then by content.
+    fn format(&self) -> Format {
+        let path = self.workspace.active().and_then(Document::path);
+        bp_formats::detect(path, self.active_text())
+    }
+
+    /// Replace the active document's text with the result of a data
+    /// operation, leaving it unsaved.
+    ///
+    /// Applied as an ordinary edit: the user can undo it, and nothing reaches
+    /// disk until they save.
+    fn apply_to_active(&mut self, result: Result<String, bp_data::DataError>) {
+        match result {
+            Ok(text) => {
+                self.error = None;
+                self.edit(text);
+            }
+            Err(e) => self.error = Some(e.to_string()),
+        }
+    }
+
+    /// Run a data operation, reporting the outcome in the status bar.
+    fn run_data_action(&mut self, id: i32) {
+        let text = self.active_text().to_owned();
+        match (id, self.format()) {
+            (action::DATA_VALIDATE, Format::Json) => {
+                self.error = Some(match bp_data::json_validate(&text) {
+                    Ok(()) => "✓ valid JSON".to_owned(),
+                    Err(e) => format!("invalid JSON — {e}"),
+                });
+            }
+            (action::DATA_VALIDATE, Format::JsonLines) => {
+                self.error = Some(bp_data::jsonl_validate(&text).summary());
+            }
+            (action::DATA_VALIDATE, Format::Toml) => {
+                self.error = Some(match bp_data::toml_validate(&text) {
+                    Ok(()) => "✓ valid TOML".to_owned(),
+                    Err(e) => format!("invalid TOML — {e}"),
+                });
+            }
+            (action::DATA_FORMAT, Format::Json) => {
+                self.apply_to_active(bp_data::json_format(&text));
+            }
+            (action::DATA_FORMAT, Format::Toml) => {
+                self.apply_to_active(bp_data::toml_format(&text));
+            }
+            (action::DATA_MINIFY, Format::Json) => {
+                self.apply_to_active(bp_data::json_minify(&text));
+            }
+            (action::DATA_TO_JSONL, _) => self.apply_to_active(bp_data::json_to_jsonl(&text)),
+            (action::DATA_TO_JSON, _) => self.apply_to_active(bp_data::jsonl_to_json(&text)),
+            (action::DATA_REPORT, _) => {
+                self.error = Some(bp_data::delimited_report(&text).summary());
+            }
+            // A row that does not apply to this format. The menu should not
+            // have offered it; doing nothing is better than guessing.
+            _ => {}
+        }
     }
 
     /// Discard edits and re-read the active document from disk.
@@ -474,6 +535,7 @@ fn refresh(ui: &AppWindow, state: &mut AppState, push_text: PushText) {
         ui.set_gutter(state.gutter.as_str().into());
     }
     let lines = state.gutter_lines;
+    let format = state.format();
 
     if let Some(doc) = state.workspace.active() {
         ui.set_save_state(save_state_label(doc).into());
@@ -481,7 +543,7 @@ fn refresh(ui: &AppWindow, state: &mut AppState, push_text: PushText) {
         ui.set_location(doc.location_label().into());
         ui.set_encoding_label(doc.encoding().label().into());
         ui.set_line_ending_label(doc.line_ending().label().into());
-        ui.set_format_label("TXT".into());
+        ui.set_format_label(format.label().into());
         ui.set_cursor_label(format!("{lines} lines").into());
     }
 
@@ -515,6 +577,7 @@ fn refresh(ui: &AppWindow, state: &mut AppState, push_text: PushText) {
     if let Some(doc) = state.workspace.active() {
         ui.set_format_items(model(menus::format(doc.encoding(), doc.line_ending())));
     }
+    ui.set_data_items(model(menus::data(format)));
 }
 
 /// Menus whose contents never change. Set once, not on every refresh.
@@ -523,7 +586,6 @@ fn set_static_menus(ui: &AppWindow) {
     ui.set_edit_items(model(menus::edit()));
     ui.set_help_items(model(menus::help()));
     ui.set_insert_items(model(menus::planned_menu("Insert")));
-    ui.set_data_items(model(menus::planned_menu("Data")));
     ui.set_note_items(model(menus::planned_menu("Note")));
     ui.set_notebook_items(model(menus::planned_menu("Notebook")));
     ui.set_organize_items(model(menus::planned_menu("Organize")));
@@ -946,6 +1008,10 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
                         std::env::var("SLINT_BACKEND").unwrap_or_else(|_| "software".to_owned()),
                     ),
                 ),
+
+                id if (action::DATA_VALIDATE..=action::DATA_REPORT).contains(&id) => {
+                    cell.borrow_mut().run_data_action(id);
+                }
 
                 // Recently opened files.
                 id if (action::RECENT_BASE..100).contains(&id) => {
