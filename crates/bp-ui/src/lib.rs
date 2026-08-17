@@ -31,8 +31,9 @@ use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
+use bp_config::Recent;
 use bp_core::{Document, DocumentId, Encoding, LineEnding, UNTITLED, Workspace};
-use bp_files::{SaveOptions, atomic_write, load};
+use bp_files::{DiskState, FileStamp, SaveOptions, atomic_write, load};
 use bp_naming::SemanticName;
 use bp_theme::{Palette as ThemePalette, ThemeId};
 use time::OffsetDateTime;
@@ -120,6 +121,13 @@ struct AppState {
     gutter_lines: usize,
     show_gutter: bool,
     wrap_text: bool,
+    /// What each document's file looked like when we last read or wrote it,
+    /// so an edit made by another program can be noticed.
+    stamps: HashMap<DocumentId, FileStamp>,
+    recent: Recent,
+    /// Standing warning about the file on disk. Distinct from `error`, which
+    /// reports something that just failed; this persists until resolved.
+    disk_warning: Option<String>,
 }
 
 impl AppState {
@@ -137,7 +145,45 @@ impl AppState {
             gutter_lines: usize::MAX,
             show_gutter: true,
             wrap_text: false,
+            stamps: HashMap::new(),
+            recent: bp_config::load_recent(),
+            disk_warning: None,
         }
+    }
+
+    /// Note that this document and its file are in step, and remember the
+    /// file as recently used.
+    fn mark_in_step(&mut self, id: DocumentId, path: &Path) {
+        if let Some(stamp) = FileStamp::of(path) {
+            self.stamps.insert(id, stamp);
+        }
+        self.disk_warning = None;
+        self.recent.push(path);
+        bp_config::save_recent(&self.recent);
+    }
+
+    /// How the active document's file compares with what we last saw.
+    fn disk_state(&self) -> Option<DiskState> {
+        let id = self.workspace.active_id()?;
+        let path = self.workspace.get(id)?.path()?;
+        Some(bp_files::check(path, *self.stamps.get(&id)?))
+    }
+
+    /// Refresh the standing warning about the file on disk.
+    fn poll_disk(&mut self) {
+        self.disk_warning = match self.disk_state() {
+            Some(DiskState::Modified) => {
+                Some("⚠ changed on disk by another program — File ▸ Reload from Disk".to_owned())
+            }
+            Some(DiskState::Missing) => {
+                Some("⚠ no longer on disk — Save will write it again".to_owned())
+            }
+            _ => None,
+        };
+    }
+
+    fn recent_path(&self, index: usize) -> Option<PathBuf> {
+        self.recent.paths().get(index).cloned()
     }
 
     /// Discard edits and re-read the active document from disk.
@@ -163,6 +209,7 @@ impl AppState {
                     doc.record_disk_save(now());
                 }
                 self.texts.insert(id, file.text);
+                self.mark_in_step(id, &path);
             }
             Err(e) => self.error = Some(e.to_string()),
         }
@@ -242,6 +289,7 @@ impl AppState {
 
     fn open(&mut self, path: PathBuf) {
         self.error = None;
+        let path2 = path.clone();
         match load(&path) {
             Ok(file) => {
                 let id = self.workspace.open_path(path, now());
@@ -250,6 +298,7 @@ impl AppState {
                     doc.set_line_ending(file.line_ending);
                 }
                 self.texts.insert(id, file.text);
+                self.mark_in_step(id, &path2);
             }
             // The error types already render a message naming the file and
             // what to do about it, which is exactly what the status bar wants.
@@ -282,10 +331,13 @@ impl AppState {
         match atomic_write(&target, &bytes, SaveOptions::default()) {
             Ok(_) => {
                 if let Some(doc) = self.workspace.get_mut(id) {
-                    doc.set_path(target);
+                    doc.set_path(target.clone());
                     // Only now, after a verified write, is the document clean.
                     doc.record_disk_save(now());
                 }
+                // Re-stamp from what we just wrote, or our own save would
+                // look like somebody else's change on the next poll.
+                self.mark_in_step(id, &target);
                 SaveResult::Saved
             }
             Err(e) => {
@@ -293,6 +345,18 @@ impl AppState {
                 SaveResult::Failed
             }
         }
+    }
+
+    /// True if `id`'s file changed underneath us since we last read or wrote
+    /// it — meaning a save would overwrite somebody else's work.
+    fn would_overwrite_external_change(&self, id: DocumentId) -> bool {
+        let Some(path) = self.workspace.get(id).and_then(Document::path) else {
+            return false;
+        };
+        let Some(stamp) = self.stamps.get(&id) else {
+            return false;
+        };
+        bp_files::check(path, *stamp) == DiskState::Modified
     }
 
     /// Where a file dialog should open.
@@ -421,7 +485,13 @@ fn refresh(ui: &AppWindow, state: &mut AppState, push_text: PushText) {
         ui.set_cursor_label(format!("{lines} lines").into());
     }
 
-    ui.set_error_message(state.error.as_deref().unwrap_or_default().into());
+    // Something that just failed outranks a standing warning about the file.
+    let notice = state
+        .error
+        .as_deref()
+        .or(state.disk_warning.as_deref())
+        .unwrap_or_default();
+    ui.set_error_message(notice.into());
 
     ui.set_show_gutter(state.show_gutter);
     ui.set_wrap_text(state.wrap_text);
@@ -432,7 +502,11 @@ fn refresh(ui: &AppWindow, state: &mut AppState, push_text: PushText) {
     let has_path = state.workspace.active().and_then(Document::path).is_some();
     let model = |items: Vec<MenuItem>| slint::ModelRc::new(slint::VecModel::from(items));
 
-    ui.set_file_items(model(menus::file(any_dirty, has_path)));
+    ui.set_file_items(model(menus::file(
+        any_dirty,
+        has_path,
+        state.recent.paths(),
+    )));
     ui.set_view_items(model(menus::view(
         state.theme,
         state.show_gutter,
@@ -555,6 +629,8 @@ pub struct RunOptions {
     /// Shown in the status bar at startup, where configuration problems go.
     /// A warning the user cannot see is a warning they will hit again.
     pub startup_notice: Option<String>,
+    /// Files named on the command line, opened at startup (specs.md §19).
+    pub files: Vec<PathBuf>,
     /// Print `BPSPIKE_READY_MS=<f64>` once the first frame has been rendered,
     /// then quit. Drives `scripts/Measure-UiSpike.ps1`.
     ///
@@ -593,6 +669,22 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
         initial.theme = theme;
     }
     initial.error = options.startup_notice.clone();
+
+    // Files from the command line. The first one replaces the empty document
+    // opened at startup, so `bachelorpad note.txt` shows one tab rather than
+    // an untouched Untitled beside it.
+    if !options.files.is_empty() {
+        let blank = initial.workspace.active_id();
+        for path in &options.files {
+            initial.open(path.clone());
+        }
+        if let Some(blank) = blank
+            && initial.workspace.len() > 1
+        {
+            initial.close(blank);
+        }
+    }
+
     let state = Rc::new(RefCell::new(initial));
 
     let mut reported = false;
@@ -855,6 +947,15 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
                     ),
                 ),
 
+                // Recently opened files.
+                id if (action::RECENT_BASE..100).contains(&id) => {
+                    let index = usize::try_from(id - action::RECENT_BASE).unwrap_or(0);
+                    let path = cell.borrow().recent_path(index);
+                    if let Some(path) = path {
+                        cell.borrow_mut().open(path);
+                    }
+                }
+
                 // action::NONE and anything unrecognised: a row that exists
                 // to describe what is coming.
                 _ => return,
@@ -865,9 +966,37 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
         });
     }
 
+    // Watch the file on disk. Polling two numbers every couple of seconds is
+    // cheap, needs no dependency and no background thread pushing events into
+    // this loop, and behaves identically on both platforms. Must outlive the
+    // event loop, hence the binding.
+    let disk_timer = slint::Timer::default();
+    {
+        let cell = Rc::clone(&state);
+        let weak = ui.as_weak();
+        disk_timer.start(
+            slint::TimerMode::Repeated,
+            std::time::Duration::from_secs(2),
+            move || {
+                let changed = {
+                    let mut s = cell.borrow_mut();
+                    let before = s.disk_warning.clone();
+                    s.poll_disk();
+                    before != s.disk_warning
+                };
+                // Only touch the UI when the answer actually changed; a
+                // two-second repaint of an unchanged status bar is waste.
+                if changed && let Some(ui) = weak.upgrade() {
+                    refresh(&ui, &mut cell.borrow_mut(), PushText::No);
+                }
+            },
+        );
+    }
+
     set_static_menus(&ui);
     refresh(&ui, &mut state.borrow_mut(), PushText::Yes);
     ui.run()?;
+    drop(disk_timer);
     Ok(())
 }
 
@@ -964,10 +1093,30 @@ pub fn latency_probe() {
     println!("editor view owns its own text.");
 }
 
-/// Save, escalating to Save As when the document has no path yet.
+/// Save, escalating to Save As when the document has no path yet, and asking
+/// first if the file changed underneath us.
 ///
-/// Save on a never-saved document must not silently do nothing.
+/// Save on a never-saved document must not silently do nothing, and Save on a
+/// file somebody else edited must not silently discard their work.
 fn save_with_prompt(state: &mut AppState, id: DocumentId) -> SaveResult {
+    if state.would_overwrite_external_change(id) {
+        let name = state.display_name(id);
+        let answer = rfd::MessageDialog::new()
+            .set_level(rfd::MessageLevel::Warning)
+            .set_title("Changed on disk")
+            .set_description(format!(
+                "{name} has changed on disk since you opened it.\n\n\
+                 Saving will overwrite those changes. Save anyway?"
+            ))
+            .set_buttons(rfd::MessageButtons::YesNo)
+            .show();
+        if answer != rfd::MessageDialogResult::Yes {
+            // Not a failure -- a refusal. Nothing was written either way, so
+            // the caller must not treat it as saved.
+            return SaveResult::NeedsPath;
+        }
+    }
+
     match state.save_document(id, None) {
         SaveResult::NeedsPath => {
             match pick_save_path(state, id) {

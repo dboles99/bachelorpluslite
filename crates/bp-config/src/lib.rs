@@ -24,6 +24,9 @@ use std::path::PathBuf;
 
 use serde::Deserialize;
 
+pub mod recent;
+pub use recent::{MAX_RECENT, Recent, load_recent, save_recent};
+
 /// Crate identity used by workspace smoke tests and diagnostics.
 pub const CRATE_NAME: &str = "bp-config";
 

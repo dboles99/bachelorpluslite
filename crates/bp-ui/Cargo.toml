@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 bp-buffer = { path = "../bp-buffer" }
+bp-config = { path = "../bp-config" }
 bp-core = { path = "../bp-core" }
 bp-files = { path = "../bp-files" }
 bp-naming = { path = "../bp-naming" }

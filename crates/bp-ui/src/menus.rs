@@ -42,6 +42,11 @@ pub mod action {
     pub const SHORTCUTS: i32 = 50;
     pub const ABOUT: i32 = 51;
 
+    /// Recently-opened files occupy `RECENT_BASE .. RECENT_BASE + MAX_RECENT`.
+    /// The range is sized to the list so a longer list cannot silently run
+    /// into the editor ids at 100.
+    pub const RECENT_BASE: i32 = 60;
+
     // Slint-handled; these never reach `menu-action`.
     pub const UNDO: i32 = 100;
     pub const REDO: i32 = 101;
@@ -98,10 +103,37 @@ fn arrives(phase: &str) -> MenuItem {
     planned(&format!("— not implemented yet ({phase})"))
 }
 
-pub fn file(any_dirty: bool, has_path: bool) -> Vec<MenuItem> {
-    vec![
+pub fn file(any_dirty: bool, has_path: bool, recent: &[std::path::PathBuf]) -> Vec<MenuItem> {
+    let mut items = vec![
         row("New", "Ctrl+N", action::NEW),
         row_end("Open...", "Ctrl+O", action::OPEN),
+    ];
+
+    // Recently opened, most recent first. Shown by file name with the parent
+    // folder as the right-hand hint, because a column of identical
+    // "Untitled_17AUG2026.txt" tells you nothing about which is which.
+    for (index, path) in recent.iter().take(bp_config::MAX_RECENT).enumerate() {
+        let name = path.file_name().map_or_else(
+            || path.display().to_string(),
+            |n| n.to_string_lossy().into(),
+        );
+        let parent = path
+            .parent()
+            .map(|p| p.display().to_string())
+            .unwrap_or_default();
+        items.push(row(
+            &name,
+            &shorten(&parent, 34),
+            action::RECENT_BASE + i32::try_from(index).unwrap_or(0),
+        ));
+    }
+    if !recent.is_empty()
+        && let Some(last) = items.last_mut()
+    {
+        last.separator_after = true;
+    }
+
+    items.extend([
         row("Save", "Ctrl+S", action::SAVE),
         row("Save As...", "Ctrl+Shift+S", action::SAVE_AS),
         MenuItem {
@@ -115,7 +147,23 @@ pub fn file(any_dirty: bool, has_path: bool) -> Vec<MenuItem> {
             ..row_end("Reload from Disk", "", action::RELOAD)
         },
         row("Close Tab", "Ctrl+W", action::CLOSE_TAB),
-    ]
+    ]);
+    items
+}
+
+/// Trim a path for the menu's right-hand hint, keeping the tail.
+///
+/// The end of a path identifies it; the start is usually `C:\Users\...`,
+/// which every entry shares.
+fn shorten(text: &str, max: usize) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    if chars.len() <= max {
+        return text.to_owned();
+    }
+    let tail: String = chars[chars.len() - max.saturating_sub(1)..]
+        .iter()
+        .collect();
+    format!("…{tail}")
 }
 
 pub fn edit() -> Vec<MenuItem> {
@@ -292,21 +340,21 @@ mod tests {
 
     #[test]
     fn save_all_is_disabled_when_nothing_is_unsaved() {
-        let items = file(false, true);
+        let items = file(false, true, &[]);
         let save_all = items
             .iter()
             .find(|i| i.action == action::SAVE_ALL)
             .expect("Save All");
         assert!(!save_all.enabled);
 
-        let items = file(true, true);
+        let items = file(true, true, &[]);
         let save_all = items.iter().find(|i| i.action == action::SAVE_ALL).unwrap();
         assert!(save_all.enabled);
     }
 
     #[test]
     fn reload_needs_a_file_to_reload_from() {
-        let items = file(false, false);
+        let items = file(false, false, &[]);
         let reload = items
             .iter()
             .find(|i| i.action == action::RELOAD)
@@ -384,7 +432,7 @@ mod tests {
     #[test]
     fn every_working_row_has_an_action() {
         let mut all = Vec::new();
-        all.extend(file(true, true));
+        all.extend(file(true, true, &[]));
         all.extend(edit());
         all.extend(view(ThemeId::Organic, true, false));
         all.extend(format(Encoding::Utf8, LineEnding::Lf));
@@ -401,6 +449,65 @@ mod tests {
     }
 
     #[test]
+    fn recent_files_appear_newest_first_with_distinguishing_folders() {
+        let recent = [
+            std::path::PathBuf::from("/notes/a/Report_17AUG2026.txt"),
+            std::path::PathBuf::from("/notes/b/Report_17AUG2026.txt"),
+        ];
+        let items = file(false, true, &recent);
+
+        let rows: Vec<&MenuItem> = items
+            .iter()
+            .filter(|i| i.action >= action::RECENT_BASE && i.action < 100)
+            .collect();
+
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].action, action::RECENT_BASE);
+        assert_eq!(rows[1].action, action::RECENT_BASE + 1);
+        assert!(rows.iter().all(|r| r.label == "Report_17AUG2026.txt"));
+        assert_ne!(
+            rows[0].shortcut, rows[1].shortcut,
+            "identical names must be told apart by their folder"
+        );
+    }
+
+    #[test]
+    fn no_recent_files_means_no_recent_rows() {
+        let items = file(false, true, &[]);
+        assert!(
+            items
+                .iter()
+                .all(|i| i.action < action::RECENT_BASE || i.action >= 100)
+        );
+    }
+
+    #[test]
+    fn a_full_recent_list_cannot_collide_with_editor_actions() {
+        // The failure this prevents is silent: a recent id reaching 100 would
+        // be routed to TextInput and open nothing.
+        let recent: Vec<std::path::PathBuf> = (0..bp_config::MAX_RECENT + 5)
+            .map(|i| std::path::PathBuf::from(format!("/f{i}.txt")))
+            .collect();
+        let items = file(false, true, &recent);
+
+        let max = items.iter().map(|i| i.action).max().unwrap();
+        assert!(
+            max < 100,
+            "recent ids reached {max}, which Slint would swallow"
+        );
+    }
+
+    #[test]
+    fn shorten_keeps_the_identifying_tail() {
+        assert_eq!(shorten("/short", 34), "/short");
+        let long = "/very/long/path/that/goes/on/and/on/and/on/finally/here";
+        let short = shorten(long, 20);
+        assert!(short.starts_with('…'));
+        assert!(short.ends_with("finally/here"), "got {short}");
+        assert!(short.chars().count() <= 20);
+    }
+
+    #[test]
     fn editor_actions_stay_above_the_rust_boundary() {
         // Slint routes >= 100 to TextInput and everything else to Rust. An id
         // on the wrong side of that line silently does nothing.
@@ -411,7 +518,7 @@ mod tests {
                 item.label
             );
         }
-        for item in file(true, true).iter().filter(|i| i.enabled) {
+        for item in file(true, true, &[]).iter().filter(|i| i.enabled) {
             assert!(item.action < 100, "'{}' would never reach Rust", item.label);
         }
     }

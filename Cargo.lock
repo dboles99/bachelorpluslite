@@ -660,6 +660,7 @@ name = "bp-config"
 version = "0.1.0"
 dependencies = [
  "serde",
+ "tempfile",
  "toml",
 ]
 
@@ -709,6 +710,7 @@ name = "bp-ui"
 version = "0.1.0"
 dependencies = [
  "bp-buffer",
+ "bp-config",
  "bp-core",
  "bp-files",
  "bp-naming",

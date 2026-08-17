@@ -15,9 +15,11 @@
 
 mod load;
 mod save;
+mod watch;
 
 pub use load::{LoadError, LoadedFile, load};
 pub use save::{Overwrite, SaveError, SaveOptions, SaveOutcome, atomic_write, resolve_in_dir};
+pub use watch::{DiskState, FileStamp, check};
 
 /// Crate identity used by workspace smoke tests and diagnostics.
 pub const CRATE_NAME: &str = "bp-files";

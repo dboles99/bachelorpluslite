@@ -56,8 +56,18 @@ fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
+    // Anything that is not a flag is a file to open (specs.md §19).
+    // `args[0]` is the executable.
+    let files: Vec<std::path::PathBuf> = args
+        .iter()
+        .skip(1)
+        .filter(|a| !a.starts_with('-'))
+        .map(std::path::PathBuf::from)
+        .collect();
+
     tracing::info!("starting BachelorPad+");
     bp_ui::run_with(bp_ui::RunOptions {
+        files,
         renderer: match loaded.config.renderer {
             RendererPref::Software => bp_ui::Renderer::Software,
             RendererPref::Platform => bp_ui::Renderer::Platform,
