@@ -132,7 +132,7 @@ fn refresh(ui: &AppWindow, state: &mut state::AppState, push_text: state::PushTe
     }
     ui.set_data_items(model(menus::data(format)));
     ui.set_note_items(model(menus::note(state.active_has_content())));
-    ui.set_edit_items(model(menus::edit(state.clips.entries())));
+    ui.set_edit_items(model(menus::edit(state.clips.entries(), state.editor_view)));
 }
 
 /// Menus whose contents never change. Set once, not on every refresh.

@@ -58,19 +58,19 @@ cargo run --release -- --editor-view   # with the custom editor view (ADR-0018)
 
 ## Current state (2026-08-17)
 
-**15 crates, 393 tests, green on Windows and Linux.** The app opens, edits and
+**15 crates, 542 tests, green on Windows and Linux.** The app opens, edits and
 saves atomically, and does rather more than that:
 
 | Area | What works |
 | --- | --- |
-| Editing | Tabs, four themes, honest save state, atomic save, undo/cut/copy/paste, sort / deduplicate / reverse / trim lines |
+| Editing | Tabs, four themes, honest save state, atomic save, undo/cut/copy/paste, sort / deduplicate / reverse / trim lines, duplicate and move lines |
 | Storage | A rope buffer holds every document; whole-document operations are one undo step |
 | Safety | Unsaved-changes prompts, external-change detection, crash recovery journal |
 | Files | Open/Save/Save As/Save All/Reload, recent files, command-line file opening |
 | Search | Find and replace (literal or regex) with the changes shown before they are applied, recursive cross-file search |
-| Data | JSON / JSONL / TOML validate, format, minify, convert; RFC 4180 CSV/TSV shape report |
+| Data | JSON / JSONL / TOML validate, format, minify, convert; RFC 4180 CSV/TSV shape report, conversion to JSON and JSON Lines, column types |
 | Semantic | Title, keywords, summary and outline extracted from the document |
-| Clipboard | History with kind detection, paste from history |
+| Clipboard | History with kind detection, paste from history, format-aware paste transformations |
 | Metadata | A SQLite store with migrations — built and tested, not yet wired in ([ADR-0019](docs/decisions/ADR-0019.md)) |
 
 Startup, with the software renderer ([ADR-0017](docs/decisions/ADR-0017.md)):

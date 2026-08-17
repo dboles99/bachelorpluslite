@@ -5,15 +5,27 @@
 //! filename bugs actually live: a title someone pastes from a web page, a
 //! CJK note name, a 400-character heading.
 
-use bp_naming::{MAX_COMPONENT_BYTES, SemanticName, sanitize_title};
+use bp_naming::{MAX_COMPONENT_BYTES, SemanticName, Stamp, render, sanitize_title};
 use proptest::prelude::*;
-use time::{Date, Month};
+use time::{Date, Month, Time, UtcOffset};
 
 /// Any real calendar date. Days stop at 28 so every month is valid without
 /// the strategy having to know about leap years.
 fn any_date() -> impl Strategy<Value = Date> {
     (2000i32..2100, 1u8..=12, 1u8..=28)
         .prop_map(|(y, m, d)| Date::from_calendar_date(y, Month::try_from(m).unwrap(), d).unwrap())
+}
+
+/// Any time of day, to the second.
+fn any_time() -> impl Strategy<Value = Time> {
+    (0u8..24, 0u8..60, 0u8..60).prop_map(|(h, m, s)| Time::from_hms(h, m, s).unwrap())
+}
+
+/// Any whole-hour offset from UTC, east and west. Whole hours keep the
+/// minutes and seconds components at zero, which trivially satisfies
+/// `UtcOffset`'s rule that all three components share one sign.
+fn any_offset() -> impl Strategy<Value = UtcOffset> {
+    (-23i8..=23).prop_map(|h| UtcOffset::from_hms(h, 0, 0).unwrap())
 }
 
 /// Titles without `_`. Underscores are legal in titles and handled by the
@@ -103,5 +115,19 @@ proptest! {
     #[test]
     fn parse_never_panics(s in ".{0,120}") {
         let _ = SemanticName::parse(&s);
+    }
+
+    /// A stamp must render for any date, time and offset the type can
+    /// represent -- a document's insertion point does not get to reject a
+    /// user's clock, however far from today it is set.
+    #[test]
+    fn render_never_panics(
+        date in any_date(),
+        time in any_time(),
+        offset in any_offset(),
+        stamp in prop::sample::select(Stamp::all()),
+    ) {
+        let at = date.with_time(time).assume_offset(offset);
+        let _ = render(stamp, at);
     }
 }

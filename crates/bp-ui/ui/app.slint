@@ -583,6 +583,33 @@ export component AppWindow inherits Window {
                 root.focus-find();
             }
         }
+
+        // Duplicate Line / Move Line Up / Move Line Down (bp-ui/src/menus.rs
+        // ids 95-97). Routed through `dispatch` like a menu click, which is
+        // what it is -- the ids sit below 100, so they always reach Rust.
+        // `run_line_edit` is what makes Move Line Up/Down and Duplicate Line
+        // no-ops without the custom editor view, the same as the menu rows
+        // being disabled there; claiming Alt+Up/Down here rather than only
+        // when that view is active keeps this list state-free, like every
+        // other binding in it.
+        KeyBinding {
+            keys: @keys(Control + "d");
+            activated => {
+                root.dispatch(95);
+            }
+        }
+        KeyBinding {
+            keys: @keys(Alt + UpArrow);
+            activated => {
+                root.dispatch(96);
+            }
+        }
+        KeyBinding {
+            keys: @keys(Alt + DownArrow);
+            activated => {
+                root.dispatch(97);
+            }
+        }
         KeyBinding {
             keys: @keys(Escape);
             activated => {

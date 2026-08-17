@@ -10,7 +10,7 @@ use std::rc::Rc;
 use bp_core::{Document, DocumentId, Encoding, LineEnding};
 use bp_theme::ThemeId;
 
-use crate::menus::action;
+use crate::menus::{self, action};
 use crate::state::{AppState, NoteOutcome, PushText, SaveResult};
 use crate::{AppWindow, set_os_clipboard};
 
@@ -233,7 +233,11 @@ pub fn handle_menu_action(
             push = PushText::No;
         }
 
-        id if id >= action::CLIP_BASE => {
+        // Bounded above by `clip_end()` -- an unbounded `>=` here is exactly
+        // what let the recent-files arm swallow everything up to 100 before
+        // it had a real range, and the paste-transformation ids just below
+        // would have fallen into this arm the same way.
+        id if (action::CLIP_BASE..menus::clip_end()).contains(&id) => {
             let index = usize::try_from(id - action::CLIP_BASE).unwrap_or(0);
             let text = state.borrow().clips.get(index).map(|e| e.text.clone())?;
             set_os_clipboard(&text);
@@ -258,6 +262,40 @@ pub fn handle_menu_action(
             return None;
         }
 
+        // A paste transformation. Same two-path shape as the plain
+        // clipboard rows just above -- the caret is reached differently
+        // under each editor view, and missing one path is how a feature
+        // works for whoever tested it and does nothing for whoever did not.
+        id if (action::CLIP_TRANSFORM_BASE..menus::clip_transform_end()).contains(&id) => {
+            let (entry_index, transform) = {
+                let s = state.borrow();
+                menus::decode_transform(id, s.clips.entries())?
+            };
+            let source = state
+                .borrow()
+                .clips
+                .get(entry_index)
+                .map(|e| e.text.clone())?;
+            let text = menus::apply_transform(transform, &source)?;
+            set_os_clipboard(&text);
+
+            let owns_caret = state.borrow().editor_view;
+            if owns_caret {
+                {
+                    let mut s = state.borrow_mut();
+                    if let Some(editor) = s.active_editor_mut() {
+                        editor.insert(&text);
+                    }
+                    s.mark_edited();
+                }
+                refresh(ui, &mut state.borrow_mut(), PushText::No);
+                ui.invoke_focus_editor();
+            } else {
+                ui.invoke_paste_from_clipboard();
+            }
+            return None;
+        }
+
         id if (action::NOTE_TITLE..=action::NOTE_OUTLINE).contains(&id) => {
             let outcome = state.borrow().note_action(id);
             match outcome {
@@ -275,12 +313,19 @@ pub fn handle_menu_action(
             }
         }
 
-        id if (action::DATA_VALIDATE..=action::DATA_REPORT).contains(&id) => {
+        id if (action::DATA_VALIDATE..=action::DATA_COLUMN_TYPES).contains(&id) => {
             state.borrow_mut().run_data_action(id);
         }
 
         id if (action::LINES_SORT_ASC..=action::LINES_TRIM).contains(&id) => {
             state.borrow_mut().run_line_action(id);
+        }
+
+        // Duplicate Line, Move Line Up/Down. A separate range from the line
+        // operations above: those replace the whole document, these need
+        // the caret, and `run_line_edit` is where that distinction lives.
+        id if (action::DUPLICATE_LINE..=action::MOVE_LINE_DOWN).contains(&id) => {
+            state.borrow_mut().run_line_edit(id);
         }
 
         // Recently opened files. Bounded by the length of the list

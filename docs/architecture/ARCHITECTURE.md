@@ -81,7 +81,7 @@ bachelorpad ──> bp-config
 **Eleven crates depend on nothing else in the workspace**: `bp-core`,
 `bp-naming`, `bp-theme`, `bp-config`, `bp-buffer`, `bp-formats`, `bp-data`,
 `bp-search`, `bp-semantic`, `bp-storage` and `bp-clipboard`. That is what keeps them cheap
-to test and impossible to entangle with the UI toolkit — and it is why 393
+to test and impossible to entangle with the UI toolkit — and it is why 542
 tests run without a window.
 
 Two deliberate non-dependencies:

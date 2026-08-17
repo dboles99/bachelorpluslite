@@ -149,6 +149,54 @@ impl Editor {
         self.buffer.position_of(self.cursor)
     }
 
+    /// Put the caret at the start of a 1-based line number, for the "go to
+    /// line" command.
+    ///
+    /// Just `go_to_position` with column 1: the column clamp there already
+    /// gives the right answer for "the start of the line" once column is 1,
+    /// so there is no separate arithmetic here to keep in step with it.
+    pub fn go_to_line(&mut self, line: usize) -> bool {
+        self.go_to_position(Position::new(line, 1))
+    }
+
+    /// Put the caret at a 1-based line and column, for the "go to line"
+    /// command.
+    ///
+    /// Both are 1-based, matching what the status bar shows and what a user
+    /// types into a "go to" box. Zero is treated the same as one rather than
+    /// rejected: a user who types 0, or a caller passing through some
+    /// uninitialised default, means "the start", not "an error" -- and since
+    /// every document has at least one line and every line has at least
+    /// column 1, that request is always satisfiable, which is why it always
+    /// counts as in range rather than being reported as a clamp.
+    ///
+    /// A line or column past the end of the document clamps rather than
+    /// refusing: typing 9999 into a 42-line document means "the end", not
+    /// "do nothing". The column clamps to the line's own length in
+    /// characters, excluding its line break -- which is also what keeps the
+    /// caret out of a CRLF pair, since the clamp never reaches as far as the
+    /// break in the first place. `set_cursor` is still what assigns the
+    /// caret rather than the field directly, so that guarantee holds even if
+    /// this arithmetic is ever wrong.
+    ///
+    /// Returns whether the request was fully in range, so a caller can still
+    /// say "there are only 42 lines" while the caret has already moved
+    /// somewhere sensible.
+    pub fn go_to_position(&mut self, position: Position) -> bool {
+        let last_line = self.buffer.len_lines();
+        let requested_line = position.line.max(1);
+        let line_in_range = requested_line <= last_line;
+        let line_idx = requested_line.min(last_line) - 1;
+
+        let line_len = self.buffer.line_len_chars(line_idx);
+        let requested_column = position.column.max(1);
+        let column_in_range = requested_column - 1 <= line_len;
+        let column_offset = (requested_column - 1).min(line_len);
+
+        self.set_cursor(self.buffer.line_start(line_idx) + column_offset);
+        line_in_range && column_in_range
+    }
+
     /// The selected range, or `None` when the caret is a point.
     pub fn selection(&self) -> Option<Range<usize>> {
         if self.anchor == self.cursor {
@@ -1375,6 +1423,136 @@ mod tests {
         ] {
             e.move_caret(motion, false);
             assert_eq!(e.cursor(), 0, "{motion:?} moved in an empty document");
+        }
+    }
+
+    // --- go to line -------------------------------------------------------
+
+    #[test]
+    fn go_to_line_moves_the_caret_to_an_ordinary_line() {
+        let mut e = Editor::new("one\ntwo\nthree");
+        assert!(e.go_to_line(2), "line 2 exists");
+        assert_eq!(e.position(), Position::new(2, 1));
+    }
+
+    #[test]
+    fn go_to_line_reaches_the_first_and_last_line() {
+        let mut e = Editor::new("one\ntwo\nthree");
+        assert!(e.go_to_line(3));
+        assert_eq!(e.position(), Position::new(3, 1));
+
+        assert!(e.go_to_line(1));
+        assert_eq!(e.position(), Position::new(1, 1));
+    }
+
+    #[test]
+    fn line_zero_means_the_first_line_not_an_error() {
+        // A user who types 0 means "the start", the same as typing 1 -- so
+        // it is treated as equivalent rather than refused.
+        let mut e = Editor::new("one\ntwo");
+        assert!(
+            e.go_to_line(0),
+            "0 is a valid way to ask for the first line"
+        );
+        assert_eq!(e.position(), Position::new(1, 1));
+    }
+
+    #[test]
+    fn a_line_past_the_end_clamps_to_the_last_line_and_reports_out_of_range() {
+        let mut e = Editor::new("one\ntwo\nthree");
+        assert!(
+            !e.go_to_line(9999),
+            "asking for line 9999 of a 3-line document is out of range"
+        );
+        assert_eq!(e.position(), Position::new(3, 1), "still moved to the end");
+    }
+
+    #[test]
+    fn go_to_line_in_an_empty_document_stays_on_the_only_line() {
+        let mut e = Editor::new("");
+        assert!(e.go_to_line(1));
+        assert_eq!(e.position(), Position::new(1, 1));
+        assert!(!e.go_to_line(2), "an empty document has only one line");
+    }
+
+    #[test]
+    fn go_to_position_on_a_crlf_line_does_not_land_inside_the_break() {
+        let mut e = Editor::new("one\r\ntwo\r\nthree");
+        // Column 50 is far past "one"'s three characters: clamping must stop
+        // before the \r, not walk into the break looking for more column to
+        // give.
+        assert!(
+            !e.go_to_position(Position::new(1, 50)),
+            "\"one\" has no column 50"
+        );
+        assert_eq!(e.cursor(), 3, "clamped to just after the e, before the \\r");
+
+        let cursor = e.cursor();
+        let splits_the_pair = e.buffer().char_at(cursor) == Some('\n')
+            && cursor.checked_sub(1).and_then(|i| e.buffer().char_at(i)) == Some('\r');
+        assert!(
+            !splits_the_pair,
+            "the caret must never sit between \\r and \\n"
+        );
+    }
+
+    #[test]
+    fn go_to_line_treats_the_phantom_final_line_as_a_real_line() {
+        // A trailing newline creates an empty final line the caret can sit
+        // on, as Buffer::len_lines documents -- so "go to the last line"
+        // must reach it, not stop one short at the last line with visible
+        // text on it.
+        let mut e = Editor::new("one\ntwo\n");
+        assert!(
+            e.go_to_line(3),
+            "the phantom line after the trailing newline"
+        );
+        assert_eq!(e.position(), Position::new(3, 1));
+        assert_eq!(e.cursor(), e.buffer().len_chars());
+    }
+
+    #[test]
+    fn go_to_position_counts_columns_by_character_not_byte() {
+        let mut e = Editor::new("日本語\nabc");
+        assert!(e.go_to_position(Position::new(1, 2)));
+        assert_eq!(e.cursor(), 1, "between 日 and 本, by character offset");
+    }
+
+    #[test]
+    fn go_to_position_clamps_a_column_past_the_end_of_the_line() {
+        let mut e = Editor::new("hi\nlonger line");
+        assert!(
+            !e.go_to_position(Position::new(1, 100)),
+            "\"hi\" has no column 100"
+        );
+        assert_eq!(
+            e.position(),
+            Position::new(1, 3),
+            "clamped to just after the i"
+        );
+    }
+
+    #[test]
+    fn go_to_line_lands_on_the_requested_line_for_every_line_in_range() {
+        // The check that actually pins the behaviour: whatever go_to_line
+        // does internally, asking for line n and reading the line back must
+        // always give n back, for every n a document actually has.
+        let documents = [
+            "one\ntwo\nthree",
+            "one\ntwo\nthree\n",
+            "solo",
+            "",
+            "a\r\nb\r\nc",
+            "\n\n\n",
+            "日本\nlatin\n語",
+        ];
+        for text in documents {
+            let mut e = Editor::new(text);
+            let last_line = e.buffer().len_lines();
+            for n in 1..=last_line {
+                assert!(e.go_to_line(n), "{text:?}: line {n} of {last_line}");
+                assert_eq!(e.position().line, n, "{text:?}: go_to_line({n})");
+            }
         }
     }
 

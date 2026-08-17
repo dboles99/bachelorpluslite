@@ -185,6 +185,133 @@ pub fn summary(text: &str, max_chars: usize) -> String {
     }
 }
 
+/// What a document is made of, for the status bar and the inspector.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Statistics {
+    pub characters: usize,
+    /// Characters excluding whitespace.
+    pub characters_no_whitespace: usize,
+    pub words: usize,
+    pub lines: usize,
+    pub paragraphs: usize,
+}
+
+/// Count characters, words, lines and paragraphs in `text`.
+///
+/// The shell hands this the whole document -- after every edit, for the
+/// status bar -- so this is one pass over the characters rather than
+/// `chars().count()`, `split_whitespace().count()`, `lines().count()` and a
+/// separate paragraph scan run back to back over the same text.
+pub fn statistics(text: &str) -> Statistics {
+    let mut characters = 0usize;
+    let mut characters_no_whitespace = 0usize;
+    let mut words = 0usize;
+    // A document is at least one line even when it is empty -- the caret
+    // has to be somewhere -- so this starts at one, not zero.
+    let mut lines = 1usize;
+    let mut paragraphs = 0usize;
+
+    // A word is a maximal run of alphanumeric characters. A hyphen or
+    // apostrophe extends the current word only when it sits between two
+    // alphanumerics, so "state-of-the-art" and "don't" each count once;
+    // anything else (leading, trailing, or doubled) is ordinary punctuation
+    // and ends the word instead of gluing it to whatever follows. Telling
+    // those apart needs one character of memory -- was the previous
+    // character such a candidate joiner -- rather than lookahead, which is
+    // what keeps this a single pass.
+    #[derive(PartialEq)]
+    enum Word {
+        Outside,
+        Inside,
+        /// Just saw a possible joiner right after `Inside`; not confirmed
+        /// until we see what comes next.
+        Joining,
+    }
+    let mut word = Word::Outside;
+
+    // A paragraph is a run of non-blank lines; a line that is empty or
+    // whitespace-only separates paragraphs rather than belonging to one.
+    // Several blank lines in a row still separate exactly two paragraphs,
+    // not several -- a gap is a gap, and counting each blank line would
+    // turn "two gaps between three paragraphs" into a number nobody asked
+    // for, so `in_paragraph` only flips once per run either way.
+    let mut line_has_content = false;
+    let mut in_paragraph = false;
+
+    for c in text.chars() {
+        // `\r` is line-ending encoding, not content: dropping it here
+        // unconditionally (not only as half of "\r\n") means the remaining
+        // character stream for a CRLF document is identical to its LF
+        // equivalent, so every field below agrees between the two, not
+        // just the line count.
+        if c == '\r' {
+            continue;
+        }
+
+        characters += 1;
+        if !c.is_whitespace() {
+            characters_no_whitespace += 1;
+        }
+
+        if c.is_alphanumeric() {
+            if word == Word::Outside {
+                words += 1;
+            }
+            word = Word::Inside;
+        } else if matches!(c, '-' | '\'' | '\u{2019}') && word == Word::Inside {
+            word = Word::Joining;
+        } else {
+            word = Word::Outside;
+        }
+
+        if c == '\n' {
+            // Must agree with `bp_buffer::line_count`'s convention: a
+            // trailing newline starts a new, empty line, so "a\n" is two
+            // lines, not the one `str::lines()` would report. The two
+            // implementations must never disagree, or the editor's gutter
+            // and this crate's status bar would number the document
+            // differently.
+            lines += 1;
+            if line_has_content {
+                if !in_paragraph {
+                    paragraphs += 1;
+                }
+                in_paragraph = true;
+            } else {
+                in_paragraph = false;
+            }
+            line_has_content = false;
+        } else if !c.is_whitespace() {
+            line_has_content = true;
+        }
+    }
+    // The final line has no trailing '\n' to trigger the check above.
+    if line_has_content && !in_paragraph {
+        paragraphs += 1;
+    }
+
+    Statistics {
+        characters,
+        characters_no_whitespace,
+        words,
+        lines,
+        paragraphs,
+    }
+}
+
+impl Statistics {
+    /// One line for the status bar.
+    pub fn summary(&self) -> String {
+        format!(
+            "{} word{}, {} line{}",
+            self.words,
+            if self.words == 1 { "" } else { "s" },
+            self.lines,
+            if self.lines == 1 { "" } else { "s" },
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -379,6 +506,103 @@ mod tests {
             let _ = outline(text);
             let _ = keywords(text, 5);
             let _ = summary(text, 50);
+            let _ = statistics(text);
         }
+    }
+
+    #[test]
+    fn an_empty_document_has_one_empty_line_and_nothing_else() {
+        let stats = statistics("");
+        assert_eq!(stats.characters, 0);
+        assert_eq!(stats.characters_no_whitespace, 0);
+        assert_eq!(stats.words, 0, "no words in nothing");
+        assert_eq!(stats.lines, 1, "the caret has to be somewhere");
+        assert_eq!(stats.paragraphs, 0, "no content, no paragraph");
+    }
+
+    #[test]
+    fn a_single_word_counts_as_one_of_everything_that_matters() {
+        let stats = statistics("hello");
+        assert_eq!(stats.characters, 5);
+        assert_eq!(stats.words, 1);
+        assert_eq!(stats.lines, 1, "no newline at all");
+        assert_eq!(stats.paragraphs, 1, "one line of content is one paragraph");
+    }
+
+    #[test]
+    fn a_trailing_newline_still_counts_as_a_line() {
+        // str::lines() would say one; the caret can sit on the second,
+        // empty line, and the gutter has to number it.
+        let stats = statistics("a\n");
+        assert_eq!(stats.lines, 2, "str::lines() says 1, and is wrong here");
+    }
+
+    #[test]
+    fn crlf_documents_count_the_same_as_their_lf_equivalent() {
+        let lf = "first paragraph, two lines,\nstill one paragraph.\n\nsecond paragraph.\n";
+        let crlf =
+            "first paragraph, two lines,\r\nstill one paragraph.\r\n\r\nsecond paragraph.\r\n";
+
+        assert_eq!(
+            statistics(lf),
+            statistics(crlf),
+            "\\r is encoding, not content"
+        );
+    }
+
+    #[test]
+    fn multibyte_text_counts_characters_not_bytes() {
+        let text = "日本語";
+        let stats = statistics(text);
+        assert_eq!(text.len(), 9, "three characters, nine UTF-8 bytes");
+        assert_eq!(
+            stats.characters, 3,
+            "must count characters, not the byte length"
+        );
+        assert_eq!(stats.characters_no_whitespace, 3);
+    }
+
+    #[test]
+    fn hyphenated_and_apostrophised_words_count_once_each() {
+        let stats = statistics("state-of-the-art don't rock'n'roll");
+        assert_eq!(
+            stats.words, 3,
+            "a joining hyphen or apostrophe must not split a word in two"
+        );
+    }
+
+    #[test]
+    fn punctuation_that_is_not_a_joiner_still_splits_words() {
+        // A hyphen or apostrophe only glues a word together when it sits
+        // between two alphanumerics; leading, trailing or doubled ones are
+        // ordinary punctuation.
+        let stats = statistics("'quoted' word--word -dash- end-");
+        assert_eq!(stats.words, 5, "quoted, word, word, dash, end");
+    }
+
+    #[test]
+    fn several_consecutive_blank_lines_are_still_one_separator() {
+        let one_gap = statistics("first paragraph\n\nsecond paragraph");
+        let many_gaps = statistics("first paragraph\n\n\n\n\nsecond paragraph");
+
+        assert_eq!(one_gap.paragraphs, 2);
+        assert_eq!(
+            many_gaps.paragraphs, 2,
+            "a run of blank lines is one separator, not several"
+        );
+    }
+
+    #[test]
+    fn a_document_of_only_whitespace_has_no_words_or_paragraphs() {
+        let stats = statistics("   \n\t\n   ");
+        assert_eq!(stats.words, 0);
+        assert_eq!(stats.paragraphs, 0, "blank lines are not a paragraph");
+        assert_eq!(stats.characters_no_whitespace, 0);
+    }
+
+    #[test]
+    fn summary_reads_as_one_line_for_the_status_bar() {
+        assert_eq!(statistics("hello").summary(), "1 word, 1 line");
+        assert_eq!(statistics("hello\nworld").summary(), "2 words, 2 lines");
     }
 }

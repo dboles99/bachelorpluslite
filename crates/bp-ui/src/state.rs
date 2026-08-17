@@ -403,6 +403,40 @@ impl AppState {
         self.edit(changed);
     }
 
+    /// Apply a caret-dependent line operation: Duplicate Line, Move Line
+    /// Up/Down.
+    ///
+    /// Unlike `run_line_action`, these move and duplicate the line the
+    /// caret is on rather than rewriting the whole document, so they call
+    /// `Editor` directly. That caret is `bp-editor`'s and `TextInput` never
+    /// exposes it, so this is a no-op outside the custom editor view -- the
+    /// menu already disables these rows there, and a shortcut key that
+    /// reaches here anyway is safer treated as doing nothing than acted on
+    /// against a caret position this crate cannot trust.
+    pub(crate) fn run_line_edit(&mut self, id: i32) {
+        if !self.editor_view {
+            return;
+        }
+        // Compared rather than assumed: Duplicate Line always changes the
+        // document, but Move Line Up/Down is a deliberate no-op at the
+        // first or last line, and `bp-editor` reports that only through its
+        // undo stack, not a return value. A no-op must not mark a clean
+        // document dirty.
+        let before = self.active_text();
+        let Some(editor) = self.active_editor_mut() else {
+            return;
+        };
+        match id {
+            action::DUPLICATE_LINE => editor.duplicate_line(),
+            action::MOVE_LINE_UP => editor.move_line_up(),
+            action::MOVE_LINE_DOWN => editor.move_line_down(),
+            _ => return,
+        }
+        if self.active_text() != before {
+            self.mark_edited();
+        }
+    }
+
     /// Run a data operation, reporting the outcome in the status bar.
     pub(crate) fn run_data_action(&mut self, id: i32) {
         let text = self.active_text().to_owned();
@@ -436,6 +470,23 @@ impl AppState {
             (action::DATA_REPORT, _) => {
                 self.error = Some(match bp_data::delimited_report(&text) {
                     Ok(report) => report.summary(),
+                    Err(e) => format!("could not read as a table — {e}"),
+                });
+            }
+            (action::DATA_CSV_TO_JSON, _) => {
+                self.apply_to_active(bp_data::delimited_to_json(&text));
+            }
+            (action::DATA_CSV_TO_JSONL, _) => {
+                self.apply_to_active(bp_data::delimited_to_jsonl(&text));
+            }
+            (action::DATA_COLUMN_TYPES, _) => {
+                self.error = Some(match bp_data::column_types(&text) {
+                    Ok(columns) if columns.is_empty() => "no columns to report".to_owned(),
+                    Ok(columns) => columns
+                        .iter()
+                        .map(bp_data::ColumnReport::summary)
+                        .collect::<Vec<_>>()
+                        .join(" │ "),
                     Err(e) => format!("could not read as a table — {e}"),
                 });
             }
@@ -793,14 +844,13 @@ pub(crate) fn now() -> OffsetDateTime {
 }
 
 /// `8:05 PM`, as specs.md section 3 shows it.
+///
+/// Delegated to `bp-naming` rather than written here. The Insert menu puts
+/// the same rendering into documents, and two copies of a twelve-hour clock
+/// is two places for midnight to come out as `0:30 AM` -- in one of which
+/// nobody would notice.
 pub(crate) fn clock(t: OffsetDateTime) -> String {
-    let (hour, meridiem) = match t.hour() {
-        0 => (12, "AM"),
-        h @ 1..=11 => (h, "AM"),
-        12 => (12, "PM"),
-        h => (h - 12, "PM"),
-    };
-    format!("{hour}:{:02} {meridiem}", t.minute())
+    bp_naming::render(bp_naming::Stamp::Time, t)
 }
 
 /// Encode the buffer for disk, honouring the document's encoding and line
@@ -1139,12 +1189,165 @@ mod tests {
             action::LINES_DEDUPE,
             action::LINES_REVERSE,
             action::LINES_TRIM,
+            action::DUPLICATE_LINE,
+            action::MOVE_LINE_UP,
+            action::MOVE_LINE_DOWN,
             action::DATA_VALIDATE,
             action::DATA_REPORT,
+            action::DATA_CSV_TO_JSON,
+            action::DATA_CSV_TO_JSONL,
+            action::DATA_COLUMN_TYPES,
             action::NOTE_TITLE,
             action::NOTE_OUTLINE,
         ] {
             assert!(!window.contains(&id), "id {id} collides with recent files");
         }
+    }
+
+    // --- Duplicate Line / Move Line Up / Move Line Down --------------------
+
+    #[test]
+    fn duplicating_a_line_through_the_menu_marks_the_document_modified() {
+        let mut state = AppState::new();
+        state.editor_view = true;
+        state.edit("one\ntwo\nthree".to_owned());
+        let id = state.workspace.active_id().unwrap();
+        state.workspace.get_mut(id).unwrap().record_disk_save(now());
+        state.active_editor_mut().unwrap().set_cursor(5); // on "two"
+
+        state.run_line_edit(action::DUPLICATE_LINE);
+
+        assert_eq!(state.active_text(), "one\ntwo\ntwo\nthree");
+        assert!(state.is_dirty(id), "duplicating a line is an edit");
+    }
+
+    #[test]
+    fn moving_a_line_down_through_the_menu_swaps_it_and_marks_modified() {
+        let mut state = AppState::new();
+        state.editor_view = true;
+        state.edit("one\ntwo\nthree".to_owned());
+        let id = state.workspace.active_id().unwrap();
+        state.workspace.get_mut(id).unwrap().record_disk_save(now());
+        state.active_editor_mut().unwrap().set_cursor(1); // on "one"
+
+        state.run_line_edit(action::MOVE_LINE_DOWN);
+
+        assert_eq!(state.active_text(), "two\none\nthree");
+        assert!(state.is_dirty(id));
+    }
+
+    #[test]
+    fn moving_the_top_line_up_is_a_no_op_and_must_not_mark_the_document_dirty() {
+        // bp-editor's own no-op for Move Line Up at the first line; the point
+        // of this test is that bp-ui does not turn that no-op into a false
+        // "modified" flag.
+        let mut state = AppState::new();
+        state.editor_view = true;
+        state.edit("one\ntwo".to_owned());
+        let id = state.workspace.active_id().unwrap();
+        state.workspace.get_mut(id).unwrap().record_disk_save(now());
+        state.active_editor_mut().unwrap().set_cursor(1); // on "one", the top line
+
+        state.run_line_edit(action::MOVE_LINE_UP);
+
+        assert_eq!(state.active_text(), "one\ntwo");
+        assert!(
+            !state.is_dirty(id),
+            "a no-op must not mark a clean document dirty"
+        );
+    }
+
+    #[test]
+    fn duplicate_and_move_line_do_nothing_outside_the_custom_editor_view() {
+        // The row is disabled in that view, but a shortcut key reaches
+        // `run_line_edit` directly and must not act on a caret this crate
+        // cannot trust `TextInput` to have reported correctly.
+        let mut state = AppState::new();
+        state.edit("one\ntwo\nthree".to_owned());
+        let id = state.workspace.active_id().unwrap();
+        state.workspace.get_mut(id).unwrap().record_disk_save(now());
+
+        state.run_line_edit(action::DUPLICATE_LINE);
+
+        assert_eq!(state.active_text(), "one\ntwo\nthree");
+        assert!(!state.is_dirty(id));
+    }
+
+    // --- CSV / TSV data operations ------------------------------------------
+
+    fn csv_state(text: &str) -> AppState {
+        let mut state = AppState::new();
+        let id = state.workspace.active_id().unwrap();
+        // Format detection is extension-first (`bp_formats::detect`), so a
+        // `.csv` path is what makes `run_data_action` see `Format::Csv`
+        // without needing a real file on disk.
+        state
+            .workspace
+            .get_mut(id)
+            .unwrap()
+            .set_path(PathBuf::from("table.csv"));
+        state.edit(text.to_owned());
+        state
+    }
+
+    #[test]
+    fn converting_csv_to_json_replaces_the_document() {
+        let mut state = csv_state("name,age\nAlice,30\nBob,25\n");
+        let id = state.workspace.active_id().unwrap();
+        // Cleared explicitly, rather than relying on the dirty flag the
+        // initial `edit` already set, so the assertion below proves the
+        // conversion itself is what marks the document unsaved.
+        state.workspace.get_mut(id).unwrap().record_disk_save(now());
+
+        state.run_data_action(action::DATA_CSV_TO_JSON);
+
+        assert!(
+            state.error.is_none(),
+            "a successful conversion is not an error"
+        );
+        assert!(state.active_text().contains("Alice"));
+        assert!(state.active_text().trim_start().starts_with('['));
+        assert!(
+            state.is_dirty(id),
+            "nothing reaches disk on its own -- the conversion is an ordinary edit"
+        );
+    }
+
+    #[test]
+    fn converting_csv_to_json_lines_replaces_the_document() {
+        let mut state = csv_state("name,age\nAlice,30\nBob,25\n");
+        state.run_data_action(action::DATA_CSV_TO_JSONL);
+
+        let text = state.active_text();
+        assert_eq!(text.lines().count(), 2, "one compact object per data row");
+        assert!(text.contains("Alice") && text.contains("Bob"));
+    }
+
+    #[test]
+    fn column_types_reports_into_the_status_bar_without_changing_the_document() {
+        let mut state = csv_state("name,age\nAlice,30\nBob,25\n");
+        let before = state.active_text();
+
+        state.run_data_action(action::DATA_COLUMN_TYPES);
+
+        assert_eq!(
+            state.active_text(),
+            before,
+            "a report must not edit the document"
+        );
+        let message = state.error.expect("column report in the status bar");
+        assert!(message.contains("name"), "got {message}");
+        assert!(
+            message.contains("integer"),
+            "age should read as integer; got {message}"
+        );
+    }
+
+    #[test]
+    fn an_action_that_is_not_a_csv_operation_on_a_csv_document_changes_nothing() {
+        let mut state = csv_state("name,age\nAlice,30\n");
+        let before = state.active_text();
+        state.run_data_action(action::NOTE_TITLE);
+        assert_eq!(state.active_text(), before);
     }
 }

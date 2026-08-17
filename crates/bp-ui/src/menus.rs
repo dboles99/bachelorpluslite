@@ -43,12 +43,28 @@ pub mod action {
     pub const SHORTCUTS: i32 = 50;
     pub const ABOUT: i32 = 51;
 
-    /// Clipboard history occupies `CLIP_BASE .. CLIP_BASE + MAX_ENTRIES`.
+    /// Clipboard history occupies `CLIP_BASE ..` (bounded by [`super::clip_end`]).
     ///
     /// Slint's `dispatch` routes exactly `UNDO..=SELECT_ALL` to the widget and
     /// everything else to Rust, so this range only has to avoid that window —
     /// not sit below it.
     pub const CLIP_BASE: i32 = 300;
+
+    /// How many transform rows are reserved per clipboard entry.
+    ///
+    /// `transforms_for` currently offers at most three for any one
+    /// `ClipKind` (`PlainText` and `Json`); one spare slot is headroom.
+    /// `no_clip_kind_offers_more_transforms_than_the_reserved_slots` fails
+    /// loudly if that ever stops being true, rather than letting a fourth
+    /// transform silently share an id with the next entry's first one.
+    pub const CLIP_TRANSFORM_SLOTS: i32 = 4;
+    /// Paste-transformation rows: entry `i`'s transforms occupy
+    /// `CLIP_TRANSFORM_BASE + i * CLIP_TRANSFORM_SLOTS ..` (bounded by
+    /// [`super::clip_transform_end`]). A block per entry, in a range of its
+    /// own above `CLIP_BASE`'s, rather than interleaved with it -- so the
+    /// plain-paste arm's `id - CLIP_BASE` arithmetic never has to know
+    /// transform rows exist.
+    pub const CLIP_TRANSFORM_BASE: i32 = 500;
 
     pub const NOTE_TITLE: i32 = 80;
     pub const NOTE_RENAME: i32 = 81;
@@ -56,14 +72,20 @@ pub mod action {
     pub const NOTE_KEYWORDS: i32 = 83;
     pub const NOTE_OUTLINE: i32 = 84;
 
-    /// Line operations that need no caret. The rest of the family --
-    /// Duplicate Line, Move Line Up/Down -- needs one, and waits for the
-    /// custom editor view.
+    /// Line operations that need no caret: a whole-document replace, like a
+    /// data operation.
     pub const LINES_SORT_ASC: i32 = 90;
     pub const LINES_SORT_DESC: i32 = 91;
     pub const LINES_DEDUPE: i32 = 92;
     pub const LINES_REVERSE: i32 = 93;
     pub const LINES_TRIM: i32 = 94;
+
+    /// The rest of the line-operation family: it needs the caret `bp-editor`
+    /// owns, which only the custom editor view exposes -- `TextInput`'s
+    /// caret is unreadable from here. 98 and 99 are free.
+    pub const DUPLICATE_LINE: i32 = 95;
+    pub const MOVE_LINE_UP: i32 = 96;
+    pub const MOVE_LINE_DOWN: i32 = 97;
 
     pub const DATA_VALIDATE: i32 = 70;
     pub const DATA_FORMAT: i32 = 71;
@@ -71,6 +93,15 @@ pub mod action {
     pub const DATA_TO_JSONL: i32 = 73;
     pub const DATA_TO_JSON: i32 = 74;
     pub const DATA_REPORT: i32 = 75;
+    /// CSV/TSV only. Kept apart from `DATA_TO_JSON`/`DATA_TO_JSONL`, which
+    /// convert between JSON and JSON Lines -- a delimited table becoming
+    /// JSON is a different operation behind a different library function,
+    /// and sharing an id would make `run_data_action`'s match depend on the
+    /// format to know which one a click meant.
+    pub const DATA_CSV_TO_JSON: i32 = 76;
+    pub const DATA_CSV_TO_JSONL: i32 = 77;
+    pub const DATA_COLUMN_TYPES: i32 = 78;
+    // 79 is free.
 
     /// Recently-opened files occupy `RECENT_BASE .. RECENT_BASE + MAX_RECENT`.
     /// The range is sized to the list so a longer list cannot silently run
@@ -131,6 +162,84 @@ fn toggle(label: &str, on: bool, action: i32) -> MenuItem {
 /// The trailing note naming when a menu's contents arrive.
 fn arrives(phase: &str) -> MenuItem {
     planned(&format!("— not implemented yet ({phase})"))
+}
+
+/// One past the last plain-paste clipboard id `CLIP_BASE` can produce.
+///
+/// Bounded the same way `RECENT_BASE`'s window is bounded by `MAX_RECENT`:
+/// dispatch used to match `id >= CLIP_BASE` with no upper edge at all, which
+/// is the same shape of mistake that once let the recent-files arm claim
+/// everything up to 100. A function rather than a `const` because
+/// `i32::try_from` is not usable in a const initialiser.
+pub(crate) fn clip_end() -> i32 {
+    action::CLIP_BASE + i32::try_from(bp_clipboard::MAX_ENTRIES).unwrap_or(0)
+}
+
+/// One past the last paste-transformation id.
+pub(crate) fn clip_transform_end() -> i32 {
+    action::CLIP_TRANSFORM_BASE
+        + action::CLIP_TRANSFORM_SLOTS * i32::try_from(bp_clipboard::MAX_ENTRIES).unwrap_or(0)
+}
+
+/// A menu label for a paste transformation.
+///
+/// Presentation only -- what each `Transform` actually does lives in
+/// `bp_clipboard` and, for the two JSON ones, `bp_data`; this just names the
+/// row for a menu built in Rust.
+fn transform_label(transform: bp_clipboard::Transform) -> &'static str {
+    use bp_clipboard::Transform;
+    match transform {
+        Transform::JoinLines => "Join Lines",
+        Transform::PlainText => "Strip Markdown",
+        Transform::PrettyJson => "Pretty-Print JSON",
+        Transform::MinifyJson => "Minify JSON",
+        Transform::ForwardSlashes => "Forward Slashes",
+        Transform::BulletList => "As Bullet List",
+        Transform::CodeBlock => "As Code Block",
+    }
+}
+
+/// Apply a paste transformation, routing JSON reformatting to `bp-data`.
+///
+/// `bp_clipboard::apply` deliberately returns `None` for `PrettyJson` and
+/// `MinifyJson` -- its doc comment explains why: `bp-data` already owns JSON
+/// formatting through `serde_json`, and a second implementation here would
+/// give the same document two different answers depending on which menu
+/// reached for it. `None` still means what it means for every other
+/// transform -- nothing would change, so no row should offer it -- which is
+/// why the JSON branches are also checked against the input rather than
+/// trusted to always differ.
+pub(crate) fn apply_transform(transform: bp_clipboard::Transform, text: &str) -> Option<String> {
+    use bp_clipboard::Transform;
+    let result = match transform {
+        Transform::PrettyJson => bp_data::json_format(text).ok(),
+        Transform::MinifyJson => bp_data::json_minify(text).ok(),
+        other => bp_clipboard::apply(other, text),
+    }?;
+    (result != text).then_some(result)
+}
+
+/// Decode a `CLIP_TRANSFORM_BASE`-range id back to which entry and
+/// transform it means.
+///
+/// `None` covers a stale id the same way as an unknown one: the range is
+/// wrong, the entry is no longer there (the history moved between the menu
+/// being built and the click landing), or the slot is past however many
+/// transforms that entry's kind actually offers. All three are "do nothing"
+/// as far as the caller is concerned.
+pub(crate) fn decode_transform(
+    id: i32,
+    clips: &[bp_clipboard::Entry],
+) -> Option<(usize, bp_clipboard::Transform)> {
+    if !(action::CLIP_TRANSFORM_BASE..clip_transform_end()).contains(&id) {
+        return None;
+    }
+    let offset = id - action::CLIP_TRANSFORM_BASE;
+    let entry_index = usize::try_from(offset / action::CLIP_TRANSFORM_SLOTS).ok()?;
+    let slot = usize::try_from(offset % action::CLIP_TRANSFORM_SLOTS).ok()?;
+    let entry = clips.get(entry_index)?;
+    let transform = *bp_clipboard::transforms_for(entry.kind).get(slot)?;
+    Some((entry_index, transform))
 }
 
 pub fn file(any_dirty: bool, has_path: bool, recent: &[std::path::PathBuf]) -> Vec<MenuItem> {
@@ -196,7 +305,11 @@ fn shorten(text: &str, max: usize) -> String {
     format!("…{tail}")
 }
 
-pub fn edit(clips: &[bp_clipboard::Entry]) -> Vec<MenuItem> {
+/// `editor_view` gates the caret-dependent line operations: `TextInput`
+/// never exposes where the caret is, so those rows stay present but greyed
+/// rather than vanishing, per this module's convention for a feature that
+/// exists but is not usable right now.
+pub fn edit(clips: &[bp_clipboard::Entry], editor_view: bool) -> Vec<MenuItem> {
     let mut items = vec![
         row("Undo", "Ctrl+Z", action::UNDO),
         row_end("Redo", "Ctrl+Y", action::REDO),
@@ -218,6 +331,23 @@ pub fn edit(clips: &[bp_clipboard::Entry]) -> Vec<MenuItem> {
                 entry.kind.label(),
                 action::CLIP_BASE + i32::try_from(index).unwrap_or(0),
             ));
+
+            // Format-aware paste transformations (specs.md section 14) --
+            // only the ones that would actually change this entry's text.
+            // A row that does nothing when clicked is worse than no row.
+            for (slot, &transform) in bp_clipboard::transforms_for(entry.kind).iter().enumerate() {
+                if apply_transform(transform, &entry.text).is_none() {
+                    continue;
+                }
+                let id = action::CLIP_TRANSFORM_BASE
+                    + i32::try_from(index).unwrap_or(0) * action::CLIP_TRANSFORM_SLOTS
+                    + i32::try_from(slot).unwrap_or(0);
+                items.push(row(
+                    &format!("    ↳ {}", transform_label(transform)),
+                    "",
+                    id,
+                ));
+            }
         }
     }
     if let Some(last) = items.last_mut() {
@@ -230,11 +360,21 @@ pub fn edit(clips: &[bp_clipboard::Entry]) -> Vec<MenuItem> {
         row("Remove Duplicate Lines", "", action::LINES_DEDUPE),
         row("Reverse Lines", "", action::LINES_REVERSE),
         row_end("Trim Trailing Whitespace", "", action::LINES_TRIM),
-        // Both need to know where the caret is, which Slint's TextInput does
-        // not expose. They arrive with the custom editor view.
-        planned("Duplicate Line"),
-        planned("Move Line Up / Down"),
-        planned("Paste Special"),
+        // Both need the caret bp-editor owns, which only the custom surface
+        // exposes -- TextInput's caret is unreadable from here.
+        MenuItem {
+            enabled: editor_view,
+            ..row("Duplicate Line", "Ctrl+D", action::DUPLICATE_LINE)
+        },
+        MenuItem {
+            enabled: editor_view,
+            ..row("Move Line Up", "Alt+Up", action::MOVE_LINE_UP)
+        },
+        MenuItem {
+            enabled: editor_view,
+            ..row_end("Move Line Down", "Alt+Down", action::MOVE_LINE_DOWN)
+        },
+        planned("Multi-cursor"),
         arrives("phase 2"),
     ]);
     items
@@ -307,7 +447,12 @@ pub fn data(format: Format) -> Vec<MenuItem> {
             row_end("Validate", "", action::DATA_VALIDATE),
             row("Format", "", action::DATA_FORMAT),
         ],
-        Format::Csv | Format::Tsv => vec![row("Report Shape", "", action::DATA_REPORT)],
+        Format::Csv | Format::Tsv => vec![
+            row("Report Shape", "", action::DATA_REPORT),
+            row_end("Column Types", "", action::DATA_COLUMN_TYPES),
+            row("Convert to JSON", "", action::DATA_CSV_TO_JSON),
+            row_end("Convert to JSON Lines", "", action::DATA_CSV_TO_JSONL),
+        ],
         _ => {
             let mut items = planned_menu("Data");
             items.insert(
@@ -562,9 +707,12 @@ mod tests {
     fn every_working_row_has_an_action() {
         let mut all = Vec::new();
         all.extend(file(true, true, &[]));
-        all.extend(edit(&[]));
+        // `true` so the caret-dependent rows are enabled here too -- the
+        // stronger check, since a disabled row is exempt below regardless.
+        all.extend(edit(&[], true));
         all.extend(view(ThemeId::Organic, true, false));
         all.extend(format(Encoding::Utf8, LineEnding::Lf));
+        all.extend(data(Format::Csv));
         all.extend(help());
 
         for item in all.iter().filter(|i| i.enabled) {
@@ -651,6 +799,7 @@ mod tests {
         rust_side.extend(format(Encoding::Utf8, LineEnding::Lf));
         rust_side.extend(note(true));
         rust_side.extend(data(Format::Json));
+        rust_side.extend(data(Format::Csv));
         rust_side.extend(help());
 
         for item in rust_side.iter().filter(|i| i.enabled) {
@@ -675,7 +824,10 @@ mod tests {
             action::PASTE,
             action::SELECT_ALL,
         ];
-        for item in edit(&clips).iter().filter(|i| i.enabled) {
+        // `true` so Duplicate Line and Move Line Up/Down are enabled here
+        // too -- they are outside the editor window either way, but a
+        // disabled row would skip the check below and prove nothing.
+        for item in edit(&clips, true).iter().filter(|i| i.enabled) {
             if widget_rows.contains(&item.action) {
                 continue;
             }
@@ -694,10 +846,14 @@ mod tests {
             bp_clipboard::Entry::new("first"),
             bp_clipboard::Entry::new("second"),
         ];
-        let items = edit(&clips);
+        let items = edit(&clips, false);
+        // Bounded above by `clip_end()`: both entries are plain text and
+        // single words, so each also offers transform rows (As Bullet
+        // List, As Code Block) whose ids live past `clip_end()` -- an
+        // unbounded `>= CLIP_BASE` filter here would count those too.
         let rows: Vec<&MenuItem> = items
             .iter()
-            .filter(|i| i.action >= action::CLIP_BASE)
+            .filter(|i| i.action >= action::CLIP_BASE && i.action < clip_end())
             .collect();
 
         assert_eq!(rows.len(), 2);
@@ -707,8 +863,149 @@ mod tests {
     }
 
     #[test]
+    fn an_entry_with_only_rejected_transforms_offers_no_transform_row() {
+        // A path with no backslashes: `transforms_for(Path)` offers only
+        // `ForwardSlashes`, and `apply` refuses because nothing would
+        // change. The plain-paste row must still be there; nothing beyond
+        // it should be.
+        let clips = [bp_clipboard::Entry::new("/usr/local/bin")];
+        let items = edit(&clips, false);
+
+        assert!(
+            items.iter().any(|i| i.action == action::CLIP_BASE),
+            "the plain paste row must still be offered"
+        );
+        assert!(
+            items.iter().all(|i| i.action < action::CLIP_TRANSFORM_BASE),
+            "a transform that changes nothing must not get a row"
+        );
+    }
+
+    #[test]
+    fn a_json_entry_offers_pretty_print_and_minify_routed_through_bp_data() {
+        // `bp_clipboard::apply` always returns `None` for these two -- the
+        // shell is supposed to route them to `bp-data` instead, and the
+        // menu row is the proof that routing actually happens.
+        let clips = [bp_clipboard::Entry::new(r#"{"b":1,"a":2}"#)];
+        let items = edit(&clips, false);
+
+        assert!(
+            items.iter().any(|i| i.label.contains("Pretty-Print JSON")),
+            "unsorted, compact JSON should offer to be pretty-printed"
+        );
+        assert!(
+            items.iter().any(|i| i.label.contains("Minify JSON")),
+            "unsorted JSON minifies to a different (sorted) string"
+        );
+    }
+
+    #[test]
+    fn plain_clipboard_ids_and_transform_ids_never_overlap() {
+        assert!(
+            clip_end() <= action::CLIP_TRANSFORM_BASE,
+            "a full clipboard history would run into the transform-row ids"
+        );
+    }
+
+    #[test]
+    fn no_clip_kind_offers_more_transforms_than_the_reserved_slots() {
+        // The id scheme assumes a fixed number of slots per entry. A kind
+        // that grows past it would make two transforms share an id instead
+        // of failing to compile or panicking -- exactly the silent failure
+        // this codebase cares most about catching.
+        for kind in [
+            bp_clipboard::ClipKind::PlainText,
+            bp_clipboard::ClipKind::Json,
+            bp_clipboard::ClipKind::Url,
+            bp_clipboard::ClipKind::Path,
+            bp_clipboard::ClipKind::Code,
+            bp_clipboard::ClipKind::Markdown,
+        ] {
+            let offered = bp_clipboard::transforms_for(kind).len();
+            assert!(
+                i32::try_from(offered).unwrap_or(i32::MAX) <= action::CLIP_TRANSFORM_SLOTS,
+                "{kind:?} offers {offered} transforms, more than CLIP_TRANSFORM_SLOTS reserves"
+            );
+        }
+    }
+
+    #[test]
+    fn duplicate_and_move_line_rows_are_present_but_disabled_without_the_custom_editor_view() {
+        let items = edit(&[], false);
+        for id in [
+            action::DUPLICATE_LINE,
+            action::MOVE_LINE_UP,
+            action::MOVE_LINE_DOWN,
+        ] {
+            let row = items
+                .iter()
+                .find(|i| i.action == id)
+                .unwrap_or_else(|| panic!("row for action {id} is missing"));
+            assert!(
+                !row.enabled,
+                "'{}' needs the caret, which TextInput does not expose",
+                row.label
+            );
+        }
+    }
+
+    #[test]
+    fn duplicate_and_move_line_rows_are_enabled_under_the_custom_editor_view() {
+        let items = edit(&[], true);
+        for id in [
+            action::DUPLICATE_LINE,
+            action::MOVE_LINE_UP,
+            action::MOVE_LINE_DOWN,
+        ] {
+            let row = items
+                .iter()
+                .find(|i| i.action == id)
+                .unwrap_or_else(|| panic!("row for action {id} is missing"));
+            assert!(row.enabled, "'{}' should be usable here", row.label);
+        }
+    }
+
+    #[test]
+    fn csv_and_tsv_offer_conversions_and_column_types() {
+        for fmt in [Format::Csv, Format::Tsv] {
+            let items = data(fmt);
+            for id in [
+                action::DATA_REPORT,
+                action::DATA_COLUMN_TYPES,
+                action::DATA_CSV_TO_JSON,
+                action::DATA_CSV_TO_JSONL,
+            ] {
+                let row = items
+                    .iter()
+                    .find(|i| i.action == id)
+                    .unwrap_or_else(|| panic!("{fmt:?} is missing action {id}"));
+                assert!(
+                    row.enabled,
+                    "'{}' should not be offered disabled",
+                    row.label
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn only_csv_and_tsv_offer_the_csv_specific_data_rows() {
+        let items = data(Format::Json);
+        for id in [
+            action::DATA_COLUMN_TYPES,
+            action::DATA_CSV_TO_JSON,
+            action::DATA_CSV_TO_JSONL,
+        ] {
+            assert!(
+                items.iter().all(|i| i.action != id),
+                "JSON has no delimited table to convert or type-check"
+            );
+        }
+    }
+
+    #[test]
     fn an_empty_clipboard_history_says_so_rather_than_showing_nothing() {
-        let items = edit(&[]);
+        let items = edit(&[], false);
         assert!(
             items.iter().any(|i| i.label.contains("nothing copied yet")),
             "an empty section with no explanation reads as broken"

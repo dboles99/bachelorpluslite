@@ -73,6 +73,26 @@ const MAX_FONT_SIZE: u8 = 96;
 /// Matches the size `app.slint` used to hard-code.
 const DEFAULT_FONT_SIZE: u8 = 14;
 
+/// Smallest accepted tab width, in columns.
+///
+/// A width of zero would collapse every indent level to nothing and turns
+/// column arithmetic elsewhere into division-by-zero territory, so it is
+/// rejected here rather than relied on callers to guard against.
+const MIN_TAB_WIDTH: u8 = 1;
+
+/// Largest accepted tab width, in columns.
+///
+/// Real editors top out around 8 by default; doubling that twice over to 32
+/// leaves headroom for unusual but legitimate wide-indent styles while still
+/// catching what is almost certainly a typo -- a three-digit tab width reads
+/// like a font size typed into the wrong setting.
+const MAX_TAB_WIDTH: u8 = 32;
+
+/// Tab width used before any configuration is applied, in columns. Matches
+/// the `TAB_WIDTH` constant `bp-ui` currently hard-codes, and the default
+/// `bp_editor::view` already falls back to.
+const DEFAULT_TAB_WIDTH: u8 = 4;
+
 /// Resolved settings.
 ///
 /// `theme` stays a `String` rather than a `bp-theme` enum on purpose: an
@@ -91,6 +111,15 @@ pub struct Config {
     /// point size for this setting, and `u8` rules both out at the type
     /// level rather than by convention.
     pub font_size: u8,
+    /// Indentation width in columns. A `u8` for the same reason as
+    /// `font_size`: it is always a small positive whole number in practice.
+    /// Matches the `tab_width` parameter `bp_editor::view` already threads
+    /// through everywhere, and the `TAB_WIDTH` constant `bp-ui` currently
+    /// hard-codes.
+    pub tab_width: u8,
+    /// Whether the Tab key inserts spaces instead of a literal tab
+    /// character.
+    pub indent_spaces: bool,
 }
 
 impl Default for Config {
@@ -102,6 +131,12 @@ impl Default for Config {
             // text editor whose real warnings get ignored.
             log: "warn".to_owned(),
             font_size: DEFAULT_FONT_SIZE,
+            tab_width: DEFAULT_TAB_WIDTH,
+            // A Notepad-style editor promises "Notepad when you want it": Tab
+            // inserts a tab. Silently rewriting it into spaces is exactly the
+            // kind of surprise that promise rules out, so opting into spaces
+            // is something the user must ask for.
+            indent_spaces: false,
         }
     }
 }
@@ -146,6 +181,12 @@ pub struct Env {
     /// one place ([`apply_font_size`]) regardless of which layer the value
     /// came from.
     pub font_size: Option<String>,
+    /// Kept as text for the same reason as `font_size` -- see
+    /// [`apply_tab_width`].
+    pub tab_width: Option<String>,
+    /// Kept as text for the same reason as `font_size` -- see
+    /// [`apply_indent_spaces`].
+    pub indent_spaces: Option<String>,
     /// `BACHELORPAD_CONFIG` overrides the config file location.
     pub config_path: Option<String>,
 }
@@ -159,6 +200,8 @@ impl Env {
             renderer: get("BACHELORPAD_RENDERER"),
             log: get("BACHELORPAD_LOG"),
             font_size: get("BACHELORPAD_FONT_SIZE"),
+            tab_width: get("BACHELORPAD_TAB_WIDTH"),
+            indent_spaces: get("BACHELORPAD_INDENT_SPACES"),
             config_path: get("BACHELORPAD_CONFIG"),
         }
     }
@@ -167,16 +210,21 @@ impl Env {
 /// The settings a config file may set. Unknown keys are ignored rather than
 /// fatal -- one typo must not discard every other setting.
 ///
-/// `font_size` is read as `i64`, wider than the `u8` it settles into, so a
-/// too-large or negative number in the file is a range problem this module
-/// reports with a [`Notice`], not a TOML type error that would discard the
-/// whole file.
+/// `font_size` and `tab_width` are read as `i64`, wider than the `u8` they
+/// settle into, so a too-large or negative number in the file is a range
+/// problem this module reports with a [`Notice`], not a TOML type error that
+/// would discard the whole file. `indent_spaces` stays a native TOML `bool`
+/// for the same reason: any value written the way TOML expects a boolean to
+/// look deserialises fine, and only genuinely wrong types (e.g. a quoted
+/// string) become a file-level error.
 #[derive(Debug, Default, Deserialize)]
 struct FileConfig {
     theme: Option<String>,
     renderer: Option<String>,
     log: Option<String>,
     font_size: Option<i64>,
+    tab_width: Option<i64>,
+    indent_spaces: Option<bool>,
 }
 
 /// Outcome of loading configuration.
@@ -232,11 +280,25 @@ pub fn resolve(file: Option<&str>, env: &Env, args: &[String]) -> (Config, Vec<N
                 if let Some(f) = parsed.font_size {
                     apply_font_size(&mut config, &f.to_string(), &mut notices);
                 }
+                if let Some(t) = parsed.tab_width {
+                    apply_tab_width(&mut config, &t.to_string(), &mut notices);
+                }
+                if let Some(s) = parsed.indent_spaces {
+                    apply_indent_spaces(&mut config, &s.to_string(), &mut notices);
+                }
                 // Report keys we ignored, so a typo is visible instead of
                 // silently doing nothing.
                 if let Ok(table) = toml::from_str::<toml::Table>(text) {
                     for key in table.keys() {
-                        if !matches!(key.as_str(), "theme" | "renderer" | "log" | "font_size") {
+                        if !matches!(
+                            key.as_str(),
+                            "theme"
+                                | "renderer"
+                                | "log"
+                                | "font_size"
+                                | "tab_width"
+                                | "indent_spaces"
+                        ) {
                             notices.push(Notice::UnknownKey { key: key.clone() });
                         }
                     }
@@ -262,6 +324,12 @@ pub fn resolve(file: Option<&str>, env: &Env, args: &[String]) -> (Config, Vec<N
     if let Some(f) = &env.font_size {
         apply_font_size(&mut config, f, &mut notices);
     }
+    if let Some(t) = &env.tab_width {
+        apply_tab_width(&mut config, t, &mut notices);
+    }
+    if let Some(s) = &env.indent_spaces {
+        apply_indent_spaces(&mut config, s, &mut notices);
+    }
 
     // --- command line (highest) ----------------------------------------
     for arg in args {
@@ -273,6 +341,8 @@ pub fn resolve(file: Option<&str>, env: &Env, args: &[String]) -> (Config, Vec<N
             "renderer" => apply_renderer(&mut config, value, &mut notices),
             "log" => config.log = value.to_owned(),
             "font-size" => apply_font_size(&mut config, value, &mut notices),
+            "tab-width" => apply_tab_width(&mut config, value, &mut notices),
+            "indent-spaces" => apply_indent_spaces(&mut config, value, &mut notices),
             _ => {}
         }
     }
@@ -290,6 +360,20 @@ fn apply_renderer(config: &mut Config, value: &str, notices: &mut Vec<Notice>) {
     }
 }
 
+/// Parse and range-check a small positive whole number, shared by every
+/// setting shaped like this ([`apply_font_size`], [`apply_tab_width`]): a
+/// string in, `min..=max` enforced, `None` for anything unparseable or out
+/// of range. Widening through `i64` first means a huge or negative number
+/// is a normal range failure here rather than an integer-overflow panic.
+fn parse_ranged_u8(value: &str, min: u8, max: u8) -> Option<u8> {
+    value
+        .trim()
+        .parse::<i64>()
+        .ok()
+        .filter(|n| (i64::from(min)..=i64::from(max)).contains(n))
+        .map(|n| n as u8)
+}
+
 /// Parse and range-check a font size from any layer (file, environment or
 /// command line all hand this a string -- see the comment on `Env::font_size`
 /// for why). On failure the existing value is left untouched rather than
@@ -298,15 +382,42 @@ fn apply_renderer(config: &mut Config, value: &str, notices: &mut Vec<Notice>) {
 /// `Config::default()`, that still means "falls back to the default" in the
 /// common case of a bad value with nothing better beneath it.
 fn apply_font_size(config: &mut Config, value: &str, notices: &mut Vec<Notice>) {
-    let in_range = value
-        .trim()
-        .parse::<i64>()
-        .ok()
-        .filter(|n| (i64::from(MIN_FONT_SIZE)..=i64::from(MAX_FONT_SIZE)).contains(n));
-    match in_range {
-        Some(n) => config.font_size = n as u8,
+    match parse_ranged_u8(value, MIN_FONT_SIZE, MAX_FONT_SIZE) {
+        Some(n) => config.font_size = n,
         None => notices.push(Notice::UnknownValue {
             key: "font-size".to_owned(),
+            value: value.to_owned(),
+        }),
+    }
+}
+
+/// Parse and range-check a tab width from any layer. Same shape and the same
+/// "leave the existing value alone on failure" behaviour as
+/// [`apply_font_size`] -- see that function's comment for why.
+fn apply_tab_width(config: &mut Config, value: &str, notices: &mut Vec<Notice>) {
+    match parse_ranged_u8(value, MIN_TAB_WIDTH, MAX_TAB_WIDTH) {
+        Some(n) => config.tab_width = n,
+        None => notices.push(Notice::UnknownValue {
+            key: "tab-width".to_owned(),
+            value: value.to_owned(),
+        }),
+    }
+}
+
+/// Parse "insert spaces for Tab" from any layer -- file, environment and
+/// command line all hand this a string, same as [`apply_font_size`].
+///
+/// Only the spellings TOML's own boolean literals use are accepted. Unlike
+/// `RendererPref`'s synonyms, where `cpu`/`gpu` name genuinely different
+/// renderer concepts, `true`/`false` already has exactly one obvious
+/// spelling per value; accepting more (`1`/`0`, `yes`/`no`) would just be
+/// more ways to mistype it, not more ways to mean it.
+fn apply_indent_spaces(config: &mut Config, value: &str, notices: &mut Vec<Notice>) {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "true" => config.indent_spaces = true,
+        "false" => config.indent_spaces = false,
+        _ => notices.push(Notice::UnknownValue {
+            key: "indent-spaces".to_owned(),
             value: value.to_owned(),
         }),
     }
@@ -512,6 +623,173 @@ mod tests {
     }
 
     #[test]
+    fn the_default_tab_width_matches_bp_uis_hard_coded_constant() {
+        assert_eq!(
+            Config::default().tab_width,
+            4,
+            "bp-ui's TAB_WIDTH and bp_editor::view's own default are both 4; the config default must not disagree with the editor it configures"
+        );
+    }
+
+    #[test]
+    fn the_file_sets_the_tab_width() {
+        let (c, n) = resolve(Some("tab_width = 8"), &Env::default(), &[]);
+        assert_eq!(c.tab_width, 8);
+        assert!(n.is_empty(), "a valid tab width must not warn");
+    }
+
+    #[test]
+    fn the_environment_overrides_the_files_tab_width() {
+        let file = "tab_width = 8\n";
+        let env = Env {
+            tab_width: Some("2".to_owned()),
+            ..Env::default()
+        };
+        let (c, _) = resolve(Some(file), &env, &[]);
+        assert_eq!(c.tab_width, 2);
+    }
+
+    #[test]
+    fn the_command_line_overrides_the_tab_width() {
+        let file = "tab_width = 8\n";
+        let env = Env {
+            tab_width: Some("2".to_owned()),
+            ..Env::default()
+        };
+        let (c, _) = resolve(Some(file), &env, &args(&["--tab-width=3"]));
+        assert_eq!(c.tab_width, 3);
+    }
+
+    #[test]
+    fn an_unparseable_tab_width_warns_and_falls_back() {
+        let (c, n) = resolve(None, &Env::default(), &args(&["--tab-width=wide"]));
+
+        assert_eq!(
+            c.tab_width, 4,
+            "a value that is not even a number must not change anything"
+        );
+        assert_eq!(
+            n,
+            vec![Notice::UnknownValue {
+                key: "tab-width".to_owned(),
+                value: "wide".to_owned()
+            }]
+        );
+    }
+
+    #[test]
+    fn an_out_of_range_tab_width_warns_and_falls_back() {
+        let (c, n) = resolve(None, &Env::default(), &args(&["--tab-width=999"]));
+
+        assert_eq!(
+            c.tab_width, 4,
+            "a 999-column tab is not a legitimate indent width; it is almost certainly a mistake, so fall back rather than clamp to a value the user never asked for"
+        );
+        assert_eq!(
+            n,
+            vec![Notice::UnknownValue {
+                key: "tab-width".to_owned(),
+                value: "999".to_owned()
+            }]
+        );
+    }
+
+    #[test]
+    fn a_tab_width_of_zero_warns_and_falls_back() {
+        let (c, n) = resolve(None, &Env::default(), &args(&["--tab-width=0"]));
+
+        assert_eq!(
+            c.tab_width, 4,
+            "a zero-width tab would collapse every indent level to nothing"
+        );
+        assert_eq!(
+            n.len(),
+            1,
+            "the out-of-range value must produce exactly one notice"
+        );
+    }
+
+    #[test]
+    fn an_empty_environment_tab_width_is_treated_as_unset() {
+        // Mirrors an_empty_environment_font_size_is_treated_as_unset: an
+        // exported-but-blank variable is the shell's idea of "unset", so it
+        // must not shadow the file underneath it.
+        let env = Env {
+            tab_width: None,
+            ..Env::default()
+        };
+        let (c, _) = resolve(Some("tab_width = 2"), &env, &[]);
+        assert_eq!(c.tab_width, 2);
+    }
+
+    #[test]
+    fn the_default_is_to_insert_a_literal_tab() {
+        assert!(
+            !Config::default().indent_spaces,
+            "BachelorPad+ promises Notepad when you want it: Tab must insert a tab unless the user opts into spaces"
+        );
+    }
+
+    #[test]
+    fn the_file_sets_indent_spaces() {
+        let (c, n) = resolve(Some("indent_spaces = true"), &Env::default(), &[]);
+        assert!(c.indent_spaces);
+        assert!(n.is_empty(), "a valid indent-spaces value must not warn");
+    }
+
+    #[test]
+    fn the_environment_overrides_the_files_indent_spaces() {
+        let file = "indent_spaces = true\n";
+        let env = Env {
+            indent_spaces: Some("false".to_owned()),
+            ..Env::default()
+        };
+        let (c, _) = resolve(Some(file), &env, &[]);
+        assert!(!c.indent_spaces);
+    }
+
+    #[test]
+    fn the_command_line_overrides_indent_spaces() {
+        let file = "indent_spaces = false\n";
+        let env = Env {
+            indent_spaces: Some("false".to_owned()),
+            ..Env::default()
+        };
+        let (c, _) = resolve(Some(file), &env, &args(&["--indent-spaces=true"]));
+        assert!(c.indent_spaces);
+    }
+
+    #[test]
+    fn an_unrecognised_indent_spaces_spelling_warns_and_falls_back() {
+        let (c, n) = resolve(None, &Env::default(), &args(&["--indent-spaces=yes"]));
+
+        assert!(
+            !c.indent_spaces,
+            "an unrecognised spelling must not change anything"
+        );
+        assert_eq!(
+            n,
+            vec![Notice::UnknownValue {
+                key: "indent-spaces".to_owned(),
+                value: "yes".to_owned()
+            }]
+        );
+    }
+
+    #[test]
+    fn an_empty_environment_indent_spaces_is_treated_as_unset() {
+        // Mirrors an_empty_environment_font_size_is_treated_as_unset: an
+        // exported-but-blank variable is the shell's idea of "unset", so it
+        // must not shadow the file underneath it.
+        let env = Env {
+            indent_spaces: None,
+            ..Env::default()
+        };
+        let (c, _) = resolve(Some("indent_spaces = true"), &env, &[]);
+        assert!(c.indent_spaces);
+    }
+
+    #[test]
     fn a_malformed_file_yields_defaults_and_a_notice() {
         // The rule that matters: broken config must not stop the editor.
         let (c, n) = resolve(Some("theme = = broken"), &Env::default(), &[]);
@@ -618,7 +896,7 @@ mod tests {
         // Structural guard for ADR-0011: everything in Config is a setting.
         // If a field is ever added that could carry document text, this test
         // is where the argument about it should happen.
-        let file = "theme = \"Green\"\nrenderer = \"software\"\nlog = \"warn\"\nfont_size = 18\n";
+        let file = "theme = \"Green\"\nrenderer = \"software\"\nlog = \"warn\"\nfont_size = 18\ntab_width = 8\nindent_spaces = true\n";
         let (c, _) = resolve(Some(file), &Env::default(), &[]);
         let rendered = format!("{c:?}");
 

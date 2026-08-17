@@ -71,6 +71,13 @@ Adding a decision means adding both.
   way the wheel scrolls are all open. `project/NEXT_SESSION.md` has the
   checklist. It is opt-in behind `--editor-view`, so nothing depends on the
   answers yet.
+- **A clipboard menu row can act on a different entry than the one it
+  names.** Row ids are decoded against the clipboard history as it is at the
+  moment of the click, not as it was when the menu was built, and a 1.2 s
+  poll timer can add an entry in between. Predates the paste-transformation
+  rows and applies equally to plain paste. Fixing it properly means freezing
+  a snapshot of the history while a menu is open, which is a design question
+  rather than a patch.
 - **Most of the product has not been used.** 393 tests cover the pieces in
   isolation. One manual pass found two defects no test caught: a menu bar
   where twelve of fourteen menus swallowed clicks, and Save As defaulting to

@@ -190,6 +190,58 @@ fn every_caret_position_in_a_crlf_document_is_reachable_and_stable() {
 }
 
 #[test]
+fn going_to_a_line_lands_on_it_and_says_whether_it_existed() {
+    let mut e = Editor::new("one\ntwo\nthree");
+
+    assert!(e.go_to_line(2));
+    assert_eq!(e.position().line, 2);
+    assert_eq!(e.cursor(), 4, "the start of the line, not somewhere in it");
+
+    // Past the end still moves somewhere sensible, and says it could not.
+    assert!(!e.go_to_line(9999), "there are only three lines");
+    assert_eq!(e.position().line, 3, "clamped to the last one");
+}
+
+#[test]
+fn going_to_a_line_clears_any_selection() {
+    // Otherwise the caret jumps and drags a selection across the document
+    // behind it, which nobody asked for.
+    let mut e = Editor::new("one\ntwo\nthree");
+    e.select(0, 7);
+    assert!(e.selection().is_some());
+
+    e.go_to_line(3);
+    assert_eq!(e.selection(), None);
+}
+
+#[test]
+fn going_to_a_line_in_a_crlf_document_never_splits_a_break() {
+    let text = "one\r\ntwo\r\nthree\r\n";
+    let mut e = Editor::new(text);
+    let chars: Vec<char> = text.chars().collect();
+
+    for line in 0..=6 {
+        e.go_to_line(line);
+        let at = e.cursor();
+        let splits = at > 0 && at < chars.len() && chars[at - 1] == '\r' && chars[at] == '\n';
+        assert!(
+            !splits,
+            "go_to_line({line}) landed inside a CRLF pair at {at}"
+        );
+    }
+}
+
+#[test]
+fn going_to_a_line_is_undo_neutral() {
+    // Moving the caret is not an edit; it must not become an undo entry or a
+    // reason to call the document modified.
+    let mut e = Editor::new("one\ntwo\nthree");
+    e.go_to_line(2);
+    assert!(!e.can_undo(), "navigation is not an edit");
+    assert_eq!(e.text(), "one\ntwo\nthree");
+}
+
+#[test]
 fn line_selection_takes_the_break_with_it() {
     let mut e = Editor::new("one\ntwo\n");
     e.select_line_at(1);

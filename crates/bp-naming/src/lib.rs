@@ -18,6 +18,7 @@
 mod date;
 mod name;
 mod sanitize;
+mod stamp;
 
 pub use date::{DATE_LEN, format_date, parse_date};
 pub use name::{FIRST_COLLISION, FIRST_REVISION, SemanticName};
@@ -25,6 +26,7 @@ pub use sanitize::{
     FALLBACK_TITLE, MAX_COMPONENT_BYTES, MAX_EXTENSION_CHARS, sanitize_extension, sanitize_title,
     truncate_bytes,
 };
+pub use stamp::{Stamp, render};
 
 /// Crate identity used by workspace smoke tests and diagnostics.
 pub const CRATE_NAME: &str = "bp-naming";
