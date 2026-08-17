@@ -15,6 +15,8 @@
 
 #![forbid(unsafe_code)]
 
+use std::collections::HashSet;
+
 use thiserror::Error;
 
 /// Crate identity used by workspace smoke tests and diagnostics.
@@ -359,6 +361,236 @@ pub fn delimited_report(text: &str) -> Result<DelimitedReport, DataError> {
     })
 }
 
+// --- CSV: JSON conversion and column typing ------------------------------
+
+/// Resolve header cells to distinct JSON object keys.
+///
+/// Two things can otherwise make two columns collide under one key: an empty
+/// header cell, and a header name repeated later in the row. Either would
+/// silently drop a column's data when the second value overwrites the
+/// first in the JSON object -- exactly what the module doc forbids. The
+/// rule: an empty cell becomes `_<column>` (1-based), and a name already
+/// used gets its own column number appended. Both branches are naive about
+/// a pathological header (a literal `_2` column sitting next to an empty
+/// second cell can still collide), but every generated key is traceable
+/// back to a column number, which matters more than covering every
+/// adversarial header.
+fn resolve_header_keys(header: &[String]) -> Vec<String> {
+    let mut used = HashSet::new();
+    let mut keys = Vec::with_capacity(header.len());
+
+    for (index, cell) in header.iter().enumerate() {
+        let column = index + 1;
+        let key = if cell.is_empty() {
+            format!("_{column}")
+        } else if used.contains(cell) {
+            format!("{cell}_{column}")
+        } else {
+            cell.clone()
+        };
+        used.insert(key.clone());
+        keys.push(key);
+    }
+    keys
+}
+
+/// Map delimited rows to JSON objects keyed by the header row.
+///
+/// The first row is the header; every row after it becomes one object.
+/// Fields are always emitted as JSON strings, never numbers or booleans --
+/// see `delimited_to_json` for why -- so this only has to decide which key
+/// each field goes under.
+fn rows_to_objects(rows: &[Row]) -> Vec<serde_json::Value> {
+    let Some(header) = rows.first() else {
+        return Vec::new();
+    };
+    let keys = resolve_header_keys(&header.fields);
+
+    rows.iter()
+        .skip(1)
+        .map(|row| {
+            let mut object = serde_json::Map::new();
+            for (index, key) in keys.iter().enumerate() {
+                // A short row is missing data, not owed a guess at it: null
+                // says "not present" without inventing content.
+                let value = match row.fields.get(index) {
+                    Some(field) => serde_json::Value::String(field.clone()),
+                    None => serde_json::Value::Null,
+                };
+                object.insert(key.clone(), value);
+            }
+            // A long row has fields the header never named. They are still
+            // the user's data, so they are kept -- under the same
+            // `_<column>` scheme as an empty header cell, rather than
+            // dropped on the floor.
+            for (index, field) in row.fields.iter().enumerate().skip(keys.len()) {
+                object.insert(
+                    format!("_{}", index + 1),
+                    serde_json::Value::String(field.clone()),
+                );
+            }
+            serde_json::Value::Object(object)
+        })
+        .collect()
+}
+
+/// Convert a delimited document to a JSON array, one object per row.
+///
+/// The first row supplies the field names; see `resolve_header_keys` for how
+/// a blank or repeated one is handled. Every value is emitted as a JSON
+/// string, never a number or boolean, no matter how numeric it looks: a
+/// part number like `007` would lose its leading zeros, and a big enough
+/// integer loses precision, the moment it is read back as a JSON number.
+/// `column_types` reports what a column looks like without changing what is
+/// actually stored.
+pub fn delimited_to_json(text: &str) -> Result<String, DataError> {
+    let rows = delimited_rows(text, detect_delimiter(text))?;
+    let values = serde_json::Value::Array(rows_to_objects(&rows));
+    json_format(&serde_json::to_string(&values).map_err(|e| DataError::Other(e.to_string()))?)
+}
+
+/// Convert a delimited document to JSON Lines, one compact object per row.
+///
+/// Same header-to-key mapping as `delimited_to_json`; the two must always
+/// describe the same data for the same input, which is what
+/// `delimited_to_json_and_jsonl_agree_on_the_same_input` tests.
+pub fn delimited_to_jsonl(text: &str) -> Result<String, DataError> {
+    let rows = delimited_rows(text, detect_delimiter(text))?;
+    let mut out = String::new();
+    for object in rows_to_objects(&rows) {
+        out.push_str(&serde_json::to_string(&object).map_err(|e| DataError::Other(e.to_string()))?);
+        out.push('\n');
+    }
+    Ok(out)
+}
+
+/// The narrowest type every non-empty value in a column fits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ColumnKind {
+    Integer,
+    Float,
+    Boolean,
+    /// No non-empty value to judge -- not the same as `Text`, which claims
+    /// to have looked at values and found no narrower fit.
+    Empty,
+    Text,
+}
+
+/// What a column of a delimited file looks like.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ColumnReport {
+    pub name: String,
+    pub kind: ColumnKind,
+    /// Non-empty values.
+    pub filled: usize,
+    /// Empty values, including a row too short to reach this column.
+    pub missing: usize,
+}
+
+impl ColumnReport {
+    /// One-line summary for the status bar, in the same style as
+    /// `DelimitedReport::summary`.
+    pub fn summary(&self) -> String {
+        let kind = match self.kind {
+            ColumnKind::Integer => "integer",
+            ColumnKind::Float => "float",
+            ColumnKind::Boolean => "boolean",
+            ColumnKind::Empty => "empty",
+            ColumnKind::Text => "text",
+        };
+        if self.missing == 0 {
+            format!("{}: {kind} ({} filled)", self.name, self.filled)
+        } else {
+            format!(
+                "{}: {kind} ({} filled, {} missing)",
+                self.name, self.filled, self.missing
+            )
+        }
+    }
+}
+
+/// Whether `value` is written as an optionally-signed run of digits.
+///
+/// Not a `parse::<i64>` check: a column of large IDs is still an integer
+/// column even if one value overflows `i64`, and what matters here is what
+/// the text looks like, not whether it fits one particular machine width.
+fn looks_like_integer(value: &str) -> bool {
+    let digits = value.strip_prefix('-').unwrap_or(value);
+    !digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit())
+}
+
+/// Whether `value` reads as `true`/`false`, case-insensitively.
+///
+/// Deliberately not `0`/`1`: those are already valid, unambiguous integers,
+/// and guessing that a column of them means booleans would be exactly the
+/// kind of clever-but-wrong inference this module avoids elsewhere.
+fn looks_like_boolean(value: &str) -> bool {
+    value.eq_ignore_ascii_case("true") || value.eq_ignore_ascii_case("false")
+}
+
+/// Whether `value` parses as a float and is not one of the word-like values
+/// (`inf`, `nan`, ...) that `f64::from_str` also happens to accept.
+///
+/// A CSV cell that says "nan" almost never means the IEEE value; it means
+/// someone typed the letters n-a-n. Reporting that column as `Float` would
+/// be a clever misreading of the data, not a description of it.
+fn looks_like_float(value: &str) -> bool {
+    let lower = value.to_ascii_lowercase();
+    let word = lower.trim_start_matches(['+', '-']);
+    if matches!(word, "inf" | "infinity" | "nan") {
+        return false;
+    }
+    value.parse::<f64>().is_ok()
+}
+
+/// The narrowest `ColumnKind` that every value in `values` fits.
+///
+/// Checked narrowest first: every integer also parses as a float, so
+/// checking float first would report `Float` for a plain integer column.
+fn column_kind(values: &[&str]) -> ColumnKind {
+    if values.is_empty() {
+        ColumnKind::Empty
+    } else if values.iter().all(|v| looks_like_integer(v)) {
+        ColumnKind::Integer
+    } else if values.iter().all(|v| looks_like_boolean(v)) {
+        ColumnKind::Boolean
+    } else if values.iter().all(|v| looks_like_float(v)) {
+        ColumnKind::Float
+    } else {
+        ColumnKind::Text
+    }
+}
+
+/// Report each header column's inferred type and how filled in it is.
+pub fn column_types(text: &str) -> Result<Vec<ColumnReport>, DataError> {
+    let rows = delimited_rows(text, detect_delimiter(text))?;
+    let Some(header) = rows.first() else {
+        return Ok(Vec::new());
+    };
+    let keys = resolve_header_keys(&header.fields);
+    let data_rows = &rows[1..];
+
+    Ok(keys
+        .into_iter()
+        .enumerate()
+        .map(|(index, name)| {
+            let cells: Vec<&str> = data_rows
+                .iter()
+                .map(|row| row.fields.get(index).map_or("", String::as_str))
+                .collect();
+            let non_empty: Vec<&str> = cells.iter().copied().filter(|c| !c.is_empty()).collect();
+            let missing = cells.len() - non_empty.len();
+
+            ColumnReport {
+                name,
+                kind: column_kind(&non_empty),
+                filled: non_empty.len(),
+                missing,
+            }
+        })
+        .collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -562,5 +794,176 @@ mod tests {
         assert_eq!(jsonl_validate("").records, 0);
         assert_eq!(delimited_report("").unwrap().rows, 0);
         assert!(toml_validate("").is_ok(), "an empty TOML table is valid");
+    }
+
+    #[test]
+    fn delimited_to_json_maps_header_names_to_values() {
+        let text = "name,age\nAda,36\nGrace,85\n";
+        let json = delimited_to_json(text).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(value[0]["name"], "Ada");
+        assert_eq!(value[0]["age"], "36", "values stay strings, never numbers");
+        assert_eq!(value[1]["name"], "Grace");
+        assert!(json.contains('\n'), "output should be pretty-printed");
+    }
+
+    #[test]
+    fn delimited_to_jsonl_emits_one_compact_object_per_line() {
+        let text = "name,age\nAda,36\nGrace,85\n";
+        let jsonl = delimited_to_jsonl(text).unwrap();
+        let lines: Vec<&str> = jsonl.lines().collect();
+
+        assert_eq!(lines.len(), 2);
+        assert!(jsonl.ends_with('\n'), "trailing newline");
+        assert!(!lines[0].contains('\n'), "each object is compact, one line");
+
+        let first: serde_json::Value = serde_json::from_str(lines[0]).unwrap();
+        assert_eq!(first["name"], "Ada");
+    }
+
+    #[test]
+    fn delimited_to_json_and_jsonl_agree_on_the_same_input() {
+        let text = "a,b\n1,2\n3,4\n";
+        let json = delimited_to_json(text).unwrap();
+        let jsonl = delimited_to_jsonl(text).unwrap();
+
+        let from_json: Vec<serde_json::Value> = serde_json::from_str(&json).unwrap();
+        let from_jsonl: Vec<serde_json::Value> = jsonl
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+
+        assert_eq!(
+            from_json, from_jsonl,
+            "the two conversions must describe the same data"
+        );
+    }
+
+    #[test]
+    fn a_quoted_field_with_the_delimiter_and_a_newline_survives_conversion() {
+        let text = "name,note\n\"Doe, Jane\",\"line one\nline two\"\n";
+        let json = delimited_to_json(text).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(value[0]["name"], "Doe, Jane");
+        assert_eq!(value[0]["note"], "line one\nline two");
+    }
+
+    #[test]
+    fn a_row_longer_than_the_header_keeps_its_extra_fields() {
+        let text = "a,b\n1,2,3,4\n";
+        let json = delimited_to_json(text).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(value[0]["a"], "1");
+        assert_eq!(value[0]["b"], "2");
+        assert_eq!(
+            value[0]["_3"], "3",
+            "an extra field keeps its column number as the key"
+        );
+        assert_eq!(value[0]["_4"], "4");
+    }
+
+    #[test]
+    fn a_row_shorter_than_the_header_gets_nulls_for_the_rest() {
+        let text = "a,b,c\n1\n";
+        let json = delimited_to_json(text).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(value[0]["a"], "1");
+        assert!(
+            value[0]["b"].is_null(),
+            "missing field must be null, not dropped or guessed"
+        );
+        assert!(value[0]["c"].is_null());
+    }
+
+    #[test]
+    fn duplicate_and_empty_header_names_do_not_collide() {
+        let text = "a,,a\n1,2,3\n";
+        let json = delimited_to_json(text).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let object = value[0].as_object().unwrap();
+
+        assert_eq!(
+            object.len(),
+            3,
+            "three columns must give three distinct keys, got {object:?}"
+        );
+        assert_eq!(value[0]["a"], "1", "first column keeps the plain name");
+        assert_eq!(
+            value[0]["_2"], "2",
+            "empty header cell gets a generated key"
+        );
+        assert_eq!(
+            value[0]["a_3"], "3",
+            "repeated header name gets its column number appended"
+        );
+    }
+
+    #[test]
+    fn a_leading_zero_survives_the_round_trip() {
+        // The classic CSV-to-JSON bug: coercing "007" to a number drops the
+        // zeros that made it a valid part number in the first place.
+        let text = "code\n007\n";
+        let json = delimited_to_json(text).unwrap();
+        assert!(
+            json.contains("\"007\""),
+            "a leading zero must stay a string, got {json}"
+        );
+
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            value[0]["code"],
+            serde_json::Value::String("007".to_owned())
+        );
+    }
+
+    #[test]
+    fn column_types_infers_the_narrowest_kind_that_fits_every_value() {
+        let text = "n,f,b,e,t,m\n1,1.5,true,,hello,1\n2,2.0,false,,world,x\n";
+        let reports = column_types(text).unwrap();
+        let kind_of = |name: &str| reports.iter().find(|r| r.name == name).unwrap().kind;
+
+        assert_eq!(kind_of("n"), ColumnKind::Integer);
+        assert_eq!(kind_of("f"), ColumnKind::Float);
+        assert_eq!(kind_of("b"), ColumnKind::Boolean);
+        assert_eq!(kind_of("e"), ColumnKind::Empty);
+        assert_eq!(kind_of("t"), ColumnKind::Text);
+        assert_eq!(
+            kind_of("m"),
+            ColumnKind::Text,
+            "a mix of number-like and text values falls back to Text"
+        );
+
+        let n = reports.iter().find(|r| r.name == "n").unwrap();
+        assert!(
+            !n.summary().contains("missing"),
+            "a fully filled column should not mention missing values, got {}",
+            n.summary()
+        );
+    }
+
+    #[test]
+    fn column_types_counts_filled_and_missing_values() {
+        let text = "a,b\n1,\n,2\n";
+        let reports = column_types(text).unwrap();
+
+        let a = reports.iter().find(|r| r.name == "a").unwrap();
+        assert_eq!(a.filled, 1);
+        assert_eq!(a.missing, 1);
+        assert!(a.summary().contains("missing"), "got {}", a.summary());
+
+        let b = reports.iter().find(|r| r.name == "b").unwrap();
+        assert_eq!(b.filled, 1);
+        assert_eq!(b.missing, 1);
+    }
+
+    #[test]
+    fn empty_input_produces_empty_results_for_the_new_conversions() {
+        assert_eq!(delimited_to_json("").unwrap(), "[]");
+        assert_eq!(delimited_to_jsonl("").unwrap(), "");
+        assert!(column_types("").unwrap().is_empty());
     }
 }

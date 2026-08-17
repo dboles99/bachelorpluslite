@@ -185,6 +185,58 @@ impl Editor {
         self.select(0, self.buffer.len_chars());
     }
 
+    /// Select the run of same-class characters around `char_idx`, for a
+    /// double-click.
+    ///
+    /// Whitespace is a class like any other here: double-clicking the gap
+    /// between two words selects the gap, rather than falling through to
+    /// one of the words on either side of it.
+    pub fn select_word_at(&mut self, char_idx: usize) {
+        let idx = char_idx.min(self.buffer.len_chars());
+        // At the very end of the document there is no character *at* idx to
+        // classify, so fall back to the one just behind it.
+        let kind = self
+            .buffer
+            .char_at(idx)
+            .or_else(|| idx.checked_sub(1).and_then(|i| self.buffer.char_at(i)))
+            .map(class);
+        let Some(kind) = kind else {
+            // Nothing to select: an empty document.
+            self.set_cursor(idx);
+            return;
+        };
+
+        let mut start = idx;
+        while start > 0
+            && self
+                .buffer
+                .char_at(start - 1)
+                .is_some_and(|ch| class(ch) == kind)
+        {
+            start -= 1;
+        }
+        let mut end = idx;
+        let len = self.buffer.len_chars();
+        while end < len && self.buffer.char_at(end).is_some_and(|ch| class(ch) == kind) {
+            end += 1;
+        }
+        self.select(start, end);
+    }
+
+    /// Select a whole line, including its trailing newline if it has one,
+    /// for a triple-click.
+    ///
+    /// The newline is part of the selection so that typing over it replaces
+    /// the line cleanly rather than leaving an empty one behind.
+    pub fn select_line_at(&mut self, char_idx: usize) {
+        let idx = char_idx.min(self.buffer.len_chars());
+        let line = self.buffer.position_of(idx).line - 1;
+        let start = self.buffer.line_start(line);
+        let content_end = start + self.buffer.line_len_chars(line);
+        let end = content_end + self.line_break_len(content_end);
+        self.select(start, end);
+    }
+
     /// Move the caret, extending the selection when `select` is set.
     ///
     /// An unshifted Left or Right with a selection collapses to its near
@@ -426,6 +478,175 @@ impl Editor {
             cursor_before,
             false,
         );
+    }
+
+    /// Duplicate the caret's line, or every line a selection touches, into a
+    /// copy placed directly below.
+    ///
+    /// The caret's new position is its old offset from the start of the
+    /// span, carried across unchanged. That is what lands it on the same
+    /// line and column of the copy without recomputing anything, even when
+    /// the span is several lines and the caret was not on the first one.
+    pub fn duplicate_line(&mut self) {
+        let cursor_before = self.cursor;
+        let (first, last) = self.line_span();
+        let span_start = self.buffer.line_start(first);
+        let content_end = self.buffer.line_start(last) + self.buffer.line_len_chars(last);
+        let break_len = self.line_break_len(content_end);
+        let offset = self.cursor - span_start;
+
+        let (at, text) = if break_len > 0 {
+            (
+                content_end + break_len,
+                self.buffer.slice(span_start..content_end + break_len),
+            )
+        } else {
+            // The span's last line has no break of its own: it is the final
+            // line of the document, so the copy needs one to land on a line
+            // of its own instead of running on from the original.
+            let mut text = String::from("\n");
+            text.push_str(&self.buffer.slice(span_start..content_end));
+            (content_end, text)
+        };
+        let lead_in = if break_len > 0 { 0 } else { 1 };
+
+        self.buffer.insert(at, &text);
+        self.cursor = at + lead_in + offset;
+        self.anchor = self.cursor;
+        self.commit(vec![Op::Insert { at, text }], cursor_before, false);
+    }
+
+    /// Swap the caret's line with the one above, as every editor's Alt+Up
+    /// does. Does nothing at the first line, since there is nothing above it
+    /// to swap with.
+    pub fn move_line_up(&mut self) {
+        let line = self.buffer.position_of(self.cursor).line - 1;
+        if line == 0 {
+            return;
+        }
+        self.swap_lines(line - 1, line);
+    }
+
+    /// Swap the caret's line with the one below. Does nothing at the last
+    /// line -- including the phantom empty line after a trailing newline,
+    /// which is as much a line as any other for caret purposes elsewhere in
+    /// this file, and swapping into it is what turns "the last real line"
+    /// into a normal, undoable move rather than a permanent no-op.
+    pub fn move_line_down(&mut self) {
+        let line = self.buffer.position_of(self.cursor).line - 1;
+        if line + 1 >= self.buffer.len_lines() {
+            return;
+        }
+        self.swap_lines(line, line + 1);
+    }
+
+    /// Swap two adjacent lines, keeping the caret on its own text at the
+    /// same column.
+    ///
+    /// Takes the pair rather than a direction because "up" and "down" are
+    /// the same operation once the two line indices are known -- the caret
+    /// is always in `first` or `second`, whichever call it came from.
+    ///
+    /// Each line's break travels with its own *slot*, not with the text
+    /// that started in it. Gluing the two raw line slices together instead
+    /// would carry `first`'s break along with `first`'s text to the new
+    /// position, but `second`'s slot might have none (it is the end of the
+    /// document) or a different one (mixed CRLF and LF) -- either way that
+    /// merges two lines into one or invents a break that was never there.
+    fn swap_lines(&mut self, first: usize, second: usize) {
+        let cursor_before = self.cursor;
+        let start = self.buffer.line_start(first);
+        let first_content_end = start + self.buffer.line_len_chars(first);
+        let first_break_len = self.line_break_len(first_content_end);
+        let middle = first_content_end + first_break_len;
+        let second_content_end = middle + self.buffer.line_len_chars(second);
+        let second_break_len = self.line_break_len(second_content_end);
+        let end = second_content_end + second_break_len;
+
+        let first_content = self.buffer.slice(start..first_content_end);
+        let first_break = self.buffer.slice(first_content_end..middle);
+        let second_content = self.buffer.slice(middle..second_content_end);
+        let second_break = self.buffer.slice(second_content_end..end);
+
+        let mut swapped = second_content.clone();
+        swapped.push_str(&first_break);
+        swapped.push_str(&first_content);
+        swapped.push_str(&second_break);
+
+        // Every piece keeps its own length; only their order changes. Find
+        // which piece the caret was in, then place it at that piece's new
+        // start plus however far into the piece it was.
+        let second_content_len = second_content.chars().count();
+        let first_break_len_chars = first_break.chars().count();
+        let first_content_len = first_content.chars().count();
+        let new_first_content_start = start + second_content_len + first_break_len_chars;
+        let new_first_break_start = start + second_content_len;
+        let new_second_break_start = new_first_content_start + first_content_len;
+
+        let new_cursor = if self.cursor < middle {
+            if self.cursor <= first_content_end {
+                new_first_content_start + (self.cursor - start)
+            } else {
+                new_first_break_start + (self.cursor - first_content_end)
+            }
+        } else if self.cursor <= second_content_end {
+            start + (self.cursor - middle)
+        } else {
+            new_second_break_start + (self.cursor - second_content_end)
+        };
+
+        let removed = self.buffer.slice(start..end);
+        self.buffer.remove(start..end);
+        self.buffer.insert(start, &swapped);
+
+        self.cursor = new_cursor;
+        self.anchor = new_cursor;
+
+        self.commit(
+            vec![
+                Op::Remove {
+                    at: start,
+                    text: removed,
+                },
+                Op::Insert {
+                    at: start,
+                    text: swapped,
+                },
+            ],
+            cursor_before,
+            false,
+        );
+    }
+
+    /// The 0-based first and last line touched by the caret, or by a
+    /// selection.
+    ///
+    /// A selection ending exactly at the start of a line has not reached
+    /// into that line -- the newline it selected belongs to the line above
+    /// -- so that line is excluded. Otherwise dragging to just before the
+    /// next line would duplicate or affect a line the user never touched.
+    fn line_span(&self) -> (usize, usize) {
+        let (from, to) = match self.selection() {
+            Some(range) => (range.start, range.end),
+            None => (self.cursor, self.cursor),
+        };
+        let first = self.buffer.position_of(from).line - 1;
+        let mut last = self.buffer.position_of(to).line - 1;
+        if last > first && to == self.buffer.line_start(last) {
+            last -= 1;
+        }
+        (first, last)
+    }
+
+    /// Length of the line break starting at `at`: 0, 1 for `\n`, or 2 for
+    /// `\r\n`. Mirrors the pairing `Buffer::line_len_chars` strips, so the
+    /// two never disagree about where a line actually ends.
+    fn line_break_len(&self, at: usize) -> usize {
+        match (self.buffer.char_at(at), self.buffer.char_at(at + 1)) {
+            (Some('\r'), Some('\n')) => 2,
+            (Some('\n'), _) => 1,
+            _ => 0,
+        }
     }
 
     /// Record a change, merging into the previous entry when it continues an
@@ -1112,5 +1333,334 @@ mod tests {
             e.move_caret(motion, false);
             assert_eq!(e.cursor(), 0, "{motion:?} moved in an empty document");
         }
+    }
+
+    // --- duplicate line --------------------------------------------------
+
+    #[test]
+    fn duplicating_a_line_copies_it_directly_below() {
+        let mut e = Editor::new("one\ntwo\nthree");
+        e.set_cursor(5); // column 2 of "two"
+        e.duplicate_line();
+        assert_eq!(e.text(), "one\ntwo\ntwo\nthree");
+        assert_eq!(
+            e.position(),
+            Position::new(3, 2),
+            "caret lands on the copy, same column"
+        );
+    }
+
+    #[test]
+    fn duplicating_a_line_is_one_undo_step() {
+        let mut e = Editor::new("one\ntwo\nthree");
+        e.set_cursor(5);
+        e.duplicate_line();
+        assert!(e.undo());
+        assert_eq!(e.text(), "one\ntwo\nthree");
+        assert!(!e.can_undo(), "one entry, not two");
+    }
+
+    #[test]
+    fn duplicating_a_multi_line_selection_duplicates_the_whole_span() {
+        // The selection only reaches partway into each line, but the whole
+        // of both lines is what gets duplicated.
+        let mut e = Editor::new("one\ntwo\nthree\nfour");
+        e.select(5, 10);
+        e.duplicate_line();
+        assert_eq!(e.text(), "one\ntwo\nthree\ntwo\nthree\nfour");
+        assert_eq!(
+            e.position(),
+            Position::new(5, 3),
+            "caret follows the same character onto the copy"
+        );
+    }
+
+    #[test]
+    fn duplicating_a_selection_that_stops_at_the_next_lines_start_excludes_it() {
+        // A selection ending exactly at the start of the next line has not
+        // reached into it -- only the fully-selected line is duplicated.
+        let mut e = Editor::new("one\ntwo\nthree");
+        e.select(0, 4);
+        e.duplicate_line();
+        assert_eq!(e.text(), "one\none\ntwo\nthree");
+    }
+
+    #[test]
+    fn duplicating_the_last_line_without_a_trailing_newline_adds_one() {
+        let mut e = Editor::new("one\ntwo");
+        e.set_cursor(5); // column 2 of "two"
+        e.duplicate_line();
+        assert_eq!(e.text(), "one\ntwo\ntwo");
+        assert_eq!(e.position(), Position::new(3, 2), "caret on the new copy");
+    }
+
+    #[test]
+    fn duplicating_a_line_with_a_crlf_ending_keeps_it_intact() {
+        let mut e = Editor::new("one\r\ntwo\r\nthree");
+        e.set_cursor(0);
+        e.duplicate_line();
+        assert_eq!(
+            e.text(),
+            "one\r\none\r\ntwo\r\nthree",
+            "the break must not be split into a lone \\r or \\n"
+        );
+    }
+
+    #[test]
+    fn duplicating_the_only_line_in_a_single_line_document() {
+        let mut e = Editor::new("solo");
+        e.set_cursor(2);
+        e.duplicate_line();
+        assert_eq!(e.text(), "solo\nsolo");
+        assert_eq!(e.position(), Position::new(2, 3));
+    }
+
+    #[test]
+    fn duplicating_a_line_with_multibyte_text_keeps_the_caret_aligned() {
+        let mut e = Editor::new("日本語\nabc");
+        e.set_cursor(1); // between 日 and 本
+        e.duplicate_line();
+        assert_eq!(e.text(), "日本語\n日本語\nabc");
+        assert_eq!(e.cursor(), 5, "same character offset into the copy");
+    }
+
+    // --- move line up / down ----------------------------------------------
+
+    #[test]
+    fn moving_a_line_up_swaps_it_with_the_line_above() {
+        let mut e = Editor::new("one\ntwo\nthree");
+        e.set_cursor(5); // column 2 of "two"
+        e.move_line_up();
+        assert_eq!(e.text(), "two\none\nthree");
+        assert_eq!(
+            e.position(),
+            Position::new(1, 2),
+            "the caret follows its line up, keeping its column"
+        );
+    }
+
+    #[test]
+    fn moving_a_line_down_swaps_it_with_the_line_below() {
+        let mut e = Editor::new("one\ntwo\nthree");
+        e.set_cursor(1); // column 2 of "one"
+        e.move_line_down();
+        assert_eq!(e.text(), "two\none\nthree");
+        assert_eq!(e.position(), Position::new(2, 2));
+    }
+
+    #[test]
+    fn moving_the_middle_line_of_three_swaps_with_its_neighbour() {
+        let mut up = Editor::new("one\ntwo\nthree");
+        up.set_cursor(5); // on "two"
+        up.move_line_up();
+        assert_eq!(up.text(), "two\none\nthree");
+
+        let mut down = Editor::new("one\ntwo\nthree");
+        down.set_cursor(5);
+        down.move_line_down();
+        assert_eq!(down.text(), "one\nthree\ntwo");
+    }
+
+    #[test]
+    fn moving_a_line_up_at_the_top_does_nothing() {
+        let mut e = Editor::new("one\ntwo");
+        e.set_cursor(1);
+        e.move_line_up();
+        assert_eq!(e.text(), "one\ntwo");
+        assert!(!e.can_undo(), "a no-op must not create an undo entry");
+    }
+
+    #[test]
+    fn moving_a_line_down_at_the_bottom_does_nothing() {
+        let mut e = Editor::new("one\ntwo");
+        e.set_cursor(5); // on "two", the last line
+        e.move_line_down();
+        assert_eq!(e.text(), "one\ntwo");
+        assert!(!e.can_undo());
+    }
+
+    #[test]
+    fn moving_the_only_line_in_a_document_does_nothing_either_way() {
+        let mut e = Editor::new("solo");
+        e.set_cursor(2);
+        e.move_line_up();
+        e.move_line_down();
+        assert_eq!(e.text(), "solo");
+        assert!(!e.can_undo());
+    }
+
+    #[test]
+    fn moving_the_last_real_line_down_swaps_with_the_trailing_empty_line() {
+        // A trailing newline creates an empty final line the caret can sit
+        // on, as `Buffer::len_lines` documents -- so it counts as a real
+        // line to swap with, not a phantom that makes "two" already the
+        // last line. The swap pushes "two" past it, so the document no
+        // longer ends in a newline.
+        let mut e = Editor::new("one\ntwo\n");
+        e.set_cursor(5); // on "two"
+        e.move_line_down();
+        assert_eq!(e.text(), "one\n\ntwo");
+    }
+
+    #[test]
+    fn moving_a_line_without_a_trailing_newline_does_not_invent_one() {
+        // Gluing the two line slices together verbatim would carry the
+        // first line's break along with its text and leave the last line
+        // without one of its own. The swap must instead give each line
+        // whichever break belongs to its new neighbour.
+        let mut down = Editor::new("AAA\nBBB");
+        down.set_cursor(1);
+        down.move_line_down();
+        assert_eq!(down.text(), "BBB\nAAA");
+
+        let mut up = Editor::new("AAA\nBBB");
+        up.set_cursor(5);
+        up.move_line_up();
+        assert_eq!(up.text(), "BBB\nAAA");
+    }
+
+    #[test]
+    fn moving_a_line_preserves_crlf_line_endings_both_ways() {
+        let mut down = Editor::new("AAA\r\nBBB\r\n");
+        down.set_cursor(0);
+        down.move_line_down();
+        assert_eq!(down.text(), "BBB\r\nAAA\r\n");
+
+        let mut up = Editor::new("AAA\r\nBBB\r\n");
+        up.set_cursor(7); // on "BBB"
+        up.move_line_up();
+        assert_eq!(up.text(), "BBB\r\nAAA\r\n");
+    }
+
+    #[test]
+    fn moving_a_line_preserves_crlf_when_the_last_line_has_no_break() {
+        let mut e = Editor::new("AAA\r\nBBB");
+        e.set_cursor(0);
+        e.move_line_down();
+        assert_eq!(e.text(), "BBB\r\nAAA");
+    }
+
+    #[test]
+    fn moving_a_line_keeps_its_column_even_when_the_new_neighbour_is_shorter() {
+        let mut e = Editor::new("a\nbcdef");
+        e.set_cursor(5); // column 4 of "bcdef"
+        e.move_line_up();
+        assert_eq!(e.text(), "bcdef\na");
+        assert_eq!(
+            e.position(),
+            Position::new(1, 4),
+            "the caret's own column, not clamped to the line it swapped with"
+        );
+    }
+
+    #[test]
+    fn moving_a_line_with_multibyte_text_keeps_the_caret_aligned() {
+        let mut e = Editor::new("日本語\nabc");
+        e.set_cursor(1); // between 日 and 本
+        e.move_line_down();
+        assert_eq!(e.text(), "abc\n日本語");
+        assert_eq!(e.cursor(), 5, "offset 1 into the moved line, by character");
+    }
+
+    #[test]
+    fn moving_a_line_up_is_one_undo_step() {
+        let mut e = Editor::new("one\ntwo\nthree");
+        e.set_cursor(5);
+        e.move_line_up();
+        assert!(e.undo());
+        assert_eq!(e.text(), "one\ntwo\nthree");
+        assert!(!e.can_undo(), "one entry, not two");
+    }
+
+    #[test]
+    fn moving_a_line_down_is_one_undo_step() {
+        let mut e = Editor::new("one\ntwo\nthree");
+        e.set_cursor(1);
+        e.move_line_down();
+        assert!(e.undo());
+        assert_eq!(e.text(), "one\ntwo\nthree");
+        assert!(!e.can_undo());
+    }
+
+    #[test]
+    fn moving_a_line_down_then_back_up_restores_the_document_exactly() {
+        // The strongest check available: whatever the swap does internally,
+        // doing it and then undoing it by hand (not via `undo`, via the
+        // inverse move) must reproduce the original bytes exactly.
+        for text in [
+            "one\ntwo\nthree",
+            "one\ntwo\nthree\n",
+            "AAA\nBBB",
+            "AAA\r\nBBB\r\n",
+            "AAA\r\nBBB",
+            "just one line",
+        ] {
+            let mut e = Editor::new(text);
+            e.set_cursor(0);
+            e.move_line_down();
+            e.move_line_up();
+            assert_eq!(e.text(), text, "round trip corrupted {text:?}");
+        }
+    }
+
+    // --- word and line selection -------------------------------------------
+
+    #[test]
+    fn double_clicking_a_word_selects_it() {
+        let mut e = Editor::new("hello world");
+        e.select_word_at(7); // inside "world"
+        assert_eq!(e.selection(), Some(6..11));
+    }
+
+    #[test]
+    fn double_clicking_whitespace_selects_the_whitespace_run() {
+        let mut e = Editor::new("hello   world");
+        e.select_word_at(6); // the middle of three spaces
+        assert_eq!(e.selection(), Some(5..8));
+    }
+
+    #[test]
+    fn double_clicking_punctuation_selects_the_punctuation_run() {
+        let mut e = Editor::new("foo!!bar");
+        e.select_word_at(4);
+        assert_eq!(e.selection(), Some(3..5));
+    }
+
+    #[test]
+    fn double_clicking_at_the_end_of_the_document_selects_the_last_word() {
+        let mut e = Editor::new("hello world");
+        e.select_word_at(11); // past the last character
+        assert_eq!(e.selection(), Some(6..11));
+    }
+
+    #[test]
+    fn double_clicking_an_empty_document_selects_nothing() {
+        let mut e = Editor::new("");
+        e.select_word_at(0);
+        assert_eq!(e.selection(), None);
+        assert_eq!(e.cursor(), 0);
+    }
+
+    #[test]
+    fn triple_clicking_a_line_selects_it_including_the_newline() {
+        let mut e = Editor::new("one\ntwo\nthree");
+        e.select_line_at(5); // somewhere on "two"
+        assert_eq!(e.selection(), Some(4..8));
+        assert_eq!(e.buffer().slice(4..8), "two\n");
+    }
+
+    #[test]
+    fn triple_clicking_the_last_line_without_a_trailing_newline_selects_just_the_text() {
+        let mut e = Editor::new("one\ntwo\nthree");
+        e.select_line_at(10); // somewhere on "three"
+        assert_eq!(e.selection(), Some(8..13));
+    }
+
+    #[test]
+    fn triple_clicking_a_crlf_line_includes_the_full_break() {
+        let mut e = Editor::new("one\r\ntwo\r\nthree");
+        e.select_line_at(0);
+        assert_eq!(e.selection(), Some(0..5));
+        assert_eq!(e.buffer().slice(0..5), "one\r\n");
     }
 }

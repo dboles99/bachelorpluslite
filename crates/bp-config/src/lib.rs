@@ -55,6 +55,24 @@ impl RendererPref {
     }
 }
 
+/// Smallest accepted editor font size, in points.
+///
+/// Below this a Slint `length` is too small to read, and treating it as a
+/// typo rather than a legitimate wish protects users from fat-fingering
+/// their editor into illegibility.
+const MIN_FONT_SIZE: u8 = 6;
+
+/// Largest accepted editor font size, in points.
+///
+/// A `u8` comfortably spans a usable typography range (this crate's whole
+/// point is that broken input is clamped, not trusted), and staying inside
+/// one byte keeps the type as small as the domain allows.
+const MAX_FONT_SIZE: u8 = 96;
+
+/// Editor font size used before any configuration is applied, in points.
+/// Matches the size `app.slint` used to hard-code.
+const DEFAULT_FONT_SIZE: u8 = 14;
+
 /// Resolved settings.
 ///
 /// `theme` stays a `String` rather than a `bp-theme` enum on purpose: an
@@ -67,6 +85,12 @@ pub struct Config {
     pub renderer: RendererPref,
     /// `tracing` filter directive.
     pub log: String,
+    /// Editor font size in points. A `u8` because it ends up as a Slint
+    /// `length` measured in points, which is always a small positive whole
+    /// number in practice -- there is no meaningful fractional or negative
+    /// point size for this setting, and `u8` rules both out at the type
+    /// level rather than by convention.
+    pub font_size: u8,
 }
 
 impl Default for Config {
@@ -77,6 +101,7 @@ impl Default for Config {
             // Quiet by default. A text editor that chatters on stdout is a
             // text editor whose real warnings get ignored.
             log: "warn".to_owned(),
+            font_size: DEFAULT_FONT_SIZE,
         }
     }
 }
@@ -117,6 +142,10 @@ pub struct Env {
     pub theme: Option<String>,
     pub renderer: Option<String>,
     pub log: Option<String>,
+    /// Kept as text, not a number, so parsing and range-checking happen in
+    /// one place ([`apply_font_size`]) regardless of which layer the value
+    /// came from.
+    pub font_size: Option<String>,
     /// `BACHELORPAD_CONFIG` overrides the config file location.
     pub config_path: Option<String>,
 }
@@ -129,6 +158,7 @@ impl Env {
             theme: get("BACHELORPAD_THEME"),
             renderer: get("BACHELORPAD_RENDERER"),
             log: get("BACHELORPAD_LOG"),
+            font_size: get("BACHELORPAD_FONT_SIZE"),
             config_path: get("BACHELORPAD_CONFIG"),
         }
     }
@@ -136,11 +166,17 @@ impl Env {
 
 /// The settings a config file may set. Unknown keys are ignored rather than
 /// fatal -- one typo must not discard every other setting.
+///
+/// `font_size` is read as `i64`, wider than the `u8` it settles into, so a
+/// too-large or negative number in the file is a range problem this module
+/// reports with a [`Notice`], not a TOML type error that would discard the
+/// whole file.
 #[derive(Debug, Default, Deserialize)]
 struct FileConfig {
     theme: Option<String>,
     renderer: Option<String>,
     log: Option<String>,
+    font_size: Option<i64>,
 }
 
 /// Outcome of loading configuration.
@@ -193,11 +229,14 @@ pub fn resolve(file: Option<&str>, env: &Env, args: &[String]) -> (Config, Vec<N
                 if let Some(l) = parsed.log {
                     config.log = l;
                 }
+                if let Some(f) = parsed.font_size {
+                    apply_font_size(&mut config, &f.to_string(), &mut notices);
+                }
                 // Report keys we ignored, so a typo is visible instead of
                 // silently doing nothing.
                 if let Ok(table) = toml::from_str::<toml::Table>(text) {
                     for key in table.keys() {
-                        if !matches!(key.as_str(), "theme" | "renderer" | "log") {
+                        if !matches!(key.as_str(), "theme" | "renderer" | "log" | "font_size") {
                             notices.push(Notice::UnknownKey { key: key.clone() });
                         }
                     }
@@ -220,6 +259,9 @@ pub fn resolve(file: Option<&str>, env: &Env, args: &[String]) -> (Config, Vec<N
     if let Some(l) = &env.log {
         config.log = l.clone();
     }
+    if let Some(f) = &env.font_size {
+        apply_font_size(&mut config, f, &mut notices);
+    }
 
     // --- command line (highest) ----------------------------------------
     for arg in args {
@@ -230,6 +272,7 @@ pub fn resolve(file: Option<&str>, env: &Env, args: &[String]) -> (Config, Vec<N
             "theme" => config.theme = Some(value.to_owned()),
             "renderer" => apply_renderer(&mut config, value, &mut notices),
             "log" => config.log = value.to_owned(),
+            "font-size" => apply_font_size(&mut config, value, &mut notices),
             _ => {}
         }
     }
@@ -242,6 +285,28 @@ fn apply_renderer(config: &mut Config, value: &str, notices: &mut Vec<Notice>) {
         Some(r) => config.renderer = r,
         None => notices.push(Notice::UnknownValue {
             key: "renderer".to_owned(),
+            value: value.to_owned(),
+        }),
+    }
+}
+
+/// Parse and range-check a font size from any layer (file, environment or
+/// command line all hand this a string -- see the comment on `Env::font_size`
+/// for why). On failure the existing value is left untouched rather than
+/// forced to the default, so an invalid override never clobbers a good
+/// setting from a lower-precedence layer; since resolution starts from
+/// `Config::default()`, that still means "falls back to the default" in the
+/// common case of a bad value with nothing better beneath it.
+fn apply_font_size(config: &mut Config, value: &str, notices: &mut Vec<Notice>) {
+    let in_range = value
+        .trim()
+        .parse::<i64>()
+        .ok()
+        .filter(|n| (i64::from(MIN_FONT_SIZE)..=i64::from(MAX_FONT_SIZE)).contains(n));
+    match in_range {
+        Some(n) => config.font_size = n as u8,
+        None => notices.push(Notice::UnknownValue {
+            key: "font-size".to_owned(),
             value: value.to_owned(),
         }),
     }
@@ -347,6 +412,103 @@ mod tests {
 
         assert_eq!(c.theme.as_deref(), Some("Light"));
         assert_eq!(c.log, "trace");
+    }
+
+    #[test]
+    fn the_default_font_size_matches_what_app_slint_used_to_hard_code() {
+        assert_eq!(
+            Config::default().font_size,
+            14,
+            "specs.md section 4 zoom needs a starting point that matches today's rendered size, or existing documents would visibly jump on first run"
+        );
+    }
+
+    #[test]
+    fn the_file_sets_the_font_size() {
+        let (c, n) = resolve(Some("font_size = 18"), &Env::default(), &[]);
+        assert_eq!(c.font_size, 18);
+        assert!(n.is_empty(), "a valid font size must not warn");
+    }
+
+    #[test]
+    fn the_environment_overrides_the_files_font_size() {
+        let file = "font_size = 18\n";
+        let env = Env {
+            font_size: Some("22".to_owned()),
+            ..Env::default()
+        };
+        let (c, _) = resolve(Some(file), &env, &[]);
+        assert_eq!(c.font_size, 22);
+    }
+
+    #[test]
+    fn the_command_line_overrides_the_font_size() {
+        let file = "font_size = 18\n";
+        let env = Env {
+            font_size: Some("22".to_owned()),
+            ..Env::default()
+        };
+        let (c, _) = resolve(Some(file), &env, &args(&["--font-size=30"]));
+        assert_eq!(c.font_size, 30);
+    }
+
+    #[test]
+    fn an_unparseable_font_size_warns_and_falls_back() {
+        let (c, n) = resolve(None, &Env::default(), &args(&["--font-size=huge"]));
+
+        assert_eq!(
+            c.font_size, 14,
+            "a value that is not even a number must not change anything"
+        );
+        assert_eq!(
+            n,
+            vec![Notice::UnknownValue {
+                key: "font-size".to_owned(),
+                value: "huge".to_owned()
+            }]
+        );
+    }
+
+    #[test]
+    fn an_out_of_range_font_size_warns_and_falls_back() {
+        let (c, n) = resolve(None, &Env::default(), &args(&["--font-size=999"]));
+
+        assert_eq!(
+            c.font_size, 14,
+            "999pt is not a legitimate editor size; it is almost certainly a mistake, so fall back rather than clamp to a value the user never asked for"
+        );
+        assert_eq!(
+            n,
+            vec![Notice::UnknownValue {
+                key: "font-size".to_owned(),
+                value: "999".to_owned()
+            }]
+        );
+    }
+
+    #[test]
+    fn a_negative_font_size_warns_and_falls_back() {
+        let (c, n) = resolve(None, &Env::default(), &args(&["--font-size=-5"]));
+
+        assert_eq!(c.font_size, 14, "a negative size makes no sense at all");
+        assert_eq!(
+            n.len(),
+            1,
+            "the negative value must produce exactly one notice"
+        );
+    }
+
+    #[test]
+    fn an_empty_environment_font_size_is_treated_as_unset() {
+        // Mirrors empty_environment_values_are_treated_as_unset: an
+        // exported-but-blank variable is the shell's idea of "unset", so it
+        // must not shadow the file underneath it.
+        let env = Env {
+            font_size: None,
+            ..Env::default()
+        };
+        let (c, _) = resolve(Some("font_size = 20"), &env, &[]);
+        assert_eq!(c.font_size, 20);
     }
 
     #[test]
@@ -456,7 +618,7 @@ mod tests {
         // Structural guard for ADR-0011: everything in Config is a setting.
         // If a field is ever added that could carry document text, this test
         // is where the argument about it should happen.
-        let file = "theme = \"Green\"\nrenderer = \"software\"\nlog = \"warn\"\n";
+        let file = "theme = \"Green\"\nrenderer = \"software\"\nlog = \"warn\"\nfont_size = 18\n";
         let (c, _) = resolve(Some(file), &Env::default(), &[]);
         let rendered = format!("{c:?}");
 
