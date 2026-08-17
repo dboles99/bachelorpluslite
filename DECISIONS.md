@@ -58,12 +58,20 @@ Adding a decision means adding both.
   (2026-08-17, manual test). `KeyBinding` in a wrapping `FocusScope` matches
   during the capture phase, so the focused `TextInput` no longer swallows
   Ctrl+S.
-- **Two shipped features hold sensitive data with no security profile
-  governing them.** The recovery journal writes unsaved text to disk in
-  plaintext; clipboard history keeps copied secrets in memory. Neither is
-  wrong today — both are what those features *are* — but ADR-0011 says the
-  document's profile should govern them, and phase 14 does not exist yet.
-- **Most of the product has not been used.** 280 tests cover the pieces in
+- **Three things now want security profiles (phase 14).** The recovery
+  journal writes unsaved text to disk in plaintext; clipboard history keeps
+  copied secrets in memory; and `bp-storage` is built, tested and
+  deliberately unwired, because the useful thing to record — a document's
+  extracted title — is a summary of what the user wrote. ADR-0011 says the
+  document's profile governs all three.
+- **The custom editor view has never been typed into.** Its rules are covered
+  by 91 tests in `bp-editor`; the widget has been verified to exactly one
+  standard, that it renders a frame with a real file open without panicking.
+  Whether keys arrive, whether the caret lands under the pointer and which
+  way the wheel scrolls are all open. `project/NEXT_SESSION.md` has the
+  checklist. It is opt-in behind `--editor-view`, so nothing depends on the
+  answers yet.
+- **Most of the product has not been used.** 393 tests cover the pieces in
   isolation. One manual pass found two defects no test caught: a menu bar
   where twelve of fourteen menus swallowed clicks, and Save As defaulting to
   the process working directory, which wrote real documents into a git
