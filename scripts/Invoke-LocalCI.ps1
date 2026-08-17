@@ -161,6 +161,32 @@ try {
         $global:LASTEXITCODE = 0
     }
 
+    # --- log hygiene ---------------------------------------------------
+    # ADR-0011 and the Definition of Done forbid document content, clipboard
+    # data, passphrases and key material from reaching logs at any level.
+    # That rule is only as good as its enforcement, and a reviewer noticing is
+    # not enforcement. Log *about* a document -- its path, its size -- never
+    # what it contains.
+    Invoke-Stage 'log hygiene' {
+        $sources = Get-ChildItem -Path (Join-Path $Root 'crates'), (Join-Path $Root 'apps') `
+            -Recurse -Filter '*.rs' -ErrorAction SilentlyContinue
+        # Identifiers that carry document text or secrets. A tracing macro
+        # mentioning one of these is the thing to look at.
+        $carriers = 'doc_text|active_text|text_of|\btexts\b|\bbuffer\b|contents|passphrase|secret|password|\btoken\b|plaintext|clipboard_text'
+        # @() forces an array: a single match comes back as a scalar MatchInfo,
+        # and .Count on that throws -- which reports a PowerShell error where a
+        # leak report belongs.
+        $hits = @($sources | Select-String -Pattern "tracing::(trace|debug|info|warn|error)!.*($carriers)")
+
+        if ($hits.Count -gt 0) {
+            foreach ($hit in $hits) {
+                Write-Host ("  {0}:{1}: {2}" -f $hit.Filename, $hit.LineNumber, $hit.Line.Trim()) -ForegroundColor Red
+            }
+            throw "$($hits.Count) log statement(s) may carry document content or secrets"
+        }
+        $global:LASTEXITCODE = 0
+    }
+
     # --- spikes --------------------------------------------------------
     $spikes = Get-ChildItem -Path (Join-Path $Root 'spikes') -Directory -ErrorAction SilentlyContinue |
         ForEach-Object { Get-ChildItem -Path $_.FullName -Directory } |

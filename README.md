@@ -63,8 +63,15 @@ implemented and tested — 103 tests, green on both platforms.
 Startup, with the software renderer ([ADR-0017](docs/decisions/ADR-0017.md)):
 **36 ms to window, 19.2 MB idle**, against targets of 150 ms and 50 MB.
 
-Known gaps: no keyboard shortcuts yet, no prompt when closing a modified tab,
-and text is held in a `String` rather than a rope. See
+Configuration comes from, in precedence order: command line
+(`--theme=`, `--renderer=`, `--log=`), environment (`BACHELORPAD_*`), a TOML
+file (`%APPDATA%\bachelorpad\config.toml`, or `$XDG_CONFIG_HOME` on Linux),
+then defaults. Broken config warns and falls back; it never stops the editor
+starting.
+
+Known gaps: keyboard shortcut delivery is wired but unverified, cursor
+position shows a line count rather than Ln/Col, and text is held in a `String`
+rather than a rope (measured fine to ~40 MB). See
 [project/tasks/01-foundation/](project/tasks/01-foundation/).
 
 The crate map — including the ~22 crates not yet created — is in

@@ -519,7 +519,8 @@ name = "bachelorpad"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "bp-core",
+ "bp-config",
+ "bp-theme",
  "bp-ui",
  "tracing",
  "tracing-subscriber",
@@ -645,6 +646,14 @@ checksum = "a88b7ea17d208c4193f2c1e6de3c35fe71f98c96982d5ced308bdcc749ff6e1f"
 dependencies = [
  "bytes",
  "cfg_aliases",
+]
+
+[[package]]
+name = "bp-config"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "toml",
 ]
 
 [[package]]

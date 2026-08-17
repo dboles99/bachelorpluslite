@@ -368,9 +368,14 @@ pub enum Renderer {
 }
 
 /// How to run the shell.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct RunOptions {
     pub renderer: Renderer,
+    /// Starting theme. `None` uses the built-in default.
+    pub theme: Option<ThemeId>,
+    /// Shown in the status bar at startup, where configuration problems go.
+    /// A warning the user cannot see is a warning they will hit again.
+    pub startup_notice: Option<String>,
     /// Print `BPSPIKE_READY_MS=<f64>` once the first frame has been rendered,
     /// then quit. Drives `scripts/Measure-UiSpike.ps1`.
     ///
@@ -404,7 +409,12 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
     }
 
     let ui = AppWindow::new()?;
-    let state = Rc::new(RefCell::new(AppState::new()));
+    let mut initial = AppState::new();
+    if let Some(theme) = options.theme {
+        initial.theme = theme;
+    }
+    initial.error = options.startup_notice.clone();
+    let state = Rc::new(RefCell::new(initial));
 
     let mut reported = false;
     let measure_exit = options.measure_exit;

@@ -7,6 +7,7 @@ resolver = "2"
 # when there is something to put in it.
 members = [
     "apps/bachelorpad",
+    "crates/bp-config",
     "crates/bp-core",
     "crates/bp-naming",
     "crates/bp-files",
@@ -32,3 +33,4 @@ tracing-subscriber = "0.3"
 time = { version = "0.3", features = ["local-offset"] }
 tempfile = "3"
 proptest = "1"
+toml = "1"

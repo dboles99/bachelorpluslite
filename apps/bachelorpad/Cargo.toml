@@ -8,5 +8,6 @@ license.workspace = true
 anyhow.workspace = true
 tracing.workspace = true
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
-bp-core = { path = "../../crates/bp-core" }
+bp-config = { path = "../../crates/bp-config" }
+bp-theme = { path = "../../crates/bp-theme" }
 bp-ui = { path = "../../crates/bp-ui" }

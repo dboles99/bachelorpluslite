@@ -32,6 +32,7 @@ and this table carries the intent until then.
 | `bp-naming` | **live** | Semantic filename grammar (ADR-0003). Pure: no filesystem, no clock. | 1 |
 | `bp-files` | **live** | Atomic save, load, encoding detection (ADR-0007). | 1 |
 | `bp-theme` | **live** | Palettes as data (ADR-0009). | 1 |
+| `bp-config` | **live** | Settings precedence, config file, recovery from bad input. | 1 |
 | `bp-ui` | **live** | The Slint application shell (ADR-0015). | 1 |
 | `bp-buffer` | planned | Rope buffer, memory mapping, huge-file mode. Replaces the `String` map in `bp-ui`. | 2, 4 |
 | `bp-editor` | planned | Editing operations, undo/redo, multi-cursor, line operations. | 2 |
@@ -59,17 +60,21 @@ and this table carries the intent until then.
 ## Current dependency edges
 
 ```text
-bachelorpad ──> bp-ui ──> bp-core
-                  │  ├──> bp-files ──> bp-core
-                  │  │                └─> bp-naming
-                  │  ├──> bp-naming
-                  │  └──> bp-theme
-                  └──> slint, rfd
+bachelorpad ──> bp-config
+            ├──> bp-theme
+            └──> bp-ui ──> bp-core
+                     ├──> bp-files ──> bp-core
+                     │                └─> bp-naming
+                     ├──> bp-naming
+                     ├──> bp-theme
+                     └──> slint, rfd
 ```
 
-`bp-core` and `bp-naming` have no dependencies on other workspace crates,
-which is what keeps them cheap to test and impossible to entangle with the
-UI toolkit.
+`bp-core`, `bp-naming`, `bp-theme` and `bp-config` have no dependencies on
+other workspace crates, which is what keeps them cheap to test and impossible
+to entangle with the UI toolkit. `bp-config` deliberately does not depend on
+`bp-theme`: a theme name from a user's file has to be recoverable when it is
+wrong, so it stays a string until the app resolves it.
 
 ## Known placeholders
 

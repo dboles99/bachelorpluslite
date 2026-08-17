@@ -30,6 +30,7 @@ Re-run it after pulling a change to `scripts/hooks/`.
 | clippy | `cargo clippy --workspace --all-targets -- -D warnings` |
 | test | `cargo test --workspace` |
 | launch | Runs `bachelorpad --self-check` and asserts it starts |
+| log hygiene | Fails on any `tracing::` call that may carry document content or secrets |
 | spikes | fmt and clippy over each standalone workspace in `spikes/` |
 | linux (wsl) | fmt, clippy and test inside WSL |
 
@@ -43,6 +44,13 @@ side-by-side manifest — produced a binary that failed with
 `STATUS_ENTRYPOINT_NOT_FOUND` before `main`, with the whole gate green.
 Anything that changes link-time features, manifests or linked libraries needs
 this stage.
+
+The `log hygiene` stage enforces ADR-0011's rule that document content,
+clipboard data, passphrases and key material never reach logs. It greps for
+`tracing::` macros mentioning content-bearing identifiers and fails the build
+on a hit. It is crude and will need widening as more crates land, but it fails
+closed and runs on every commit — which a review convention does not. Log
+*about* a document (path, size), never what it contains.
 
 `-Quick` skips the locked dependency resolve, which is the slowest part of a
 cold run and cannot regress from an edit that does not touch a manifest.
