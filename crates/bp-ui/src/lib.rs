@@ -119,9 +119,29 @@ enum NoteOutcome {
     Nothing,
 }
 
+/// How much of a document is enough to answer a question about its start.
+///
+/// Format detection sniffs the beginning, and `refresh` asks on every
+/// keystroke. Copying a whole document to look at its first line would put
+/// the document's size back into the typing path, which is the cost the rope
+/// exists to remove.
+const PREFIX_CHARS: usize = 4096;
+
 struct AppState {
     workspace: Workspace,
-    texts: HashMap<DocumentId, String>,
+    /// One editor per document: the rope is the storage, and the caret,
+    /// selection and undo stack belong to us.
+    ///
+    /// True whichever view is drawing. `TextInput` still owns *its* caret and
+    /// undo when it is the one on screen, but the text it hands back lands
+    /// here as a single undoable replacement, so there is one document.
+    editors: HashMap<DocumentId, bp_editor::Editor>,
+    /// Draw with the custom surface rather than Slint's `TextInput`.
+    editor_view: bool,
+    /// First document line the surface is showing.
+    first_line: usize,
+    /// How many lines fit in it. Slint measures and tells us.
+    visible_rows: usize,
     theme: ThemeId,
     error: Option<String>,
     /// Cached gutter text, and the line count it was built for.
@@ -156,11 +176,16 @@ impl AppState {
     fn new() -> Self {
         let mut workspace = Workspace::new();
         let id = workspace.open_new(now());
-        let mut texts = HashMap::new();
-        texts.insert(id, String::new());
+        let mut editors = HashMap::new();
+        editors.insert(id, bp_editor::Editor::default());
         Self {
             workspace,
-            texts,
+            editors,
+            editor_view: false,
+            first_line: 0,
+            // Replaced by Slint's own measurement as soon as the surface has
+            // a height; only Page Up before the first frame would see this.
+            visible_rows: 30,
             theme: ThemeId::default(),
             error: None,
             gutter: String::new(),
@@ -221,7 +246,7 @@ impl AppState {
                 Some(path) => self.workspace.open_path(path, now()),
                 None => self.workspace.open_new(now()),
             };
-            self.texts.insert(id, entry.text);
+            self.editors.insert(id, bp_editor::Editor::new(&entry.text));
             // Recovered work is by definition not on disk yet.
             if let Some(doc) = self.workspace.get_mut(id) {
                 doc.mark_modified();
@@ -239,7 +264,8 @@ impl AppState {
             self.find_status.clear();
             return None;
         }
-        match bp_search::find_all(self.active_text(), query) {
+        let text = self.active_text();
+        match bp_search::find_all(&text, query) {
             Ok(found) => {
                 self.matches = found;
                 self.find_status = if self.matches.is_empty() {
@@ -316,7 +342,7 @@ impl AppState {
     fn note_action(&self, id: i32) -> NoteOutcome {
         let text = self.active_text();
         match id {
-            action::NOTE_TITLE => bp_semantic::suggest_title(text).map_or(
+            action::NOTE_TITLE => bp_semantic::suggest_title(&text).map_or(
                 NoteOutcome::Show {
                     title: "Suggest title".to_owned(),
                     body: "There is nothing in this document to take a title from.".to_owned(),
@@ -332,7 +358,7 @@ impl AppState {
             action::NOTE_RENAME => NoteOutcome::SaveAs,
 
             action::NOTE_SUMMARY => {
-                let summary = bp_semantic::summary(text, 400);
+                let summary = bp_semantic::summary(&text, 400);
                 NoteOutcome::Show {
                     title: "Summary".to_owned(),
                     body: if summary.is_empty() {
@@ -344,7 +370,7 @@ impl AppState {
             }
 
             action::NOTE_KEYWORDS => {
-                let keywords = bp_semantic::keywords(text, 12);
+                let keywords = bp_semantic::keywords(&text, 12);
                 NoteOutcome::Show {
                     title: "Keywords".to_owned(),
                     body: if keywords.is_empty() {
@@ -356,7 +382,7 @@ impl AppState {
             }
 
             action::NOTE_OUTLINE => {
-                let outline = bp_semantic::outline(text);
+                let outline = bp_semantic::outline(&text);
                 NoteOutcome::Show {
                     title: "Outline".to_owned(),
                     body: if outline.is_empty() {
@@ -388,7 +414,7 @@ impl AppState {
     /// so Save As always has something to offer.
     fn semantic_filename(&self, id: DocumentId) -> Option<String> {
         let doc = self.workspace.get(id)?;
-        let title = bp_semantic::suggest_title(self.text_of(id))?;
+        let title = bp_semantic::suggest_title(&self.text_of(id))?;
         let extension = doc
             .path()
             .and_then(Path::extension)
@@ -400,7 +426,9 @@ impl AppState {
     /// What the active document is, by extension then by content.
     fn format(&self) -> Format {
         let path = self.workspace.active().and_then(Document::path);
-        bp_formats::detect(path, self.active_text())
+        // A prefix, not the document: this is asked on every refresh, and
+        // detection only ever sniffs the beginning.
+        bp_formats::detect(path, &self.active_prefix())
     }
 
     /// Replace the active document's text with the result of a data
@@ -429,11 +457,11 @@ impl AppState {
 
         let text = self.active_text();
         let changed = match id {
-            action::LINES_SORT_ASC => lines::sort(text, Order::Ascending),
-            action::LINES_SORT_DESC => lines::sort(text, Order::Descending),
-            action::LINES_DEDUPE => lines::remove_duplicates(text),
-            action::LINES_REVERSE => lines::reverse(text),
-            action::LINES_TRIM => lines::trim_trailing_whitespace(text),
+            action::LINES_SORT_ASC => lines::sort(&text, Order::Ascending),
+            action::LINES_SORT_DESC => lines::sort(&text, Order::Descending),
+            action::LINES_DEDUPE => lines::remove_duplicates(&text),
+            action::LINES_REVERSE => lines::reverse(&text),
+            action::LINES_TRIM => lines::trim_trailing_whitespace(&text),
             _ => return,
         };
         self.error = None;
@@ -504,7 +532,7 @@ impl AppState {
                     // Back in step with disk, so the document is clean again.
                     doc.record_disk_save(now());
                 }
-                self.texts.insert(id, file.text);
+                self.editors.insert(id, bp_editor::Editor::new(&file.text));
                 self.mark_in_step(id, &path);
             }
             Err(e) => self.error = Some(e.to_string()),
@@ -533,15 +561,55 @@ impl AppState {
         }
     }
 
-    fn active_text(&self) -> &str {
+    fn active_editor(&self) -> Option<&bp_editor::Editor> {
         self.workspace
             .active_id()
-            .and_then(|id| self.texts.get(&id))
-            .map_or("", String::as_str)
+            .and_then(|id| self.editors.get(&id))
     }
 
-    fn text_of(&self, id: DocumentId) -> &str {
-        self.texts.get(&id).map_or("", String::as_str)
+    fn active_editor_mut(&mut self) -> Option<&mut bp_editor::Editor> {
+        self.workspace
+            .active_id()
+            .and_then(|id| self.editors.get_mut(&id))
+    }
+
+    /// The active document as one string.
+    ///
+    /// Allocates: a rope is not contiguous, so "the whole document as text"
+    /// costs a copy. That is the right trade -- saving, searching and format
+    /// conversion each want the whole thing once, while editing wants none of
+    /// it -- but it is why nothing on the typing path calls this.
+    fn active_text(&self) -> String {
+        self.active_editor()
+            .map(bp_editor::Editor::text)
+            .unwrap_or_default()
+    }
+
+    fn text_of(&self, id: DocumentId) -> String {
+        self.editors
+            .get(&id)
+            .map(bp_editor::Editor::text)
+            .unwrap_or_default()
+    }
+
+    /// The first [`PREFIX_CHARS`] characters of the active document.
+    fn active_prefix(&self) -> String {
+        self.active_editor().map_or_else(String::new, |editor| {
+            editor
+                .buffer()
+                .slice(0..PREFIX_CHARS.min(editor.buffer().len_chars()))
+        })
+    }
+
+    /// Whether the document has anything worth extracting a title from.
+    ///
+    /// Checks a prefix rather than the whole document, because this is asked
+    /// on every refresh. A document longer than the prefix and made entirely
+    /// of whitespace would answer wrongly, and is not worth a full scan.
+    fn active_has_content(&self) -> bool {
+        self.active_editor().is_some_and(|editor| {
+            editor.buffer().len_chars() > PREFIX_CHARS || !self.active_prefix().trim().is_empty()
+        })
     }
 
     /// Tab label for `id`, for use in prompts.
@@ -559,10 +627,12 @@ impl AppState {
     ///
     /// Returns `true` if the cache changed and the UI needs the new value.
     fn sync_gutter(&mut self) -> bool {
-        // `bp_buffer::line_count`, not `str::lines()`: the latter ignores a
-        // trailing newline, so every file ending in one -- which is most of
-        // them -- had a gutter one line shorter than the text beside it.
-        let lines = bp_buffer::line_count(self.active_text());
+        // From the rope, which already counts the line after a trailing
+        // newline -- unlike `str::lines()`, which ignores it and left every
+        // file ending in one with a gutter shorter than the text beside it.
+        let lines = self
+            .active_editor()
+            .map_or(1, |editor| editor.buffer().len_lines());
         if self.gutter_lines == lines {
             return false;
         }
@@ -580,7 +650,7 @@ impl AppState {
     fn new_document(&mut self) {
         self.error = None;
         let id = self.workspace.open_new(now());
-        self.texts.insert(id, String::new());
+        self.editors.insert(id, bp_editor::Editor::default());
     }
 
     fn open(&mut self, path: PathBuf) {
@@ -593,7 +663,7 @@ impl AppState {
                     doc.set_encoding(file.encoding);
                     doc.set_line_ending(file.line_ending);
                 }
-                self.texts.insert(id, file.text);
+                self.editors.insert(id, bp_editor::Editor::new(&file.text));
                 self.mark_in_step(id, &path2);
             }
             // The error types already render a message naming the file and
@@ -616,7 +686,7 @@ impl AppState {
             return SaveResult::NeedsPath;
         };
 
-        let bytes = match encode(self.text_of(id), doc.encoding(), doc.line_ending()) {
+        let bytes = match encode(&self.text_of(id), doc.encoding(), doc.line_ending()) {
             Ok(b) => b,
             Err(message) => {
                 self.error = Some(message);
@@ -689,7 +759,7 @@ impl AppState {
     fn close(&mut self, id: DocumentId) {
         self.error = None;
         if self.workspace.close(id).is_some() {
-            self.texts.remove(&id);
+            self.editors.remove(&id);
         }
         // Never leave the user staring at an empty frame with no way back.
         if self.workspace.is_empty() {
@@ -697,19 +767,59 @@ impl AppState {
         }
     }
 
+    /// Replace the active document's text as a single undoable edit.
+    ///
+    /// What a data operation, Replace All or a line operation does, and what
+    /// `TextInput` reports after every keystroke. Unchanged text is not an
+    /// edit: a Format that found nothing to reformat must not mark a saved
+    /// document unsaved.
     fn edit(&mut self, text: String) {
         let Some(id) = self.workspace.active_id() else {
             return;
         };
-        if self
-            .texts
-            .get(&id)
-            .is_some_and(|existing| *existing == text)
-        {
-            return;
+        let changed = self
+            .editors
+            .get_mut(&id)
+            .is_some_and(|editor| editor.replace_all_text(&text));
+
+        if changed && let Some(doc) = self.workspace.get_mut(id) {
+            doc.mark_modified();
         }
-        self.texts.insert(id, text);
-        if let Some(doc) = self.workspace.get_mut(id) {
+    }
+
+    /// `Ln 42, Col 18` when we own the caret; the line count when we do not.
+    ///
+    /// specs.md section 3 asks for line and column. Under `TextInput` the
+    /// caret is reachable only through a property marked internal and
+    /// undocumented, so the honest answer there is the thing we do know.
+    fn cursor_label(&self) -> String {
+        let lines = self.gutter_lines;
+        if !self.editor_view {
+            return format!("{lines} lines");
+        }
+        self.active_editor().map_or_else(
+            || format!("{lines} lines"),
+            |editor| {
+                let position = editor.position();
+                format!("Ln {}, Col {}", position.line, position.column)
+            },
+        )
+    }
+
+    /// Scroll so the caret is on screen, moving as little as possible.
+    fn reveal_caret(&mut self) {
+        let rows = self.visible_rows.max(1);
+        let caret_line = self
+            .active_editor()
+            .map_or(0, |editor| editor.position().line - 1);
+        self.first_line = bp_editor::view::reveal(self.first_line, rows, caret_line);
+    }
+
+    /// Note that the active document was edited in place, through the caret.
+    fn mark_edited(&mut self) {
+        if let Some(id) = self.workspace.active_id()
+            && let Some(doc) = self.workspace.get_mut(id)
+        {
             doc.mark_modified();
         }
     }
@@ -778,12 +888,15 @@ fn refresh(ui: &AppWindow, state: &mut AppState, push_text: PushText) {
     ui.set_tabs(Rc::new(slint::VecModel::from(tabs)).into());
 
     if push_text == PushText::Yes {
-        ui.set_doc_text(state.active_text().into());
+        ui.set_doc_text(state.active_text().as_str().into());
+    }
+    if state.editor_view {
+        push_editor_view(ui, state);
     }
     if state.sync_gutter() {
         ui.set_gutter(state.gutter.as_str().into());
     }
-    let lines = state.gutter_lines;
+    let cursor = state.cursor_label();
     let format = state.format();
 
     if let Some(doc) = state.workspace.active() {
@@ -793,7 +906,7 @@ fn refresh(ui: &AppWindow, state: &mut AppState, push_text: PushText) {
         ui.set_encoding_label(doc.encoding().label().into());
         ui.set_line_ending_label(doc.line_ending().label().into());
         ui.set_format_label(format.label().into());
-        ui.set_cursor_label(format!("{lines} lines").into());
+        ui.set_cursor_label(cursor.as_str().into());
     }
 
     // Something that just failed outranks a standing warning about the file.
@@ -827,8 +940,221 @@ fn refresh(ui: &AppWindow, state: &mut AppState, push_text: PushText) {
         ui.set_format_items(model(menus::format(doc.encoding(), doc.line_ending())));
     }
     ui.set_data_items(model(menus::data(format)));
-    ui.set_note_items(model(menus::note(!state.active_text().trim().is_empty())));
+    ui.set_note_items(model(menus::note(state.active_has_content())));
     ui.set_edit_items(model(menus::edit(state.clips.entries())));
+}
+
+/// Tab stops the surface draws with. Four, matching this repository's Rust.
+///
+/// A constant rather than a setting for now: it has to be the same number on
+/// both sides of the boundary, and one place to change it is better than a
+/// setting nothing reads yet.
+const TAB_WIDTH: usize = 4;
+
+/// Hand the surface the lines it should draw, the caret and the selection.
+///
+/// Only the visible rows cross the boundary, which is the whole point: this
+/// costs the same on a 100,000-line document as on a ten-line one.
+fn push_editor_view(ui: &AppWindow, state: &mut AppState) {
+    state.reveal_caret();
+    draw_editor_view(ui, state);
+}
+
+/// Draw the surface exactly where it is now.
+///
+/// Separate from [`push_editor_view`] because scrolling deliberately moves
+/// the view away from the caret, and revealing it again would make the wheel
+/// snap straight back.
+fn draw_editor_view(ui: &AppWindow, state: &AppState) {
+    let rows = state.visible_rows.max(1);
+    let first = state.first_line;
+    let Some(editor) = state.active_editor() else {
+        return;
+    };
+    let buffer = editor.buffer();
+
+    let visible: Vec<EditorRow> = bp_editor::view::visible_lines(buffer, first, rows)
+        .into_iter()
+        .map(|(line, text)| EditorRow {
+            number: format!("{}", line + 1).into(),
+            text: text.as_str().into(),
+        })
+        .collect();
+    ui.set_editor_rows(Rc::new(slint::VecModel::from(visible)).into());
+
+    let boxes: Vec<SelectionBox> = editor
+        .selection()
+        .map(|range| {
+            bp_editor::view::selection_spans(
+                buffer,
+                &range,
+                bp_editor::view::Metrics {
+                    tab_width: TAB_WIDTH,
+                    ..bp_editor::view::Metrics::default()
+                },
+                first,
+                rows,
+            )
+        })
+        .unwrap_or_default()
+        .into_iter()
+        .map(|span| SelectionBox {
+            row: clamp_i32(span.row),
+            start: clamp_i32(span.columns.start),
+            end: clamp_i32(span.columns.end),
+        })
+        .collect();
+    ui.set_editor_selection(Rc::new(slint::VecModel::from(boxes)).into());
+
+    let (row, column) = bp_editor::view::caret_cell(buffer, first, editor.cursor(), TAB_WIDTH);
+    // A row outside the viewport is reported as -1 rather than drawn off the
+    // edge, which is what the surface checks before showing the caret.
+    let visible_row = usize::try_from(row)
+        .ok()
+        .filter(|row| *row < rows)
+        .map_or(-1, clamp_i32);
+    ui.set_caret_row(visible_row);
+    ui.set_caret_column(clamp_i32(column));
+}
+
+fn clamp_i32(value: usize) -> i32 {
+    i32::try_from(value).unwrap_or(i32::MAX)
+}
+
+/// Slint's key text as the editor understands it.
+///
+/// Slint reports named keys as private-use characters. `slint::platform::Key`
+/// gives them names, so this stays a readable list rather than a table of
+/// code points that nobody can check.
+fn translate_key(text: &str) -> Option<bp_editor::Key> {
+    use bp_editor::Key as Editor;
+    use slint::platform::Key as Slint;
+
+    let ch = text.chars().next()?;
+    let is = |key: Slint| char::from(key) == ch;
+
+    Some(if is(Slint::LeftArrow) {
+        Editor::Left
+    } else if is(Slint::RightArrow) {
+        Editor::Right
+    } else if is(Slint::UpArrow) {
+        Editor::Up
+    } else if is(Slint::DownArrow) {
+        Editor::Down
+    } else if is(Slint::Home) {
+        Editor::Home
+    } else if is(Slint::End) {
+        Editor::End
+    } else if is(Slint::PageUp) {
+        Editor::PageUp
+    } else if is(Slint::PageDown) {
+        Editor::PageDown
+    } else if is(Slint::Backspace) {
+        Editor::Backspace
+    } else if is(Slint::Delete) {
+        Editor::Delete
+    } else if is(Slint::Return) {
+        Editor::Enter
+    } else if is(Slint::Tab) {
+        Editor::Tab
+    } else if is(Slint::Escape) {
+        Editor::Escape
+    } else {
+        Editor::Char(ch)
+    })
+}
+
+/// Move the caret to a clicked cell, extending the selection if asked.
+fn place_caret(state: &mut AppState, row: i32, column: i32, extend: bool) {
+    let first = state.first_line;
+    let Some(editor) = state.active_editor_mut() else {
+        return;
+    };
+    let offset = bp_editor::view::offset_at_cell(
+        editor.buffer(),
+        first,
+        usize::try_from(row).unwrap_or(0),
+        usize::try_from(column).unwrap_or(0),
+        TAB_WIDTH,
+    );
+
+    if extend {
+        // Extend from the far end of any existing selection, so shift-click
+        // and drag both grow it rather than restarting it.
+        let anchor = editor.selection().map_or(editor.cursor(), |range| {
+            if editor.cursor() == range.start {
+                range.end
+            } else {
+                range.start
+            }
+        });
+        editor.select(anchor, offset);
+    } else {
+        editor.set_cursor(offset);
+    }
+}
+
+/// Carry out an editing command, reporting whether the editor claimed it.
+///
+/// The clipboard commands are handled here rather than in `bp-editor`: the
+/// OS clipboard is the shell's business, and a crate tested without a window
+/// has no way to reach one.
+fn apply_editor_command(state: &mut AppState, command: &bp_editor::Command) -> bool {
+    match command {
+        bp_editor::Command::Ignore => false,
+
+        bp_editor::Command::Copy => {
+            let selected = state
+                .active_editor()
+                .and_then(|editor| Some(editor.buffer().slice(editor.selection()?)));
+            // Copying nothing must not wipe what the user copied earlier.
+            if let Some(text) = selected.filter(|text| !text.is_empty()) {
+                set_os_clipboard(&text);
+            }
+            true
+        }
+
+        bp_editor::Command::Cut => {
+            let selected = state
+                .active_editor()
+                .and_then(|editor| Some(editor.buffer().slice(editor.selection()?)));
+            if let Some(text) = selected.filter(|text| !text.is_empty()) {
+                set_os_clipboard(&text);
+                if let Some(editor) = state.active_editor_mut() {
+                    editor.delete_selection();
+                }
+                state.mark_edited();
+            }
+            true
+        }
+
+        bp_editor::Command::Paste => {
+            if let Some(text) = os_clipboard_text().filter(|text| !text.is_empty()) {
+                if let Some(editor) = state.active_editor_mut() {
+                    editor.insert(&text);
+                }
+                state.mark_edited();
+            }
+            true
+        }
+
+        other => {
+            let changed = state
+                .active_editor_mut()
+                .is_some_and(|editor| editor.apply(other));
+            if changed {
+                state.mark_edited();
+            }
+            true
+        }
+    }
+}
+
+/// Whatever the OS clipboard holds, if it holds text.
+fn os_clipboard_text() -> Option<String> {
+    arboard::Clipboard::new()
+        .and_then(|mut clipboard| clipboard.get_text())
+        .ok()
 }
 
 /// Menus whose contents never change. Set once, not on every refresh.
@@ -928,9 +1254,20 @@ fn set_os_clipboard(text: &str) -> bool {
 
 /// Select a character range in the editor.
 ///
-/// Offsets are clamped into `i32` because that is what Slint's model uses; a
-/// document long enough to overflow it would have other problems first.
-fn select(ui: &AppWindow, range: &std::ops::Range<usize>) {
+/// Under the custom surface we own the selection, so this sets it and asks
+/// only for the focus back. Under `TextInput` the widget owns it, and the
+/// offsets are clamped into `i32` because that is what its API takes -- a
+/// document long enough to overflow one would have other problems first.
+fn select(ui: &AppWindow, state: &mut AppState, range: &std::ops::Range<usize>) {
+    if state.editor_view {
+        if let Some(editor) = state.active_editor_mut() {
+            editor.select(range.start, range.end);
+        }
+        state.reveal_caret();
+        draw_editor_view(ui, state);
+        ui.invoke_focus_editor();
+        return;
+    }
     let start = i32::try_from(range.start).unwrap_or(i32::MAX);
     let end = i32::try_from(range.end).unwrap_or(i32::MAX);
     ui.invoke_select_range(start, end);
@@ -1004,6 +1341,13 @@ pub struct RunOptions {
     /// separate benchmark binary on purpose: a fixture measures the fixture,
     /// and drifts from the product the moment either changes.
     pub measure_exit: bool,
+    /// Draw with the custom editor surface instead of Slint's `TextInput`.
+    ///
+    /// Opt-in while it reaches parity: word wrap and input-method
+    /// composition still belong to the widget it replaces. The rope is the
+    /// storage either way -- only the drawing and the caret differ -- so this
+    /// is a choice of view, not of document model.
+    pub editor_view: bool,
 }
 
 /// Run the BachelorPad+ shell.
@@ -1082,7 +1426,9 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
         }
     }
 
+    initial.editor_view = options.editor_view;
     let state = Rc::new(RefCell::new(initial));
+    ui.set_use_editor_view(options.editor_view);
 
     let mut reported = false;
     let measure_exit = options.measure_exit;
@@ -1344,16 +1690,45 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
                     ),
                 ),
 
+                // Only reachable with the custom surface. Under `TextInput`
+                // Slint handles these on the widget itself and they never get
+                // this far.
+                id if (action::UNDO..=action::SELECT_ALL).contains(&id) => {
+                    let command = match id {
+                        action::UNDO => bp_editor::Command::Undo,
+                        action::REDO => bp_editor::Command::Redo,
+                        action::CUT => bp_editor::Command::Cut,
+                        action::COPY => bp_editor::Command::Copy,
+                        action::PASTE => bp_editor::Command::Paste,
+                        _ => bp_editor::Command::SelectAll,
+                    };
+                    apply_editor_command(&mut cell.borrow_mut(), &command);
+                    push = PushText::No;
+                }
+
                 id if id >= action::CLIP_BASE => {
                     let index = usize::try_from(id - action::CLIP_BASE).unwrap_or(0);
                     let text = cell.borrow().clips.get(index).map(|e| e.text.clone());
-                    if let Some(text) = text
-                        && set_os_clipboard(&text)
-                        && let Some(ui) = weak.upgrade()
-                    {
+                    let Some(text) = text else { return };
+                    set_os_clipboard(&text);
+
+                    let owns_caret = cell.borrow().editor_view;
+                    if owns_caret {
+                        {
+                            let mut s = cell.borrow_mut();
+                            if let Some(editor) = s.active_editor_mut() {
+                                editor.insert(&text);
+                            }
+                            s.mark_edited();
+                        }
+                        if let Some(ui) = weak.upgrade() {
+                            refresh(&ui, &mut cell.borrow_mut(), PushText::No);
+                            ui.invoke_focus_editor();
+                        }
+                    } else if let Some(ui) = weak.upgrade() {
                         // The OS clipboard now holds the entry, so the
-                        // widget's own paste puts it at the caret -- which is
-                        // the one way to insert there without caret access.
+                        // widget's own paste puts it at the caret -- the one
+                        // way to insert there without caret access.
                         ui.invoke_paste_from_clipboard();
                     }
                     return;
@@ -1409,6 +1784,100 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
         });
     }
 
+    // --- the custom editor surface -------------------------------------
+    {
+        let cell = Rc::clone(&state);
+        let weak = ui.as_weak();
+        ui.on_editor_key(move |text, control, shift, alt| {
+            let Some(ui) = weak.upgrade() else {
+                return false;
+            };
+            let modifiers = bp_editor::Modifiers {
+                control,
+                shift,
+                alt,
+            };
+
+            let handled = {
+                let mut s = cell.borrow_mut();
+                let rows = s.visible_rows;
+
+                // A backend can deliver more than one character at once --
+                // an input method committing, most often. Insert the lot
+                // rather than all but the first.
+                let command = if text.chars().count() > 1 && !modifiers.control {
+                    bp_editor::Command::Insert(text.to_string())
+                } else {
+                    match translate_key(&text) {
+                        Some(key) => bp_editor::keys::command_for(key, modifiers, rows),
+                        None => bp_editor::Command::Ignore,
+                    }
+                };
+                apply_editor_command(&mut s, &command)
+            };
+
+            if handled {
+                refresh(&ui, &mut cell.borrow_mut(), PushText::No);
+            }
+            handled
+        });
+    }
+
+    {
+        let cell = Rc::clone(&state);
+        let weak = ui.as_weak();
+        ui.on_editor_pressed(move |row, column, extend| {
+            let Some(ui) = weak.upgrade() else { return };
+            place_caret(&mut cell.borrow_mut(), row, column, extend);
+            refresh(&ui, &mut cell.borrow_mut(), PushText::No);
+        });
+    }
+
+    {
+        let cell = Rc::clone(&state);
+        let weak = ui.as_weak();
+        ui.on_editor_dragged(move |row, column| {
+            let Some(ui) = weak.upgrade() else { return };
+            // A drag always extends -- that is what dragging means.
+            place_caret(&mut cell.borrow_mut(), row, column, true);
+            refresh(&ui, &mut cell.borrow_mut(), PushText::No);
+        });
+    }
+
+    {
+        let cell = Rc::clone(&state);
+        let weak = ui.as_weak();
+        ui.on_editor_scrolled(move |lines| {
+            let Some(ui) = weak.upgrade() else { return };
+            let mut s = cell.borrow_mut();
+
+            // Bounded at the last line: the view may not scroll past the
+            // document into empty space.
+            let last = s
+                .active_editor()
+                .map_or(0, |editor| editor.buffer().len_lines().saturating_sub(1));
+            s.first_line = s
+                .first_line
+                .saturating_add_signed(isize::try_from(lines).unwrap_or(0))
+                .min(last);
+
+            // Drawn where it now is rather than through `refresh`: scrolling
+            // away from the caret is exactly what the user asked for, and
+            // revealing it again would snap the wheel straight back.
+            draw_editor_view(&ui, &s);
+        });
+    }
+
+    {
+        let cell = Rc::clone(&state);
+        let weak = ui.as_weak();
+        ui.on_editor_resized(move |rows| {
+            let Some(ui) = weak.upgrade() else { return };
+            cell.borrow_mut().visible_rows = usize::try_from(rows).unwrap_or(1).max(1);
+            refresh(&ui, &mut cell.borrow_mut(), PushText::No);
+        });
+    }
+
     // --- find and replace ---------------------------------------------
     {
         let cell = Rc::clone(&state);
@@ -1419,7 +1888,7 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
             let selection = cell.borrow_mut().find(&query);
             ui.set_find_status(cell.borrow().find_status.as_str().into());
             if let Some(range) = selection {
-                select(&ui, &range);
+                select(&ui, &mut cell.borrow_mut(), &range);
             }
         });
     }
@@ -1432,7 +1901,7 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
             let selection = cell.borrow_mut().step_match(forward);
             ui.set_find_status(cell.borrow().find_status.as_str().into());
             if let Some(range) = selection {
-                select(&ui, &range);
+                select(&ui, &mut cell.borrow_mut(), &range);
             }
         };
         if forward {
@@ -1457,7 +1926,7 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
             // how a re-entrant callback panics.
             let planned = {
                 let s = cell.borrow();
-                bp_search::plan_replace_all(s.active_text(), &query, &replacement)
+                bp_search::plan_replace_all(&s.active_text(), &query, &replacement)
             };
 
             match planned {
@@ -1553,7 +2022,7 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
             refresh(&ui, &mut cell.borrow_mut(), PushText::Yes);
             // Select the match so the editor scrolls to it, rather than
             // opening the file at the top and leaving the user to hunt.
-            select(&ui, &(hit.offset..hit.offset));
+            select(&ui, &mut cell.borrow_mut(), &(hit.offset..hit.offset));
         });
     }
 
@@ -1811,6 +2280,103 @@ fn find_id(workspace: &Workspace, raw: i32) -> Option<DocumentId> {
 mod tests {
     use super::*;
     use time::macros::datetime;
+
+    #[test]
+    fn slints_named_keys_are_recognised() {
+        // The one place a Slint constant meets a bp-editor one. Slint reports
+        // named keys as private-use characters, so a mismatch here is silent:
+        // the arrow keys would type invisible glyphs into the document.
+        use slint::platform::Key as Slint;
+
+        let named = |key: Slint| translate_key(&char::from(key).to_string());
+        assert_eq!(named(Slint::LeftArrow), Some(bp_editor::Key::Left));
+        assert_eq!(named(Slint::RightArrow), Some(bp_editor::Key::Right));
+        assert_eq!(named(Slint::UpArrow), Some(bp_editor::Key::Up));
+        assert_eq!(named(Slint::DownArrow), Some(bp_editor::Key::Down));
+        assert_eq!(named(Slint::Home), Some(bp_editor::Key::Home));
+        assert_eq!(named(Slint::End), Some(bp_editor::Key::End));
+        assert_eq!(named(Slint::PageUp), Some(bp_editor::Key::PageUp));
+        assert_eq!(named(Slint::PageDown), Some(bp_editor::Key::PageDown));
+        assert_eq!(named(Slint::Backspace), Some(bp_editor::Key::Backspace));
+        assert_eq!(named(Slint::Delete), Some(bp_editor::Key::Delete));
+        assert_eq!(named(Slint::Return), Some(bp_editor::Key::Enter));
+        assert_eq!(named(Slint::Tab), Some(bp_editor::Key::Tab));
+        assert_eq!(named(Slint::Escape), Some(bp_editor::Key::Escape));
+    }
+
+    #[test]
+    fn ordinary_text_is_not_mistaken_for_a_named_key() {
+        assert_eq!(translate_key("a"), Some(bp_editor::Key::Char('a')));
+        assert_eq!(translate_key("日"), Some(bp_editor::Key::Char('日')));
+        assert_eq!(translate_key(""), None, "a key with no text is not one");
+    }
+
+    #[test]
+    fn typing_through_the_surface_edits_and_marks_the_document_unsaved() {
+        let mut state = AppState::new();
+        state.editor_view = true;
+
+        for ch in "hi".chars() {
+            let command = bp_editor::Command::Insert(ch.to_string());
+            assert!(apply_editor_command(&mut state, &command));
+        }
+
+        assert_eq!(state.active_text(), "hi");
+        assert!(state.workspace.active().unwrap().is_dirty());
+    }
+
+    #[test]
+    fn a_chord_the_editor_does_not_claim_is_left_for_the_window() {
+        // If this ever returns true, Ctrl+S stops saving.
+        let mut state = AppState::new();
+        assert!(!apply_editor_command(
+            &mut state,
+            &bp_editor::Command::Ignore
+        ));
+    }
+
+    #[test]
+    fn the_status_bar_shows_line_and_column_only_when_we_own_the_caret() {
+        let mut state = AppState::new();
+        state.edit("one\ntwo".to_owned());
+        state.sync_gutter();
+
+        assert_eq!(state.cursor_label(), "2 lines", "TextInput hides its caret");
+
+        state.editor_view = true;
+        state.active_editor_mut().unwrap().set_cursor(5);
+        assert_eq!(state.cursor_label(), "Ln 2, Col 2");
+    }
+
+    #[test]
+    fn clicking_puts_the_caret_where_the_click_was() {
+        let mut state = AppState::new();
+        state.editor_view = true;
+        state.edit("hello\nworld".to_owned());
+
+        place_caret(&mut state, 1, 3, false);
+        assert_eq!(state.active_editor().unwrap().cursor(), 9);
+        assert!(state.active_editor().unwrap().selection().is_none());
+
+        // Shift-clicking elsewhere extends rather than restarting.
+        place_caret(&mut state, 0, 1, true);
+        assert_eq!(state.active_editor().unwrap().selection(), Some(1..9));
+    }
+
+    #[test]
+    fn scrolling_far_past_the_end_still_shows_the_document() {
+        let mut state = AppState::new();
+        state.editor_view = true;
+        state.edit("a\nb\nc".to_owned());
+        state.visible_rows = 2;
+
+        state.first_line = 99;
+        state.reveal_caret();
+        assert!(
+            state.first_line < state.active_editor().unwrap().buffer().len_lines(),
+            "revealing the caret must bring the view back to the document"
+        );
+    }
 
     #[test]
     fn a_line_operation_is_an_ordinary_undoable_edit() {
@@ -2092,7 +2658,7 @@ mod tests {
         assert_eq!(state.workspace.len(), 1);
         assert!(state.workspace.active().is_some());
         assert!(
-            !state.texts.contains_key(&id),
+            !state.editors.contains_key(&id),
             "closed text must be dropped"
         );
     }

@@ -143,34 +143,69 @@ pub fn char_column(line: &str, target: usize, tab_width: usize) -> usize {
     line.chars().count()
 }
 
-/// The character offset the point `(x, y)` falls on.
+/// The character offset at a viewport row and visual column.
 ///
-/// Clamped in both directions: a drag that leaves the window still has to
-/// select something sensible rather than panic.
+/// The primitive the widget actually uses: a toolkit that knows its own font
+/// can divide pixels by the advance itself, and keeping pixels on that side
+/// of the boundary means there is one place where the two could disagree
+/// rather than two.
+///
+/// Clamped in both directions, because a drag that leaves the window still
+/// has to select something sensible.
+pub fn offset_at_cell(
+    buffer: &Buffer,
+    first_line: usize,
+    row: usize,
+    column: usize,
+    tab_width: usize,
+) -> usize {
+    let line = first_line
+        .saturating_add(row)
+        .min(buffer.len_lines().saturating_sub(1));
+    let text = buffer.line(line);
+
+    buffer.line_start(line) + char_column(content(&text), column, tab_width)
+}
+
+/// The caret's viewport row and visual column.
+///
+/// The row is signed: negative means above the visible area, which is what
+/// tells the caller to scroll rather than to draw.
+pub fn caret_cell(
+    buffer: &Buffer,
+    first_line: usize,
+    char_idx: usize,
+    tab_width: usize,
+) -> (isize, usize) {
+    let position = buffer.position_of(char_idx);
+    let line = position.line - 1;
+    let text = buffer.line(line);
+
+    let row = isize::try_from(line).unwrap_or(isize::MAX)
+        - isize::try_from(first_line).unwrap_or(isize::MAX);
+    (
+        row,
+        visual_column(content(&text), position.column - 1, tab_width),
+    )
+}
+
+/// The character offset the point `(x, y)` falls on.
 pub fn offset_at(buffer: &Buffer, metrics: Metrics, first_line: usize, point: Point) -> usize {
-    let row = (point.y / metrics.line_height()).floor().max(0.0);
     // `as` saturates, so a row beyond any real document lands on the last
     // line rather than wrapping to the first.
-    let line = first_line
-        .saturating_add(row as usize)
-        .min(buffer.len_lines().saturating_sub(1));
+    let row = (point.y / metrics.line_height()).floor().max(0.0) as usize;
+    let column = (point.x / metrics.advance()).round().max(0.0) as usize;
 
-    let text = buffer.line(line);
-    let target = (point.x / metrics.advance()).round().max(0.0) as usize;
-
-    buffer.line_start(line) + char_column(content(&text), target, metrics.tab_width())
+    offset_at_cell(buffer, first_line, row, column, metrics.tab_width())
 }
 
 /// Where the caret sits for a character offset.
 pub fn caret_point(buffer: &Buffer, metrics: Metrics, first_line: usize, char_idx: usize) -> Point {
-    let position = buffer.position_of(char_idx);
-    let line = position.line - 1;
-    let text = buffer.line(line);
-    let visual = visual_column(content(&text), position.column - 1, metrics.tab_width());
+    let (row, column) = caret_cell(buffer, first_line, char_idx, metrics.tab_width());
 
     Point {
-        x: visual as f32 * metrics.advance(),
-        y: (line as f32 - first_line as f32) * metrics.line_height(),
+        x: column as f32 * metrics.advance(),
+        y: row as f32 * metrics.line_height(),
     }
 }
 
@@ -347,6 +382,43 @@ mod tests {
         };
         let buffer = Buffer::from_text("one\ntwo");
         assert!(offset_at(&buffer, zero, 0, point(5.0, 5.0)) <= buffer.len_chars());
+    }
+
+    #[test]
+    fn cells_and_pixels_agree() {
+        // The pixel functions are wrappers; if they ever stop agreeing with
+        // the cells the caret and the click land in different places.
+        let buffer = Buffer::from_text("one\n\ttwo\nthree");
+        for offset in 0..=buffer.len_chars() {
+            let (row, column) = caret_cell(&buffer, 0, offset, M.tab_width);
+            let point = caret_point(&buffer, M, 0, offset);
+
+            assert_eq!(point.x, column as f32 * M.advance, "x at {offset}");
+            assert_eq!(point.y, row as f32 * M.line_height, "y at {offset}");
+            assert_eq!(
+                offset_at(&buffer, M, 0, point),
+                offset_at_cell(&buffer, 0, row as usize, column, M.tab_width),
+                "round trip at {offset}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_caret_above_the_viewport_reports_a_negative_row() {
+        let buffer = Buffer::from_text("a\nb\nc\nd");
+        assert_eq!(caret_cell(&buffer, 2, 0, 4).0, -2);
+        assert_eq!(caret_cell(&buffer, 0, 6, 4).0, 3);
+    }
+
+    #[test]
+    fn a_cell_below_the_document_lands_on_the_last_line() {
+        let buffer = Buffer::from_text("one\ntwo");
+        assert_eq!(offset_at_cell(&buffer, 0, 900, 0, 4), 4);
+        assert_eq!(
+            offset_at_cell(&buffer, 0, 0, 900, 4),
+            3,
+            "past the line end"
+        );
     }
 
     #[test]

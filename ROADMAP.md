@@ -45,11 +45,12 @@ that points at them for no gain.
 Phases 1 and 3 are complete. Phases 2, 5, 6, 7, 8, 11 and 17 each have a
 tested slice in the product.
 
-One thing gates more than anything else: **the custom editor view**. Slint's
-`TextInput` owns its own text, caret and undo stack, which simultaneously
-blocks the rope buffer becoming storage (phase 2), our own undo (phase 2), and
-Ln/Col in the status bar. It is also the prerequisite for the large-file work
-in phase 4. See `docs/architecture/ARCHITECTURE.md`.
+**The item that gated three sessions is no longer gating.** The rope is now
+the editor's storage, `bp-editor` owns caret, motion and undo, and a custom
+editor view exists behind `--editor-view` (ADR-0018). What remains before it
+can be the default is parity — word wrap and input-method composition — and a
+person actually typing into it. Phase 4's large-file work is unblocked either
+way, because the storage question is settled.
 
 The other structural gap is **security profiles** (phase 14). Two shipped
 features already hold sensitive data — the recovery journal writes unsaved

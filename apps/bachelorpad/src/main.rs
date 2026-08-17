@@ -81,6 +81,12 @@ fn main() -> anyhow::Result<()> {
             }
         }),
         measure_exit: args.iter().any(|a| a == "--measure-exit"),
+        // Opt-in while the custom editor surface reaches parity with the
+        // widget it replaces (word wrap, input-method composition). Parsed
+        // here beside the other switches rather than through the config
+        // precedence, because it is a thing to try rather than a preference
+        // to keep.
+        editor_view: args.iter().any(|a| a == "--editor-view"),
     })?;
     Ok(())
 }

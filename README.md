@@ -51,18 +51,20 @@ authoritative gate and runs from `pre-commit` and `pre-push`. See
 [docs/governance/LOCAL_CI.md](docs/governance/LOCAL_CI.md) and ADR-0016.
 
 ```powershell
-cargo run --release          # the app
+cargo run --release            # the app
+cargo run --release -- --editor-view   # with the custom editor view (ADR-0018)
 ./scripts/Measure-Startup.ps1  # startup and idle memory vs specs.md §22
 ```
 
 ## Current state (2026-08-17)
 
-**14 crates, 327 tests, green on Windows and Linux.** The app opens, edits and
+**14 crates, 375 tests, green on Windows and Linux.** The app opens, edits and
 saves atomically, and does rather more than that:
 
 | Area | What works |
 | --- | --- |
 | Editing | Tabs, four themes, honest save state, atomic save, undo/cut/copy/paste, sort / deduplicate / reverse / trim lines |
+| Storage | A rope buffer holds every document; whole-document operations are one undo step |
 | Safety | Unsaved-changes prompts, external-change detection, crash recovery journal |
 | Files | Open/Save/Save As/Save All/Reload, recent files, command-line file opening |
 | Search | Find and replace (literal or regex) with the changes shown before they are applied, recursive cross-file search |
@@ -81,10 +83,12 @@ starting.
 
 ### Known gaps
 
-- **Cursor position shows a line count, not Ln/Col.** Slint's `TextInput`
-  owns the caret and exposes it only through an internal, undocumented
-  property. This also blocks the rope buffer becoming the editor's storage and
-  our own undo becoming the authority — all three need a custom editor view.
+- **The custom editor view is opt-in and has barely been used.** `--editor-view`
+  gives Ln/Col, our own undo, and a view that draws only the lines on screen.
+  It does not yet do word wrap or input-method composition, which is why the
+  default is still Slint's `TextInput`. Its rules are covered by tests; whether
+  the caret lands under the pointer is not something a test can say. See
+  [ADR-0018](docs/decisions/ADR-0018.md).
 - **Little of this has been used in anger.** The tests cover the pieces in
   isolation; the integrated behaviour has had one manual pass.
 - **Two features hold sensitive data without a security profile governing

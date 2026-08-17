@@ -560,6 +560,32 @@ impl Editor {
         }
     }
 
+    /// Replace the whole document as a single undoable edit.
+    ///
+    /// What a data operation, Replace All or a line operation does: the
+    /// document is rewritten wholesale, and undo must put back what was there
+    /// in one press rather than unpicking it. Distinct from [`reset`], which
+    /// is a *new* document and discards the history.
+    ///
+    /// Returns whether anything actually changed, so a no-op operation does
+    /// not mark a clean document dirty.
+    pub fn replace_all_text(&mut self, text: &str) -> bool {
+        if self.buffer.len_chars() == text.chars().count() && self.text() == text {
+            return false;
+        }
+        let cursor = self.cursor;
+        self.select_all();
+        if text.is_empty() {
+            self.delete_selection();
+        } else {
+            self.insert(text);
+        }
+        // Keep the caret where it was where that still makes sense: formatting
+        // a document should not scroll the user back to the top.
+        self.set_cursor(cursor.min(self.buffer.len_chars()));
+        true
+    }
+
     /// Replace the whole document, as loading a file does.
     ///
     /// Clears history: undoing past a file load into the previous document's
@@ -766,6 +792,42 @@ mod tests {
 
         while e.redo() {}
         assert_eq!(e.text(), scrambled);
+    }
+
+    #[test]
+    fn replacing_the_whole_document_is_one_undo_step() {
+        // What Format JSON, Replace All and Sort Lines each do. Unpicking it
+        // keystroke by keystroke would be useless.
+        let mut e = Editor::new("one\ntwo\nthree");
+        e.set_cursor(5);
+        assert!(e.replace_all_text("ONE\nTWO\nTHREE"));
+
+        assert_eq!(e.text(), "ONE\nTWO\nTHREE");
+        assert_eq!(e.cursor(), 5, "the caret stays where the user left it");
+
+        assert!(e.undo());
+        assert_eq!(e.text(), "one\ntwo\nthree");
+        assert!(!e.can_undo(), "one entry, not two");
+    }
+
+    #[test]
+    fn replacing_a_document_with_itself_changes_nothing() {
+        // Otherwise a data operation that found nothing to do would still
+        // mark a saved document unsaved.
+        let mut e = Editor::new("unchanged");
+        assert!(!e.replace_all_text("unchanged"));
+        assert!(!e.can_undo());
+    }
+
+    #[test]
+    fn a_document_can_be_replaced_with_nothing() {
+        let mut e = Editor::new("something");
+        assert!(e.replace_all_text(""));
+        assert_eq!(e.text(), "");
+        assert_eq!(e.cursor(), 0);
+
+        e.undo();
+        assert_eq!(e.text(), "something");
     }
 
     #[test]

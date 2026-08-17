@@ -35,6 +35,24 @@ export struct SearchHit {
     index: int,
 }
 
+/// One visible line of the document, as `EditorSurface` draws it.
+///
+/// The gutter number arrives already formatted: which lines are on screen is
+/// Rust's decision, and having Slint recompute it from an index would be a
+/// second implementation of the same arithmetic.
+export struct EditorRow {
+    number: string,
+    text: string,
+}
+
+/// One line's worth of selection highlight, in **visual** columns -- after
+/// tabs have expanded, which is the only measure that lines up with the text.
+export struct SelectionBox {
+    row: int,
+    start: int,
+    end: int,
+}
+
 export global Palette {
     in property <color> shell;
     in property <color> panel;
@@ -137,6 +155,155 @@ component MenuPopup inherits PopupWindow {
                     }
                 }
             }
+        }
+    }
+}
+
+// The custom editor surface.
+//
+// Slint's `TextInput` owns its own text, caret and undo stack, which is the
+// single fact blocking three separate things: the rope in `bp-buffer` cannot
+// be the storage, `bp-editor`'s undo cannot be the authority, and the status
+// bar cannot show Ln/Col. This component exists to own none of those either
+// -- it draws what Rust hands it and reports what the user did. Every
+// decision lives in `bp-editor`, which is tested without a window.
+//
+// Only the visible rows are ever built, so a 100,000-line document costs the
+// same to draw as a ten-line one.
+component EditorSurface inherits Rectangle {
+    in property <[EditorRow]> rows;
+    in property <[SelectionBox]> selection;
+    /// Viewport row of the caret, or -1 when it is scrolled out of sight.
+    in property <int> caret-row: -1;
+    in property <int> caret-column;
+    in property <bool> show-gutter: true;
+    in property <length> font-size: 14px;
+    in property <length> line-height: 18px;
+
+    /// text, control, shift, alt. Returns whether the editor claimed it --
+    /// anything it does not claim must bubble up, or Ctrl+S stops saving.
+    callback key(string, bool, bool, bool) -> bool;
+    /// row, visual column, extend-selection.
+    callback pressed(int, int, bool);
+    callback dragged(int, int);
+    /// Lines to scroll; positive is toward the end of the document.
+    callback scrolled(int);
+    /// How many rows now fit.
+    callback resized(int);
+
+    // The character advance is measured, not assumed. A hard-coded ratio
+    // drifts the caret one fraction of a pixel further from its character
+    // with every column, which is invisible until someone types a long line
+    // and then unusable. Twenty characters so the division dilutes rounding;
+    // the fallback only applies before the first layout pass, when
+    // `preferred-width` is still zero.
+    probe := Text {
+        text: "MMMMMMMMMMMMMMMMMMMM";
+        font-family: "Consolas";
+        font-size: root.font-size;
+        opacity: 0;
+    }
+    property <length> advance: probe.preferred-width > 0
+        ? probe.preferred-width / 20
+        : root.font-size * 0.6;
+
+    property <length> pad: 10px;
+    property <length> gutter-width: root.show-gutter ? 46px : 0px;
+    property <length> text-left: root.pad + root.gutter-width;
+
+    property <int> fitting-rows: max(1, floor((self.height - 2 * root.pad) / root.line-height));
+    changed fitting-rows => {
+        root.resized(self.fitting-rows);
+    }
+
+    function row-at(y: length) -> int {
+        return max(0, floor((y - root.pad) / root.line-height));
+    }
+    // Rounded, not floored: clicking the right half of a character puts the
+    // caret after it, which is what every editor does and what makes
+    // click-to-place feel accurate rather than one character left.
+    function column-at(x: length) -> int {
+        return max(0, round((x - root.text-left) / root.advance));
+    }
+
+    background: Palette.panel;
+    forward-focus: keys;
+
+    keys := FocusScope {
+        key-pressed(event) => {
+            if (root.key(event.text, event.modifiers.control, event.modifiers.shift, event.modifiers.alt)) {
+                return EventResult.accept;
+            }
+            return EventResult.reject;
+        }
+    }
+
+    // Selection first, so the text draws over it.
+    for box in root.selection: Rectangle {
+        x: root.text-left + box.start * root.advance;
+        y: root.pad + box.row * root.line-height;
+        width: (box.end - box.start) * root.advance;
+        height: root.line-height;
+        background: Palette.accent;
+    }
+
+    for row[i] in root.rows: Text {
+        x: root.text-left;
+        y: root.pad + i * root.line-height;
+        height: root.line-height;
+        text: row.text;
+        color: Palette.ink;
+        font-family: "Consolas";
+        font-size: root.font-size;
+        vertical-alignment: center;
+    }
+
+    if root.show-gutter: Rectangle {
+        for row[i] in root.rows: Text {
+            x: root.pad;
+            y: root.pad + i * root.line-height;
+            width: root.gutter-width - 10px;
+            height: root.line-height;
+            text: row.number;
+            color: Palette.ink-dim;
+            font-family: "Consolas";
+            font-size: root.font-size;
+            horizontal-alignment: right;
+            vertical-alignment: center;
+        }
+    }
+
+    // Hidden when the surface is not focused, so it is clear which of the
+    // find box and the document a keystroke would reach.
+    Rectangle {
+        visible: root.caret-row >= 0 && keys.has-focus;
+        x: root.text-left + root.caret-column * root.advance;
+        y: root.pad + root.caret-row * root.line-height;
+        width: 2px;
+        height: root.line-height;
+        background: Palette.ink;
+    }
+
+    // Last, so it sits above the drawing and receives the pointer.
+    touch := TouchArea {
+        mouse-cursor: text;
+
+        pointer-event(event) => {
+            if (event.kind == PointerEventKind.down) {
+                keys.focus();
+                root.pressed(root.row-at(self.mouse-y), root.column-at(self.mouse-x), event.modifiers.shift);
+            }
+        }
+        moved => {
+            if (self.pressed) {
+                root.dragged(root.row-at(self.mouse-y), root.column-at(self.mouse-x));
+            }
+        }
+        scroll-event(event) => {
+            // A wheel notch is reported in pixels; a line is the unit the
+            // document is virtualised in.
+            root.scrolled(-round(event.delta-y / root.line-height));
+            return EventResult.accept;
         }
     }
 }
@@ -260,6 +427,22 @@ export component AppWindow inherits Window {
     /// Menu actions below 100. Ids from 100 up never reach Rust.
     callback menu-action(int);
 
+    // --- custom editor surface -----------------------------------------
+    // Opt-in until it reaches parity with the widget it replaces: word wrap
+    // and input-method composition both still belong to `TextInput`. The
+    // rope is the storage either way; only the drawing differs.
+    in property <bool> use-editor-view;
+    in property <[EditorRow]> editor-rows;
+    in property <[SelectionBox]> editor-selection;
+    in property <int> caret-row: -1;
+    in property <int> caret-column;
+
+    callback editor-key(string, bool, bool, bool) -> bool;
+    callback editor-pressed(int, int, bool);
+    callback editor-dragged(int, int);
+    callback editor-scrolled(int);
+    callback editor-resized(int);
+
     // --- find and replace ---------------------------------------------
     in-out property <bool> find-open;
     in-out property <string> find-query;
@@ -284,15 +467,28 @@ export component AppWindow inherits Window {
     /// where the next match is -- `set-selection-offsets` is a function on
     /// the widget, so only Slint can invoke it.
     public function select-range(start: int, end: int) {
+        if (root.use-editor-view) {
+            // Rust has already moved its own caret; there is nothing here to
+            // tell. Just take the focus back from the find box.
+            surface.focus();
+            return;
+        }
         editor.set-selection-offsets(start, end);
         editor.focus();
     }
 
     /// Paste whatever the OS clipboard holds at the caret.
     ///
-    /// Rust puts the chosen history entry on the clipboard first. This is the
-    /// only way to insert at the caret, since the caret is not readable.
+    /// Rust puts the chosen history entry on the clipboard first. Under
+    /// `TextInput` that is the only way to insert at the caret, because the
+    /// caret is not readable; under the custom surface it is a courtesy, and
+    /// the insertion has already happened.
     public function paste-from-clipboard() {
+        if (root.use-editor-view) {
+            // We own the caret, so Rust inserted at it directly.
+            surface.focus();
+            return;
+        }
         editor.focus();
         editor.paste();
     }
@@ -303,14 +499,28 @@ export component AppWindow inherits Window {
         find-input.select-all();
     }
 
+    /// Put the caret back in whichever editor is in use.
+    public function focus-editor() {
+        if (root.use-editor-view) {
+            surface.focus();
+        } else {
+            editor.focus();
+        }
+    }
+
     // Typing goes to the editor unless the user clicks elsewhere.
     forward-focus: editor;
 
-    // Editor-local menu actions. These call functions on the TextInput
-    // itself, so they cannot be handled in Rust -- Slint owns the widget's
-    // text, selection and undo stack.
+    // Editor-local menu actions.
+    //
+    // Under `TextInput` these call functions on the widget, because Slint
+    // owns its text, selection and undo stack and Rust cannot reach them.
+    // Under the custom surface the opposite is true -- we own all three -- so
+    // every row goes to Rust instead.
     function dispatch(action: int) {
-        if (action == 100) {
+        if (root.use-editor-view) {
+            root.menu-action(action);
+        } else if (action == 100) {
             editor.undo();
         } else if (action == 101) {
             editor.redo();
@@ -325,7 +535,7 @@ export component AppWindow inherits Window {
         } else {
             root.menu-action(action);
         }
-        editor.focus();
+        root.focus-editor();
     }
 
     // Shortcuts live in a FocusScope that *wraps* the content, because key
@@ -377,7 +587,7 @@ export component AppWindow inherits Window {
             keys: @keys(Escape);
             activated => {
                 root.find-open = false;
-                editor.focus();
+                root.focus-editor();
             }
         }
 
@@ -516,7 +726,37 @@ export component AppWindow inherits Window {
                 background: Palette.panel;
                 vertical-stretch: 1;
 
+                // Both exist rather than one being inside an `if`: an element
+                // in an `if` is out of scope for `dispatch` and
+                // `forward-focus`, which is the same constraint the find bar
+                // is collapsed rather than conditional for.
+                surface := EditorSurface {
+                    visible: root.use-editor-view;
+                    rows: root.editor-rows;
+                    selection: root.editor-selection;
+                    caret-row: root.caret-row;
+                    caret-column: root.caret-column;
+                    show-gutter: root.show-gutter;
+
+                    key(text, control, shift, alt) => {
+                        return root.editor-key(text, control, shift, alt);
+                    }
+                    pressed(row, column, extend) => {
+                        root.editor-pressed(row, column, extend);
+                    }
+                    dragged(row, column) => {
+                        root.editor-dragged(row, column);
+                    }
+                    scrolled(lines) => {
+                        root.editor-scrolled(lines);
+                    }
+                    resized(rows) => {
+                        root.editor-resized(rows);
+                    }
+                }
+
                 Flickable {
+                    visible: !root.use-editor-view;
                     viewport-height: max(self.height, editor-row.preferred-height);
 
                     editor-row := HorizontalLayout {
@@ -665,7 +905,7 @@ export component AppWindow inherits Window {
                         label: "×";
                         clicked => {
                             root.find-open = false;
-                            editor.focus();
+                            root.focus-editor();
                         }
                     }
                 }

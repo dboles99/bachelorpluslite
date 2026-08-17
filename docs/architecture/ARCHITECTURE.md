@@ -34,8 +34,8 @@ and this table carries the intent until then.
 | `bp-theme` | **live** | Palettes as data (ADR-0009). Green is the default. | 1, 17 |
 | `bp-config` | **live** | Settings precedence, config file, recent-files list, recovery from bad input. | 1 |
 | `bp-ui` | **live** | The Slint application shell (ADR-0015). | 1 |
-| `bp-buffer` | **live** | Rope buffer, character indices, line/column maths. Not yet the editor's storage — see below. | 2, 4 |
-| `bp-editor` | **live** | Caret, selection, edits, transaction-based undo/redo, and whole-document line operations. Only `lines` is wired — see below. | 2 |
+| `bp-buffer` | **live** | Rope buffer, character indices, line/column maths. | 2, 4 |
+| `bp-editor` | **live** | Caret, selection, motion, transaction-based undo/redo, line operations, key-to-command mapping, document-to-screen geometry. The editor's storage — see below. | 2 |
 | `bp-history` | **live** | Crash-safe recovery journal and autosave checkpoints. | 3 |
 | `bp-formats` | **live** | Format detection and profiles (ADR-0008). | 5 |
 | `bp-data` | **live** | Structured-data operations: validate, format, minify, convert, report. | 6 |
@@ -64,11 +64,11 @@ bachelorpad ──> bp-config
             ├──> bp-theme
             └──> bp-ui ──┬─> bp-core
                          ├─> bp-files ──> bp-core, bp-naming
-                         ├─> bp-buffer   (line counting only, for now)
+                         ├─> bp-buffer   (the latency probe only)
                          ├─> bp-clipboard
                          ├─> bp-config
                          ├─> bp-data
-                         ├─> bp-editor  (line operations only, for now)
+                         ├─> bp-editor ──> bp-buffer
                          ├─> bp-formats
                          ├─> bp-history
                          ├─> bp-naming
@@ -76,15 +76,13 @@ bachelorpad ──> bp-config
                          ├─> bp-semantic
                          ├─> bp-theme
                          └─> slint, rfd, arboard
-
-bp-editor ──> bp-buffer
 ```
 
-**Seven crates depend on nothing else in the workspace**: `bp-core`,
+**Ten crates depend on nothing else in the workspace**: `bp-core`,
 `bp-naming`, `bp-theme`, `bp-config`, `bp-buffer`, `bp-formats`, `bp-data`,
-`bp-search`, `bp-semantic`, `bp-clipboard` and `bp-history`. That is what
-keeps them cheap to test and impossible to entangle with the UI toolkit — and
-it is why 280 tests run without a window.
+`bp-search`, `bp-semantic` and `bp-clipboard`. That is what keeps them cheap
+to test and impossible to entangle with the UI toolkit — and it is why 375
+tests run without a window.
 
 Two deliberate non-dependencies:
 
@@ -97,31 +95,41 @@ Two deliberate non-dependencies:
 
 ## The editor-view boundary
 
-`bp-buffer` and `bp-editor` exist and are tested. The shell uses
-`bp-editor::lines` — the whole-document line operations, which need no caret —
-and **none of the rest**. That is deliberate, and it is one cause with three
-effects.
-
-Slint's `TextInput` owns its own text and caret. It hands the entire buffer
-back on every edit, keeps its own undo stack, and exposes the caret only
-through a property marked *"internal, undocumented, only exposed for tests"*.
-Consequently:
-
-- the rope cannot become the storage — a rope behind that widget means
-  converting to `String` on every push, which is worse than the `String` it
-  would replace;
-- our undo cannot become the authority — two undo stacks over one document is
-  worse than one;
-- the status bar cannot show Ln/Col — the caret is not legitimately readable.
-
-All three unblock together when a custom, virtualised editor view owns the
-text and routes keys itself. Until then the shell keeps
-`HashMap<DocumentId, String>`, which measures fine to roughly 40 MB.
-
-Building the libraries first is the right order: their semantics are provable
-without a window, and the widget is the risky part.
+**The rope is the storage.** `bp-ui` holds
+`HashMap<DocumentId, bp_editor::Editor>`, whichever view is drawing. That was
+the change ADR-0018 made, and it is what unblocked phase 2.
 
 | Document | insert via `String` | insert via rope |
 | ---: | ---: | ---: |
 | 100 KB | 55.8 µs | 0.3 µs |
 | 1 MB | 563.7 µs | 0.3 µs |
+
+There are two views over it:
+
+| | `TextInput` (default) | `EditorSurface` (`--editor-view`) |
+| --- | --- | --- |
+| Caret and selection | Slint's, unreadable | `bp-editor`'s |
+| Undo | Slint's | `bp-editor`'s transactions |
+| Status bar | line count | **Ln/Col** |
+| Word wrap | yes | not yet |
+| Input-method composition | yes | not yet |
+| Lines drawn | all of them | only the visible ones |
+
+`TextInput` owns its own text, caret and undo stack and exposes the caret only
+through a property marked *"internal, undocumented, only exposed for tests"*,
+which is why text arriving from it lands in the rope as a single undoable
+replacement rather than as keystrokes.
+
+The custom surface exists to own none of those things either. Every decision
+is in `bp-editor` — motion in `Editor`, chords in `keys`, document-to-screen
+arithmetic in `view` — and the widget draws what it is handed and reports rows,
+columns and key text back. That split is what lets an editor's behaviour be
+checked by `cargo test`; what is left needing a person is genuinely visual.
+
+The rule the boundary runs on: **`bp-editor` deals in rows and visual columns,
+never pixels.** The toolkit knows its own font, so it converts. One place for
+the two to disagree instead of two.
+
+Word wrap is the parity item with real depth: it makes a visual line differ
+from a document line, which every function in `bp_editor::view` currently
+assumes away.
