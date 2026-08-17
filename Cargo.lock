@@ -725,6 +725,7 @@ name = "bp-search"
 version = "0.1.0"
 dependencies = [
  "regex",
+ "tempfile",
  "thiserror 2.0.20",
 ]
 

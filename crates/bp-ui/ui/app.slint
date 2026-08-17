@@ -28,6 +28,13 @@ export struct MenuItem {
     separator-after: bool,
 }
 
+/// One row in the cross-file search results.
+export struct SearchHit {
+    label: string,
+    detail: string,
+    index: int,
+}
+
 export global Palette {
     in property <color> shell;
     in property <color> panel;
@@ -264,6 +271,14 @@ export component AppWindow inherits Window {
     callback find-next();
     callback find-previous();
     callback replace-all();
+
+    // Cross-file search results.
+    in property <[SearchHit]> search-hits;
+    // in-out: Rust opens it after a search, the close button shuts it.
+    in-out property <bool> results-open;
+    in property <string> results-summary;
+    callback search-folder();
+    callback open-hit(int);
 
     /// Select a range in the editor. Called from Rust once it has worked out
     /// where the next match is -- `set-selection-offsets` is a function on
@@ -628,6 +643,13 @@ export component AppWindow inherits Window {
                         }
                     }
 
+                    MenuLabel {
+                        label: "In Folder...";
+                        clicked => {
+                            root.search-folder();
+                        }
+                    }
+
                     Rectangle { horizontal-stretch: 1; }
 
                     MenuLabel {
@@ -635,6 +657,78 @@ export component AppWindow inherits Window {
                         clicked => {
                             root.find-open = false;
                             editor.focus();
+                        }
+                    }
+                }
+            }
+
+            // --- cross-file search results ------------------------------
+            Rectangle {
+                height: root.results-open ? 180px : 0px;
+                visible: root.results-open;
+                background: Palette.panel;
+
+                VerticalLayout {
+                    padding: 6px;
+                    spacing: 4px;
+
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Text {
+                            text: root.results-summary;
+                            color: Palette.ink-dim;
+                            font-size: 12px;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                        }
+                        MenuLabel {
+                            label: "×";
+                            clicked => {
+                                root.results-open = false;
+                            }
+                        }
+                    }
+
+                    Flickable {
+                        viewport-height: hits.preferred-height;
+
+                        hits := VerticalLayout {
+                            alignment: start;
+
+                            for hit in root.search-hits: Rectangle {
+                                height: 22px;
+                                background: hit-area.has-hover ? Palette.edge : transparent;
+
+                                HorizontalLayout {
+                                    padding-left: 6px;
+                                    padding-right: 6px;
+                                    spacing: 10px;
+
+                                    Text {
+                                        text: hit.label;
+                                        color: Palette.accent;
+                                        font-size: 12px;
+                                        vertical-alignment: center;
+                                        width: 260px;
+                                        overflow: elide;
+                                    }
+                                    Text {
+                                        text: hit.detail;
+                                        color: Palette.ink-dim;
+                                        font-family: "Consolas";
+                                        font-size: 12px;
+                                        vertical-alignment: center;
+                                        overflow: elide;
+                                        horizontal-stretch: 1;
+                                    }
+                                }
+
+                                hit-area := TouchArea {
+                                    clicked => {
+                                        root.open-hit(hit.index);
+                                    }
+                                }
+                            }
                         }
                     }
                 }

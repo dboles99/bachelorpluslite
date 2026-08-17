@@ -7,3 +7,6 @@ license.workspace = true
 [dependencies]
 regex = "1"
 thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

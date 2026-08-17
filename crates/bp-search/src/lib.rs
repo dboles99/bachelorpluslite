@@ -15,6 +15,9 @@ use std::ops::Range;
 use regex::{Regex, RegexBuilder};
 use thiserror::Error;
 
+mod files;
+pub use files::{FileHit, FileSearchReport, MAX_FILE_BYTES, MAX_HITS, search_dir};
+
 /// Crate identity used by workspace smoke tests and diagnostics.
 pub const CRATE_NAME: &str = "bp-search";
 

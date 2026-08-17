@@ -147,6 +147,8 @@ struct AppState {
     match_index: usize,
     find_status: String,
     journal: bp_history::Journal,
+    /// Cross-file search results, indexed by the row the user clicks.
+    file_hits: Vec<bp_search::FileHit>,
 }
 
 impl AppState {
@@ -171,6 +173,7 @@ impl AppState {
             match_index: 0,
             find_status: String::new(),
             journal: bp_history::Journal::new(recovery_dir()),
+            file_hits: Vec::new(),
         }
     }
 
@@ -1382,6 +1385,80 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
             }
             ui.set_find_status(cell.borrow().find_status.as_str().into());
             refresh(&ui, &mut cell.borrow_mut(), PushText::Yes);
+        });
+    }
+
+    // --- cross-file search ---------------------------------------------
+    {
+        let cell = Rc::clone(&state);
+        let weak = ui.as_weak();
+        ui.on_search_folder(move || {
+            let Some(ui) = weak.upgrade() else { return };
+            let query = bp_search::Query::literal(&ui.get_find_query());
+            if query.is_empty() {
+                ui.set_results_summary("type something to search for".into());
+                ui.set_results_open(true);
+                return;
+            }
+
+            let start = cell.borrow().dialog_directory();
+            let Some(folder) = rfd::FileDialog::new().set_directory(start).pick_folder() else {
+                return;
+            };
+
+            match bp_search::search_dir(&folder, &query) {
+                Ok(report) => {
+                    let rows: Vec<SearchHit> = report
+                        .hits
+                        .iter()
+                        .enumerate()
+                        .map(|(index, hit)| SearchHit {
+                            // Relative to the searched folder: the shared
+                            // prefix is the same on every row and identifies
+                            // nothing.
+                            label: format!(
+                                "{}:{}",
+                                hit.path
+                                    .strip_prefix(&folder)
+                                    .unwrap_or(&hit.path)
+                                    .display(),
+                                hit.line
+                            )
+                            .into(),
+                            detail: hit.preview.as_str().into(),
+                            index: i32::try_from(index).unwrap_or(i32::MAX),
+                        })
+                        .collect();
+
+                    ui.set_search_hits(Rc::new(slint::VecModel::from(rows)).into());
+                    ui.set_results_summary(report.summary().as_str().into());
+                    cell.borrow_mut().file_hits = report.hits;
+                }
+                Err(e) => {
+                    ui.set_search_hits(Rc::new(slint::VecModel::from(Vec::new())).into());
+                    ui.set_results_summary(e.to_string().as_str().into());
+                    cell.borrow_mut().file_hits.clear();
+                }
+            }
+            ui.set_results_open(true);
+        });
+    }
+
+    {
+        let cell = Rc::clone(&state);
+        let weak = ui.as_weak();
+        ui.on_open_hit(move |index| {
+            let Some(ui) = weak.upgrade() else { return };
+            let hit = usize::try_from(index)
+                .ok()
+                .and_then(|i| cell.borrow().file_hits.get(i).cloned());
+            let Some(hit) = hit else { return };
+
+            cell.borrow_mut().open(hit.path);
+            refresh(&ui, &mut cell.borrow_mut(), PushText::Yes);
+            // Select the match so the editor scrolls to it, rather than
+            // opening the file at the top and leaving the user to hunt.
+            select(&ui, &(hit.offset..hit.offset));
         });
     }
 
