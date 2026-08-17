@@ -482,11 +482,23 @@ Sensitive metadata follows the document security profile.
 
 ## 22. Performance targets
 
-Targets, not guarantees:
+Targets, not guarantees.
 
-- cold startup < 150 ms where practical
+Startup is two separately observable events, and conflating them hid a
+129 ms window with a 411 ms blank interior behind a single passing number.
+See ADR-0017.
+
+- time to window < 150 ms cold — window on screen, themed, titled
+- time to first interaction < 250 ms cold — content drawn, accepting keys
 - warm startup < 75 ms where practical
 - idle RAM < 50 MB target
+
+Measured on the real application by `scripts/Measure-Startup.ps1`. As of
+2026-08-17, with the software renderer: 36 ms to window, 19.2 MB idle. Time to
+first interaction is **not yet measurable** under that renderer.
+
+Throughput and responsiveness:
+
 - 1 MB text: effectively instant
 - 10 MB: near-instant
 - 100 MB: comfortably usable

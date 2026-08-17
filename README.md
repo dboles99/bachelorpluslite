@@ -50,12 +50,25 @@ This project has **no hosted CI**. `scripts/Invoke-LocalCI.ps1` is the
 authoritative gate and runs from `pre-commit` and `pre-push`. See
 [docs/governance/LOCAL_CI.md](docs/governance/LOCAL_CI.md) and ADR-0016.
 
-Current state: the core model (`bp-core`), filename grammar (`bp-naming`) and
-atomic save path (`bp-files`) are implemented and tested. The UI toolkit has
-been benchmarked but not yet committed to — see
-[ADR-0015](docs/decisions/ADR-0015.md), which is *Proposed*, and the
-measurements in [artifacts/ui/](artifacts/ui/). The remaining `bp-*` crates
-are placeholders.
+```powershell
+cargo run --release          # the app
+./scripts/Measure-Startup.ps1  # startup and idle memory vs specs.md §22
+```
+
+Current state: the app opens, edits, and saves atomically on Windows and
+Linux. The core model (`bp-core`), filename grammar (`bp-naming`), atomic save
+path (`bp-files`), themes (`bp-theme`) and the Slint shell (`bp-ui`) are
+implemented and tested — 103 tests, green on both platforms.
+
+Startup, with the software renderer ([ADR-0017](docs/decisions/ADR-0017.md)):
+**36 ms to window, 19.2 MB idle**, against targets of 150 ms and 50 MB.
+
+Known gaps: no keyboard shortcuts yet, no prompt when closing a modified tab,
+and text is held in a `String` rather than a rope. See
+[project/tasks/01-foundation/](project/tasks/01-foundation/).
+
+The crate map — including the ~22 crates not yet created — is in
+[ARCHITECTURE.md](docs/architecture/ARCHITECTURE.md).
 
 ## Governance hierarchy
 

@@ -164,12 +164,20 @@ try {
         $drive = $Root.Substring(0, 1).ToLowerInvariant()
         $wslRoot = "/mnt/$drive" + ($Root.Substring(2) -replace '\\', '/')
 
+        # Put the *Linux* toolchain on PATH explicitly. WSL inherits the
+        # Windows PATH through interop, which already contains the Windows
+        # ~/.cargo/bin, while a rustup install into the distro lands in
+        # $HOME/.cargo/bin and does not reach a non-interactive shell. Without
+        # this the leg either fails to find cargo or finds the wrong one.
+        # Backtick-escaped so PowerShell leaves $HOME for bash to expand.
+        $prelude = "export PATH=`"`$HOME/.cargo/bin:`$PATH`"; "
+
         & wsl -d $Distro -- true 2>$null | Out-Null
         $distroUp = ($LASTEXITCODE -eq 0)
 
         $hasCargo = $false
         if ($distroUp) {
-            & wsl -d $Distro -- bash -lc 'command -v cargo' 2>$null | Out-Null
+            & wsl -d $Distro -- bash -c "$prelude command -v cargo" 2>$null | Out-Null
             $hasCargo = ($LASTEXITCODE -eq 0)
         }
 
@@ -182,11 +190,12 @@ try {
             Skip-Stage 'linux (wsl)' "no Rust toolchain in '$Distro' (see docs/governance/LOCAL_CI.md)"
         }
         else {
-            $cmd = "export CARGO_TARGET_DIR=`$HOME/.cache/bachelorpadplus-target; " +
+            $cmd = $prelude +
+                   "export CARGO_TARGET_DIR=`$HOME/.cache/bachelorpadplus-target; " +
                    "cd '$wslRoot' && cargo fmt --all -- --check && " +
                    "cargo clippy --workspace --all-targets -- -D warnings && " +
                    "cargo test --workspace"
-            Invoke-Stage "linux (wsl: $Distro)" { wsl -d $Distro -- bash -lc $cmd }
+            Invoke-Stage "linux (wsl: $Distro)" { wsl -d $Distro -- bash -c $cmd }
         }
     }
 

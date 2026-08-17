@@ -1,34 +1,17 @@
 [workspace]
 resolver = "2"
+# Only crates with real content are members. The full intended crate map --
+# including the ~22 not yet created -- lives in
+# docs/architecture/ARCHITECTURE.md, which is where a plan belongs; an empty
+# crate is a compile unit and a merge surface, not a plan. Add a crate here
+# when there is something to put in it.
 members = [
     "apps/bachelorpad",
     "crates/bp-core",
-    "crates/bp-editor",
-    "crates/bp-buffer",
-    "crates/bp-files",
-    "crates/bp-formats",
-    "crates/bp-search",
-    "crates/bp-semantic",
     "crates/bp-naming",
-    "crates/bp-organize",
-    "crates/bp-storage",
-    "crates/bp-history",
-    "crates/bp-clipboard",
-    "crates/bp-notebook",
-    "crates/bp-execution",
-    "crates/bp-data",
-    "crates/bp-research",
-    "crates/bp-security",
-    "crates/bp-crypto",
-    "crates/bp-secrets",
-    "crates/bp-integrity",
-    "crates/bp-redaction",
-    "crates/bp-audit",
+    "crates/bp-files",
     "crates/bp-theme",
-    "crates/bp-platform",
-    "crates/bp-platform-windows",
-    "crates/bp-platform-linux",
-    "crates/bp-ui"
+    "crates/bp-ui",
 ]
 
 [workspace.package]

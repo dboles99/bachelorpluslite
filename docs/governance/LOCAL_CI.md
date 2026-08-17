@@ -61,18 +61,37 @@ the first time it is wrong, and then nothing is checked at all.
 BP-ADR-0001 makes Linux a first-class target, and nothing else in this setup
 would catch a Windows-only regression. `-Linux` runs the same gate inside WSL.
 
-It needs a Rust toolchain **inside the distro** — the Windows toolchain is not
-visible there. As of 2026-08-17 the distro does not have one, so the stage
-reports as `skipped` rather than silently passing. To enable it:
+**Working as of 2026-08-17** on Ubuntu-24.04 — the workspace builds, clippies
+and tests clean there.
+
+It needs a Rust toolchain **inside the distro**; the Windows toolchain is not
+visible there. If you are setting up a fresh distro:
 
 ```powershell
-wsl -d Ubuntu-24.04 -- bash -lc "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y"
-wsl -d Ubuntu-24.04 -- bash -lc "sudo apt-get update && sudo apt-get install -y build-essential pkg-config"
+# apt needs root. WSL grants that without a password, which is why -u root
+# works where plain sudo would sit waiting for one.
+wsl -d Ubuntu-24.04 -u root -- bash -c "apt-get update && apt-get install -y build-essential pkg-config libfontconfig1-dev libxkbcommon-dev libxcb1-dev libgl1-mesa-dev libwayland-dev libssl-dev"
+wsl -d Ubuntu-24.04 -- bash -c "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal -c rustfmt,clippy"
+
+# Only if you want to *run* the GUI under WSLg, not just build it:
+wsl -d Ubuntu-24.04 -u root -- bash -c "apt-get install -y libxkbcommon-x11-0 libxcb-cursor0"
 ```
 
-The run sets `CARGO_TARGET_DIR` to a WSL-native path. Sharing `target/` with
-Windows would make each platform invalidate the other's artifacts on every
-switch, and building onto `/mnt/g` is slow enough already.
+Two traps this leg had to work around, both worth knowing:
+
+- **PATH.** WSL inherits the Windows PATH through interop, which already
+  contains the *Windows* `~/.cargo/bin`. A rustup install into the distro
+  lands in the distro's `$HOME/.cargo/bin` and does not reach a
+  non-interactive shell at all. The script exports it explicitly; without
+  that the leg either fails to find cargo or finds the wrong one.
+- **Target directory.** The run sets `CARGO_TARGET_DIR` to a WSL-native path.
+  Sharing `target/` with Windows would make each platform invalidate the
+  other's artifacts on every switch, and building onto `/mnt/g` is slow
+  enough already.
+
+Timing measured under WSLg is *not* representative — the compositor adds
+overhead a native desktop does not. Use it to verify correctness, not
+performance.
 
 ## The dormant workflow
 

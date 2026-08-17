@@ -5,3 +5,26 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+bp-core = { path = "../bp-core" }
+bp-files = { path = "../bp-files" }
+bp-naming = { path = "../bp-naming" }
+bp-theme = { path = "../bp-theme" }
+slint = "1.17"
+# Native file dialogs. xdg-portal rather than gtk3 on Linux, so the app does
+# not need a specific desktop environment installed just to open a file
+# (BP-ADR-0001). `pollster` supplies the executor the blocking API needs,
+# since the portal backend is async underneath.
+rfd = { version = "0.17", default-features = false, features = [
+    "xdg-portal",
+    "pollster",
+    "common-controls-v6",
+] }
+thiserror.workspace = true
+time.workspace = true
+tracing.workspace = true
+
+[build-dependencies]
+slint-build = "1.17"
+
+[dev-dependencies]
+time = { workspace = true, features = ["macros"] }

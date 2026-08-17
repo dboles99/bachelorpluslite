@@ -1,7 +1,7 @@
 /target
-# Spike workspaces are standalone, so each has its own target directory that
-# the root-anchored rule above does not cover.
-spikes/**/target/
+# Any standalone workspace (a spike, a fuzz target) has its own target
+# directory that the root-anchored rule above does not cover.
+**/target/
 **/*.rs.bk
 .env
 .env.*

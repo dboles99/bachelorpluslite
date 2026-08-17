@@ -1,0 +1,386 @@
+// BachelorPad+ application shell.
+//
+// This file deliberately contains no colour literals. Every colour comes from
+// the `Palette` global, which Rust fills from `bp-theme` -- ADR-0009 requires
+// themes to be data, and a hex code in here would be a theme that a user
+// could never override.
+
+export struct TabInfo {
+    id: int,
+    label: string,
+    dirty: bool,
+    active: bool,
+}
+
+export global Palette {
+    in property <color> shell;
+    in property <color> panel;
+    in property <color> edge;
+    in property <color> ink;
+    in property <color> ink-dim;
+    in property <color> accent;
+}
+
+component MenuLabel inherits Rectangle {
+    in property <string> label;
+    callback clicked();
+    height: 26px;
+    width: txt.preferred-width + 22px;
+    background: ta.has-hover ? Palette.edge : transparent;
+
+    txt := Text {
+        text: root.label;
+        color: Palette.ink;
+        font-size: 13px;
+        vertical-alignment: center;
+        horizontal-alignment: center;
+    }
+
+    ta := TouchArea {
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+component MenuEntry inherits Rectangle {
+    in property <string> label;
+    in property <string> shortcut;
+    callback chosen();
+    height: 28px;
+    background: ta.has-hover ? Palette.edge : Palette.panel;
+
+    HorizontalLayout {
+        padding-left: 14px;
+        padding-right: 14px;
+        spacing: 24px;
+
+        Text {
+            text: root.label;
+            color: Palette.ink;
+            font-size: 13px;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+        }
+
+        Text {
+            text: root.shortcut;
+            color: Palette.ink-dim;
+            font-size: 12px;
+            vertical-alignment: center;
+        }
+    }
+
+    ta := TouchArea {
+        clicked => {
+            root.chosen();
+        }
+    }
+}
+
+component Tab inherits Rectangle {
+    in property <string> label;
+    in property <bool> dirty;
+    in property <bool> active;
+    callback selected();
+    callback closed();
+
+    height: 30px;
+    width: 190px;
+    background: root.active ? Palette.panel : Palette.shell;
+    border-color: Palette.edge;
+    border-width: 1px;
+
+    select-area := TouchArea {
+        clicked => {
+            root.selected();
+        }
+    }
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 8px;
+        spacing: 6px;
+
+        // A dot rather than the usual asterisk: it matches the status bar's
+        // unsaved marker, so one symbol means "not on disk" everywhere.
+        Text {
+            text: root.dirty ? "●" : "";
+            color: Palette.accent;
+            font-size: 13px;
+            vertical-alignment: center;
+        }
+
+        Text {
+            text: root.label;
+            color: root.active ? Palette.ink : Palette.ink-dim;
+            font-size: 13px;
+            overflow: elide;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+        }
+
+        Rectangle {
+            width: 18px;
+            background: close-area.has-hover ? Palette.edge : transparent;
+            Text {
+                text: "×";
+                color: Palette.ink-dim;
+                font-size: 15px;
+                vertical-alignment: center;
+                horizontal-alignment: center;
+            }
+            close-area := TouchArea {
+                clicked => {
+                    root.closed();
+                }
+            }
+        }
+    }
+}
+
+component StatusText inherits Text {
+    color: Palette.ink-dim;
+    font-size: 12px;
+    vertical-alignment: center;
+}
+
+export component AppWindow inherits Window {
+    title: "BachelorPad+";
+    preferred-width: 1000px;
+    preferred-height: 680px;
+    background: Palette.shell;
+
+    in-out property <string> doc-text;
+    in property <[TabInfo]> tabs;
+    in property <string> gutter;
+    in property <string> save-state;
+    in property <bool> is-dirty;
+    in property <string> location;
+    in property <string> format-label;
+    in property <string> encoding-label;
+    in property <string> line-ending-label;
+    in property <string> cursor-label;
+    in property <string> theme-name;
+    // Non-empty when something went wrong. The status bar shows it instead of
+    // the path, because an error the user cannot see is an error they will
+    // hit again.
+    in property <string> error-message;
+
+    callback new-document();
+    callback open-document();
+    callback save-document();
+    callback save-as-document();
+    callback select-tab(int);
+    callback close-tab(int);
+    callback cycle-theme();
+    callback text-edited(string);
+
+    file-menu := PopupWindow {
+        x: 4px;
+        y: 28px;
+        width: 220px;
+        height: 148px;
+
+        Rectangle {
+            background: Palette.panel;
+            border-color: Palette.edge;
+            border-width: 1px;
+
+            VerticalLayout {
+                padding: 4px;
+                MenuEntry {
+                    label: "New";
+                    shortcut: "Ctrl+N";
+                    chosen => {
+                        root.new-document();
+                    }
+                }
+                MenuEntry {
+                    label: "Open...";
+                    shortcut: "Ctrl+O";
+                    chosen => {
+                        root.open-document();
+                    }
+                }
+                MenuEntry {
+                    label: "Save";
+                    shortcut: "Ctrl+S";
+                    chosen => {
+                        root.save-document();
+                    }
+                }
+                MenuEntry {
+                    label: "Save As...";
+                    shortcut: "Ctrl+Shift+S";
+                    chosen => {
+                        root.save-as-document();
+                    }
+                }
+            }
+        }
+    }
+
+    VerticalLayout {
+        // --- menu bar ---------------------------------------------------
+        Rectangle {
+            height: 28px;
+            background: Palette.panel;
+            HorizontalLayout {
+                padding-left: 4px;
+                alignment: start;
+                MenuLabel {
+                    label: "File";
+                    clicked => {
+                        file-menu.show();
+                    }
+                }
+                MenuLabel { label: "Edit"; }
+                MenuLabel { label: "View"; }
+                MenuLabel { label: "Insert"; }
+                MenuLabel { label: "Format"; }
+                MenuLabel { label: "Data"; }
+                MenuLabel { label: "Note"; }
+                MenuLabel { label: "Notebook"; }
+                MenuLabel { label: "Organize"; }
+                MenuLabel { label: "Research"; }
+                MenuLabel { label: "Run"; }
+                MenuLabel { label: "Security"; }
+                MenuLabel { label: "Tools"; }
+                MenuLabel { label: "Help"; }
+            }
+        }
+
+        Rectangle { height: 1px; background: Palette.edge; }
+
+        // --- tab strip --------------------------------------------------
+        Rectangle {
+            height: 32px;
+            background: Palette.shell;
+            HorizontalLayout {
+                padding-left: 6px;
+                spacing: 2px;
+                alignment: start;
+
+                for tab[i] in root.tabs: Tab {
+                    label: tab.label;
+                    dirty: tab.dirty;
+                    active: tab.active;
+                    selected => {
+                        root.select-tab(tab.id);
+                    }
+                    closed => {
+                        root.close-tab(tab.id);
+                    }
+                }
+
+                MenuLabel {
+                    label: "+";
+                    clicked => {
+                        root.new-document();
+                    }
+                }
+            }
+        }
+
+        Rectangle { height: 1px; background: Palette.edge; }
+
+        // --- editor pane ------------------------------------------------
+        Rectangle {
+            background: Palette.panel;
+            vertical-stretch: 1;
+
+            Flickable {
+                viewport-height: max(self.height, editor-row.preferred-height);
+
+                editor-row := HorizontalLayout {
+                    padding: 10px;
+                    spacing: 10px;
+                    alignment: start;
+
+                    Text {
+                        text: root.gutter;
+                        color: Palette.ink-dim;
+                        font-family: "Consolas";
+                        font-size: 14px;
+                        horizontal-alignment: right;
+                        width: 40px;
+                    }
+
+                    TextInput {
+                        text <=> root.doc-text;
+                        color: Palette.ink;
+                        selection-background-color: Palette.accent;
+                        font-family: "Consolas";
+                        font-size: 14px;
+                        single-line: false;
+                        wrap: no-wrap;
+                        horizontal-stretch: 1;
+                        edited => {
+                            root.text-edited(self.text);
+                        }
+                    }
+                }
+            }
+        }
+
+        Rectangle { height: 1px; background: Palette.edge; }
+
+        // --- status bar (specs.md section 3) ----------------------------
+        Rectangle {
+            height: 44px;
+            background: Palette.panel;
+
+            VerticalLayout {
+                padding-left: 10px;
+                padding-right: 10px;
+                padding-top: 4px;
+                padding-bottom: 4px;
+                spacing: 2px;
+
+                HorizontalLayout {
+                    spacing: 10px;
+                    alignment: start;
+
+                    Text {
+                        text: root.save-state;
+                        // Dirty is the state worth noticing, so it gets the
+                        // accent; a clean save is unremarkable by design.
+                        color: root.is-dirty ? Palette.accent : Palette.ink-dim;
+                        font-size: 12px;
+                        vertical-alignment: center;
+                    }
+                    StatusText { text: "│ " + root.format-label; }
+                    StatusText { text: "│ " + root.encoding-label; }
+                    StatusText { text: "│ " + root.line-ending-label; }
+                    StatusText { text: "│ " + root.cursor-label; }
+
+                    Rectangle {
+                        width: theme-label.preferred-width + 16px;
+                        background: theme-area.has-hover ? Palette.edge : transparent;
+                        theme-label := Text {
+                            text: "│ " + root.theme-name;
+                            color: Palette.accent;
+                            font-size: 12px;
+                            vertical-alignment: center;
+                            horizontal-alignment: center;
+                        }
+                        theme-area := TouchArea {
+                            clicked => {
+                                root.cycle-theme();
+                            }
+                        }
+                    }
+                }
+
+                Text {
+                    text: root.error-message == "" ? root.location : root.error-message;
+                    color: root.error-message == "" ? Palette.ink-dim : Palette.accent;
+                    font-size: 12px;
+                    overflow: elide;
+                    vertical-alignment: center;
+                }
+            }
+        }
+    }
+}

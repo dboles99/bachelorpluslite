@@ -1,0 +1,39 @@
+{
+  "measured_at": "2026-08-17T06:29:16.1903167+07:00",
+  "host_os": "Microsoft Windows NT 10.0.19045.0",
+  "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+  "runs": 7,
+  "note": "WindowMs is measured externally and is comparable across renderers. ReadyMedianMs needs an in-app first-frame hook; null means the renderer has none. Cold figures are first-launch upper bounds.",
+  "results": [
+    {
+      "Variant": "egui / wgpu",
+      "BinaryMB": 12.2,
+      "WindowMs": 197.3,
+      "ColdWallMs": 1307.7,
+      "WarmMedianMs": 1290.1,
+      "ReadyMedianMs": 994.4,
+      "IdleWorkingMB": 153.8,
+      "IdlePrivateMB": 359.8
+    },
+    {
+      "Variant": "slint / gpu (femtovg)",
+      "BinaryMB": 10.4,
+      "WindowMs": 98.5,
+      "ColdWallMs": 644.4,
+      "WarmMedianMs": 640.6,
+      "ReadyMedianMs": 441.7,
+      "IdleWorkingMB": 64.4,
+      "IdlePrivateMB": 70.8
+    },
+    {
+      "Variant": "slint / software",
+      "BinaryMB": 10.4,
+      "WindowMs": 90.5,
+      "ColdWallMs": null,
+      "WarmMedianMs": null,
+      "ReadyMedianMs": null,
+      "IdleWorkingMB": 18.7,
+      "IdlePrivateMB": 6.4
+    }
+  ]
+}

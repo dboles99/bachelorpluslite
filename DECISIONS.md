@@ -20,14 +20,19 @@ Adding a decision means adding both.
 | BP-ADR-0012 | 2026-08-16 | Use OS-supported default-editor registration, never patch Notepad | Accepted | [ADR-0012](docs/decisions/ADR-0012.md) |
 | BP-ADR-0013 | 2026-08-16 | Use original retro-futurist appliance branding without copying existing IP | Accepted | [ADR-0013](docs/decisions/ADR-0013.md) |
 | BP-ADR-0014 | 2026-08-16 | Use project→task→step→prompts/rosettas→artifacts→metadata→database→note governance | Accepted | [ADR-0014](docs/decisions/ADR-0014.md) |
-| BP-ADR-0015 | 2026-08-17 | Adopt Slint as the UI toolkit | **Proposed** | [ADR-0015](docs/decisions/ADR-0015.md) |
+| BP-ADR-0015 | 2026-08-17 | Adopt Slint as the UI toolkit | Accepted | [ADR-0015](docs/decisions/ADR-0015.md) |
 | BP-ADR-0016 | 2026-08-17 | CI is local-first; GitHub Actions is dormant | Accepted | [ADR-0016](docs/decisions/ADR-0016.md) |
+| BP-ADR-0017 | 2026-08-17 | Default to the software renderer; split the startup target | Accepted | [ADR-0017](docs/decisions/ADR-0017.md) |
 
 ## Open items
 
-- **BP-ADR-0015 awaits sign-off.** The measurements are in
-  (`artifacts/ui/ui-toolkit-spike-17AUG2026.md`) and favour Slint on every
-  axis, but Linux is unmeasured.
-- **specs.md section 22 startup targets are not met by any candidate
-  toolkit.** Needs its own decision: software-renderer spike, revised
-  targets, or a split between time-to-window and time-to-interactive.
+- **Time to first interaction is unmeasurable under the software renderer.**
+  Slint exposes no rendering notifier there, so half of the ADR-0017 startup
+  target has no measurement behind it. A hole, not a pass.
+- **Typing latency and scroll smoothness under CPU rasterisation are
+  unmeasured.** This is the explicit revert condition on ADR-0017: if either
+  regresses, the default renderer changes back and the RAM target gets
+  revisited instead.
+- **Comparative startup timing on Linux is unmeasured.** The shell builds and
+  runs there, but WSLg's compositor makes timing unrepresentative. Needs a
+  native Linux machine.
