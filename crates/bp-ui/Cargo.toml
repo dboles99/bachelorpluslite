@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 bp-buffer = { path = "../bp-buffer" }
+bp-clipboard = { path = "../bp-clipboard" }
 bp-config = { path = "../bp-config" }
 bp-core = { path = "../bp-core" }
 bp-data = { path = "../bp-data" }
@@ -16,6 +17,7 @@ bp-semantic = { path = "../bp-semantic" }
 bp-files = { path = "../bp-files" }
 bp-naming = { path = "../bp-naming" }
 bp-theme = { path = "../bp-theme" }
+arboard = "3"
 slint = "1.17"
 # Native file dialogs. xdg-portal rather than gtk3 on Linux, so the app does
 # not need a specific desktop environment installed just to open a file

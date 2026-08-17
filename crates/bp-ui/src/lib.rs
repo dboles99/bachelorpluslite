@@ -149,6 +149,7 @@ struct AppState {
     journal: bp_history::Journal,
     /// Cross-file search results, indexed by the row the user clicks.
     file_hits: Vec<bp_search::FileHit>,
+    clips: bp_clipboard::History,
 }
 
 impl AppState {
@@ -174,6 +175,7 @@ impl AppState {
             find_status: String::new(),
             journal: bp_history::Journal::new(recovery_dir()),
             file_hits: Vec::new(),
+            clips: bp_clipboard::History::new(),
         }
     }
 
@@ -801,12 +803,12 @@ fn refresh(ui: &AppWindow, state: &mut AppState, push_text: PushText) {
     }
     ui.set_data_items(model(menus::data(format)));
     ui.set_note_items(model(menus::note(!state.active_text().trim().is_empty())));
+    ui.set_edit_items(model(menus::edit(state.clips.entries())));
 }
 
 /// Menus whose contents never change. Set once, not on every refresh.
 fn set_static_menus(ui: &AppWindow) {
     let model = |items: Vec<MenuItem>| slint::ModelRc::new(slint::VecModel::from(items));
-    ui.set_edit_items(model(menus::edit()));
     ui.set_help_items(model(menus::help()));
     ui.set_insert_items(model(menus::planned_menu("Insert")));
     ui.set_notebook_items(model(menus::planned_menu("Notebook")));
@@ -884,6 +886,19 @@ fn recovery_dir() -> PathBuf {
         || PathBuf::from("recovery"),
         |p| p.with_file_name("recovery"),
     )
+}
+
+/// Read the OS clipboard, if it holds text.
+///
+/// Failures are silent: a clipboard held open by another process is normal
+/// and momentary, and there is nothing useful to say about it.
+fn read_os_clipboard() -> Option<String> {
+    arboard::Clipboard::new().ok()?.get_text().ok()
+}
+
+/// Put text on the OS clipboard. Returns whether it worked.
+fn set_os_clipboard(text: &str) -> bool {
+    arboard::Clipboard::new().is_ok_and(|mut c| c.set_text(text.to_owned()).is_ok())
 }
 
 /// Select a character range in the editor.
@@ -1283,6 +1298,21 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
                     ),
                 ),
 
+                id if id >= action::CLIP_BASE => {
+                    let index = usize::try_from(id - action::CLIP_BASE).unwrap_or(0);
+                    let text = cell.borrow().clips.get(index).map(|e| e.text.clone());
+                    if let Some(text) = text
+                        && set_os_clipboard(&text)
+                        && let Some(ui) = weak.upgrade()
+                    {
+                        // The OS clipboard now holds the entry, so the
+                        // widget's own paste puts it at the caret -- which is
+                        // the one way to insert there without caret access.
+                        ui.invoke_paste_from_clipboard();
+                    }
+                    return;
+                }
+
                 id if (action::NOTE_TITLE..=action::NOTE_OUTLINE).contains(&id) => {
                     let outcome = cell.borrow().note_action(id);
                     match outcome {
@@ -1478,6 +1508,31 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
                 // repaint -- but a checkpoint is not a save and the save
                 // state must not move.
                 if let Some(ui) = weak.upgrade() {
+                    refresh(&ui, &mut cell.borrow_mut(), PushText::No);
+                }
+            },
+        );
+    }
+
+    // Capture clipboard changes. Polling, because neither platform offers a
+    // portable change notification and a missed clip is a minor loss.
+    //
+    // History is in memory only: the clipboard carries passwords and tokens
+    // constantly, and specs.md section 14 makes persistence opt-in.
+    let clipboard_timer = slint::Timer::default();
+    {
+        let cell = Rc::clone(&state);
+        let weak = ui.as_weak();
+        clipboard_timer.start(
+            slint::TimerMode::Repeated,
+            std::time::Duration::from_millis(1200),
+            move || {
+                let Some(text) = read_os_clipboard() else {
+                    return;
+                };
+                let added = cell.borrow_mut().clips.push(&text);
+                // Only rebuild the menus when the history actually changed.
+                if added && let Some(ui) = weak.upgrade() {
                     refresh(&ui, &mut cell.borrow_mut(), PushText::No);
                 }
             },

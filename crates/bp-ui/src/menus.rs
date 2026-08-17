@@ -43,6 +43,13 @@ pub mod action {
     pub const SHORTCUTS: i32 = 50;
     pub const ABOUT: i32 = 51;
 
+    /// Clipboard history occupies `CLIP_BASE .. CLIP_BASE + MAX_ENTRIES`.
+    ///
+    /// Slint's `dispatch` routes exactly `UNDO..=SELECT_ALL` to the widget and
+    /// everything else to Rust, so this range only has to avoid that window —
+    /// not sit below it.
+    pub const CLIP_BASE: i32 = 300;
+
     pub const NOTE_TITLE: i32 = 80;
     pub const NOTE_RENAME: i32 = 81;
     pub const NOTE_SUMMARY: i32 = 82;
@@ -180,19 +187,40 @@ fn shorten(text: &str, max: usize) -> String {
     format!("…{tail}")
 }
 
-pub fn edit() -> Vec<MenuItem> {
-    vec![
+pub fn edit(clips: &[bp_clipboard::Entry]) -> Vec<MenuItem> {
+    let mut items = vec![
         row("Undo", "Ctrl+Z", action::UNDO),
         row_end("Redo", "Ctrl+Y", action::REDO),
         row("Cut", "Ctrl+X", action::CUT),
         row("Copy", "Ctrl+C", action::COPY),
         row_end("Paste", "Ctrl+V", action::PASTE),
         row_end("Select All", "Ctrl+A", action::SELECT_ALL),
+    ];
+
+    // Clipboard history. Each row shows a preview and what the entry looks
+    // like, so a column of similar-looking clips is still distinguishable.
+    if clips.is_empty() {
+        items.push(planned("Clipboard History — nothing copied yet"));
+    } else {
+        for (index, entry) in clips.iter().take(bp_clipboard::MAX_ENTRIES).enumerate() {
+            let pin = if entry.pinned { "📌 " } else { "" };
+            items.push(row(
+                &format!("{pin}{}", entry.preview(44)),
+                entry.kind.label(),
+                action::CLIP_BASE + i32::try_from(index).unwrap_or(0),
+            ));
+        }
+    }
+    if let Some(last) = items.last_mut() {
+        last.separator_after = true;
+    }
+
+    items.extend([
         planned("Paste Special"),
-        planned("Clipboard History"),
         planned("Line Operations"),
         arrives("phase 11"),
-    ]
+    ]);
+    items
 }
 
 pub fn view(theme: ThemeId, gutter: bool, wrap: bool) -> Vec<MenuItem> {
@@ -517,7 +545,7 @@ mod tests {
     fn every_working_row_has_an_action() {
         let mut all = Vec::new();
         all.extend(file(true, true, &[]));
-        all.extend(edit());
+        all.extend(edit(&[]));
         all.extend(view(ThemeId::Organic, true, false));
         all.extend(format(Encoding::Utf8, LineEnding::Lf));
         all.extend(help());
@@ -592,18 +620,69 @@ mod tests {
     }
 
     #[test]
-    fn editor_actions_stay_above_the_rust_boundary() {
-        // Slint routes >= 100 to TextInput and everything else to Rust. An id
-        // on the wrong side of that line silently does nothing.
-        for item in edit().iter().filter(|i| i.enabled) {
+    fn only_editor_actions_fall_in_slints_window() {
+        // Slint's `dispatch` handles EDITOR_FIRST..=EDITOR_LAST itself and
+        // sends everything else to Rust. An id on the wrong side of that
+        // window silently does nothing when clicked, which no other test
+        // would catch.
+        let editor_window = action::UNDO..=action::SELECT_ALL;
+
+        let clips = [bp_clipboard::Entry::new("copied")];
+        let mut rust_side = Vec::new();
+        rust_side.extend(file(true, true, &[std::path::PathBuf::from("/a.txt")]));
+        rust_side.extend(view(ThemeId::Green, true, false));
+        rust_side.extend(format(Encoding::Utf8, LineEnding::Lf));
+        rust_side.extend(note(true));
+        rust_side.extend(data(Format::Json));
+        rust_side.extend(help());
+
+        for item in rust_side.iter().filter(|i| i.enabled) {
             assert!(
-                item.action >= 100,
-                "'{}' is an editor action but would be sent to Rust",
-                item.label
+                !editor_window.contains(&item.action),
+                "'{}' ({}) would be swallowed by the editor",
+                item.label,
+                item.action
             );
         }
-        for item in file(true, true, &[]).iter().filter(|i| i.enabled) {
-            assert!(item.action < 100, "'{}' would never reach Rust", item.label);
+
+        // Within Edit, only the six widget operations belong to Slint; the
+        // clipboard-history rows must reach Rust.
+        for item in edit(&clips).iter().filter(|i| i.enabled) {
+            let is_clip = item.action >= action::CLIP_BASE;
+            assert_eq!(
+                editor_window.contains(&item.action),
+                !is_clip,
+                "'{}' ({}) is routed to the wrong side",
+                item.label,
+                item.action
+            );
         }
+    }
+
+    #[test]
+    fn clipboard_rows_are_indexed_from_the_base() {
+        let clips = [
+            bp_clipboard::Entry::new("first"),
+            bp_clipboard::Entry::new("second"),
+        ];
+        let items = edit(&clips);
+        let rows: Vec<&MenuItem> = items
+            .iter()
+            .filter(|i| i.action >= action::CLIP_BASE)
+            .collect();
+
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].action, action::CLIP_BASE);
+        assert!(rows[0].label.contains("first"));
+        assert_eq!(rows[1].action, action::CLIP_BASE + 1);
+    }
+
+    #[test]
+    fn an_empty_clipboard_history_says_so_rather_than_showing_nothing() {
+        let items = edit(&[]);
+        assert!(
+            items.iter().any(|i| i.label.contains("nothing copied yet")),
+            "an empty section with no explanation reads as broken"
+        );
     }
 }

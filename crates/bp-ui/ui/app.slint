@@ -288,6 +288,15 @@ export component AppWindow inherits Window {
         editor.focus();
     }
 
+    /// Paste whatever the OS clipboard holds at the caret.
+    ///
+    /// Rust puts the chosen history entry on the clipboard first. This is the
+    /// only way to insert at the caret, since the caret is not readable.
+    public function paste-from-clipboard() {
+        editor.focus();
+        editor.paste();
+    }
+
     public function focus-find() {
         root.find-open = true;
         find-input.focus();

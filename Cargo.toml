@@ -8,6 +8,7 @@ resolver = "2"
 members = [
     "apps/bachelorpad",
     "crates/bp-buffer",
+    "crates/bp-clipboard",
     "crates/bp-config",
     "crates/bp-core",
     "crates/bp-data",
