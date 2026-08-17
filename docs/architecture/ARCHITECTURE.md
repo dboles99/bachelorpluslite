@@ -43,7 +43,7 @@ and this table carries the intent until then.
 | `bp-semantic` | **live** | Deterministic extraction: titles, keywords, summaries, outlines. Layer one only. | 8 |
 | `bp-clipboard` | **live** | Clipboard history and kind detection (ADR-0010). In memory only. | 11 |
 | `bp-organize` | planned | Projects, topics, tags, related notes, duplicate detection. | 9 |
-| `bp-storage` | planned | SQLite metadata store and migrations. | 9 |
+| `bp-storage` | **live** | SQLite metadata store and migrations (ADR-0019). Documents, tags. Nothing writes to it yet. | 9 |
 | `bp-notebook` | planned | Cell model, `.ipynb` import/export. | 12 |
 | `bp-execution` | planned | Runners and execution security. Never auto-runs (ADR-0011). | 12 |
 | `bp-research` | planned | Citations, paper metadata, research profile. | 13 |
@@ -78,10 +78,10 @@ bachelorpad ──> bp-config
                          └─> slint, rfd, arboard
 ```
 
-**Ten crates depend on nothing else in the workspace**: `bp-core`,
+**Eleven crates depend on nothing else in the workspace**: `bp-core`,
 `bp-naming`, `bp-theme`, `bp-config`, `bp-buffer`, `bp-formats`, `bp-data`,
-`bp-search`, `bp-semantic` and `bp-clipboard`. That is what keeps them cheap
-to test and impossible to entangle with the UI toolkit — and it is why 375
+`bp-search`, `bp-semantic`, `bp-storage` and `bp-clipboard`. That is what keeps them cheap
+to test and impossible to entangle with the UI toolkit — and it is why 393
 tests run without a window.
 
 Two deliberate non-dependencies:

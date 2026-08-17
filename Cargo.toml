@@ -18,6 +18,7 @@ members = [
     "crates/bp-naming",
     "crates/bp-search",
     "crates/bp-semantic",
+    "crates/bp-storage",
     "crates/bp-files",
     "crates/bp-theme",
     "crates/bp-ui",

@@ -1,0 +1,16 @@
+[package]
+name = "bp-storage"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+# `bundled` compiles SQLite from source rather than linking whatever the
+# machine happens to have. BP-ADR-0001 makes Windows and Linux equal targets,
+# and "works here" is not a build strategy: a bundled copy is the same version
+# with the same compile-time options on both, and needs nothing installed.
+rusqlite = { version = "0.37", features = ["bundled"] }
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

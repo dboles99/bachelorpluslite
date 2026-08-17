@@ -58,7 +58,7 @@ cargo run --release -- --editor-view   # with the custom editor view (ADR-0018)
 
 ## Current state (2026-08-17)
 
-**14 crates, 375 tests, green on Windows and Linux.** The app opens, edits and
+**15 crates, 393 tests, green on Windows and Linux.** The app opens, edits and
 saves atomically, and does rather more than that:
 
 | Area | What works |
@@ -71,6 +71,7 @@ saves atomically, and does rather more than that:
 | Data | JSON / JSONL / TOML validate, format, minify, convert; RFC 4180 CSV/TSV shape report |
 | Semantic | Title, keywords, summary and outline extracted from the document |
 | Clipboard | History with kind detection, paste from history |
+| Metadata | A SQLite store with migrations — built and tested, not yet wired in ([ADR-0019](docs/decisions/ADR-0019.md)) |
 
 Startup, with the software renderer ([ADR-0017](docs/decisions/ADR-0017.md)):
 **36 ms to window, 19.2 MB idle**, against targets of 150 ms and 50 MB.
