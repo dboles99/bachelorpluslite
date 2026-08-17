@@ -12,6 +12,22 @@ export struct TabInfo {
     active: bool,
 }
 
+// One row in a menu. `action` is dispatched by number: ids below 100 are
+// handled in Rust, 100 and above are editor functions Slint owns (undo, cut,
+// paste and friends live on TextInput, not in our state).
+//
+// `enabled: false` renders the row greyed and inert. Menus for subsystems that
+// do not exist yet list their contents that way rather than being labels that
+// swallow a click -- a menu that does nothing when clicked reads as broken,
+// while a menu of greyed items reads as "not yet", which is the truth.
+export struct MenuItem {
+    label: string,
+    shortcut: string,
+    action: int,
+    enabled: bool,
+    separator-after: bool,
+}
+
 export global Palette {
     in property <color> shell;
     in property <color> panel;
@@ -23,10 +39,11 @@ export global Palette {
 
 component MenuLabel inherits Rectangle {
     in property <string> label;
+    in property <bool> open;
     callback clicked();
     height: 26px;
     width: txt.preferred-width + 22px;
-    background: ta.has-hover ? Palette.edge : transparent;
+    background: root.open || ta.has-hover ? Palette.edge : transparent;
 
     txt := Text {
         text: root.label;
@@ -43,12 +60,11 @@ component MenuLabel inherits Rectangle {
     }
 }
 
-component MenuEntry inherits Rectangle {
-    in property <string> label;
-    in property <string> shortcut;
-    callback chosen();
+component MenuRow inherits Rectangle {
+    in property <MenuItem> item;
+    callback chosen(int);
     height: 28px;
-    background: ta.has-hover ? Palette.edge : Palette.panel;
+    background: root.item.enabled && ta.has-hover ? Palette.edge : Palette.panel;
 
     HorizontalLayout {
         padding-left: 14px;
@@ -56,15 +72,17 @@ component MenuEntry inherits Rectangle {
         spacing: 24px;
 
         Text {
-            text: root.label;
-            color: Palette.ink;
+            text: root.item.label;
+            // Greyed when inert, so "not implemented" is visible rather than
+            // discovered by clicking.
+            color: root.item.enabled ? Palette.ink : Palette.ink-dim;
             font-size: 13px;
             vertical-alignment: center;
             horizontal-stretch: 1;
         }
 
         Text {
-            text: root.shortcut;
+            text: root.item.shortcut;
             color: Palette.ink-dim;
             font-size: 12px;
             vertical-alignment: center;
@@ -73,7 +91,45 @@ component MenuEntry inherits Rectangle {
 
     ta := TouchArea {
         clicked => {
-            root.chosen();
+            if (root.item.enabled) {
+                root.chosen(root.item.action);
+            }
+        }
+    }
+}
+
+component MenuPopup inherits PopupWindow {
+    in property <[MenuItem]> items;
+    in property <length> menu-width: 280px;
+    callback chosen(int);
+
+    width: root.menu-width;
+    height: content.preferred-height;
+
+    Rectangle {
+        background: Palette.panel;
+        border-color: Palette.edge;
+        border-width: 1px;
+
+        content := VerticalLayout {
+            padding: 4px;
+            for item in root.items: VerticalLayout {
+                MenuRow {
+                    item: item;
+                    chosen(action) => {
+                        root.chosen(action);
+                    }
+                }
+
+                if item.separator-after: Rectangle {
+                    height: 5px;
+                    Rectangle {
+                        height: 1px;
+                        y: 2px;
+                        background: Palette.edge;
+                    }
+                }
+            }
         }
     }
 }
@@ -162,10 +218,28 @@ export component AppWindow inherits Window {
     in property <string> line-ending-label;
     in property <string> cursor-label;
     in property <string> theme-name;
-    // Non-empty when something went wrong. The status bar shows it instead of
-    // the path, because an error the user cannot see is an error they will
-    // hit again.
     in property <string> error-message;
+
+    // View toggles, driven from the View menu.
+    in property <bool> show-gutter: true;
+    in property <bool> wrap-text: false;
+
+    // Menu contents, built in Rust so that enabled state can depend on
+    // application state (Save All only when something is unsaved, and so on).
+    in property <[MenuItem]> file-items;
+    in property <[MenuItem]> edit-items;
+    in property <[MenuItem]> view-items;
+    in property <[MenuItem]> insert-items;
+    in property <[MenuItem]> format-items;
+    in property <[MenuItem]> data-items;
+    in property <[MenuItem]> note-items;
+    in property <[MenuItem]> notebook-items;
+    in property <[MenuItem]> organize-items;
+    in property <[MenuItem]> research-items;
+    in property <[MenuItem]> run-items;
+    in property <[MenuItem]> security-items;
+    in property <[MenuItem]> tools-items;
+    in property <[MenuItem]> help-items;
 
     callback new-document();
     callback open-document();
@@ -176,53 +250,32 @@ export component AppWindow inherits Window {
     callback close-active-tab();
     callback cycle-theme();
     callback text-edited(string);
+    /// Menu actions below 100. Ids from 100 up never reach Rust.
+    callback menu-action(int);
 
     // Typing goes to the editor unless the user clicks elsewhere.
     forward-focus: editor;
 
-    file-menu := PopupWindow {
-        x: 4px;
-        y: 28px;
-        width: 220px;
-        height: 148px;
-
-        Rectangle {
-            background: Palette.panel;
-            border-color: Palette.edge;
-            border-width: 1px;
-
-            VerticalLayout {
-                padding: 4px;
-                MenuEntry {
-                    label: "New";
-                    shortcut: "Ctrl+N";
-                    chosen => {
-                        root.new-document();
-                    }
-                }
-                MenuEntry {
-                    label: "Open...";
-                    shortcut: "Ctrl+O";
-                    chosen => {
-                        root.open-document();
-                    }
-                }
-                MenuEntry {
-                    label: "Save";
-                    shortcut: "Ctrl+S";
-                    chosen => {
-                        root.save-document();
-                    }
-                }
-                MenuEntry {
-                    label: "Save As...";
-                    shortcut: "Ctrl+Shift+S";
-                    chosen => {
-                        root.save-as-document();
-                    }
-                }
-            }
+    // Editor-local menu actions. These call functions on the TextInput
+    // itself, so they cannot be handled in Rust -- Slint owns the widget's
+    // text, selection and undo stack.
+    function dispatch(action: int) {
+        if (action == 100) {
+            editor.undo();
+        } else if (action == 101) {
+            editor.redo();
+        } else if (action == 102) {
+            editor.cut();
+        } else if (action == 103) {
+            editor.copy();
+        } else if (action == 104) {
+            editor.paste();
+        } else if (action == 105) {
+            editor.select-all();
+        } else {
+            root.menu-action(action);
         }
+        editor.focus();
     }
 
     // Shortcuts live in a FocusScope that *wraps* the content, because key
@@ -230,9 +283,6 @@ export component AppWindow inherits Window {
     // toward the focused element. A FocusScope beside the editor rather than
     // around it would never be on that path, and the focused TextInput would
     // swallow Ctrl+S before anything saw it.
-    //
-    // It must not take focus itself, or clicking the shell would pull the
-    // caret out of the editor.
     FocusScope {
         focus-on-click: false;
         focus-on-tab-navigation: false;
@@ -268,167 +318,349 @@ export component AppWindow inherits Window {
             }
         }
 
-    VerticalLayout {
-        // --- menu bar ---------------------------------------------------
-        Rectangle {
-            height: 28px;
-            background: Palette.panel;
-            HorizontalLayout {
-                padding-left: 4px;
-                alignment: start;
-                MenuLabel {
-                    label: "File";
-                    clicked => {
-                        file-menu.show();
-                    }
-                }
-                MenuLabel { label: "Edit"; }
-                MenuLabel { label: "View"; }
-                MenuLabel { label: "Insert"; }
-                MenuLabel { label: "Format"; }
-                MenuLabel { label: "Data"; }
-                MenuLabel { label: "Note"; }
-                MenuLabel { label: "Notebook"; }
-                MenuLabel { label: "Organize"; }
-                MenuLabel { label: "Research"; }
-                MenuLabel { label: "Run"; }
-                MenuLabel { label: "Security"; }
-                MenuLabel { label: "Tools"; }
-                MenuLabel { label: "Help"; }
-            }
-        }
-
-        Rectangle { height: 1px; background: Palette.edge; }
-
-        // --- tab strip --------------------------------------------------
-        Rectangle {
-            height: 32px;
-            background: Palette.shell;
-            HorizontalLayout {
-                padding-left: 6px;
-                spacing: 2px;
-                alignment: start;
-
-                for tab[i] in root.tabs: Tab {
-                    label: tab.label;
-                    dirty: tab.dirty;
-                    active: tab.active;
-                    selected => {
-                        root.select-tab(tab.id);
-                    }
-                    closed => {
-                        root.close-tab(tab.id);
-                    }
-                }
-
-                MenuLabel {
-                    label: "+";
-                    clicked => {
-                        root.new-document();
-                    }
-                }
-            }
-        }
-
-        Rectangle { height: 1px; background: Palette.edge; }
-
-        // --- editor pane ------------------------------------------------
-        Rectangle {
-            background: Palette.panel;
-            vertical-stretch: 1;
-
-            Flickable {
-                viewport-height: max(self.height, editor-row.preferred-height);
-
-                editor-row := HorizontalLayout {
-                    padding: 10px;
-                    spacing: 10px;
-                    alignment: start;
-
-                    Text {
-                        text: root.gutter;
-                        color: Palette.ink-dim;
-                        font-family: "Consolas";
-                        font-size: 14px;
-                        horizontal-alignment: right;
-                        width: 40px;
-                    }
-
-                    editor := TextInput {
-                        text <=> root.doc-text;
-                        color: Palette.ink;
-                        selection-background-color: Palette.accent;
-                        font-family: "Consolas";
-                        font-size: 14px;
-                        single-line: false;
-                        wrap: no-wrap;
-                        horizontal-stretch: 1;
-                        edited => {
-                            root.text-edited(self.text);
-                        }
-                    }
-                }
-            }
-        }
-
-        Rectangle { height: 1px; background: Palette.edge; }
-
-        // --- status bar (specs.md section 3) ----------------------------
-        Rectangle {
-            height: 44px;
-            background: Palette.panel;
-
-            VerticalLayout {
-                padding-left: 10px;
-                padding-right: 10px;
-                padding-top: 4px;
-                padding-bottom: 4px;
-                spacing: 2px;
-
+        VerticalLayout {
+            // --- menu bar -----------------------------------------------
+            Rectangle {
+                height: 28px;
+                background: Palette.panel;
                 HorizontalLayout {
-                    spacing: 10px;
+                    padding-left: 4px;
                     alignment: start;
 
-                    Text {
-                        text: root.save-state;
-                        // Dirty is the state worth noticing, so it gets the
-                        // accent; a clean save is unremarkable by design.
-                        color: root.is-dirty ? Palette.accent : Palette.ink-dim;
-                        font-size: 12px;
-                        vertical-alignment: center;
-                    }
-                    StatusText { text: "│ " + root.format-label; }
-                    StatusText { text: "│ " + root.encoding-label; }
-                    StatusText { text: "│ " + root.line-ending-label; }
-                    StatusText { text: "│ " + root.cursor-label; }
-
-                    Rectangle {
-                        width: theme-label.preferred-width + 16px;
-                        background: theme-area.has-hover ? Palette.edge : transparent;
-                        theme-label := Text {
-                            text: "│ " + root.theme-name;
-                            color: Palette.accent;
-                            font-size: 12px;
-                            vertical-alignment: center;
-                            horizontal-alignment: center;
+                    file-label := MenuLabel {
+                        label: "File";
+                        clicked => {
+                            file-menu.show();
                         }
-                        theme-area := TouchArea {
-                            clicked => {
-                                root.cycle-theme();
+                    }
+                    edit-label := MenuLabel {
+                        label: "Edit";
+                        clicked => {
+                            edit-menu.show();
+                        }
+                    }
+                    view-label := MenuLabel {
+                        label: "View";
+                        clicked => {
+                            view-menu.show();
+                        }
+                    }
+                    insert-label := MenuLabel {
+                        label: "Insert";
+                        clicked => {
+                            insert-menu.show();
+                        }
+                    }
+                    format-label2 := MenuLabel {
+                        label: "Format";
+                        clicked => {
+                            format-menu.show();
+                        }
+                    }
+                    data-label := MenuLabel {
+                        label: "Data";
+                        clicked => {
+                            data-menu.show();
+                        }
+                    }
+                    note-label := MenuLabel {
+                        label: "Note";
+                        clicked => {
+                            note-menu.show();
+                        }
+                    }
+                    notebook-label := MenuLabel {
+                        label: "Notebook";
+                        clicked => {
+                            notebook-menu.show();
+                        }
+                    }
+                    organize-label := MenuLabel {
+                        label: "Organize";
+                        clicked => {
+                            organize-menu.show();
+                        }
+                    }
+                    research-label := MenuLabel {
+                        label: "Research";
+                        clicked => {
+                            research-menu.show();
+                        }
+                    }
+                    run-label := MenuLabel {
+                        label: "Run";
+                        clicked => {
+                            run-menu.show();
+                        }
+                    }
+                    security-label := MenuLabel {
+                        label: "Security";
+                        clicked => {
+                            security-menu.show();
+                        }
+                    }
+                    tools-label := MenuLabel {
+                        label: "Tools";
+                        clicked => {
+                            tools-menu.show();
+                        }
+                    }
+                    help-label := MenuLabel {
+                        label: "Help";
+                        clicked => {
+                            help-menu.show();
+                        }
+                    }
+                }
+            }
+
+            Rectangle { height: 1px; background: Palette.edge; }
+
+            // --- tab strip ----------------------------------------------
+            Rectangle {
+                height: 32px;
+                background: Palette.shell;
+                HorizontalLayout {
+                    padding-left: 6px;
+                    spacing: 2px;
+                    alignment: start;
+
+                    for tab[i] in root.tabs: Tab {
+                        label: tab.label;
+                        dirty: tab.dirty;
+                        active: tab.active;
+                        selected => {
+                            root.select-tab(tab.id);
+                        }
+                        closed => {
+                            root.close-tab(tab.id);
+                        }
+                    }
+
+                    MenuLabel {
+                        label: "+";
+                        clicked => {
+                            root.new-document();
+                        }
+                    }
+                }
+            }
+
+            Rectangle { height: 1px; background: Palette.edge; }
+
+            // --- editor pane --------------------------------------------
+            Rectangle {
+                background: Palette.panel;
+                vertical-stretch: 1;
+
+                Flickable {
+                    viewport-height: max(self.height, editor-row.preferred-height);
+
+                    editor-row := HorizontalLayout {
+                        padding: 10px;
+                        spacing: 10px;
+                        alignment: start;
+
+                        if root.show-gutter: Text {
+                            text: root.gutter;
+                            color: Palette.ink-dim;
+                            font-family: "Consolas";
+                            font-size: 14px;
+                            horizontal-alignment: right;
+                            width: 40px;
+                        }
+
+                        editor := TextInput {
+                            text <=> root.doc-text;
+                            color: Palette.ink;
+                            selection-background-color: Palette.accent;
+                            font-family: "Consolas";
+                            font-size: 14px;
+                            single-line: false;
+                            wrap: root.wrap-text ? word-wrap : no-wrap;
+                            horizontal-stretch: 1;
+                            edited => {
+                                root.text-edited(self.text);
                             }
                         }
                     }
                 }
+            }
 
-                Text {
-                    text: root.error-message == "" ? root.location : root.error-message;
-                    color: root.error-message == "" ? Palette.ink-dim : Palette.accent;
-                    font-size: 12px;
-                    overflow: elide;
-                    vertical-alignment: center;
+            Rectangle { height: 1px; background: Palette.edge; }
+
+            // --- status bar (specs.md section 3) ------------------------
+            Rectangle {
+                height: 44px;
+                background: Palette.panel;
+
+                VerticalLayout {
+                    padding-left: 10px;
+                    padding-right: 10px;
+                    padding-top: 4px;
+                    padding-bottom: 4px;
+                    spacing: 2px;
+
+                    HorizontalLayout {
+                        spacing: 10px;
+                        alignment: start;
+
+                        Text {
+                            text: root.save-state;
+                            // Dirty is the state worth noticing, so it gets
+                            // the accent; a clean save is unremarkable.
+                            color: root.is-dirty ? Palette.accent : Palette.ink-dim;
+                            font-size: 12px;
+                            vertical-alignment: center;
+                        }
+                        StatusText { text: "│ " + root.format-label; }
+                        StatusText { text: "│ " + root.encoding-label; }
+                        StatusText { text: "│ " + root.line-ending-label; }
+                        StatusText { text: "│ " + root.cursor-label; }
+
+                        Rectangle {
+                            width: theme-label.preferred-width + 16px;
+                            background: theme-area.has-hover ? Palette.edge : transparent;
+                            theme-label := Text {
+                                text: "│ " + root.theme-name;
+                                color: Palette.accent;
+                                font-size: 12px;
+                                vertical-alignment: center;
+                                horizontal-alignment: center;
+                            }
+                            theme-area := TouchArea {
+                                clicked => {
+                                    root.cycle-theme();
+                                }
+                            }
+                        }
+                    }
+
+                    Text {
+                        text: root.error-message == "" ? root.location : root.error-message;
+                        color: root.error-message == "" ? Palette.ink-dim : Palette.accent;
+                        font-size: 12px;
+                        overflow: elide;
+                        vertical-alignment: center;
+                    }
                 }
             }
         }
     }
+
+    // Popups sit outside the layout so they can position freely. `x` tracks
+    // the label plus the menu bar's 4px padding, which is the only horizontal
+    // offset between the label's layout parent and the window.
+    file-menu := MenuPopup {
+        x: file-label.x + 4px;
+        y: 28px;
+        items: root.file-items;
+        chosen(a) => {
+            root.dispatch(a);
+        }
+    }
+    edit-menu := MenuPopup {
+        x: edit-label.x + 4px;
+        y: 28px;
+        items: root.edit-items;
+        chosen(a) => {
+            root.dispatch(a);
+        }
+    }
+    view-menu := MenuPopup {
+        x: view-label.x + 4px;
+        y: 28px;
+        items: root.view-items;
+        chosen(a) => {
+            root.dispatch(a);
+        }
+    }
+    insert-menu := MenuPopup {
+        x: insert-label.x + 4px;
+        y: 28px;
+        items: root.insert-items;
+        chosen(a) => {
+            root.dispatch(a);
+        }
+    }
+    format-menu := MenuPopup {
+        x: format-label2.x + 4px;
+        y: 28px;
+        items: root.format-items;
+        chosen(a) => {
+            root.dispatch(a);
+        }
+    }
+    data-menu := MenuPopup {
+        x: data-label.x + 4px;
+        y: 28px;
+        items: root.data-items;
+        chosen(a) => {
+            root.dispatch(a);
+        }
+    }
+    note-menu := MenuPopup {
+        x: note-label.x + 4px;
+        y: 28px;
+        items: root.note-items;
+        chosen(a) => {
+            root.dispatch(a);
+        }
+    }
+    notebook-menu := MenuPopup {
+        x: notebook-label.x + 4px;
+        y: 28px;
+        items: root.notebook-items;
+        chosen(a) => {
+            root.dispatch(a);
+        }
+    }
+    organize-menu := MenuPopup {
+        x: organize-label.x + 4px;
+        y: 28px;
+        items: root.organize-items;
+        chosen(a) => {
+            root.dispatch(a);
+        }
+    }
+    research-menu := MenuPopup {
+        x: research-label.x + 4px;
+        y: 28px;
+        items: root.research-items;
+        chosen(a) => {
+            root.dispatch(a);
+        }
+    }
+    run-menu := MenuPopup {
+        x: run-label.x + 4px;
+        y: 28px;
+        items: root.run-items;
+        chosen(a) => {
+            root.dispatch(a);
+        }
+    }
+    security-menu := MenuPopup {
+        x: security-label.x + 4px;
+        y: 28px;
+        items: root.security-items;
+        chosen(a) => {
+            root.dispatch(a);
+        }
+    }
+    tools-menu := MenuPopup {
+        x: tools-label.x + 4px;
+        y: 28px;
+        items: root.tools-items;
+        chosen(a) => {
+            root.dispatch(a);
+        }
+    }
+    help-menu := MenuPopup {
+        x: help-label.x + 4px;
+        y: 28px;
+        items: root.help-items;
+        chosen(a) => {
+            root.dispatch(a);
+        }
     }
 }

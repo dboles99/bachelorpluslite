@@ -36,6 +36,7 @@ Adding a decision means adding both.
 - **Comparative startup timing on Linux is unmeasured.** The shell builds and
   runs there, but WSLg's compositor makes timing unrepresentative. Needs a
   native Linux machine.
-- **Keyboard shortcut delivery is unverified.** Wired and compiler-validated,
-  but never actually pressed — no interactive desktop in the build
-  environment.
+- ~~Keyboard shortcut delivery is unverified.~~ **Confirmed working**
+  (2026-08-17, manual test). `KeyBinding` in a wrapping `FocusScope` matches
+  during the capture phase, so the focused `TextInput` no longer swallows
+  Ctrl+S.

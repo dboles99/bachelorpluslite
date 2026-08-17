@@ -39,6 +39,9 @@ use time::OffsetDateTime;
 
 slint::include_modules!();
 
+mod menus;
+use menus::action;
+
 /// Crate identity used by workspace smoke tests and diagnostics.
 pub const CRATE_NAME: &str = "bp-ui";
 
@@ -115,6 +118,8 @@ struct AppState {
     /// since 0 is a line count `max(1)` can never produce.
     gutter: String,
     gutter_lines: usize,
+    show_gutter: bool,
+    wrap_text: bool,
 }
 
 impl AppState {
@@ -130,6 +135,58 @@ impl AppState {
             error: None,
             gutter: String::new(),
             gutter_lines: usize::MAX,
+            show_gutter: true,
+            wrap_text: false,
+        }
+    }
+
+    /// Discard edits and re-read the active document from disk.
+    fn reload(&mut self) {
+        self.error = None;
+        let Some(id) = self.workspace.active_id() else {
+            return;
+        };
+        let Some(path) = self
+            .workspace
+            .get(id)
+            .and_then(|d| d.path())
+            .map(Path::to_path_buf)
+        else {
+            return;
+        };
+        match load(&path) {
+            Ok(file) => {
+                if let Some(doc) = self.workspace.get_mut(id) {
+                    doc.set_encoding(file.encoding);
+                    doc.set_line_ending(file.line_ending);
+                    // Back in step with disk, so the document is clean again.
+                    doc.record_disk_save(now());
+                }
+                self.texts.insert(id, file.text);
+            }
+            Err(e) => self.error = Some(e.to_string()),
+        }
+    }
+
+    /// Change how the document will be written, and mark it unsaved.
+    ///
+    /// The bytes on disk no longer match the intent, which is exactly what
+    /// "unsaved" means -- leaving it clean would hide a pending change.
+    fn set_line_ending(&mut self, line_ending: LineEnding) {
+        if let Some(doc) = self.workspace.active_mut()
+            && doc.line_ending() != line_ending
+        {
+            doc.set_line_ending(line_ending);
+            doc.mark_modified();
+        }
+    }
+
+    fn set_encoding(&mut self, encoding: Encoding) {
+        if let Some(doc) = self.workspace.active_mut()
+            && doc.encoding() != encoding
+        {
+            doc.set_encoding(encoding);
+            doc.mark_modified();
         }
     }
 
@@ -348,7 +405,63 @@ fn refresh(ui: &AppWindow, state: &mut AppState, push_text: PushText) {
     }
 
     ui.set_error_message(state.error.as_deref().unwrap_or_default().into());
+
+    ui.set_show_gutter(state.show_gutter);
+    ui.set_wrap_text(state.wrap_text);
+
+    // Only the menus whose contents depend on state are rebuilt here; the
+    // rest are set once at startup.
+    let any_dirty = state.workspace.dirty().next().is_some();
+    let has_path = state.workspace.active().and_then(Document::path).is_some();
+    let model = |items: Vec<MenuItem>| slint::ModelRc::new(slint::VecModel::from(items));
+
+    ui.set_file_items(model(menus::file(any_dirty, has_path)));
+    ui.set_view_items(model(menus::view(
+        state.theme,
+        state.show_gutter,
+        state.wrap_text,
+    )));
+    if let Some(doc) = state.workspace.active() {
+        ui.set_format_items(model(menus::format(doc.encoding(), doc.line_ending())));
+    }
 }
+
+/// Menus whose contents never change. Set once, not on every refresh.
+fn set_static_menus(ui: &AppWindow) {
+    let model = |items: Vec<MenuItem>| slint::ModelRc::new(slint::VecModel::from(items));
+    ui.set_edit_items(model(menus::edit()));
+    ui.set_help_items(model(menus::help()));
+    ui.set_insert_items(model(menus::planned_menu("Insert")));
+    ui.set_data_items(model(menus::planned_menu("Data")));
+    ui.set_note_items(model(menus::planned_menu("Note")));
+    ui.set_notebook_items(model(menus::planned_menu("Notebook")));
+    ui.set_organize_items(model(menus::planned_menu("Organize")));
+    ui.set_research_items(model(menus::planned_menu("Research")));
+    ui.set_run_items(model(menus::planned_menu("Run")));
+    ui.set_security_items(model(menus::planned_menu("Security")));
+    ui.set_tools_items(model(menus::planned_menu("Tools")));
+}
+
+/// Static information, shown in a native dialog rather than built as a
+/// bespoke window.
+fn show_info(title: &str, body: &str) {
+    rfd::MessageDialog::new()
+        .set_level(rfd::MessageLevel::Info)
+        .set_title(title)
+        .set_description(body)
+        .set_buttons(rfd::MessageButtons::Ok)
+        .show();
+}
+
+const SHORTCUTS: &str = "\
+Ctrl+N          New
+Ctrl+O          Open
+Ctrl+S          Save
+Ctrl+Shift+S    Save As
+Ctrl+W          Close tab
+Ctrl+Z / Ctrl+Y Undo / Redo
+Ctrl+X/C/V      Cut / Copy / Paste
+Ctrl+A          Select all";
 
 /// Ask about unsaved work before discarding it.
 ///
@@ -594,6 +707,113 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
         });
     }
 
+    // Menu dispatch. Ids of 100 and above never arrive here -- Slint handles
+    // those on the TextInput itself.
+    {
+        let cell = Rc::clone(&state);
+        let weak = ui.as_weak();
+        ui.on_menu_action(move |id| {
+            let mut push = PushText::Yes;
+            match id {
+                action::NEW => cell.borrow_mut().new_document(),
+                action::OPEN => {
+                    if let Some(path) = rfd::FileDialog::new().pick_file() {
+                        cell.borrow_mut().open(path);
+                    }
+                }
+                action::SAVE => {
+                    let id = cell.borrow().workspace.active_id();
+                    if let Some(id) = id {
+                        save_with_prompt(&mut cell.borrow_mut(), id);
+                    }
+                }
+                action::SAVE_AS => {
+                    let target = cell.borrow().workspace.active_id();
+                    if let Some(id) = target {
+                        let suggested = cell.borrow().suggested_filename(id);
+                        if let Some(path) =
+                            rfd::FileDialog::new().set_file_name(suggested).save_file()
+                        {
+                            cell.borrow_mut().save_document(id, Some(path));
+                        }
+                    }
+                }
+                action::SAVE_ALL => {
+                    let dirty: Vec<DocumentId> =
+                        cell.borrow().workspace.dirty().map(Document::id).collect();
+                    for id in dirty {
+                        // Stop at the first refusal rather than firing a
+                        // dialog per document at someone who just cancelled.
+                        if save_with_prompt(&mut cell.borrow_mut(), id) != SaveResult::Saved {
+                            break;
+                        }
+                    }
+                }
+                action::RELOAD => {
+                    let (dirty, name) = {
+                        let s = cell.borrow();
+                        let id = s.workspace.active_id();
+                        (
+                            id.is_some_and(|i| s.is_dirty(i)),
+                            id.map(|i| s.display_name(i)).unwrap_or_default(),
+                        )
+                    };
+                    // Reloading discards edits, so it asks like closing does.
+                    if dirty && ask_about_unsaved(&name) != rfd::MessageDialogResult::No {
+                        return;
+                    }
+                    cell.borrow_mut().reload();
+                }
+                action::CLOSE_TAB => {
+                    let id = cell.borrow().workspace.active_id();
+                    if let Some(id) = id {
+                        close_with_prompt(&cell, id);
+                    }
+                }
+
+                action::THEME_LIGHT => cell.borrow_mut().theme = ThemeId::Light,
+                action::THEME_DARK => cell.borrow_mut().theme = ThemeId::Dark,
+                action::THEME_ORGANIC => cell.borrow_mut().theme = ThemeId::Organic,
+                action::THEME_GREEN => cell.borrow_mut().theme = ThemeId::Green,
+
+                action::TOGGLE_GUTTER => {
+                    let mut s = cell.borrow_mut();
+                    s.show_gutter = !s.show_gutter;
+                    push = PushText::No;
+                }
+                action::TOGGLE_WRAP => {
+                    let mut s = cell.borrow_mut();
+                    s.wrap_text = !s.wrap_text;
+                    push = PushText::No;
+                }
+
+                action::LINE_ENDING_LF => cell.borrow_mut().set_line_ending(LineEnding::Lf),
+                action::LINE_ENDING_CRLF => cell.borrow_mut().set_line_ending(LineEnding::CrLf),
+                action::ENCODING_UTF8 => cell.borrow_mut().set_encoding(Encoding::Utf8),
+                action::ENCODING_UTF8_BOM => cell.borrow_mut().set_encoding(Encoding::Utf8Bom),
+
+                action::SHORTCUTS => show_info("Keyboard shortcuts", SHORTCUTS),
+                action::ABOUT => show_info(
+                    "About BachelorPad+",
+                    &format!(
+                        "BachelorPad+ {}\n\nNotepad when you want it. More when you need it.\n\n\
+                         Renderer: {}\nLicence: MIT OR Apache-2.0",
+                        env!("CARGO_PKG_VERSION"),
+                        std::env::var("SLINT_BACKEND").unwrap_or_else(|_| "software".to_owned()),
+                    ),
+                ),
+
+                // action::NONE and anything unrecognised: a row that exists
+                // to describe what is coming.
+                _ => return,
+            }
+            if let Some(ui) = weak.upgrade() {
+                refresh(&ui, &mut cell.borrow_mut(), push);
+            }
+        });
+    }
+
+    set_static_menus(&ui);
     refresh(&ui, &mut state.borrow_mut(), PushText::Yes);
     ui.run()?;
     Ok(())
