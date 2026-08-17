@@ -30,20 +30,20 @@ and this table carries the intent until then.
 | --- | --- | --- | --- |
 | `bp-core` | **live** | Document, Workspace, SaveState, encoding and line endings. Holds no text. | 1 |
 | `bp-naming` | **live** | Semantic filename grammar (ADR-0003). Pure: no filesystem, no clock. | 1 |
-| `bp-files` | **live** | Atomic save, load, encoding detection (ADR-0007). | 1 |
-| `bp-theme` | **live** | Palettes as data (ADR-0009). | 1 |
-| `bp-config` | **live** | Settings precedence, config file, recovery from bad input. | 1 |
+| `bp-files` | **live** | Atomic save, load, encoding detection, external-change stamps (ADR-0007). | 1, 3 |
+| `bp-theme` | **live** | Palettes as data (ADR-0009). Green is the default. | 1, 17 |
+| `bp-config` | **live** | Settings precedence, config file, recent-files list, recovery from bad input. | 1 |
 | `bp-ui` | **live** | The Slint application shell (ADR-0015). | 1 |
 | `bp-buffer` | **live** | Rope buffer, character indices, line/column maths. Not yet the editor's storage — see below. | 2, 4 |
 | `bp-editor` | **live** | Caret, selection, edits, transaction-based undo/redo. Not yet wired — see below. | 2 |
-| `bp-history` | planned | Revision history, recovery journal, autosave checkpoints. | 3 |
-| `bp-formats` | planned | Format registry and profiles (ADR-0008). | 5 |
-| `bp-data` | planned | Structured-data operations: validate, convert, query, statistics. | 6 |
-| `bp-search` | planned | Exact, regex, recursive and streaming search. | 7 |
-| `bp-semantic` | planned | Deterministic extraction, local models, optional generative providers. | 8, 10 |
+| `bp-history` | **live** | Crash-safe recovery journal and autosave checkpoints. | 3 |
+| `bp-formats` | **live** | Format detection and profiles (ADR-0008). | 5 |
+| `bp-data` | **live** | Structured-data operations: validate, format, minify, convert, report. | 6 |
+| `bp-search` | **live** | Literal and regex find/replace, plus recursive cross-file search. | 7 |
+| `bp-semantic` | **live** | Deterministic extraction: titles, keywords, summaries, outlines. Layer one only. | 8 |
+| `bp-clipboard` | **live** | Clipboard history and kind detection (ADR-0010). In memory only. | 11 |
 | `bp-organize` | planned | Projects, topics, tags, related notes, duplicate detection. | 9 |
 | `bp-storage` | planned | SQLite metadata store and migrations. | 9 |
-| `bp-clipboard` | planned | Clipboard history and format-aware paste (ADR-0010). | 11 |
 | `bp-notebook` | planned | Cell model, `.ipynb` import/export. | 12 |
 | `bp-execution` | planned | Runners and execution security. Never auto-runs (ADR-0011). | 12 |
 | `bp-research` | planned | Citations, paper metadata, research profile. | 13 |
@@ -62,19 +62,37 @@ and this table carries the intent until then.
 ```text
 bachelorpad ──> bp-config
             ├──> bp-theme
-            └──> bp-ui ──> bp-core
-                     ├──> bp-files ──> bp-core
-                     │                └─> bp-naming
-                     ├──> bp-naming
-                     ├──> bp-theme
-                     └──> slint, rfd
+            └──> bp-ui ──┬─> bp-core
+                         ├─> bp-files ──> bp-core, bp-naming
+                         ├─> bp-buffer   (line counting only, for now)
+                         ├─> bp-clipboard
+                         ├─> bp-config
+                         ├─> bp-data
+                         ├─> bp-formats
+                         ├─> bp-history
+                         ├─> bp-naming
+                         ├─> bp-search
+                         ├─> bp-semantic
+                         ├─> bp-theme
+                         └─> slint, rfd, arboard
+
+bp-editor ──> bp-buffer          (built, not yet consumed by bp-ui)
 ```
 
-`bp-core`, `bp-naming`, `bp-theme` and `bp-config` have no dependencies on
-other workspace crates, which is what keeps them cheap to test and impossible
-to entangle with the UI toolkit. `bp-config` deliberately does not depend on
-`bp-theme`: a theme name from a user's file has to be recoverable when it is
-wrong, so it stays a string until the app resolves it.
+**Seven crates depend on nothing else in the workspace**: `bp-core`,
+`bp-naming`, `bp-theme`, `bp-config`, `bp-buffer`, `bp-formats`, `bp-data`,
+`bp-search`, `bp-semantic`, `bp-clipboard` and `bp-history`. That is what
+keeps them cheap to test and impossible to entangle with the UI toolkit — and
+it is why 280 tests run without a window.
+
+Two deliberate non-dependencies:
+
+- `bp-config` does not depend on `bp-theme`. A theme name from a user's file
+  has to be recoverable when it is wrong, so it stays a string until the
+  application resolves it.
+- `bp-semantic` does not depend on `bp-formats`. Extraction reads text; asking
+  it what kind of file it is would couple two layers that have no reason to
+  know about each other.
 
 ## The editor-view boundary
 

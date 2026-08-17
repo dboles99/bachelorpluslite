@@ -24,6 +24,22 @@ Adding a decision means adding both.
 | BP-ADR-0016 | 2026-08-17 | CI is local-first; GitHub Actions is dormant | Accepted | [ADR-0016](docs/decisions/ADR-0016.md) |
 | BP-ADR-0017 | 2026-08-17 | Default to the software renderer; split the startup target | Accepted | [ADR-0017](docs/decisions/ADR-0017.md) |
 
+## Decisions needed before the work they block
+
+- **`.bpadx` envelope format** (phase 15). ADR-0011 says established KDF and
+  AEAD implementations and no custom cryptography, which constrains this more
+  than it looks: the choice of crate, envelope layout and versioning scheme
+  should be agreed before code exists, not discovered during it.
+- **What may leave the machine** (phase 8 layer three, phase 10). Generative
+  providers and embeddings both imply sending document content somewhere.
+  ADR-0006 keeps them optional; ADR-0011 governs what is permitted. Neither
+  says which providers are acceptable.
+- **YAML parser** (phase 6). `serde_yaml` is deprecated. Picking a replacement
+  is a dependency decision with a long tail.
+- **specs.md section 22's warm-start target** (75 ms) is still unverified —
+  the software renderer's time to first interaction cannot be measured, so
+  half of ADR-0017's target has no number behind it.
+
 ## Open items
 
 - **Time to first interaction is unmeasurable under the software renderer.**
@@ -40,3 +56,13 @@ Adding a decision means adding both.
   (2026-08-17, manual test). `KeyBinding` in a wrapping `FocusScope` matches
   during the capture phase, so the focused `TextInput` no longer swallows
   Ctrl+S.
+- **Two shipped features hold sensitive data with no security profile
+  governing them.** The recovery journal writes unsaved text to disk in
+  plaintext; clipboard history keeps copied secrets in memory. Neither is
+  wrong today — both are what those features *are* — but ADR-0011 says the
+  document's profile should govern them, and phase 14 does not exist yet.
+- **Most of the product has not been used.** 280 tests cover the pieces in
+  isolation. One manual pass found two defects no test caught: a menu bar
+  where twelve of fourteen menus swallowed clicks, and Save As defaulting to
+  the process working directory, which wrote real documents into a git
+  checkout. Integrated behaviour needs exercising, not more unit tests.

@@ -55,27 +55,47 @@ cargo run --release          # the app
 ./scripts/Measure-Startup.ps1  # startup and idle memory vs specs.md §22
 ```
 
-Current state: the app opens, edits, and saves atomically on Windows and
-Linux. The core model (`bp-core`), filename grammar (`bp-naming`), atomic save
-path (`bp-files`), themes (`bp-theme`) and the Slint shell (`bp-ui`) are
-implemented and tested — 103 tests, green on both platforms.
+## Current state (2026-08-17)
+
+**14 crates, 280 tests, green on Windows and Linux.** The app opens, edits and
+saves atomically, and does rather more than that:
+
+| Area | What works |
+| --- | --- |
+| Editing | Tabs, four themes, honest save state, atomic save, undo/cut/copy/paste |
+| Safety | Unsaved-changes prompts, external-change detection, crash recovery journal |
+| Files | Open/Save/Save As/Save All/Reload, recent files, command-line file opening |
+| Search | Find and replace (literal or regex), recursive cross-file search |
+| Data | JSON / JSONL / TOML validate, format, minify, convert; CSV shape report |
+| Semantic | Title, keywords, summary and outline extracted from the document |
+| Clipboard | History with kind detection, paste from history |
 
 Startup, with the software renderer ([ADR-0017](docs/decisions/ADR-0017.md)):
 **36 ms to window, 19.2 MB idle**, against targets of 150 ms and 50 MB.
 
-Configuration comes from, in precedence order: command line
-(`--theme=`, `--renderer=`, `--log=`), environment (`BACHELORPAD_*`), a TOML
-file (`%APPDATA%\bachelorpad\config.toml`, or `$XDG_CONFIG_HOME` on Linux),
-then defaults. Broken config warns and falls back; it never stops the editor
+Configuration precedence: command line (`--theme=`, `--renderer=`, `--log=`),
+environment (`BACHELORPAD_*`), a TOML file
+(`%APPDATA%\bachelorpad\config.toml`, or `$XDG_CONFIG_HOME` on Linux), then
+defaults. Broken config warns and falls back; it never stops the editor
 starting.
 
-Known gaps: keyboard shortcut delivery is wired but unverified, cursor
-position shows a line count rather than Ln/Col, and text is held in a `String`
-rather than a rope (measured fine to ~40 MB). See
-[project/tasks/01-foundation/](project/tasks/01-foundation/).
+### Known gaps
 
-The crate map — including the ~22 crates not yet created — is in
-[ARCHITECTURE.md](docs/architecture/ARCHITECTURE.md).
+- **Cursor position shows a line count, not Ln/Col.** Slint's `TextInput`
+  owns the caret and exposes it only through an internal, undocumented
+  property. This also blocks the rope buffer becoming the editor's storage and
+  our own undo becoming the authority — all three need a custom editor view.
+- **Little of this has been used in anger.** The tests cover the pieces in
+  isolation; the integrated behaviour has had one manual pass.
+- **Two features hold sensitive data without a security profile governing
+  them**: the recovery journal writes unsaved text to disk in plaintext, and
+  clipboard history keeps copied secrets in memory. Both are waiting on
+  phase 14.
+
+[ROADMAP.md](ROADMAP.md) has per-phase status;
+[ARCHITECTURE.md](docs/architecture/ARCHITECTURE.md) has the crate map and the
+editor-view constraint; [NEXT_SESSION.md](project/NEXT_SESSION.md) is the plan
+for picking this up again.
 
 ## Governance hierarchy
 
