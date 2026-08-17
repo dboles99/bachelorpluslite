@@ -295,6 +295,23 @@ impl AppState {
         }
     }
 
+    /// Where a file dialog should open.
+    ///
+    /// The active document's own folder, else the user's Documents folder.
+    /// Explicitly *not* the process working directory, which is wherever the
+    /// binary happened to be launched from -- during testing that was a git
+    /// checkout, and notes were saved straight into it.
+    fn dialog_directory(&self) -> PathBuf {
+        self.workspace
+            .active()
+            .and_then(Document::path)
+            .and_then(Path::parent)
+            .filter(|p| !p.as_os_str().is_empty())
+            .map(Path::to_path_buf)
+            .or_else(documents_dir)
+            .unwrap_or_else(|| PathBuf::from("."))
+    }
+
     /// A default filename for Save As, in the grammar from ADR-0003.
     fn suggested_filename(&self, id: DocumentId) -> String {
         self.workspace.get(id).map_or_else(
@@ -463,6 +480,43 @@ Ctrl+Z / Ctrl+Y Undo / Redo
 Ctrl+X/C/V      Cut / Copy / Paste
 Ctrl+A          Select all";
 
+/// The user's Documents folder, if the platform names one.
+fn documents_dir() -> Option<PathBuf> {
+    if cfg!(windows) {
+        let profile = std::env::var_os("USERPROFILE")?;
+        let docs = PathBuf::from(profile).join("Documents");
+        docs.is_dir().then_some(docs)
+    } else {
+        // XDG_DOCUMENTS_DIR is set by user-dirs; fall back to the convention,
+        // then to the home directory itself.
+        if let Some(dir) = std::env::var_os("XDG_DOCUMENTS_DIR") {
+            let dir = PathBuf::from(dir);
+            if dir.is_dir() {
+                return Some(dir);
+            }
+        }
+        let home = PathBuf::from(std::env::var_os("HOME")?);
+        let docs = home.join("Documents");
+        Some(if docs.is_dir() { docs } else { home })
+    }
+}
+
+/// Open a file, starting in a sensible directory.
+fn pick_file(state: &AppState) -> Option<PathBuf> {
+    rfd::FileDialog::new()
+        .set_directory(state.dialog_directory())
+        .pick_file()
+}
+
+/// Choose a save location, starting in a sensible directory with the
+/// ADR-0003 filename suggested.
+fn pick_save_path(state: &AppState, id: DocumentId) -> Option<PathBuf> {
+    rfd::FileDialog::new()
+        .set_directory(state.dialog_directory())
+        .set_file_name(state.suggested_filename(id))
+        .save_file()
+}
+
 /// Ask about unsaved work before discarding it.
 ///
 /// Blocking and native. The three-way answer matters: "Cancel" has to be
@@ -592,7 +646,7 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
     });
 
     wire!(on_open_document, |s| {
-        if let Some(path) = rfd::FileDialog::new().pick_file() {
+        if let Some(path) = pick_file(&s) {
             s.open(path);
         }
     });
@@ -604,11 +658,10 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
     });
 
     wire!(on_save_as_document, |s| {
-        if let Some(id) = s.workspace.active_id() {
-            let suggested = s.suggested_filename(id);
-            if let Some(path) = rfd::FileDialog::new().set_file_name(suggested).save_file() {
-                s.save_document(id, Some(path));
-            }
+        if let Some(id) = s.workspace.active_id()
+            && let Some(path) = pick_save_path(&s, id)
+        {
+            s.save_document(id, Some(path));
         }
     });
 
@@ -717,7 +770,8 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
             match id {
                 action::NEW => cell.borrow_mut().new_document(),
                 action::OPEN => {
-                    if let Some(path) = rfd::FileDialog::new().pick_file() {
+                    let chosen = pick_file(&cell.borrow());
+                    if let Some(path) = chosen {
                         cell.borrow_mut().open(path);
                     }
                 }
@@ -730,10 +784,8 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
                 action::SAVE_AS => {
                     let target = cell.borrow().workspace.active_id();
                     if let Some(id) = target {
-                        let suggested = cell.borrow().suggested_filename(id);
-                        if let Some(path) =
-                            rfd::FileDialog::new().set_file_name(suggested).save_file()
-                        {
+                        let chosen = pick_save_path(&cell.borrow(), id);
+                        if let Some(path) = chosen {
                             cell.borrow_mut().save_document(id, Some(path));
                         }
                     }
@@ -918,8 +970,7 @@ pub fn latency_probe() {
 fn save_with_prompt(state: &mut AppState, id: DocumentId) -> SaveResult {
     match state.save_document(id, None) {
         SaveResult::NeedsPath => {
-            let suggested = state.suggested_filename(id);
-            match rfd::FileDialog::new().set_file_name(suggested).save_file() {
+            match pick_save_path(state, id) {
                 Some(path) => state.save_document(id, Some(path)),
                 // The user dismissed the dialog. Nothing was written, and the
                 // caller must not treat that as saved.

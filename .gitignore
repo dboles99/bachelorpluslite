@@ -24,3 +24,16 @@ Thumbs.db
 # Per-run local CI records. Benchmark results under artifacts/benchmarks/ are
 # deliberately NOT ignored -- they are the evidence behind ADR-0015.
 artifacts/test-evidence/*.json
+
+# Documents saved into the checkout by accident. Save As used to default to
+# the process working directory, so testing the app from this directory wrote
+# real notes straight into the repo -- and one commit later they were pushed.
+# The dialogs now default to the document's folder or Documents; this is the
+# second line of defence. Root level only, so docs/ and notes/ are unaffected.
+/*.txt
+/*.md
+!/README.md
+!/DECISIONS.md
+!/PROJECT_MEMORY.md
+!/ROADMAP.md
+!/specs.md
