@@ -18,6 +18,7 @@ use bp_buffer::{Buffer, Position};
 pub mod keys;
 pub mod lines;
 pub mod view;
+pub mod wrap;
 
 pub use keys::{Command, Key, Modifiers};
 
@@ -112,6 +113,12 @@ pub struct Editor {
     /// never recover the one the user started from.
     goal_column: Option<usize>,
     indent: Indent,
+    /// How the text wraps, which changes what Up and Down mean.
+    ///
+    /// Held by the editor rather than the view, because vertical motion is
+    /// the editor's -- and once a line can occupy several rows, "the line
+    /// above" is no longer the same thing as "the row above".
+    wrap: crate::wrap::Wrap,
 }
 
 /// What the Tab key puts in the document.
@@ -178,6 +185,36 @@ impl Editor {
             coalesce: Coalesce::Closed,
             goal_column: None,
             indent: Indent::default(),
+            wrap: crate::wrap::Wrap::OFF,
+        }
+    }
+
+    /// How the text should wrap from now on.
+    ///
+    /// Clears the goal column, because it means different things either side
+    /// of the change: unwrapped it is a character column of a document line,
+    /// wrapped it is a visual column of a row. Carrying one over as the other
+    /// would send the next Down key somewhere neither describes.
+    pub fn set_wrap(&mut self, wrap: crate::wrap::Wrap) {
+        if self.wrap != wrap {
+            self.goal_column = None;
+        }
+        self.wrap = wrap;
+    }
+
+    pub const fn wrap(&self) -> crate::wrap::Wrap {
+        self.wrap
+    }
+
+    /// How this editor's text is laid out on screen.
+    ///
+    /// The tab width comes from the indent setting rather than being a second
+    /// number: how wide a tab is drawn and how far one indents are the same
+    /// question, and two answers would disagree the first time either moved.
+    pub const fn layout(&self) -> view::Layout {
+        view::Layout {
+            wrap: self.wrap,
+            tab_width: self.indent.width,
         }
     }
 
@@ -446,6 +483,9 @@ impl Editor {
 
     /// Move `delta` lines, keeping the column the user is aiming for.
     fn vertical(&mut self, delta: isize) -> usize {
+        if self.wrap.is_on() {
+            return self.vertical_by_row(delta);
+        }
         let position = self.buffer.position_of(self.cursor);
         let line = position.line - 1;
         // Remember the column on the first vertical move of a run, so passing
@@ -456,6 +496,25 @@ impl Editor {
         let target_line = line.saturating_add_signed(delta).min(last);
 
         self.buffer.line_start(target_line) + goal.min(self.buffer.line_len_chars(target_line))
+    }
+
+    /// Vertical motion when a document line can occupy several rows.
+    ///
+    /// Down means the next row on screen, not the next line in the document.
+    /// Moving by lines under wrapping skips over everything the reader can
+    /// see between the caret and where it lands, which is the single most
+    /// obviously wrong thing a wrapped editor can do.
+    ///
+    /// The goal column is a *visual* column within the row here, rather than
+    /// the character column the unwrapped path uses -- which is why changing
+    /// the wrap clears it.
+    fn vertical_by_row(&mut self, delta: isize) -> usize {
+        let layout = self.layout();
+        let (anchor, column) = view::row_at_offset(&self.buffer, self.cursor, layout);
+        let goal = *self.goal_column.get_or_insert(column);
+
+        let target = view::step_row(&self.buffer, anchor, delta, layout);
+        view::offset_in_row(&self.buffer, target, goal, layout)
     }
 
     /// The start of the word before `from`, as Ctrl+Left means it.
@@ -2048,6 +2107,94 @@ mod tests {
         });
         e.apply(&Command::Indent);
         assert_eq!(e.text(), " ");
+    }
+
+    // --- vertical motion under word wrap ---------------------------------
+
+    #[test]
+    fn down_moves_to_the_next_row_not_the_next_line_when_wrapped() {
+        // The single most obviously wrong thing a wrapped editor can do is
+        // skip over everything the reader can see between the caret and where
+        // it lands.
+        let mut e = Editor::new("hello world again\nsecond");
+        e.set_wrap(crate::wrap::Wrap::at(8));
+        e.set_cursor(0);
+
+        e.move_caret(Motion::Down, false);
+        assert_eq!(
+            e.cursor(),
+            6,
+            "the start of the second visual row, still inside line 1"
+        );
+
+        e.move_caret(Motion::Down, false);
+        assert_eq!(e.cursor(), 12, "the third row, still line 1");
+
+        e.move_caret(Motion::Down, false);
+        assert_eq!(e.cursor(), 18, "only now the next document line");
+    }
+
+    #[test]
+    fn without_wrapping_down_still_moves_by_document_line() {
+        // The default path must be untouched by any of this.
+        let mut e = Editor::new("hello world again\nsecond");
+        e.set_cursor(0);
+        e.move_caret(Motion::Down, false);
+        assert_eq!(e.cursor(), 18);
+    }
+
+    #[test]
+    fn down_then_up_returns_to_the_row_it_started_on() {
+        let mut e = Editor::new("aaaa bbbb cccc dddd");
+        e.set_wrap(crate::wrap::Wrap::at(5));
+        e.set_cursor(2);
+
+        e.move_caret(Motion::Down, false);
+        e.move_caret(Motion::Up, false);
+        assert_eq!(e.cursor(), 2, "one row down and back is where it started");
+    }
+
+    #[test]
+    fn the_goal_column_survives_a_short_row_when_wrapped() {
+        // The wrapped version of the defect the goal column exists for:
+        // passing through a short row must not truncate the column for good.
+        let mut e = Editor::new("aaaaaaaa\nx\nbbbbbbbb");
+        e.set_wrap(crate::wrap::Wrap::at(20));
+        e.set_cursor(5); // column 5 of the first line
+
+        e.move_caret(Motion::Down, false); // onto "x", which has no column 5
+        assert_eq!(e.cursor(), 10, "clamped to the end of the short row");
+        e.move_caret(Motion::Down, false);
+        assert_eq!(e.cursor(), 16, "and column 5 is recovered below it");
+    }
+
+    #[test]
+    fn changing_the_wrap_does_not_carry_a_goal_column_across() {
+        // The goal is a character column unwrapped and a visual column
+        // wrapped. Carrying one over as the other sends the next Down key
+        // somewhere neither describes.
+        let mut e = Editor::new("aaaaaaaaaa\nbbbbbbbbbb");
+        e.set_cursor(7);
+        e.move_caret(Motion::Down, false);
+
+        e.set_wrap(crate::wrap::Wrap::at(4));
+        assert!(e.goal_column.is_none(), "the goal must be forgotten");
+    }
+
+    #[test]
+    fn vertical_motion_is_clamped_at_both_ends_of_a_wrapped_document() {
+        let mut e = Editor::new("aaaa bbbb");
+        e.set_wrap(crate::wrap::Wrap::at(5));
+
+        e.set_cursor(0);
+        e.move_caret(Motion::Up, false);
+        assert_eq!(e.cursor(), 0, "up from the first row stays put");
+
+        e.move_caret(Motion::PageDown(500), false);
+        assert!(
+            e.cursor() <= e.buffer().len_chars(),
+            "down past the end clamps inside the document"
+        );
     }
 
     #[test]

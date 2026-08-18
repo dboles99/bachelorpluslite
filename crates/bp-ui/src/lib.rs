@@ -631,15 +631,23 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
             let Some(ui) = weak.upgrade() else { return };
             let mut s = cell.borrow_mut();
 
-            // Bounded at the last line: the view may not scroll past the
-            // document into empty space.
-            let last = s
-                .active_editor()
-                .map_or(0, |editor| editor.buffer().len_lines().saturating_sub(1));
-            s.first_line = s
-                .first_line
-                .saturating_add_signed(isize::try_from(lines).unwrap_or(0))
-                .min(last);
+            // By visual rows, not document lines. With wrapping on the two
+            // differ, and a wheel that moved whole lines would skip past
+            // everything the reader can see inside a long one.
+            //
+            // `step_row` is bounded at both ends of the document, so the view
+            // cannot scroll into empty space.
+            s.sync_wrap();
+            let anchor = s.anchor;
+            let layout = s.layout();
+            if let Some(editor) = s.active_editor() {
+                s.anchor = bp_editor::view::step_row(
+                    editor.buffer(),
+                    anchor,
+                    isize::try_from(lines).unwrap_or(0),
+                    layout,
+                );
+            }
 
             // Drawn where it now is rather than through `refresh`: scrolling
             // away from the caret is exactly what the user asked for, and
@@ -651,9 +659,17 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
     {
         let cell = Rc::clone(&state);
         let weak = ui.as_weak();
-        ui.on_editor_resized(move |rows| {
+        ui.on_editor_resized(move |rows, columns| {
             let Some(ui) = weak.upgrade() else { return };
-            cell.borrow_mut().visible_rows = usize::try_from(rows).unwrap_or(1).max(1);
+            {
+                let mut s = cell.borrow_mut();
+                s.visible_rows = usize::try_from(rows).unwrap_or(1).max(1);
+                // The column count comes from Slint because Slint owns the
+                // font. A width derived from anything but the advance it
+                // actually draws with would wrap in the wrong place, and
+                // visibly so on every line.
+                s.wrap_columns = usize::try_from(columns).unwrap_or(80).max(1);
+            }
             refresh(&ui, &mut cell.borrow_mut(), state::PushText::No);
         });
     }

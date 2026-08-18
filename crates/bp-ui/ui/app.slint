@@ -131,7 +131,7 @@ export component AppWindow inherits Window {
     callback editor-selected-line(int, int);
     callback editor-dragged(int, int);
     callback editor-scrolled(int);
-    callback editor-resized(int);
+    callback editor-resized(int, int);
 
     // --- find and replace ---------------------------------------------
     in-out property <bool> find-open;
@@ -539,8 +539,8 @@ export component AppWindow inherits Window {
                     scrolled(lines) => {
                         root.editor-scrolled(lines);
                     }
-                    resized(rows) => {
-                        root.editor-resized(rows);
+                    resized(rows, columns) => {
+                        root.editor-resized(rows, columns);
                     }
                 }
 

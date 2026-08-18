@@ -73,10 +73,18 @@ pub struct AppState {
     editors: HashMap<DocumentId, bp_editor::Editor>,
     /// Draw with the custom surface rather than Slint's `TextInput`.
     pub(crate) editor_view: bool,
-    /// First document line the surface is showing.
-    pub(crate) first_line: usize,
-    /// How many lines fit in it. Slint measures and tells us.
+    /// The visual row the surface is scrolled to.
+    ///
+    /// A line *and* a row within it, not a line alone: once a line can wrap,
+    /// one taller than the window has to be scrollable through, and a
+    /// line-only anchor could only jump over it.
+    pub(crate) anchor: bp_editor::view::Anchor,
+    /// How many rows fit in it. Slint measures and tells us.
     pub(crate) visible_rows: usize,
+    /// How many characters fit across it, for wrapping. Slint measures this
+    /// too -- it owns the font, and a column count derived from anything but
+    /// the drawn advance would wrap in the wrong place.
+    pub(crate) wrap_columns: usize,
     pub(crate) theme: ThemeId,
     /// Track the desktop's light/dark preference rather than staying put.
     ///
@@ -154,10 +162,13 @@ impl AppState {
             workspace,
             editors,
             editor_view: false,
-            first_line: 0,
+            anchor: bp_editor::view::Anchor::default(),
             // Replaced by Slint's own measurement as soon as the surface has
             // a height; only Page Up before the first frame would see this.
             visible_rows: 30,
+            // Replaced by Slint's measurement on the first layout pass, like
+            // `visible_rows`. Only wrapping before the first frame sees this.
+            wrap_columns: 80,
             theme: ThemeId::default(),
             follow_system_theme: false,
             system_dark: None,
@@ -977,10 +988,49 @@ impl AppState {
     /// Scroll so the caret is on screen, moving as little as possible.
     pub(crate) fn reveal_caret(&mut self) {
         let rows = self.visible_rows.max(1);
-        let caret_line = self
-            .active_editor()
-            .map_or(0, |editor| editor.position().line - 1);
-        self.first_line = bp_editor::view::reveal(self.first_line, rows, caret_line);
+        let anchor = self.anchor;
+        let Some(editor) = self.active_editor() else {
+            return;
+        };
+        self.anchor = bp_editor::view::reveal_row(
+            editor.buffer(),
+            anchor,
+            rows,
+            editor.cursor(),
+            editor.layout(),
+        );
+    }
+
+    /// The layout the surface is drawing with.
+    ///
+    /// Taken from the active editor rather than assembled here, so the
+    /// numbers that decide where the caret goes and the numbers that decide
+    /// what is drawn are the same ones.
+    pub(crate) fn layout(&self) -> bp_editor::view::Layout {
+        self.active_editor().map_or_else(
+            || bp_editor::view::Layout {
+                wrap: bp_editor::wrap::Wrap::OFF,
+                tab_width: self.indent.width,
+            },
+            bp_editor::Editor::layout,
+        )
+    }
+
+    /// Tell the active editor how the surface is currently wrapping.
+    ///
+    /// Called before anything that depends on the layout, because the wrap
+    /// width follows the window and the editor cannot see the window.
+    pub(crate) fn sync_wrap(&mut self) {
+        let wrap = if self.wrap_text && self.editor_view {
+            bp_editor::wrap::Wrap::at(self.wrap_columns.max(1))
+        } else {
+            bp_editor::wrap::Wrap::OFF
+        };
+        let indent = self.indent;
+        if let Some(editor) = self.active_editor_mut() {
+            editor.set_indent(indent);
+            editor.set_wrap(wrap);
+        }
     }
 
     /// Note that the active document was edited in place, through the caret.

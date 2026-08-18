@@ -94,10 +94,18 @@ starting.
   that. Whether the caret lands under the pointer is not a thing a test can
   say. Duplicate Line and Move Line Up/Down are enabled only there, so they
   inherit the answer. See [ADR-0018](docs/decisions/ADR-0018.md).
-- **Word wrap and input-method composition do not work under
-  `--editor-view`**, which is why the default is still Slint's `TextInput`.
-  Both are parity conditions for switching; soft wrap is the deep one, because
-  it makes a visual line differ from a document line.
+- **Input-method composition does not work under `--editor-view`, and cannot
+  on this Slint.** `FocusScope` rejects `UpdateComposition` and
+  `CommitComposition` in both its handlers and exposes no callback for either;
+  `TextInput` is the only item in the toolkit that consumes them. Without it
+  CJK entry does not work at all, so the default stays `TextInput`. **This was
+  the second of two parity conditions, and it is now a blocker rather than a
+  task** -- see `project/WORK_QUEUE.md`.
+- **Word wrap now works under `--editor-view`.** A document line can occupy
+  several visual rows: `bp_editor::wrap` decides where they break, the view
+  maps rows to characters, Up and Down move by row rather than by line, and
+  scrolling is anchored to a line *and* a row within it so a line taller than
+  the window can be scrolled through.
 - **Drag and drop to open does not work, and cannot yet.** specs §4 wants it.
   On Slint 1.17.1 the winit backend has no file-drop plumbing and
   `DataTransfer` carries only plain text or an image, so there is no channel a

@@ -45,8 +45,13 @@ export component EditorSurface inherits Rectangle {
     callback dragged(int, int);
     /// Lines to scroll; positive is toward the end of the document.
     callback scrolled(int);
-    /// How many rows now fit.
-    callback resized(int);
+    /// How many rows now fit, and how many characters fit across.
+    ///
+    /// Both measured here because this component owns the font: the column
+    /// count is the drawable width divided by the advance it actually draws
+    /// with, and any other source would wrap in a different place than it
+    /// renders.
+    callback resized(int, int);
 
     // The character advance is measured, not assumed. A hard-coded ratio
     // drifts the caret one fraction of a pixel further from its character
@@ -74,8 +79,14 @@ export component EditorSurface inherits Rectangle {
     property <length> text-left: root.pad + root.gutter-width;
 
     property <int> fitting-rows: max(1, floor((self.height - 2 * root.pad) / root.line-height));
+    property <int> fitting-columns: max(1, floor((self.width - root.text-left - root.pad) / root.advance));
     changed fitting-rows => {
-        root.resized(self.fitting-rows);
+        root.resized(self.fitting-rows, self.fitting-columns);
+    }
+    // Width changes without height changing whenever the window is dragged
+    // by a side edge, and that is exactly when the wrap has to be recomputed.
+    changed fitting-columns => {
+        root.resized(self.fitting-rows, self.fitting-columns);
     }
 
     function row-at(y: length) -> int {

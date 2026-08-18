@@ -8,17 +8,6 @@ use std::rc::Rc;
 use crate::state::AppState;
 use crate::{AppWindow, EditorRow, SelectionBox};
 
-/// Tab stops the surface draws with, as the shell currently has them set.
-///
-/// Read from `AppState` rather than a constant, because the same number has
-/// to serve three purposes that must never disagree: how wide a tab is drawn,
-/// how a click resolves to a character, and how far a soft tab reaches. A
-/// drawing width that differed from the click arithmetic would put the caret
-/// somewhere other than where the pointer was, on tab-indented lines only.
-fn tab_width(state: &AppState) -> usize {
-    state.indent.width.max(1)
-}
-
 pub(crate) fn clamp_i32(value: usize) -> i32 {
     i32::try_from(value).unwrap_or(i32::MAX)
 }
@@ -75,22 +64,23 @@ pub(crate) enum ClickSelection {
 
 /// Select the word or the line under a clicked cell.
 ///
-/// Shares `offset_at_cell` with [`place_caret`] rather than resolving the cell
-/// its own way: a second resolution would be a second set of tab-stop and
-/// clamping rules to keep in step, and the first click of a double click has
-/// already placed the caret through the other one.
+/// Shares `offset_at_row_cell` with [`place_caret`] rather than resolving the
+/// cell its own way: a second resolution would be a second set of tab-stop,
+/// wrapping and clamping rules to keep in step, and the first click of a
+/// double click has already placed the caret through the other one.
 pub(crate) fn select_at_cell(state: &mut AppState, row: i32, column: i32, what: ClickSelection) {
-    let first = state.first_line;
-    let width = tab_width(state);
+    state.sync_wrap();
+    let anchor = state.anchor;
+    let layout = state.layout();
     let Some(editor) = state.active_editor_mut() else {
         return;
     };
-    let offset = bp_editor::view::offset_at_cell(
+    let offset = bp_editor::view::offset_at_row_cell(
         editor.buffer(),
-        first,
+        anchor,
         usize::try_from(row).unwrap_or(0),
         usize::try_from(column).unwrap_or(0),
-        width,
+        layout,
     );
     match what {
         ClickSelection::Word => editor.select_word_at(offset),
@@ -100,17 +90,18 @@ pub(crate) fn select_at_cell(state: &mut AppState, row: i32, column: i32, what: 
 
 /// Move the caret to a clicked cell, extending the selection if asked.
 pub(crate) fn place_caret(state: &mut AppState, row: i32, column: i32, extend: bool) {
-    let first = state.first_line;
-    let width = tab_width(state);
+    state.sync_wrap();
+    let anchor = state.anchor;
+    let layout = state.layout();
     let Some(editor) = state.active_editor_mut() else {
         return;
     };
-    let offset = bp_editor::view::offset_at_cell(
+    let offset = bp_editor::view::offset_at_row_cell(
         editor.buffer(),
-        first,
+        anchor,
         usize::try_from(row).unwrap_or(0),
         usize::try_from(column).unwrap_or(0),
-        width,
+        layout,
     );
 
     if extend {
@@ -134,6 +125,9 @@ pub(crate) fn place_caret(state: &mut AppState, row: i32, column: i32, extend: b
 /// Only the visible rows cross the boundary, which is the whole point: this
 /// costs the same on a 100,000-line document as on a ten-line one.
 pub(crate) fn push_editor_view(ui: &AppWindow, state: &mut AppState) {
+    // Before revealing, because where the caret is on screen depends on how
+    // the text wraps, and the wrap width follows the window.
+    state.sync_wrap();
     state.reveal_caret();
     draw_editor_view(ui, state);
 }
@@ -145,36 +139,32 @@ pub(crate) fn push_editor_view(ui: &AppWindow, state: &mut AppState) {
 /// snap straight back.
 pub(crate) fn draw_editor_view(ui: &AppWindow, state: &AppState) {
     let rows = state.visible_rows.max(1);
-    let first = state.first_line;
-    let width = tab_width(state);
+    let anchor = state.anchor;
+    let layout = state.layout();
     let Some(editor) = state.active_editor() else {
         return;
     };
     let buffer = editor.buffer();
 
-    let visible: Vec<EditorRow> = bp_editor::view::visible_lines(buffer, first, rows)
+    let visible: Vec<EditorRow> = bp_editor::view::visible_rows(buffer, anchor, rows, layout)
         .into_iter()
-        .map(|(line, text)| EditorRow {
-            number: format!("{}", line + 1).into(),
-            text: text.as_str().into(),
+        .map(|row| EditorRow {
+            // A continuation carries no number. Numbering it again would say
+            // the document has more lines than it has, and the gutter is the
+            // one place a reader trusts to count.
+            number: if row.is_continuation() {
+                slint::SharedString::new()
+            } else {
+                format!("{}", row.line + 1).into()
+            },
+            text: row.text.as_str().into(),
         })
         .collect();
     ui.set_editor_rows(Rc::new(slint::VecModel::from(visible)).into());
 
     let boxes: Vec<SelectionBox> = editor
         .selection()
-        .map(|range| {
-            bp_editor::view::selection_spans(
-                buffer,
-                &range,
-                bp_editor::view::Metrics {
-                    tab_width: width,
-                    ..bp_editor::view::Metrics::default()
-                },
-                first,
-                rows,
-            )
-        })
+        .map(|range| bp_editor::view::selection_row_spans(buffer, &range, anchor, rows, layout))
         .unwrap_or_default()
         .into_iter()
         .map(|span| SelectionBox {
@@ -185,7 +175,7 @@ pub(crate) fn draw_editor_view(ui: &AppWindow, state: &AppState) {
         .collect();
     ui.set_editor_selection(Rc::new(slint::VecModel::from(boxes)).into());
 
-    let (row, column) = bp_editor::view::caret_cell(buffer, first, editor.cursor(), width);
+    let (row, column) = bp_editor::view::caret_row_cell(buffer, anchor, editor.cursor(), layout);
     // A row outside the viewport is reported as -1 rather than drawn off the
     // edge, which is what the surface checks before showing the caret.
     let visible_row = usize::try_from(row)
@@ -202,15 +192,16 @@ pub(crate) fn draw_editor_view(ui: &AppWindow, state: &AppState) {
 /// OS clipboard is the shell's business, and a crate tested without a window
 /// has no way to reach one.
 pub(crate) fn apply_editor_command(state: &mut AppState, command: &bp_editor::Command) -> bool {
-    // Told here rather than when the editor was created, because the setting
-    // can change while documents are open and every one of them has to follow
-    // it. One assignment of a `Copy` struct on the typing path is cheaper
-    // than a bookkeeping pass over the map each time the setting moves, and
-    // it cannot fall out of step.
-    let indent = state.indent;
-    if let Some(editor) = state.active_editor_mut() {
-        editor.set_indent(indent);
-    }
+    // Told here rather than when the editor was created, because both
+    // settings can change while documents are open and every one of them has
+    // to follow. Two `Copy` assignments on the typing path are cheaper than a
+    // bookkeeping pass over the map each time either moves, and they cannot
+    // fall out of step.
+    //
+    // The wrap matters to more than drawing: Up and Down move by visual row
+    // when it is on, and an editor that had not been told would move by
+    // document line while the screen showed something else.
+    state.sync_wrap();
 
     match command {
         bp_editor::Command::Ignore => false,
@@ -362,7 +353,7 @@ mod tests {
         // A tab is `tab_width` columns wide on screen but one character in
         // the document, so this cell is only reachable correctly through the
         // shared resolution.
-        let column = i32::try_from(tab_width(&state)).unwrap() + 2;
+        let column = i32::try_from(state.indent.width).unwrap() + 2;
         place_caret(&mut state, 0, column, false);
         let caret = state.active_editor().unwrap().cursor();
 
@@ -409,6 +400,92 @@ mod tests {
         assert_eq!(state.active_editor().unwrap().selection(), Some(1..9));
     }
 
+    /// A state with the custom view on and wrapping at `columns`.
+    fn wrapped_state(text: &str, columns: usize) -> AppState {
+        let mut state = AppState::new();
+        state.editor_view = true;
+        state.wrap_text = true;
+        state.wrap_columns = columns;
+        state.edit(text.to_owned());
+        state.sync_wrap();
+        state
+    }
+
+    #[test]
+    fn the_shell_only_wraps_when_word_wrap_is_on_and_the_surface_is_drawing() {
+        // Three conditions, and all of them are the shell's to check --
+        // `bp-editor` is told the answer rather than working it out.
+        let mut state = wrapped_state("hello world again", 8);
+        assert!(state.layout().wrap.is_on());
+
+        state.wrap_text = false;
+        state.sync_wrap();
+        assert!(!state.layout().wrap.is_on(), "Word Wrap off means off");
+
+        state.wrap_text = true;
+        state.editor_view = false;
+        state.sync_wrap();
+        assert!(
+            !state.layout().wrap.is_on(),
+            "under TextInput, Slint does the wrapping and we must not also"
+        );
+    }
+
+    #[test]
+    fn a_click_on_a_wrapped_row_lands_on_the_text_that_is_drawn_there() {
+        // The whole-stack version of the mapping test in `bp-editor`: what is
+        // drawn on row 1 and what a click on row 1 resolves to have to be the
+        // same characters, or the caret lands somewhere the user did not
+        // point.
+        let mut state = wrapped_state("hello world again", 8);
+        place_caret(&mut state, 1, 0, false);
+
+        assert_eq!(
+            state.active_editor().unwrap().cursor(),
+            6,
+            "row 1 begins at 'world'"
+        );
+    }
+
+    #[test]
+    fn moving_down_a_wrapped_line_stays_inside_it() {
+        // Under wrapping, Down means the next row on screen. Moving by
+        // document line would skip everything the reader can see.
+        let mut state = wrapped_state("hello world again\nsecond", 8);
+        state.active_editor_mut().unwrap().set_cursor(0);
+
+        apply_editor_command(
+            &mut state,
+            &bp_editor::Command::Move {
+                motion: bp_editor::Motion::Down,
+                select: false,
+            },
+        );
+        assert_eq!(state.active_editor().unwrap().cursor(), 6);
+    }
+
+    #[test]
+    fn the_wrap_width_follows_the_window_rather_than_being_fixed() {
+        // Resizing is the one thing that changes where a line breaks without
+        // the document changing at all.
+        let mut state = wrapped_state("hello world again", 8);
+        assert_eq!(state.layout().wrap.columns, 8);
+
+        state.wrap_columns = 40;
+        state.sync_wrap();
+        assert_eq!(state.layout().wrap.columns, 40);
+    }
+
+    #[test]
+    fn a_zero_width_window_does_not_wrap_to_nothing() {
+        // Slint reports a column count from a measured width, and that can be
+        // zero before the first layout pass. A wrap width of zero would mean
+        // wrapping off, which is a safe answer, but a width of zero columns
+        // reaching the layout would not be.
+        let state = wrapped_state("hello world", 0);
+        assert!(state.layout().wrap.columns >= 1);
+    }
+
     #[test]
     fn scrolling_far_past_the_end_still_shows_the_document() {
         let mut state = AppState::new();
@@ -416,10 +493,10 @@ mod tests {
         state.edit("a\nb\nc".to_owned());
         state.visible_rows = 2;
 
-        state.first_line = 99;
+        state.anchor = bp_editor::view::Anchor::at(99, 0);
         state.reveal_caret();
         assert!(
-            state.first_line < state.active_editor().unwrap().buffer().len_lines(),
+            state.anchor.line < state.active_editor().unwrap().buffer().len_lines(),
             "revealing the caret must bring the view back to the document"
         );
     }
