@@ -90,6 +90,14 @@ pub struct AppState {
     gutter_lines: usize,
     pub(crate) show_gutter: bool,
     pub(crate) wrap_text: bool,
+    /// Editor font size in points, and the only place it is decided.
+    ///
+    /// Held here rather than read back off the widget because both editor
+    /// views draw at it and neither is authoritative -- `EditorSurface`
+    /// measures its character advance from whatever it is given, so a size
+    /// that lived in the view would put the caret arithmetic somewhere Rust
+    /// cannot see. Config supplies the starting value; zoom moves it.
+    pub(crate) font_size: u8,
     /// What each document's file looked like when we last read or wrote it,
     /// so an edit made by another program can be noticed.
     stamps: HashMap<DocumentId, FileStamp>,
@@ -127,6 +135,7 @@ impl AppState {
             gutter_lines: usize::MAX,
             show_gutter: true,
             wrap_text: false,
+            font_size: bp_config::DEFAULT_FONT_SIZE,
             stamps: HashMap::new(),
             recent: bp_config::load_recent(),
             disk_warning: None,
@@ -920,6 +929,31 @@ pub(crate) fn find_id(workspace: &Workspace, raw: i32) -> Option<DocumentId> {
         .find(|id| i32::try_from(id.get()).unwrap_or(i32::MAX) == raw)
 }
 
+/// Build the query the find bar currently describes.
+///
+/// One function rather than three `Query` literals, because every place that
+/// searches has to agree about the options -- a find that honours the regex
+/// toggle and a Replace All that quietly does not is worse than neither
+/// honouring it.
+///
+/// What `bp-search` cannot catch is a toggle landing in the wrong field:
+/// `case_sensitive` and `whole_word` are both `bool`, so swapping them
+/// compiles, passes every test in that crate, and gives the user a whole-word
+/// switch that changes the case rules. That is what the test below is for.
+pub(crate) fn find_query(
+    pattern: &str,
+    case_sensitive: bool,
+    whole_word: bool,
+    regex: bool,
+) -> bp_search::Query {
+    bp_search::Query {
+        pattern: pattern.to_owned(),
+        case_sensitive,
+        whole_word,
+        regex,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1349,5 +1383,50 @@ mod tests {
         let before = state.active_text();
         state.run_data_action(action::NOTE_TITLE);
         assert_eq!(state.active_text(), before);
+    }
+
+    #[test]
+    fn each_find_option_reaches_its_own_field_and_no_other() {
+        // Set one at a time, so a pair swapped in the constructor fails here
+        // rather than compiling into a switch that changes the wrong thing.
+        let case = find_query("x", true, false, false);
+        assert!(case.case_sensitive);
+        assert!(!case.whole_word, "case sensitivity must not imply words");
+        assert!(!case.regex, "case sensitivity must not imply a pattern");
+
+        let word = find_query("x", false, true, false);
+        assert!(word.whole_word);
+        assert!(!word.case_sensitive);
+        assert!(!word.regex);
+
+        let re = find_query("x", false, false, true);
+        assert!(re.regex);
+        assert!(!re.case_sensitive);
+        assert!(!re.whole_word);
+    }
+
+    #[test]
+    fn all_options_off_is_the_literal_query_the_find_box_used_to_build() {
+        // The default the bar opens with. Everything searched before the
+        // toggles existed went through `Query::literal`, so this is the
+        // guarantee that adding them changed nothing for anyone who does not
+        // touch them.
+        assert_eq!(
+            find_query("a.b", false, false, false),
+            bp_search::Query::literal("a.b")
+        );
+    }
+
+    #[test]
+    fn the_regex_toggle_is_what_stops_a_pattern_being_escaped() {
+        // The behaviour is `bp-search`'s and tested there; what this pins is
+        // that the toggle reaches it at all. `a.b` matching `axb` is only
+        // possible when `regex` arrived as true, so this fails if the flag is
+        // dropped on the way through.
+        let literal = find_query("a.b", false, false, false);
+        let pattern = find_query("a.b", false, false, true);
+
+        assert!(bp_search::find_all("axb", &literal).unwrap().is_empty());
+        assert_eq!(bp_search::find_all("axb", &pattern).unwrap().len(), 1);
     }
 }

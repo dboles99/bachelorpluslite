@@ -62,6 +62,37 @@ pub(crate) fn translate_key(text: &str) -> Option<bp_editor::Key> {
     })
 }
 
+/// What a double- or triple-click selects.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ClickSelection {
+    Word,
+    Line,
+}
+
+/// Select the word or the line under a clicked cell.
+///
+/// Shares `offset_at_cell` with [`place_caret`] rather than resolving the cell
+/// its own way: a second resolution would be a second set of tab-stop and
+/// clamping rules to keep in step, and the first click of a double click has
+/// already placed the caret through the other one.
+pub(crate) fn select_at_cell(state: &mut AppState, row: i32, column: i32, what: ClickSelection) {
+    let first = state.first_line;
+    let Some(editor) = state.active_editor_mut() else {
+        return;
+    };
+    let offset = bp_editor::view::offset_at_cell(
+        editor.buffer(),
+        first,
+        usize::try_from(row).unwrap_or(0),
+        usize::try_from(column).unwrap_or(0),
+        TAB_WIDTH,
+    );
+    match what {
+        ClickSelection::Word => editor.select_word_at(offset),
+        ClickSelection::Line => editor.select_line_at(offset),
+    }
+}
+
 /// Move the caret to a clicked cell, extending the selection if asked.
 pub(crate) fn place_caret(state: &mut AppState, row: i32, column: i32, extend: bool) {
     let first = state.first_line;
@@ -284,6 +315,66 @@ mod tests {
         state.editor_view = true;
         state.active_editor_mut().unwrap().set_cursor(5);
         assert_eq!(state.cursor_label(), "Ln 2, Col 2");
+    }
+
+    #[test]
+    fn a_double_click_selects_the_word_under_it_and_a_triple_click_the_line() {
+        let mut state = AppState::new();
+        state.editor_view = true;
+        state.edit("hello world\nsecond line".to_owned());
+
+        // Row 0, column 8: inside "world", which is 6..11.
+        select_at_cell(&mut state, 0, 8, ClickSelection::Word);
+        assert_eq!(state.active_editor().unwrap().selection(), Some(6..11));
+
+        // The same cell, one more click: the whole line, newline included.
+        select_at_cell(&mut state, 0, 8, ClickSelection::Line);
+        assert_eq!(state.active_editor().unwrap().selection(), Some(0..12));
+    }
+
+    #[test]
+    fn a_click_selection_resolves_the_cell_the_same_way_a_caret_click_does() {
+        // Both go through `offset_at_cell`, and this is what says so. A second
+        // resolution that disagreed would select a word beside the one the
+        // first click had just put the caret in -- and only on tab-indented
+        // lines, where the two rule sets differ.
+        let mut state = AppState::new();
+        state.editor_view = true;
+        state.edit("\tindented word\nsecond".to_owned());
+
+        // A tab is TAB_WIDTH columns wide on screen but one character in the
+        // document, so this cell is only reachable correctly through the
+        // shared resolution.
+        let column = i32::try_from(TAB_WIDTH).unwrap() + 2;
+        place_caret(&mut state, 0, column, false);
+        let caret = state.active_editor().unwrap().cursor();
+
+        select_at_cell(&mut state, 0, column, ClickSelection::Word);
+        let selection = state.active_editor().unwrap().selection().unwrap();
+        assert!(
+            selection.contains(&caret) || selection.end == caret,
+            "the word selected ({selection:?}) should be the one the caret \
+             landed in ({caret})"
+        );
+        assert_eq!(
+            &state.active_text()[selection.clone()],
+            "indented",
+            "got {:?}",
+            &state.active_text()[selection]
+        );
+    }
+
+    #[test]
+    fn a_click_selection_past_the_end_of_the_document_selects_rather_than_panicking() {
+        // Rows and columns arrive from a pointer, so they can name a cell no
+        // line reaches -- clicking in the blank area below a short document.
+        let mut state = AppState::new();
+        state.editor_view = true;
+        state.edit("one\ntwo".to_owned());
+
+        select_at_cell(&mut state, 40, 200, ClickSelection::Word);
+        select_at_cell(&mut state, 40, 200, ClickSelection::Line);
+        assert!(state.active_editor().unwrap().selection().is_some());
     }
 
     #[test]

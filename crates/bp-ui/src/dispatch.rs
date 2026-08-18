@@ -20,9 +20,14 @@ Ctrl+O          Open
 Ctrl+S          Save
 Ctrl+Shift+S    Save As
 Ctrl+W          Close tab
+Ctrl+F          Find and replace
 Ctrl+Z / Ctrl+Y Undo / Redo
 Ctrl+X/C/V      Cut / Copy / Paste
-Ctrl+A          Select all";
+Ctrl+A          Select all
+Ctrl+= / Ctrl+- Zoom in / out
+Ctrl+0          Reset zoom
+Ctrl+D          Duplicate line
+Alt+Up / Down   Move line up / down";
 
 /// Static information, shown in a native dialog rather than built as a
 /// bespoke window.
@@ -198,6 +203,20 @@ pub fn handle_menu_action(
         action::TOGGLE_WRAP => {
             let mut s = state.borrow_mut();
             s.wrap_text = !s.wrap_text;
+            push = PushText::No;
+        }
+
+        // The document does not change, so the text is not re-pushed: under
+        // `TextInput` that would discard the widget's caret and selection for
+        // a change of size, which is the one thing a zoom must not do.
+        action::ZOOM_IN | action::ZOOM_OUT => {
+            let mut s = state.borrow_mut();
+            let steps = if id == action::ZOOM_IN { 1 } else { -1 };
+            s.font_size = bp_config::zoom(s.font_size, steps);
+            push = PushText::No;
+        }
+        action::ZOOM_RESET => {
+            state.borrow_mut().font_size = bp_config::DEFAULT_FONT_SIZE;
             push = PushText::No;
         }
 

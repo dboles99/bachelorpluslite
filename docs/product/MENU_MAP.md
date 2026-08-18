@@ -25,6 +25,7 @@ yet — those are the cheapest items in `project/WORK_QUEUE.md`.
 | Row | State |
 | --- | --- |
 | Undo, Redo, Cut, Copy, Paste, Select All | **live** (both editor views) |
+| Double-click a word, triple-click a line | **live** — native under `TextInput`, `bp_editor::{select_word_at, select_line_at}` under `--editor-view` |
 | Clipboard History | **live** |
 | Paste transformations | **live** — offered per entry kind, and only where the result would differ |
 | Sort / Deduplicate / Reverse / Trim lines | **live** |
@@ -37,7 +38,7 @@ yet — those are the cheapest items in `project/WORK_QUEUE.md`.
 | --- | --- |
 | Light / Dark / Organic / Green | **live** |
 | Line Numbers, Word Wrap | **live** |
-| Zoom | **built** — `Config::font_size`, no row yet |
+| Zoom In / Zoom Out / Reset Zoom | **live** — Ctrl+= / Ctrl+- / Ctrl+0, bounded by `bp_config::{MIN,MAX}_FONT_SIZE`; the rows grey at the bound and the reset row names the size in force |
 | Follow System theme | planned — specs §16 |
 | Split / Preview, panels, inspectors | planned |
 
@@ -122,6 +123,15 @@ recovery journal, clipboard history, and `bp-storage`.
 | --- | --- |
 | Keyboard Shortcuts, About | **live** |
 | Help, diagnostics | planned |
+
+## Find bar
+
+Not a menu. The bar itself is **live**, and so are its three options.
+
+| Control | State |
+| --- | --- |
+| Find, Replace, Replace All, In Folder | **live** |
+| Aa / Word / .* toggles | **live** — `bp_search::Query::{case_sensitive, whole_word, regex}`; flipping one re-runs the search |
 
 ## Go to Line
 

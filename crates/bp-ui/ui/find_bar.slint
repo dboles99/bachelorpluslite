@@ -12,10 +12,54 @@
 import { MenuLabel } from "menu.slint";
 import { Palette } from "types.slint";
 
+// A search option: on or off, and it has to look it.
+//
+// `MenuLabel` is the shell's clickable-label shape and this is deliberately
+// not one, because `MenuLabel` has no state to show. An option whose setting
+// the user cannot see is worse than no option at all -- a case-sensitive find
+// that silently stays on explains "no matches" for a search that should have
+// found something, and there would be nothing on screen to say why.
+component FindToggle inherits Rectangle {
+    in property <string> label;
+    in property <bool> active;
+    callback toggled();
+
+    // 26px is `MenuLabel`'s height, which is what the rest of this bar is
+    // built from and what is known to sit correctly in its 26px content area.
+    height: 26px;
+    width: txt.preferred-width + 16px;
+    // Filled when on, outlined when off: the difference has to survive all
+    // four themes, so it is a background swap rather than a colour shift.
+    background: root.active ? Palette.accent : (ta.has-hover ? Palette.edge : transparent);
+    border-color: Palette.edge;
+    border-width: 1px;
+
+    txt := Text {
+        text: root.label;
+        color: Palette.ink;
+        font-size: 12px;
+        vertical-alignment: center;
+        horizontal-alignment: center;
+    }
+
+    ta := TouchArea {
+        clicked => {
+            root.toggled();
+        }
+    }
+}
+
 export component FindBar inherits Rectangle {
     in property <bool> open;
     in-out property <string> find-query;
     in-out property <string> replace-query;
+    /// The three options, owned by the window so Rust can read them on every
+    /// search. Flipping one re-runs the search through `find-changed`, because
+    /// a toggle that leaves stale matches on screen is a toggle that appears
+    /// not to work.
+    in-out property <bool> case-sensitive;
+    in-out property <bool> whole-word;
+    in-out property <bool> regex;
     /// "3 of 12", "no matches", or a bad-pattern message.
     in property <string> find-status;
 
@@ -75,6 +119,34 @@ export component FindBar inherits Rectangle {
                         root.find-next();
                     }
                 }
+            }
+        }
+
+        // Beside the box they modify, and before the arrows, so that reading
+        // left to right gives the query, then how it is interpreted, then how
+        // to move through what it found.
+        FindToggle {
+            label: "Aa";
+            active: root.case-sensitive;
+            toggled => {
+                root.case-sensitive = !root.case-sensitive;
+                root.find-changed();
+            }
+        }
+        FindToggle {
+            label: "Word";
+            active: root.whole-word;
+            toggled => {
+                root.whole-word = !root.whole-word;
+                root.find-changed();
+            }
+        }
+        FindToggle {
+            label: ".*";
+            active: root.regex;
+            toggled => {
+                root.regex = !root.regex;
+                root.find-changed();
             }
         }
 

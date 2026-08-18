@@ -56,18 +56,18 @@ cargo run --release -- --editor-view   # with the custom editor view (ADR-0018)
 ./scripts/Measure-Startup.ps1  # startup and idle memory vs specs.md §22
 ```
 
-## Current state (2026-08-17)
+## Current state (2026-08-19)
 
-**15 crates, 542 tests, green on Windows and Linux.** The app opens, edits and
+**15 crates, 555 tests, green on Windows and Linux.** The app opens, edits and
 saves atomically, and does rather more than that:
 
 | Area | What works |
 | --- | --- |
-| Editing | Tabs, four themes, honest save state, atomic save, undo/cut/copy/paste, sort / deduplicate / reverse / trim lines, duplicate and move lines |
+| Editing | Tabs, four themes, zoom, honest save state, atomic save, undo/cut/copy/paste, sort / deduplicate / reverse / trim lines, duplicate and move lines |
 | Storage | A rope buffer holds every document; whole-document operations are one undo step |
 | Safety | Unsaved-changes prompts, external-change detection, crash recovery journal |
 | Files | Open/Save/Save As/Save All/Reload, recent files, command-line file opening |
-| Search | Find and replace (literal or regex) with the changes shown before they are applied, recursive cross-file search |
+| Search | Find and replace with case-sensitive, whole-word and regex toggles, changes shown before they are applied, recursive cross-file search |
 | Data | JSON / JSONL / TOML validate, format, minify, convert; RFC 4180 CSV/TSV shape report, conversion to JSON and JSON Lines, column types |
 | Semantic | Title, keywords, summary and outline extracted from the document |
 | Clipboard | History with kind detection, paste from history, format-aware paste transformations |
@@ -96,9 +96,9 @@ starting.
   `--editor-view`**, which is why the default is still Slint's `TextInput`.
   Both are parity conditions for switching; soft wrap is the deep one, because
   it makes a visual line differ from a document line.
-- **Some rows are built but not reachable**: zoom, indentation settings, date
-  and time insertion, document statistics, go-to-line. Each is a tested
-  library function waiting for a menu row.
+- **Some rows are built but not reachable**: indentation settings, date and
+  time insertion, document statistics, go-to-line. Each is a tested library
+  function waiting for a menu row.
   [MENU_MAP.md](docs/product/MENU_MAP.md) marks which is which.
 - **Little of this has been used in anger.** The tests cover the pieces in
   isolation; the integrated behaviour has had one manual pass, several

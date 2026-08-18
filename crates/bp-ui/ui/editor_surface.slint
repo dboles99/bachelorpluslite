@@ -20,13 +20,28 @@ export component EditorSurface inherits Rectangle {
     in property <int> caret-column;
     in property <bool> show-gutter: true;
     in property <length> font-size: 14px;
-    in property <length> line-height: 18px;
+    /// Derived, not a constant, because zoom moves `font-size` underneath it.
+    ///
+    /// A fixed 18px looks right at 14pt and nowhere else: zoom in and the
+    /// glyphs overlap the row above, zoom out and the text strands itself in
+    /// whitespace. Worse than either, `row-at` divides by this to turn a
+    /// click into a line, so a line height that does not match what is drawn
+    /// puts the caret on the wrong row -- silently, and further out the
+    /// further down the click is.
+    ///
+    /// 1.286 is 18/14, so the default size still lays out exactly as it did.
+    in property <length> line-height: root.font-size * 1.286;
 
     /// text, control, shift, alt. Returns whether the editor claimed it --
     /// anything it does not claim must bubble up, or Ctrl+S stops saving.
     callback key(string, bool, bool, bool) -> bool;
     /// row, visual column, extend-selection.
     callback pressed(int, int, bool);
+    /// Second and third click at the same place: select the word, then the
+    /// line. Separate callbacks rather than a count on `pressed`, so Rust is
+    /// never asked to work out what a click meant -- it is told.
+    callback selected-word(int, int);
+    callback selected-line(int, int);
     callback dragged(int, int);
     /// Lines to scroll; positive is toward the end of the document.
     callback scrolled(int);
@@ -50,7 +65,12 @@ export component EditorSurface inherits Rectangle {
         : root.font-size * 0.6;
 
     property <length> pad: 10px;
-    property <length> gutter-width: root.show-gutter ? 46px : 0px;
+    // Scaled for the same reason as `line-height`: `text-left` is built from
+    // this, and `column-at` subtracts `text-left` to turn a click into a
+    // column. A gutter too narrow for its numbers clips them; one that no
+    // longer matches where the text starts moves the caret sideways.
+    // 3.3 x 14pt is the 46px this was fixed at.
+    property <length> gutter-width: root.show-gutter ? max(46px, root.font-size * 3.3) : 0px;
     property <length> text-left: root.pad + root.gutter-width;
 
     property <int> fitting-rows: max(1, floor((self.height - 2 * root.pad) / root.line-height));
@@ -66,6 +86,32 @@ export component EditorSurface inherits Rectangle {
     // click-to-place feel accurate rather than one character left.
     function column-at(x: length) -> int {
         return max(0, round((x - root.text-left) / root.advance));
+    }
+
+    // What a press means, given how many came before it.
+    function press(row: int, column: int, shift: bool) {
+        root.click-count = row == root.click-row ? root.click-count + 1 : 1;
+        root.click-row = row;
+        clicks.running = false;
+        clicks.running = true;
+
+        // Shift-click always extends, whatever the count. Building a
+        // selection by repeated shift-click is a real gesture, and reading
+        // the second of them as a word select would throw away the selection
+        // being built.
+        if (shift) {
+            root.click-count = 1;
+            root.pressed(row, column, true);
+        } else if (root.click-count == 2) {
+            root.selected-word(row, column);
+        } else if (root.click-count >= 3) {
+            root.selected-line(row, column);
+            // Cycle restarts: a fourth click places a caret again, rather
+            // than selecting a word off the back of the third.
+            root.click-count = 0;
+        } else {
+            root.pressed(row, column, false);
+        }
     }
 
     background: Palette.panel;
@@ -126,6 +172,30 @@ export component EditorSurface inherits Rectangle {
         background: Palette.ink;
     }
 
+    // Click counting, for double- and triple-click selection.
+    //
+    // `TouchArea` offers `double-clicked` but nothing for a third click, and
+    // mixing the two would mean two different notions of "how recent" -- so
+    // both are counted here instead.
+    //
+    // The row is part of the test. Three quick clicks down a file are three
+    // separate clicks, not a request to select a line, and without this the
+    // caret would jump somewhere the user never pointed at.
+    property <int> click-count: 0;
+    property <int> click-row: -1;
+
+    // 500ms is the interval Windows defaults to for a double click. It resets
+    // rather than expires the gesture, so a slow second click places a caret,
+    // which is what it looks like it should do.
+    clicks := Timer {
+        interval: 500ms;
+        running: false;
+        triggered => {
+            root.click-count = 0;
+            self.running = false;
+        }
+    }
+
     // Last, so it sits above the drawing and receives the pointer.
     touch := TouchArea {
         mouse-cursor: text;
@@ -133,7 +203,7 @@ export component EditorSurface inherits Rectangle {
         pointer-event(event) => {
             if (event.kind == PointerEventKind.down) {
                 keys.focus();
-                root.pressed(root.row-at(self.mouse-y), root.column-at(self.mouse-x), event.modifiers.shift);
+                root.press(root.row-at(self.mouse-y), root.column-at(self.mouse-x), event.modifiers.shift);
             }
         }
         moved => {

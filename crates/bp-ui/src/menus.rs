@@ -35,6 +35,16 @@ pub mod action {
     pub const TOGGLE_GUTTER: i32 = 30;
     pub const TOGGLE_WRAP: i32 = 31;
 
+    /// Zoom, in the View menu's block beside the other view toggles rather
+    /// than in one of its own. 35-39 remain free.
+    ///
+    /// Below 100, so these always reach Rust: the font size is `bp-config`'s
+    /// and applies to both editor views, unlike the caret operations Slint
+    /// conditionally keeps to itself.
+    pub const ZOOM_IN: i32 = 32;
+    pub const ZOOM_OUT: i32 = 33;
+    pub const ZOOM_RESET: i32 = 34;
+
     pub const LINE_ENDING_LF: i32 = 40;
     pub const LINE_ENDING_CRLF: i32 = 41;
     pub const ENCODING_UTF8: i32 = 42;
@@ -127,6 +137,19 @@ fn row(label: &str, shortcut: &str, action: i32) -> MenuItem {
         action,
         enabled: true,
         separator_after: false,
+    }
+}
+
+/// A row that is real but not always available.
+///
+/// Distinct from [`planned`], which means "this does not exist yet". This one
+/// exists and cannot act right now -- at a zoom bound, say -- and greys for
+/// that reason. Keeping the two apart matters because the greying is the only
+/// thing on screen that explains why a key stopped responding.
+fn row_enabled(label: &str, shortcut: &str, action: i32, enabled: bool) -> MenuItem {
+    MenuItem {
+        enabled,
+        ..row(label, shortcut, action)
     }
 }
 
@@ -380,7 +403,7 @@ pub fn edit(clips: &[bp_clipboard::Entry], editor_view: bool) -> Vec<MenuItem> {
     items
 }
 
-pub fn view(theme: ThemeId, gutter: bool, wrap: bool) -> Vec<MenuItem> {
+pub fn view(theme: ThemeId, gutter: bool, wrap: bool, font_size: u8) -> Vec<MenuItem> {
     vec![
         toggle("Light", theme == ThemeId::Light, action::THEME_LIGHT),
         toggle("Dark", theme == ThemeId::Dark, action::THEME_DARK),
@@ -394,7 +417,32 @@ pub fn view(theme: ThemeId, gutter: bool, wrap: bool) -> Vec<MenuItem> {
             separator_after: true,
             ..toggle("Word Wrap", wrap, action::TOGGLE_WRAP)
         },
-        planned("Zoom"),
+        // The rows carry the current size rather than a separate readout,
+        // because the one question a zoom menu is opened to answer is what
+        // the size is now -- and at the bounds, why a key stopped doing
+        // anything. Disabled at the bound says that; a row that still looks
+        // live and does nothing does not.
+        row_enabled(
+            "Zoom In",
+            "Ctrl+=",
+            action::ZOOM_IN,
+            font_size < bp_config::MAX_FONT_SIZE,
+        ),
+        row_enabled(
+            "Zoom Out",
+            "Ctrl+-",
+            action::ZOOM_OUT,
+            font_size > bp_config::MIN_FONT_SIZE,
+        ),
+        MenuItem {
+            separator_after: true,
+            ..row_enabled(
+                &format!("Reset Zoom ({font_size} pt)"),
+                "Ctrl+0",
+                action::ZOOM_RESET,
+                font_size != bp_config::DEFAULT_FONT_SIZE,
+            )
+        },
         planned("Split / Preview"),
         arrives("phase 8"),
     ]
@@ -638,7 +686,7 @@ mod tests {
 
     #[test]
     fn the_active_theme_is_ticked_and_only_it() {
-        let items = view(ThemeId::Green, true, false);
+        let items = view(ThemeId::Green, true, false, bp_config::DEFAULT_FONT_SIZE);
         let ticked: Vec<_> = items
             .iter()
             .filter(|i| {
@@ -651,15 +699,85 @@ mod tests {
     }
 
     #[test]
+    fn the_zoom_rows_grey_out_at_the_bound_they_cannot_pass() {
+        let at_max = view(ThemeId::Dark, true, false, bp_config::MAX_FONT_SIZE);
+        let zoom_in = at_max
+            .iter()
+            .find(|i| i.action == action::ZOOM_IN)
+            .expect("Zoom In row");
+        assert!(
+            !zoom_in.enabled,
+            "at the largest size, Zoom In has nowhere to go -- a row that \
+             still looks live is the only explanation the user gets for a key \
+             that stopped working"
+        );
+        assert!(
+            at_max
+                .iter()
+                .find(|i| i.action == action::ZOOM_OUT)
+                .is_some_and(|i| i.enabled),
+            "Zoom Out is still available at the largest size"
+        );
+
+        let at_min = view(ThemeId::Dark, true, false, bp_config::MIN_FONT_SIZE);
+        assert!(
+            at_min
+                .iter()
+                .find(|i| i.action == action::ZOOM_OUT)
+                .is_some_and(|i| !i.enabled)
+        );
+        assert!(
+            at_min
+                .iter()
+                .find(|i| i.action == action::ZOOM_IN)
+                .is_some_and(|i| i.enabled)
+        );
+    }
+
+    #[test]
+    fn reset_zoom_is_inert_at_the_size_it_would_reset_to() {
+        let items = view(ThemeId::Dark, true, false, bp_config::DEFAULT_FONT_SIZE);
+        let reset = items
+            .iter()
+            .find(|i| i.action == action::ZOOM_RESET)
+            .expect("Reset Zoom row");
+        assert!(!reset.enabled, "already at the default");
+
+        let zoomed = view(ThemeId::Dark, true, false, bp_config::DEFAULT_FONT_SIZE + 2);
+        assert!(
+            zoomed
+                .iter()
+                .find(|i| i.action == action::ZOOM_RESET)
+                .is_some_and(|i| i.enabled)
+        );
+    }
+
+    #[test]
+    fn the_reset_row_names_the_size_currently_in_force() {
+        // The question a zoom menu is opened to answer. A row reading "Reset
+        // Zoom" alone leaves the user no way to tell 13 pt from 15 pt.
+        let items = view(ThemeId::Dark, true, false, 22);
+        let reset = items
+            .iter()
+            .find(|i| i.action == action::ZOOM_RESET)
+            .expect("Reset Zoom row");
+        assert!(
+            reset.label.contains("22"),
+            "the current size should be on the row; got '{}'",
+            reset.label
+        );
+    }
+
+    #[test]
     fn view_toggles_reflect_their_state() {
-        let on = view(ThemeId::Dark, true, true);
+        let on = view(ThemeId::Dark, true, true, bp_config::DEFAULT_FONT_SIZE);
         let gutter = on
             .iter()
             .find(|i| i.action == action::TOGGLE_GUTTER)
             .unwrap();
         assert!(gutter.label.starts_with('✓'));
 
-        let off = view(ThemeId::Dark, false, false);
+        let off = view(ThemeId::Dark, false, false, bp_config::DEFAULT_FONT_SIZE);
         let gutter = off
             .iter()
             .find(|i| i.action == action::TOGGLE_GUTTER)
@@ -710,7 +828,12 @@ mod tests {
         // `true` so the caret-dependent rows are enabled here too -- the
         // stronger check, since a disabled row is exempt below regardless.
         all.extend(edit(&[], true));
-        all.extend(view(ThemeId::Organic, true, false));
+        all.extend(view(
+            ThemeId::Organic,
+            true,
+            false,
+            bp_config::DEFAULT_FONT_SIZE,
+        ));
         all.extend(format(Encoding::Utf8, LineEnding::Lf));
         all.extend(data(Format::Csv));
         all.extend(help());
@@ -795,7 +918,12 @@ mod tests {
         let clips = [bp_clipboard::Entry::new("copied")];
         let mut rust_side = Vec::new();
         rust_side.extend(file(true, true, &[std::path::PathBuf::from("/a.txt")]));
-        rust_side.extend(view(ThemeId::Green, true, false));
+        rust_side.extend(view(
+            ThemeId::Green,
+            true,
+            false,
+            bp_config::DEFAULT_FONT_SIZE,
+        ));
         rust_side.extend(format(Encoding::Utf8, LineEnding::Lf));
         rust_side.extend(note(true));
         rust_side.extend(data(Format::Json));

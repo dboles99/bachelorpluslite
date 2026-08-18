@@ -60,18 +60,33 @@ impl RendererPref {
 /// Below this a Slint `length` is too small to read, and treating it as a
 /// typo rather than a legitimate wish protects users from fat-fingering
 /// their editor into illegibility.
-const MIN_FONT_SIZE: u8 = 6;
+pub const MIN_FONT_SIZE: u8 = 6;
 
 /// Largest accepted editor font size, in points.
 ///
 /// A `u8` comfortably spans a usable typography range (this crate's whole
 /// point is that broken input is clamped, not trusted), and staying inside
 /// one byte keeps the type as small as the domain allows.
-const MAX_FONT_SIZE: u8 = 96;
+pub const MAX_FONT_SIZE: u8 = 96;
 
 /// Editor font size used before any configuration is applied, in points.
-/// Matches the size `app.slint` used to hard-code.
-const DEFAULT_FONT_SIZE: u8 = 14;
+///
+/// `app.slint` no longer carries a size of its own -- it is fed this one --
+/// so this is the single place the editor's starting size is decided.
+pub const DEFAULT_FONT_SIZE: u8 = 14;
+
+/// The font size one zoom step from `size`, bounded by what the editor accepts
+/// from any other source.
+///
+/// Saturating and clamped rather than refusing: someone holding Ctrl+- wants
+/// the text to stop shrinking, not the key to stop responding. The bounds are
+/// [`MIN_FONT_SIZE`] and [`MAX_FONT_SIZE`], the same pair a config file is
+/// held to, so zoom cannot reach a size the file could not have asked for.
+#[must_use]
+pub fn zoom(size: u8, steps: i8) -> u8 {
+    size.saturating_add_signed(steps)
+        .clamp(MIN_FONT_SIZE, MAX_FONT_SIZE)
+}
 
 /// Smallest accepted tab width, in columns.
 ///
@@ -532,6 +547,42 @@ mod tests {
             14,
             "specs.md section 4 zoom needs a starting point that matches today's rendered size, or existing documents would visibly jump on first run"
         );
+    }
+
+    #[test]
+    fn zooming_in_and_back_out_returns_the_size_it_started_at() {
+        // The property that matters to someone who overshoots and corrects:
+        // a step out has to undo a step in exactly, at every size in range,
+        // or repeated adjustment drifts.
+        for size in MIN_FONT_SIZE + 1..MAX_FONT_SIZE {
+            assert_eq!(zoom(zoom(size, 1), -1), size, "drifted at {size}");
+            assert_eq!(zoom(zoom(size, -1), 1), size, "drifted at {size}");
+        }
+    }
+
+    #[test]
+    fn zoom_stops_at_the_bounds_rather_than_wrapping_or_refusing() {
+        assert_eq!(zoom(MAX_FONT_SIZE, 1), MAX_FONT_SIZE);
+        assert_eq!(zoom(MIN_FONT_SIZE, -1), MIN_FONT_SIZE);
+        // A step larger than the whole range must not wrap through zero,
+        // which is what `saturating_add_signed` is there to prevent.
+        assert_eq!(zoom(MIN_FONT_SIZE, i8::MIN), MIN_FONT_SIZE);
+        assert_eq!(zoom(MAX_FONT_SIZE, i8::MAX), MAX_FONT_SIZE);
+    }
+
+    #[test]
+    fn zoom_cannot_reach_a_size_a_config_file_would_have_been_refused_for() {
+        // The two paths to a font size have to agree. A file asking for 200
+        // falls back; zoom must not arrive there by held keys instead.
+        for steps in [i8::MIN, -50, -1, 0, 1, 50, i8::MAX] {
+            for size in [MIN_FONT_SIZE, DEFAULT_FONT_SIZE, MAX_FONT_SIZE] {
+                let got = zoom(size, steps);
+                assert!(
+                    (MIN_FONT_SIZE..=MAX_FONT_SIZE).contains(&got),
+                    "zoom({size}, {steps}) escaped the range at {got}"
+                );
+            }
+        }
     }
 
     #[test]

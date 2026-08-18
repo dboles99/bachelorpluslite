@@ -57,6 +57,14 @@ export component AppWindow inherits Window {
     // View toggles, driven from the View menu.
     in property <bool> show-gutter: true;
     in property <bool> wrap-text: false;
+    /// Editor font size. One property for both views and the gutter, because
+    /// three sizes that agree by coincidence stop agreeing the first time one
+    /// of them is changed -- and the gutter drifting out of step with the
+    /// text it numbers is visible on every line.
+    ///
+    /// Rust sets it on every refresh from `bp-config`; the default here only
+    /// applies to the frames before the first one.
+    in property <length> font-size: 14px;
 
     // Menu contents, built in Rust so that enabled state can depend on
     // application state (Save All only when something is unsaved, and so on).
@@ -99,6 +107,11 @@ export component AppWindow inherits Window {
 
     callback editor-key(string, bool, bool, bool) -> bool;
     callback editor-pressed(int, int, bool);
+    /// Double- and triple-click. `EditorSurface` decides which a press was;
+    /// these only carry the answer, so the counting lives in one place rather
+    /// than being reconstructed from timestamps on the Rust side.
+    callback editor-selected-word(int, int);
+    callback editor-selected-line(int, int);
     callback editor-dragged(int, int);
     callback editor-scrolled(int);
     callback editor-resized(int);
@@ -107,6 +120,15 @@ export component AppWindow inherits Window {
     in-out property <bool> find-open;
     in-out property <string> find-query;
     in-out property <string> replace-query;
+    /// The three search options, straight onto `bp_search::Query`'s fields.
+    ///
+    /// `in-out` because the bar is the only thing that flips them and Rust
+    /// only ever reads them -- on every search, rather than being told when
+    /// one changes, so that Find and Replace All cannot disagree about what
+    /// is switched on.
+    in-out property <bool> find-case-sensitive;
+    in-out property <bool> find-whole-word;
+    in-out property <bool> find-regex;
     /// "3 of 12", "no matches", or a bad-pattern message.
     in property <string> find-status;
 
@@ -269,6 +291,34 @@ export component AppWindow inherits Window {
                 root.dispatch(97);
             }
         }
+        // Zoom (bp-ui/src/menus.rs ids 32-34). Ctrl+= as well as Ctrl++,
+        // because + is the shifted key and every editor accepts the unshifted
+        // one -- requiring the shift would make zooming in a two-hand chord
+        // and zooming out a one-hand one.
+        KeyBinding {
+            keys: @keys(Control + "=");
+            activated => {
+                root.dispatch(32);
+            }
+        }
+        KeyBinding {
+            keys: @keys(Control + "+");
+            activated => {
+                root.dispatch(32);
+            }
+        }
+        KeyBinding {
+            keys: @keys(Control + "-");
+            activated => {
+                root.dispatch(33);
+            }
+        }
+        KeyBinding {
+            keys: @keys(Control + "0");
+            activated => {
+                root.dispatch(34);
+            }
+        }
         KeyBinding {
             keys: @keys(Escape);
             activated => {
@@ -423,12 +473,19 @@ export component AppWindow inherits Window {
                     caret-row: root.caret-row;
                     caret-column: root.caret-column;
                     show-gutter: root.show-gutter;
+                    font-size: root.font-size;
 
                     key(text, control, shift, alt) => {
                         return root.editor-key(text, control, shift, alt);
                     }
                     pressed(row, column, extend) => {
                         root.editor-pressed(row, column, extend);
+                    }
+                    selected-word(row, column) => {
+                        root.editor-selected-word(row, column);
+                    }
+                    selected-line(row, column) => {
+                        root.editor-selected-line(row, column);
                     }
                     dragged(row, column) => {
                         root.editor-dragged(row, column);
@@ -454,9 +511,11 @@ export component AppWindow inherits Window {
                             text: root.gutter;
                             color: Palette.ink-dim;
                             font-family: "Consolas";
-                            font-size: 14px;
+                            font-size: root.font-size;
                             horizontal-alignment: right;
-                            width: 40px;
+                            // Widened with the text, or the line numbers clip
+                            // at the sizes where there are most of them.
+                            width: max(40px, root.font-size * 3);
                         }
 
                         editor := TextInput {
@@ -464,7 +523,7 @@ export component AppWindow inherits Window {
                             color: Palette.ink;
                             selection-background-color: Palette.accent;
                             font-family: "Consolas";
-                            font-size: 14px;
+                            font-size: root.font-size;
                             single-line: false;
                             wrap: root.wrap-text ? word-wrap : no-wrap;
                             horizontal-stretch: 1;
@@ -480,6 +539,9 @@ export component AppWindow inherits Window {
                 open: root.find-open;
                 find-query <=> root.find-query;
                 replace-query <=> root.replace-query;
+                case-sensitive <=> root.find-case-sensitive;
+                whole-word <=> root.find-whole-word;
+                regex <=> root.find-regex;
                 find-status: root.find-status;
 
                 find-changed => {

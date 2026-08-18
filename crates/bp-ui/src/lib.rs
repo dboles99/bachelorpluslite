@@ -117,6 +117,9 @@ fn refresh(ui: &AppWindow, state: &mut state::AppState, push_text: state::PushTe
 
     ui.set_show_gutter(state.show_gutter);
     ui.set_wrap_text(state.wrap_text);
+    // Points to Slint's `length`. Both editor views read this one property,
+    // so a zoom cannot apply to the widget and not to the surface.
+    ui.set_font_size(f32::from(state.font_size));
 
     // Only the menus whose contents depend on state are rebuilt here; the
     // rest are set once at startup.
@@ -133,6 +136,7 @@ fn refresh(ui: &AppWindow, state: &mut state::AppState, push_text: state::PushTe
         state.theme,
         state.show_gutter,
         state.wrap_text,
+        state.font_size,
     )));
     if let Some(doc) = state.workspace.active() {
         ui.set_format_items(model(menus::format(doc.encoding(), doc.line_ending())));
@@ -153,6 +157,21 @@ fn set_static_menus(ui: &AppWindow) {
     ui.set_run_items(model(menus::planned_menu("Run")));
     ui.set_security_items(model(menus::planned_menu("Security")));
     ui.set_tools_items(model(menus::planned_menu("Tools")));
+}
+
+/// The query the find bar currently describes.
+///
+/// Every search path reads its options through here, so that a toggle cannot
+/// apply to Find and quietly not to Replace All -- which would be a silent
+/// wrong answer rather than a visible bug. The decision it wraps lives in
+/// `state::find_query`, where it can be tested without a window.
+fn ui_query(ui: &AppWindow) -> bp_search::Query {
+    state::find_query(
+        &ui.get_find_query(),
+        ui.get_find_case_sensitive(),
+        ui.get_find_whole_word(),
+        ui.get_find_regex(),
+    )
 }
 
 /// Open a file, starting in a sensible directory.
@@ -218,6 +237,12 @@ pub struct RunOptions {
     /// storage either way -- only the drawing and the caret differ -- so this
     /// is a choice of view, not of document model.
     pub editor_view: bool,
+    /// Editor font size in points, already through `bp-config`'s bounds.
+    ///
+    /// `None` keeps `bp_config::DEFAULT_FONT_SIZE`, so a caller that does not
+    /// care -- `run()`, and every test -- gets the size the editor has always
+    /// drawn at.
+    pub font_size: Option<u8>,
 }
 
 /// Run the BachelorPad+ shell.
@@ -247,6 +272,12 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
     let mut initial = state::AppState::new();
     if let Some(theme) = options.theme {
         initial.theme = theme;
+    }
+    if let Some(size) = options.font_size {
+        // Clamped again rather than trusted. `bp-config` bounds what it
+        // parses, but `RunOptions` is a public API and a caller reaching it
+        // by another route must not be able to hand the editor a 0 pt font.
+        initial.font_size = bp_config::zoom(size, 0);
     }
     initial.error = options.startup_notice.clone();
 
@@ -525,6 +556,26 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
         });
     }
 
+    // Double- and triple-click. `EditorSurface` only; `TextInput` does both
+    // natively and never reports a press to us, so wiring this for that path
+    // would be wiring it twice and getting two behaviours.
+    for what in [
+        editor_view::ClickSelection::Word,
+        editor_view::ClickSelection::Line,
+    ] {
+        let cell = Rc::clone(&state);
+        let weak = ui.as_weak();
+        let select = move |row, column| {
+            let Some(ui) = weak.upgrade() else { return };
+            editor_view::select_at_cell(&mut cell.borrow_mut(), row, column, what);
+            refresh(&ui, &mut cell.borrow_mut(), state::PushText::No);
+        };
+        match what {
+            editor_view::ClickSelection::Word => ui.on_editor_selected_word(select),
+            editor_view::ClickSelection::Line => ui.on_editor_selected_line(select),
+        }
+    }
+
     {
         let cell = Rc::clone(&state);
         let weak = ui.as_weak();
@@ -576,7 +627,7 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
         let weak = ui.as_weak();
         ui.on_find_changed(move || {
             let Some(ui) = weak.upgrade() else { return };
-            let query = bp_search::Query::literal(&ui.get_find_query());
+            let query = ui_query(&ui);
             let selection = cell.borrow_mut().find(&query);
             ui.set_find_status(cell.borrow().find_status.as_str().into());
             if let Some(range) = selection {
@@ -608,7 +659,7 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
         let weak = ui.as_weak();
         ui.on_replace_all(move || {
             let Some(ui) = weak.upgrade() else { return };
-            let query = bp_search::Query::literal(&ui.get_find_query());
+            let query = ui_query(&ui);
             let replacement = ui.get_replace_query().to_string();
 
             // Planned first, and the plan shown, before anything changes:
@@ -650,7 +701,7 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
         let weak = ui.as_weak();
         ui.on_search_folder(move || {
             let Some(ui) = weak.upgrade() else { return };
-            let query = bp_search::Query::literal(&ui.get_find_query());
+            let query = ui_query(&ui);
             if query.is_empty() {
                 ui.set_results_summary("type something to search for".into());
                 ui.set_results_open(true);

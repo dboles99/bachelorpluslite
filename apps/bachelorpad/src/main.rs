@@ -80,6 +80,7 @@ fn main() -> anyhow::Result<()> {
                 first.clone()
             }
         }),
+        font_size: Some(loaded.config.font_size),
         measure_exit: args.iter().any(|a| a == "--measure-exit"),
         // Opt-in while the custom editor surface reaches parity with the
         // widget it replaces (word wrap, input-method composition). Parsed
