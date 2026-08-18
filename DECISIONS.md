@@ -25,6 +25,7 @@ Adding a decision means adding both.
 | BP-ADR-0017 | 2026-08-17 | Default to the software renderer; split the startup target | Accepted | [ADR-0017](docs/decisions/ADR-0017.md) |
 | BP-ADR-0018 | 2026-08-17 | Write a custom editor view; make the rope the storage; ship the view opt-in | Accepted | [ADR-0018](docs/decisions/ADR-0018.md) |
 | BP-ADR-0019 | 2026-08-17 | SQLite via bundled `rusqlite`; append-only migrations; metadata never content | Accepted | [ADR-0019](docs/decisions/ADR-0019.md) |
+| BP-ADR-0020 | 2026-08-19 | Security profiles resolve to a policy; named profiles are monotonic | Accepted | [ADR-0020](docs/decisions/ADR-0020.md) |
 
 ## Decisions needed before the work they block
 
@@ -64,12 +65,20 @@ Adding a decision means adding both.
   (2026-08-17, manual test). `KeyBinding` in a wrapping `FocusScope` matches
   during the capture phase, so the focused `TextInput` no longer swallows
   Ctrl+S.
-- **Three things now want security profiles (phase 14).** The recovery
-  journal writes unsaved text to disk in plaintext; clipboard history keeps
-  copied secrets in memory; and `bp-storage` is built, tested and
-  deliberately unwired, because the useful thing to record — a document's
-  extracted title — is a summary of what the user wrote. ADR-0011 says the
-  document's profile governs all three.
+- **Three things want security profiles, and the profiles now exist as a
+  model.** The recovery journal writes unsaved text to disk in plaintext;
+  clipboard history keeps copied secrets in memory; and `bp-storage` is
+  built, tested and deliberately unwired, because the useful thing to record
+  — a document's extracted title — is a summary of what the user wrote.
+  ADR-0020 says what each profile permits over all three. **None of them
+  reads it yet**, which is the next piece of work: the model makes the leaks
+  describable, not fixed.
+
+  Two of the four profiles require an encrypted recovery journal, which
+  needs `bp-crypto` and does not exist until phase 15. ADR-0020 requires that
+  to fail loudly — the journal is refused rather than silently written in
+  clear — so those profiles are not fully honourable yet, deliberately and
+  visibly.
 - **The custom editor view has never been typed into.** Its rules are covered
   by 147 tests in `bp-editor`; the widget has been verified to exactly one
   standard, that it renders a frame with a real file open without panicking.

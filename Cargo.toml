@@ -17,6 +17,7 @@ members = [
     "crates/bp-history",
     "crates/bp-naming",
     "crates/bp-search",
+    "crates/bp-security",
     "crates/bp-semantic",
     "crates/bp-storage",
     "crates/bp-files",

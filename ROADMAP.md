@@ -2,7 +2,7 @@
 
 This is not an MVP roadmap. Each phase contributes to the full v1 target.
 
-Status as of **2026-08-17**. Three words, meaning three different things:
+Status as of **2026-08-19**. Three words, meaning three different things:
 
 - **Done** — the phase's work is finished.
 - **Started** — a real, tested slice exists *and is reachable from the
@@ -26,7 +26,7 @@ Status as of **2026-08-17**. Three words, meaning three different things:
 | 11 | Clipboard system | **Started** | [08-clipboard](project/tasks/08-clipboard/) | `bp-clipboard` |
 | 12 | Notebook/execution system | Not started | [09-notebook](project/tasks/09-notebook/) | — |
 | 13 | Research mode | Not started | [10-research](project/tasks/10-research/) | — |
-| 14 | Security foundation | Not started | [11-security](project/tasks/11-security/) | — |
+| 14 | Security foundation | **Built, unwired** | [11-security](project/tasks/11-security/) | `bp-security` |
 | 15 | Encrypted `.bpadx` documents | Not started | [11-security](project/tasks/11-security/) | — |
 | 16 | Advanced security | Not started | [11-security](project/tasks/11-security/) | — |
 | 17 | Themes/personality/accessibility | **Started** | [12-themes-brand](project/tasks/12-themes-brand/) | `bp-theme` |
@@ -58,18 +58,30 @@ operations, and a custom editor view exists behind `--editor-view`
 (ADR-0018). Phase 4's large-file work is unblocked either way, because the
 storage question is settled independently of which view draws.
 
-What stands between that view and being the default is two parity items —
-word wrap and input-method composition — and one thing no amount of code
-fixes: **nobody has typed into it yet.** Its rules are covered by 147 tests
-in `bp-editor`; the widget has been shown to render a frame without
-panicking, and nothing more. Several phase-2 features shipped since depend on
-that caret and inherit whatever is wrong with it.
+**The parity question is settled, and not in the view's favour.** Word wrap
+is done: a document line can occupy several visual rows, Up and Down move by
+row, and scrolling is anchored to a line *and* a row within it. Input-method
+composition cannot be done at all on Slint 1.17.1 — `FocusScope` rejects
+`UpdateComposition` and `CommitComposition` and exposes no callback for
+either, and `TextInput` is the only item in the toolkit that consumes them.
+Without it CJK entry does not work, so `--editor-view` stays opt-in and the
+default stays `TextInput`. `project/WORK_QUEUE.md` records the evidence.
 
-**Security profiles (phase 14) are now the largest structural gap**, and they
-have gone from two dependants to three. The recovery journal writes unsaved
-text to disk in plaintext; clipboard history holds copied secrets in memory;
-and `bp-storage` is built, tested and deliberately unreachable because the
-useful thing to record — a document's extracted title — is a summary of what
-the user wrote. ADR-0011 says the document's profile governs all three.
-None of them is wrong today. The third is *waiting*, which is different from
-the first two, which are *running*.
+**Security profiles (phase 14) have a model, and nothing reads it yet.**
+ADR-0020 defines what each of Standard, Private, Confidential and Maximum
+permits across seven axes, and `bp-security` implements it with the named
+profiles checked to be monotonic — each at least as restrictive as the one
+before, on every axis. It is listed as **built, unwired** for two reasons,
+both recorded: the three dependants below are separate work, and two of the
+four profiles require an encrypted recovery journal that `bp-crypto` does not
+supply until phase 15. ADR-0020 requires that to refuse rather than degrade,
+so those profiles are visibly not yet honourable.
+
+The gap that remains is the wiring, and it still has three dependants. The
+recovery journal writes unsaved text to disk in plaintext; clipboard history
+holds copied secrets in memory; and `bp-storage` is built, tested and
+deliberately unreachable because the useful thing to record — a document's
+extracted title — is a summary of what the user wrote. ADR-0011 says the
+document's profile governs all three, and ADR-0020 now says what each profile
+permits. None of them is wrong today. The third is *waiting*, which is
+different from the first two, which are *running*.

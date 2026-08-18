@@ -58,7 +58,7 @@ cargo run --release -- --editor-view   # with the custom editor view (ADR-0018)
 
 ## Current state (2026-08-19)
 
-**15 crates, 585 tests, green on Windows and Linux.** The app opens, edits and
+**16 crates, 631 tests, green on Windows and Linux.** The app opens, edits and
 saves atomically, and does rather more than that:
 
 | Area | What works |
@@ -117,11 +117,14 @@ starting.
 - **Little of this has been used in anger.** The tests cover the pieces in
   isolation; the integrated behaviour has had one manual pass, several
   sessions ago.
-- **Three things hold or would hold sensitive data with no security profile
-  governing them**: the recovery journal writes unsaved text to disk in
-  plaintext, clipboard history keeps copied secrets in memory, and
-  `bp-storage` is built and deliberately unwired because the useful thing to
-  record is a summary of what the user wrote. All three want phase 14.
+- **Three things hold or would hold sensitive data, and the profile that
+  governs them is a model nothing reads yet**: the recovery journal writes
+  unsaved text to disk in plaintext, clipboard history keeps copied secrets
+  in memory, and `bp-storage` is built and deliberately unwired because the
+  useful thing to record is a summary of what the user wrote.
+  [ADR-0020](docs/decisions/ADR-0020.md) says what each profile permits over
+  all three; wiring them to it is the next piece of work. The model makes
+  the leaks describable, not fixed.
 
 [ROADMAP.md](ROADMAP.md) has per-phase status;
 [MENU_MAP.md](docs/product/MENU_MAP.md) says which menu rows are real;
