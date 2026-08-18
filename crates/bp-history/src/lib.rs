@@ -5,11 +5,21 @@
 //!
 //! **This writes document content to disk.** That is the entire point, and it
 //! is also the thing to be careful about: a recovery journal is a copy of
-//! your unsaved work sitting outside the file you were editing. ADR-0011
-//! requires the document's security profile to govern it, and once profiles
-//! exist this crate is where encryption and exclusion have to land. Until
-//! then the journal is plaintext in the user's own config directory, and
-//! `Journal::location` exists so the UI can tell them where.
+//! your unsaved work sitting outside the file you were editing.
+//!
+//! The document's security profile governs it (ADR-0011, ADR-0020), and
+//! `checkpoint` takes that policy rather than assuming one. Two things follow
+//! that are easy to miss:
+//!
+//! * **A refusal deletes what is already there.** Tightening a profile has to
+//!   remove what the looser one wrote, or the journal would report itself as
+//!   protected while this morning's plaintext sat beside it.
+//! * **A profile wanting encryption is refused, not downgraded.** `bp-crypto`
+//!   arrives in phase 15; until then the honest answer is "not journalled",
+//!   and `Refusal::notice` is how the user hears it.
+//!
+//! Under the default profile the journal is plaintext in the user's own
+//! config directory, and `Journal::location` exists so the UI can say where.
 //!
 //! Two properties matter more than speed here:
 //!
@@ -23,6 +33,7 @@
 
 use std::path::{Path, PathBuf};
 
+use bp_security::Recovery;
 use serde::{Deserialize, Serialize};
 
 /// Crate identity used by workspace smoke tests and diagnostics.
@@ -41,6 +52,46 @@ pub struct Checkpoint {
     /// Seconds since the Unix epoch. A plain integer rather than a timestamp
     /// type so the journal format does not depend on a crate's serialisation.
     pub written_at: u64,
+}
+
+/// What a checkpoint attempt did.
+///
+/// Three outcomes rather than a `bool`, because "not written" has two very
+/// different meanings to the user: a profile that forbids a journal is
+/// working as asked, and one that wants encryption we cannot yet provide is
+/// a capability gap worth saying out loud.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Written {
+    Yes,
+    Refused(Refusal),
+}
+
+/// Why a checkpoint was not written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Refusal {
+    /// The document's profile disables the recovery journal outright.
+    ProfileForbidsIt,
+    /// The profile requires an encrypted journal, and `bp-crypto` does not
+    /// exist yet (phase 15).
+    EncryptionUnavailable,
+}
+
+impl Refusal {
+    /// What to tell the user, if anything.
+    ///
+    /// A profile doing what it was set to do is not news. A profile that
+    /// cannot be honoured is, and staying silent about it would leave
+    /// somebody believing their work is being journalled when it is not.
+    #[must_use]
+    pub const fn notice(self) -> Option<&'static str> {
+        match self {
+            Self::ProfileForbidsIt => None,
+            Self::EncryptionUnavailable => Some(
+                "this profile needs an encrypted recovery journal (phase 15); \
+                 unsaved work is not being journalled",
+            ),
+        }
+    }
 }
 
 /// Where checkpoints are kept.
@@ -64,13 +115,41 @@ impl Journal {
         self.dir.join(format!("{id}.json"))
     }
 
-    /// Write a checkpoint for `id`, replacing any previous one.
+    /// Write a checkpoint for `id` if the document's policy permits it.
     ///
     /// Atomic: written to a temporary file and renamed, so a crash midway
     /// leaves the *previous* checkpoint intact rather than a truncated one.
     /// A journal that can be half-written is worse than no journal, because
     /// it looks recoverable.
-    pub fn checkpoint(&self, id: u64, checkpoint: &Checkpoint) -> std::io::Result<()> {
+    ///
+    /// **A refusal deletes any checkpoint already on disk for `id`.** That is
+    /// the whole point of asking: tightening a document's profile has to
+    /// remove what the looser one wrote, or moving to Confidential would
+    /// leave this morning's plaintext sitting in the recovery directory and
+    /// report itself as protected.
+    ///
+    /// [`Recovery::Encrypted`] is refused rather than downgraded. `bp-crypto`
+    /// arrives in phase 15; until then a profile asking for encryption cannot
+    /// be honoured, and ADR-0020 requires that to fail visibly. Writing
+    /// plaintext for a user who has been told it is encrypted is worse than
+    /// keeping no journal at all.
+    pub fn checkpoint(
+        &self,
+        id: u64,
+        checkpoint: &Checkpoint,
+        recovery: Recovery,
+    ) -> std::io::Result<Written> {
+        match recovery {
+            Recovery::Plaintext => {}
+            Recovery::Disabled => {
+                self.discard(id)?;
+                return Ok(Written::Refused(Refusal::ProfileForbidsIt));
+            }
+            Recovery::Encrypted => {
+                self.discard(id)?;
+                return Ok(Written::Refused(Refusal::EncryptionUnavailable));
+            }
+        }
         std::fs::create_dir_all(&self.dir)?;
         let json = serde_json::to_vec_pretty(checkpoint)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
@@ -78,7 +157,8 @@ impl Journal {
         let target = self.file_for(id);
         let temp = target.with_extension("json.tmp");
         std::fs::write(&temp, &json)?;
-        std::fs::rename(&temp, &target)
+        std::fs::rename(&temp, &target)?;
+        Ok(Written::Yes)
     }
 
     /// Forget the checkpoint for `id`.
@@ -177,7 +257,7 @@ mod tests {
     fn a_checkpoint_round_trips() {
         let (_dir, journal) = journal();
         let entry = checkpoint("unsaved work");
-        journal.checkpoint(1, &entry).unwrap();
+        journal.checkpoint(1, &entry, Recovery::Plaintext).unwrap();
 
         let pending = journal.pending();
         assert_eq!(pending.len(), 1);
@@ -188,8 +268,12 @@ mod tests {
     #[test]
     fn checkpointing_twice_replaces_rather_than_accumulates() {
         let (_dir, journal) = journal();
-        journal.checkpoint(1, &checkpoint("first")).unwrap();
-        journal.checkpoint(1, &checkpoint("second")).unwrap();
+        journal
+            .checkpoint(1, &checkpoint("first"), Recovery::Plaintext)
+            .unwrap();
+        journal
+            .checkpoint(1, &checkpoint("second"), Recovery::Plaintext)
+            .unwrap();
 
         let pending = journal.pending();
         assert_eq!(pending.len(), 1);
@@ -199,7 +283,9 @@ mod tests {
     #[test]
     fn discarding_is_idempotent() {
         let (_dir, journal) = journal();
-        journal.checkpoint(1, &checkpoint("work")).unwrap();
+        journal
+            .checkpoint(1, &checkpoint("work"), Recovery::Plaintext)
+            .unwrap();
 
         journal.discard(1).unwrap();
         assert!(journal.pending().is_empty());
@@ -215,8 +301,8 @@ mod tests {
         let mut new = checkpoint("new");
         new.written_at = 2_000;
 
-        journal.checkpoint(1, &old).unwrap();
-        journal.checkpoint(2, &new).unwrap();
+        journal.checkpoint(1, &old, Recovery::Plaintext).unwrap();
+        journal.checkpoint(2, &new, Recovery::Plaintext).unwrap();
 
         let pending = journal.pending();
         assert_eq!(pending[0].1.text, "new");
@@ -227,7 +313,9 @@ mod tests {
     fn a_corrupt_entry_does_not_cost_the_others() {
         // One bad file must not lose the user their other recoveries.
         let (_dir, journal) = journal();
-        journal.checkpoint(1, &checkpoint("good")).unwrap();
+        journal
+            .checkpoint(1, &checkpoint("good"), Recovery::Plaintext)
+            .unwrap();
         std::fs::write(journal.location().join("2.json"), "{ not json").unwrap();
         std::fs::write(journal.location().join("notanumber.json"), "{}").unwrap();
 
@@ -249,7 +337,9 @@ mod tests {
     fn checkpointing_creates_the_directory() {
         let (_dir, journal) = journal();
         assert!(!journal.location().exists());
-        journal.checkpoint(1, &checkpoint("work")).unwrap();
+        journal
+            .checkpoint(1, &checkpoint("work"), Recovery::Plaintext)
+            .unwrap();
         assert!(journal.location().exists());
     }
 
@@ -257,7 +347,9 @@ mod tests {
     fn a_crash_mid_checkpoint_leaves_the_previous_one_readable() {
         // The reason checkpoints are written to a temp file and renamed.
         let (_dir, journal) = journal();
-        journal.checkpoint(1, &checkpoint("survivable")).unwrap();
+        journal
+            .checkpoint(1, &checkpoint("survivable"), Recovery::Plaintext)
+            .unwrap();
 
         // Simulate the debris of an interrupted write.
         std::fs::write(journal.location().join("1.json.tmp"), "{ half writ").unwrap();
@@ -277,8 +369,12 @@ mod tests {
     #[test]
     fn discard_all_clears_everything() {
         let (_dir, journal) = journal();
-        journal.checkpoint(1, &checkpoint("a")).unwrap();
-        journal.checkpoint(2, &checkpoint("b")).unwrap();
+        journal
+            .checkpoint(1, &checkpoint("a"), Recovery::Plaintext)
+            .unwrap();
+        journal
+            .checkpoint(2, &checkpoint("b"), Recovery::Plaintext)
+            .unwrap();
 
         journal.discard_all().unwrap();
         assert!(journal.pending().is_empty());
@@ -293,10 +389,99 @@ mod tests {
             text: "notes with no file yet".to_owned(),
             written_at: now_unix(),
         };
-        journal.checkpoint(7, &entry).unwrap();
+        journal.checkpoint(7, &entry, Recovery::Plaintext).unwrap();
 
         let pending = journal.pending();
         assert_eq!(pending[0].1.path, None);
         assert_eq!(pending[0].1.text, "notes with no file yet");
+    }
+
+    // --- security policy --------------------------------------------------
+
+    #[test]
+    fn a_profile_that_disables_recovery_writes_nothing() {
+        let (_dir, journal) = journal();
+
+        let written = journal
+            .checkpoint(1, &checkpoint("secret"), Recovery::Disabled)
+            .unwrap();
+
+        assert_eq!(written, Written::Refused(Refusal::ProfileForbidsIt));
+        assert!(journal.pending().is_empty());
+    }
+
+    #[test]
+    fn tightening_a_profile_deletes_what_the_looser_one_already_wrote() {
+        // The whole point of asking the policy. Without this, moving a
+        // document to Confidential leaves this morning's plaintext sitting in
+        // the recovery directory while the profile reports it as protected --
+        // which is worse than never having had a profile, because the user
+        // has been told they are covered.
+        let (_dir, journal) = journal();
+        journal
+            .checkpoint(
+                1,
+                &checkpoint("written while Standard"),
+                Recovery::Plaintext,
+            )
+            .unwrap();
+        assert_eq!(journal.pending().len(), 1, "the plaintext is on disk");
+
+        journal
+            .checkpoint(1, &checkpoint("now Confidential"), Recovery::Encrypted)
+            .unwrap();
+
+        assert!(
+            journal.pending().is_empty(),
+            "tightening the profile must remove the earlier plaintext, not \
+             merely stop adding to it"
+        );
+    }
+
+    #[test]
+    fn a_profile_wanting_encryption_refuses_rather_than_writing_plaintext() {
+        // `bp-crypto` arrives in phase 15. Until then the honest answer is
+        // "not journalled", not a plaintext file under a profile that says
+        // encrypted. ADR-0020 requires the failure to be visible.
+        let (_dir, journal) = journal();
+
+        let written = journal
+            .checkpoint(1, &checkpoint("sensitive"), Recovery::Encrypted)
+            .unwrap();
+
+        assert_eq!(written, Written::Refused(Refusal::EncryptionUnavailable));
+        assert!(journal.pending().is_empty());
+        assert!(
+            matches!(written, Written::Refused(r) if r.notice().is_some()),
+            "a capability gap has to reach the user; a profile merely doing \
+             what it was set to do does not"
+        );
+    }
+
+    #[test]
+    fn a_disabled_journal_is_silent_but_a_missing_capability_is_not() {
+        // The distinction the two refusals exist for.
+        assert_eq!(Refusal::ProfileForbidsIt.notice(), None);
+        assert!(Refusal::EncryptionUnavailable.notice().is_some());
+    }
+
+    #[test]
+    fn refusing_a_document_leaves_other_documents_journals_alone() {
+        // One document going Confidential must not lose another's unsaved
+        // work. The refusal path calls `discard`, and discarding the wrong id
+        // would be a data-loss bug wearing a security fix.
+        let (_dir, journal) = journal();
+        journal
+            .checkpoint(1, &checkpoint("keep me"), Recovery::Plaintext)
+            .unwrap();
+
+        journal
+            .checkpoint(2, &checkpoint("forget me"), Recovery::Disabled)
+            .unwrap();
+
+        let pending = journal.pending();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].0, 1);
+        assert_eq!(pending[0].1.text, "keep me");
     }
 }

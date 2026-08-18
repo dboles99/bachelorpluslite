@@ -58,7 +58,7 @@ cargo run --release -- --editor-view   # with the custom editor view (ADR-0018)
 
 ## Current state (2026-08-19)
 
-**16 crates, 631 tests, green on Windows and Linux.** The app opens, edits and
+**16 crates, 656 tests, green on Windows and Linux.** The app opens, edits and
 saves atomically, and does rather more than that:
 
 | Area | What works |
@@ -72,6 +72,7 @@ saves atomically, and does rather more than that:
 | Semantic | Title, keywords, summary and outline extracted from the document; document statistics; date and time insertion |
 | Clipboard | History with kind detection, paste from history, format-aware paste transformations |
 | Metadata | A SQLite store with migrations — built and tested, not yet wired in ([ADR-0019](docs/decisions/ADR-0019.md)) |
+| Security | Per-document profiles (Standard / Private / Confidential / Maximum) governing the recovery journal, clipboard history and metadata store ([ADR-0020](docs/decisions/ADR-0020.md)) |
 
 Startup, with the software renderer ([ADR-0017](docs/decisions/ADR-0017.md)):
 **35.7 ms to window, 21.9 MB idle**, against targets of 150 ms and 50 MB.
@@ -117,14 +118,14 @@ starting.
 - **Little of this has been used in anger.** The tests cover the pieces in
   isolation; the integrated behaviour has had one manual pass, several
   sessions ago.
-- **Three things hold or would hold sensitive data, and the profile that
-  governs them is a model nothing reads yet**: the recovery journal writes
-  unsaved text to disk in plaintext, clipboard history keeps copied secrets
-  in memory, and `bp-storage` is built and deliberately unwired because the
-  useful thing to record is a summary of what the user wrote.
-  [ADR-0020](docs/decisions/ADR-0020.md) says what each profile permits over
-  all three; wiring them to it is the next piece of work. The model makes
-  the leaks describable, not fixed.
+- **Security profiles govern the three things that hold sensitive data, but
+  two of the four profiles cannot yet be honoured.** The recovery journal,
+  clipboard history and `bp-storage` all read the document's policy
+  ([ADR-0020](docs/decisions/ADR-0020.md)). Private and Confidential require
+  an encrypted journal, and `bp-crypto` does not exist until phase 15 — so
+  recovery is refused rather than downgraded, and the Security menu says
+  "off until encryption ships". `bp-storage` is still not called by the
+  application: that is ADR-0019's product decision, not a security one.
 
 [ROADMAP.md](ROADMAP.md) has per-phase status;
 [MENU_MAP.md](docs/product/MENU_MAP.md) says which menu rows are real;

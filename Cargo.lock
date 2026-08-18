@@ -678,6 +678,9 @@ dependencies = [
 [[package]]
 name = "bp-clipboard"
 version = "0.1.0"
+dependencies = [
+ "bp-security",
+]
 
 [[package]]
 name = "bp-config"
@@ -692,6 +695,7 @@ dependencies = [
 name = "bp-core"
 version = "0.1.0"
 dependencies = [
+ "bp-security",
  "time",
 ]
 
@@ -732,6 +736,7 @@ version = "0.1.0"
 name = "bp-history"
 version = "0.1.0"
 dependencies = [
+ "bp-security",
  "serde",
  "serde_json",
  "tempfile",
@@ -770,6 +775,7 @@ version = "0.1.0"
 name = "bp-storage"
 version = "0.1.0"
 dependencies = [
+ "bp-security",
  "rusqlite",
  "tempfile",
  "thiserror 2.0.20",
@@ -799,6 +805,7 @@ dependencies = [
  "bp-history",
  "bp-naming",
  "bp-search",
+ "bp-security",
  "bp-semantic",
  "bp-theme",
  "rfd",

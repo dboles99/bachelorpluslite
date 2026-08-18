@@ -3,6 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
+use bp_security::{Policy, Security};
 use time::OffsetDateTime;
 
 use crate::{CheckpointTime, DiskSaveTime, Encoding, LineEnding, SaveState};
@@ -45,6 +46,13 @@ pub struct Document {
     last_checkpoint: Option<CheckpointTime>,
     encoding: Encoding,
     line_ending: LineEnding,
+    /// What may be derived from this document and kept (ADR-0020).
+    ///
+    /// On the document rather than global, because ADR-0011 makes the policy
+    /// a property of the document: two tabs open side by side can be
+    /// governed differently, and the stricter one must not be relaxed by the
+    /// other being open.
+    security: Security,
 }
 
 impl Document {
@@ -59,6 +67,7 @@ impl Document {
             last_checkpoint: None,
             encoding: Encoding::default(),
             line_ending: LineEnding::default(),
+            security: Security::default(),
         }
     }
 
@@ -84,7 +93,30 @@ impl Document {
             last_checkpoint: None,
             encoding: Encoding::default(),
             line_ending: LineEnding::default(),
+            security: Security::default(),
         }
+    }
+
+    /// What this document's profile permits.
+    ///
+    /// The one thing callers need; the profile itself is only for showing
+    /// the user which it is.
+    pub const fn policy(&self) -> Policy {
+        self.security.policy()
+    }
+
+    pub const fn security(&self) -> Security {
+        self.security
+    }
+
+    /// Change the profile.
+    ///
+    /// Returns the previous one, because tightening a profile obliges the
+    /// caller to clean up what the looser one permitted -- a journal already
+    /// on disk, clipboard entries already captured -- and it cannot do that
+    /// without knowing what changed.
+    pub fn set_security(&mut self, security: Security) -> Security {
+        std::mem::replace(&mut self.security, security)
     }
 
     pub const fn id(&self) -> DocumentId {

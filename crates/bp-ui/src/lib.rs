@@ -127,6 +127,19 @@ fn refresh(ui: &AppWindow, state: &mut state::AppState, push_text: state::PushTe
         ui.set_theme_name(state.theme.name().into());
     }
 
+    // Empty under Standard: a permanent "Standard" would be noise on every
+    // document, and the readout earns its place only when something unusual
+    // is in force.
+    let security = state.security();
+    ui.set_security_profile(
+        if security == bp_security::Security::default() {
+            String::new()
+        } else {
+            security.name().to_owned()
+        }
+        .into(),
+    );
+
     ui.set_show_gutter(state.show_gutter);
     ui.set_wrap_text(state.wrap_text);
     // Points to Slint's `length`. Both editor views read this one property,
@@ -165,6 +178,9 @@ fn refresh(ui: &AppWindow, state: &mut state::AppState, push_text: state::PushTe
     ui.set_data_items(model(menus::data(format)));
     ui.set_note_items(model(menus::note(state.active_has_content())));
     ui.set_edit_items(model(menus::edit(state.clips.entries(), state.editor_view)));
+    // Rebuilt rather than set once: it shows the *active* document's profile
+    // and what that profile permits, both of which change with the tab.
+    ui.set_security_items(model(menus::security(state.security())));
 }
 
 /// Menus whose contents never change. Set once, not on every refresh.
@@ -175,7 +191,6 @@ fn set_static_menus(ui: &AppWindow) {
     ui.set_organize_items(model(menus::planned_menu("Organize")));
     ui.set_research_items(model(menus::planned_menu("Research")));
     ui.set_run_items(model(menus::planned_menu("Run")));
-    ui.set_security_items(model(menus::planned_menu("Security")));
     ui.set_tools_items(model(menus::planned_menu("Tools")));
 }
 
@@ -876,9 +891,22 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
                 let Some(text) = read_os_clipboard() else {
                     return;
                 };
-                let added = cell.borrow_mut().clips.push(&text);
+                // The active document's policy, because you copy out of the
+                // document you are looking at and an OS clipboard read says
+                // nothing about where the text came from.
+                let changed = {
+                    let mut s = cell.borrow_mut();
+                    let policy = s.policy().clipboard;
+                    // Enforce first: a document whose profile forbids a
+                    // history must not keep one gathered a moment ago under a
+                    // looser profile, and the poll is the soonest reliable
+                    // point at which that is noticed.
+                    let cleared = s.clips.enforce(policy);
+                    let added = s.clips.push(&text, policy);
+                    cleared || added
+                };
                 // Only rebuild the menus when the history actually changed.
-                if added && let Some(ui) = weak.upgrade() {
+                if changed && let Some(ui) = weak.upgrade() {
                     refresh(&ui, &mut cell.borrow_mut(), state::PushText::No);
                 }
             },

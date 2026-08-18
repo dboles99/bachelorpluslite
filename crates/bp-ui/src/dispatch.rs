@@ -308,6 +308,16 @@ pub fn handle_menu_action(
             push = PushText::No;
         }
 
+        id if (action::PROFILE_BASE..menus::profile_end()).contains(&id) => {
+            let index = usize::try_from(id - action::PROFILE_BASE).unwrap_or(0);
+            if let Some(profile) = bp_security::Profile::all().get(index).copied() {
+                state
+                    .borrow_mut()
+                    .set_security(bp_security::Security::Named(profile));
+            }
+            push = PushText::No;
+        }
+
         action::GO_TO_LINE => {
             // The bar owns the interaction from here; opening it is all the
             // menu row does, which is why one action id covers the feature.

@@ -5,3 +5,6 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+# Clipboard history holds copied document text, so the document's profile
+# decides whether it may be kept at all (ADR-0011, ADR-0020).
+bp-security = { path = "../bp-security" }

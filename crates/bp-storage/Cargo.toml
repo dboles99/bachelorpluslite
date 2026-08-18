@@ -5,6 +5,9 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+# A document's extracted title is a summary of what the user wrote, so the
+# document's profile decides whether it may be recorded (ADR-0019, ADR-0020).
+bp-security = { path = "../bp-security" }
 # `bundled` compiles SQLite from source rather than linking whatever the
 # machine happens to have. BP-ADR-0001 makes Windows and Linux equal targets,
 # and "works here" is not a build strategy: a bundled copy is the same version

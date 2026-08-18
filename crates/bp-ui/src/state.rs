@@ -220,10 +220,24 @@ impl AppState {
                 text: self.text_of(id).to_owned(),
                 written_at: bp_history::now_unix(),
             };
-            if self.journal.checkpoint(id.get(), &entry).is_ok()
-                && let Some(doc) = self.workspace.get_mut(id)
-            {
-                doc.record_checkpoint(at);
+            // The document's own profile, not a global setting: two tabs
+            // open side by side can be governed differently, and the
+            // stricter one must not be relaxed by the other being open.
+            let recovery = doc.policy().recovery;
+            match self.journal.checkpoint(id.get(), &entry, recovery) {
+                Ok(bp_history::Written::Yes) => {
+                    if let Some(doc) = self.workspace.get_mut(id) {
+                        doc.record_checkpoint(at);
+                    }
+                }
+                // A profile doing what it was set to do is not news; one that
+                // cannot be honoured is. `notice` decides which this was.
+                Ok(bp_history::Written::Refused(refusal)) => {
+                    if let Some(message) = refusal.notice() {
+                        self.error = Some(message.to_owned());
+                    }
+                }
+                Err(_) => {}
             }
         }
     }
@@ -835,6 +849,67 @@ impl AppState {
         true
     }
 
+    /// The active document's security policy.
+    ///
+    /// Falls back to the default when there is no active document, so callers
+    /// never have to choose a policy for themselves -- picking one at a call
+    /// site is how a permissive default gets applied to a document that asked
+    /// for something stricter.
+    pub(crate) fn policy(&self) -> bp_security::Policy {
+        self.workspace.active().map_or_else(
+            || bp_security::Security::default().policy(),
+            Document::policy,
+        )
+    }
+
+    pub(crate) fn security(&self) -> bp_security::Security {
+        self.workspace
+            .active()
+            .map_or_else(bp_security::Security::default, Document::security)
+    }
+
+    /// Give the active document a profile, and make the world match it.
+    ///
+    /// Setting a profile is not only a note on the document: tightening one
+    /// obliges us to remove what the looser one already permitted. The
+    /// journal is handled by the next checkpoint, which deletes a refused
+    /// document's file; the clipboard is shared and has to be dealt with
+    /// here.
+    pub(crate) fn set_security(&mut self, security: bp_security::Security) {
+        let Some(id) = self.workspace.active_id() else {
+            return;
+        };
+        let Some(doc) = self.workspace.get_mut(id) else {
+            return;
+        };
+        let previous = doc.set_security(security);
+        if previous == security {
+            return;
+        }
+
+        let policy = security.policy();
+        if self.clips.enforce(policy.clipboard) {
+            self.error = Some("clipboard history cleared to match this profile".to_owned());
+        }
+
+        // The journal for *this* document only. A refused checkpoint deletes
+        // its file, so asking for one now is what turns the profile change
+        // into an actual deletion rather than waiting up to the autosave
+        // interval with plaintext still on disk.
+        let entry = bp_history::Checkpoint {
+            path: doc_path(&self.workspace, id),
+            name: self.display_name(id),
+            text: self.text_of(id).to_owned(),
+            written_at: bp_history::now_unix(),
+        };
+        if let Ok(bp_history::Written::Refused(refusal)) =
+            self.journal.checkpoint(id.get(), &entry, policy.recovery)
+            && let Some(message) = refusal.notice()
+        {
+            self.error = Some(message.to_owned());
+        }
+    }
+
     /// Which document the tab context menu's rows should act on.
     ///
     /// The right-clicked tab, or the active one when the menu was not opened
@@ -1139,6 +1214,17 @@ pub(crate) fn recovery_dir() -> PathBuf {
         || PathBuf::from("recovery"),
         |p| p.with_file_name("recovery"),
     )
+}
+
+/// A document's path, if it has one.
+///
+/// A free function so `set_security` can read it without holding a borrow of
+/// the workspace across the mutable one it already has.
+fn doc_path(workspace: &Workspace, id: DocumentId) -> Option<PathBuf> {
+    workspace
+        .get(id)
+        .and_then(Document::path)
+        .map(Path::to_path_buf)
 }
 
 /// Map a tab id from the UI back to a `DocumentId`.
@@ -1834,6 +1920,115 @@ mod tests {
         let (others, has_path) = state.tab_context_shape();
         assert_eq!(others, 1, "one other tab is open");
         assert!(!has_path, "an untitled document has no path to copy");
+    }
+
+    // --- security profiles ------------------------------------------------
+
+    #[test]
+    fn a_new_document_starts_on_the_default_profile() {
+        let state = AppState::new();
+        assert_eq!(state.security(), bp_security::Security::default());
+        assert_eq!(state.policy().recovery, bp_security::Recovery::Plaintext);
+    }
+
+    #[test]
+    fn the_profile_belongs_to_the_document_not_the_application() {
+        // Two tabs open side by side can be governed differently, and the
+        // stricter one must not be relaxed by the other being open.
+        let mut state = AppState::new();
+        state.set_security(bp_security::Security::Named(
+            bp_security::Profile::Confidential,
+        ));
+        let strict = state.workspace.active_id().unwrap();
+
+        state.new_document();
+        assert_eq!(
+            state.security(),
+            bp_security::Security::default(),
+            "a new document is not governed by the last one"
+        );
+
+        state.workspace.set_active(strict);
+        assert_eq!(
+            state.policy().clipboard,
+            bp_security::Clipboard::Disabled,
+            "switching back restores the stricter document's policy"
+        );
+    }
+
+    #[test]
+    fn tightening_a_profile_clears_the_clipboard_history() {
+        // The history is one list for the whole application, so it is the
+        // only dependant the profile change has to deal with directly -- the
+        // journal is handled by the checkpoint the change triggers.
+        let mut state = AppState::new();
+        state
+            .clips
+            .push("copied earlier", bp_security::Clipboard::InMemory);
+        assert!(!state.clips.is_empty());
+
+        state.set_security(bp_security::Security::Named(
+            bp_security::Profile::Confidential,
+        ));
+
+        assert!(
+            state.clips.is_empty(),
+            "a profile that forbids a clipboard history must not leave one \
+             gathered under a looser profile sitting in the menu"
+        );
+        assert!(
+            state.error.is_some(),
+            "and the user is told why it vanished"
+        );
+    }
+
+    #[test]
+    fn setting_the_same_profile_again_changes_nothing() {
+        // Refresh rebuilds menus constantly; a no-op that cleared the
+        // clipboard would empty it whenever the menu was opened.
+        let mut state = AppState::new();
+        state.clips.push("keep", bp_security::Clipboard::InMemory);
+
+        state.set_security(bp_security::Security::default());
+
+        assert_eq!(state.clips.entries().len(), 1);
+    }
+
+    #[test]
+    fn a_profile_needing_encryption_reports_that_recovery_is_off() {
+        // ADR-0020: fail loudly rather than degrade. The user has been told
+        // the journal is encrypted, and it is not being written at all.
+        let mut state = AppState::new();
+        state.set_security(bp_security::Security::Named(bp_security::Profile::Private));
+
+        let message = state.error.expect("a capability gap reaches the user");
+        assert!(
+            message.contains("phase 15") || message.contains("clipboard"),
+            "got {message}"
+        );
+    }
+
+    #[test]
+    fn a_confidential_document_is_not_checkpointed_in_plaintext() {
+        // The end-to-end version of the journal's own test, through the
+        // autosave path the application actually uses.
+        let dir = tempfile::tempdir().unwrap();
+        let mut state = AppState::new();
+        state.journal = bp_history::Journal::new(dir.path().to_path_buf());
+        state.edit("sensitive text".to_owned());
+
+        state.checkpoint_all();
+        assert_eq!(state.journal.pending().len(), 1, "Standard journals it");
+
+        state.set_security(bp_security::Security::Named(
+            bp_security::Profile::Confidential,
+        ));
+        state.checkpoint_all();
+
+        assert!(
+            state.journal.pending().is_empty(),
+            "the earlier plaintext must be gone, not merely not added to"
+        );
     }
 
     #[test]

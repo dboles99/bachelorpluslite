@@ -83,6 +83,13 @@ pub mod action {
     pub const SHORTCUTS: i32 = 50;
     pub const ABOUT: i32 = 51;
 
+    /// Security profiles, one id per `bp_security::Profile::all()` in that
+    /// order. A base plus an offset for the same reason as `STAMP_BASE`: the
+    /// menu and the dispatch cannot disagree about which row is which, and
+    /// adding a profile cannot leave the dispatch matching the old count.
+    /// Bounded by [`super::profile_end`]. 56-59 are free.
+    pub const PROFILE_BASE: i32 = 52;
+
     /// Clipboard history occupies `CLIP_BASE ..` (bounded by [`super::clip_end`]).
     ///
     /// Slint's `dispatch` routes exactly `UNDO..=SELECT_ALL` to the widget and
@@ -232,6 +239,14 @@ fn arrives(phase: &str) -> MenuItem {
 /// `i32::try_from` is not usable in a const initialiser.
 pub(crate) fn clip_end() -> i32 {
     action::CLIP_BASE + i32::try_from(bp_clipboard::MAX_ENTRIES).unwrap_or(0)
+}
+
+/// One past the last id `PROFILE_BASE` can produce.
+///
+/// Sized from `Profile::all()` rather than written down, so a fifth named
+/// profile extends the window with the menu instead of landing outside it.
+pub(crate) fn profile_end() -> i32 {
+    action::PROFILE_BASE + i32::try_from(bp_security::Profile::all().len()).unwrap_or(0)
 }
 
 /// One past the last id `STAMP_BASE` can produce.
@@ -548,6 +563,79 @@ pub fn format(encoding: Encoding, line_ending: LineEnding, indent: Indent) -> Ve
     ]
 }
 
+/// The Security menu: the active document's profile, and what it permits.
+///
+/// The rows below the profiles are not decoration. A profile is a promise
+/// about what happens to derived data, and a user cannot check a promise they
+/// cannot see -- so the menu states the three that are observable today
+/// rather than making them infer it from behaviour that is, by design,
+/// invisible.
+pub fn security(current: bp_security::Security) -> Vec<MenuItem> {
+    let policy = current.policy();
+    let mut items: Vec<MenuItem> = bp_security::Profile::all()
+        .iter()
+        .enumerate()
+        .map(|(index, profile)| {
+            toggle(
+                profile.name(),
+                matches!(current, bp_security::Security::Named(p) if p == *profile),
+                action::PROFILE_BASE + i32::try_from(index).unwrap_or(0),
+            )
+        })
+        .collect();
+    if let Some(last) = items.last_mut() {
+        last.separator_after = true;
+    }
+
+    // What the profile in force actually does, in the user's terms. Greyed,
+    // because they are a readout rather than something to click.
+    items.extend([
+        planned(&format!(
+            "Recovery journal: {}",
+            describe_recovery(policy.recovery)
+        )),
+        planned(&format!(
+            "Clipboard history: {}",
+            describe_clipboard(policy.clipboard)
+        )),
+        MenuItem {
+            separator_after: true,
+            ..planned(&format!(
+                "Leaves this machine: {}",
+                match policy.network {
+                    bp_security::Network::Allowed => "permitted",
+                    bp_security::Network::Denied => "never",
+                }
+            ))
+        },
+        planned("Encrypt Document (.bpadx)"),
+        planned("Privacy Mode, secret scanning, redaction"),
+        arrives("phase 15"),
+    ]);
+    items
+}
+
+fn describe_recovery(recovery: bp_security::Recovery) -> &'static str {
+    match recovery {
+        // Named plainly. A user who has not thought about it should be able
+        // to read this row and understand that unsaved work is on disk.
+        bp_security::Recovery::Plaintext => "on, unencrypted",
+        // The honest answer while bp-crypto does not exist (ADR-0020): the
+        // profile asks for encryption, so the journal is off rather than
+        // silently plaintext.
+        bp_security::Recovery::Encrypted => "off until encryption ships (phase 15)",
+        bp_security::Recovery::Disabled => "off",
+    }
+}
+
+fn describe_clipboard(clipboard: bp_security::Clipboard) -> &'static str {
+    match clipboard {
+        bp_security::Clipboard::Persistent => "kept, including on disk",
+        bp_security::Clipboard::InMemory => "kept in memory only",
+        bp_security::Clipboard::Disabled => "not kept",
+    }
+}
+
 /// The tab strip's context menu.
 ///
 /// `others` is how many other tabs are open and `has_path` whether the
@@ -852,6 +940,101 @@ mod tests {
                 .iter()
                 .filter(|i| i.action != action::NONE)
                 .all(|i| i.enabled)
+        );
+    }
+
+    #[test]
+    fn every_profile_row_is_inside_the_range_dispatch_matches() {
+        // `profile_end` is sized from `Profile::all()`, so a fifth profile
+        // extends the window with the menu rather than landing outside it and
+        // silently doing nothing.
+        let items = security(bp_security::Security::default());
+        let rows: Vec<&MenuItem> = items
+            .iter()
+            .filter(|i| i.action >= action::PROFILE_BASE && i.action < 100)
+            .collect();
+
+        assert_eq!(rows.len(), bp_security::Profile::all().len());
+        for (index, row) in rows.iter().enumerate() {
+            let expected = action::PROFILE_BASE + i32::try_from(index).unwrap();
+            assert_eq!(row.action, expected);
+            assert!((action::PROFILE_BASE..profile_end()).contains(&row.action));
+        }
+    }
+
+    #[test]
+    fn exactly_one_profile_is_ticked() {
+        // Two ticks would say the document is governed by two policies; none
+        // would leave the user unable to tell which is in force.
+        for profile in bp_security::Profile::all() {
+            let items = security(bp_security::Security::Named(*profile));
+            let ticked: Vec<&str> = items
+                .iter()
+                .filter(|i| i.label.starts_with('✓'))
+                .map(|i| i.label.as_str())
+                .collect();
+
+            assert_eq!(ticked.len(), 1, "for {:?}, got {ticked:?}", profile);
+            assert!(ticked[0].contains(profile.name()));
+        }
+    }
+
+    #[test]
+    fn a_custom_policy_ticks_no_named_profile() {
+        // Custom is not one of the four, and ticking the nearest would tell
+        // the user their document is governed by a profile it is not.
+        let items = security(bp_security::Security::Custom(
+            bp_security::Profile::Maximum.policy(),
+        ));
+        assert!(
+            !items.iter().any(|i| i.label.starts_with('✓')),
+            "a custom policy must not claim to be a named profile"
+        );
+    }
+
+    #[test]
+    fn the_menu_states_what_the_profile_actually_does() {
+        // A profile is a promise about invisible behaviour. A user cannot
+        // check a promise they cannot see, so the menu says it.
+        let standard = security(bp_security::Security::Named(bp_security::Profile::Standard));
+        assert!(
+            standard
+                .iter()
+                .any(|i| i.label.contains("Recovery journal") && i.label.contains("unencrypted")),
+            "Standard writes plaintext and the menu must say so; got {:?}",
+            standard
+                .iter()
+                .map(|i| i.label.as_str())
+                .collect::<Vec<_>>()
+        );
+
+        let maximum = security(bp_security::Security::Named(bp_security::Profile::Maximum));
+        assert!(
+            maximum
+                .iter()
+                .any(|i| i.label.contains("Leaves this machine") && i.label.contains("never"))
+        );
+        assert!(
+            maximum
+                .iter()
+                .any(|i| i.label.contains("Clipboard history") && i.label.contains("not kept"))
+        );
+    }
+
+    #[test]
+    fn a_profile_wanting_encryption_says_recovery_is_off_not_encrypted() {
+        // The honest readout while `bp-crypto` does not exist. Saying
+        // "encrypted" here would be the exact lie ADR-0020 forbids.
+        let items = security(bp_security::Security::Named(bp_security::Profile::Private));
+        let row = items
+            .iter()
+            .find(|i| i.label.contains("Recovery journal"))
+            .expect("a recovery row");
+
+        assert!(
+            row.label.contains("off"),
+            "the journal is not being written; got {:?}",
+            row.label
         );
     }
 
@@ -1238,6 +1421,7 @@ mod tests {
         rust_side.extend(help());
         rust_side.extend(insert(STAMP_CLOCK, true));
         rust_side.extend(tab_context(2, true));
+        rust_side.extend(security(bp_security::Security::default()));
 
         for item in rust_side.iter().filter(|i| i.enabled) {
             assert!(

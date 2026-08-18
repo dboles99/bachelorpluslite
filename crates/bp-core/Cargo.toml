@@ -5,6 +5,9 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+# A security profile is a property of a document (ADR-0011, ADR-0020), so it
+# lives on `Document` and travels with it.
+bp-security = { path = "../bp-security" }
 time.workspace = true
 
 [dev-dependencies]

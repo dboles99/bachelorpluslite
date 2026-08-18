@@ -54,6 +54,8 @@ export component AppWindow inherits Window {
     in property <string> line-ending-label;
     in property <string> cursor-label;
     in property <string> theme-name;
+    /// The active document's security profile, or empty under the default.
+    in property <string> security-profile;
     in property <string> error-message;
     /// What the desktop's appearance setting says, reported to Rust so
     /// `bp_theme::ThemeId::for_system` can resolve it.
@@ -647,6 +649,7 @@ export component AppWindow inherits Window {
                 encoding-label: root.encoding-label;
                 line-ending-label: root.line-ending-label;
                 cursor-label: root.cursor-label;
+                security-label: root.security-profile;
                 theme-name: root.theme-name;
                 location: root.location;
                 error-message: root.error-message;

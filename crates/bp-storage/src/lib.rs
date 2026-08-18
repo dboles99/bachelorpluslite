@@ -8,19 +8,23 @@
 //! Two rules shape everything here:
 //!
 //! * **The store holds metadata, never document content.** A title extracted
-//!   from a note is a summary of what the user wrote, and ADR-0011 says the
-//!   document's security profile governs where that may be kept. Until phase
-//!   14 exists, what goes in stays deliberately thin.
+//!   from a note is a summary of what the user wrote, so `record_document`
+//!   takes the document's `Metadata` policy (ADR-0019, ADR-0020) and honours
+//!   it: `PathOnly` drops the title, `Disabled` records nothing at all --
+//!   not even the path, because "this document exists and was opened at
+//!   14:05" is itself something a Confidential document should not leave.
 //! * **Time is a parameter, never a clock.** `bp-naming` earns its exhaustive
 //!   tests by not reading one, and the same applies here.
 //!
 //! Nothing in the application writes to this yet. It is the foundation phase 9
-//! builds on, not a feature.
+//! builds on, not a feature -- but the policy gate is in place, so wiring it
+//! is now a product decision rather than a security one.
 
 #![forbid(unsafe_code)]
 
 use std::path::Path;
 
+use bp_security::Metadata;
 use rusqlite::{Connection, OptionalExtension, params};
 use thiserror::Error;
 
@@ -141,7 +145,21 @@ impl Store {
         path: &Path,
         title: Option<&str>,
         seen_at: i64,
-    ) -> Result<i64, StoreError> {
+        policy: Metadata,
+    ) -> Result<Option<i64>, StoreError> {
+        // ADR-0019's reasoning, now expressed as policy rather than as a
+        // standing refusal: the path is a fact about the filesystem, but the
+        // title is a summary of what the user wrote, and a store full of them
+        // is a plaintext index of what they write about.
+        //
+        // `Disabled` records nothing at all -- not even the path, because
+        // "this document exists and was opened at 14:05" is itself something
+        // a Confidential document should not leave behind.
+        let title = match policy {
+            Metadata::Summary => title,
+            Metadata::PathOnly => None,
+            Metadata::Disabled => return Ok(None),
+        };
         let path = path_str(path)?;
 
         self.connection.execute(
@@ -153,11 +171,11 @@ impl Store {
             params![path, title, seen_at],
         )?;
 
-        Ok(self.connection.query_row(
+        Ok(Some(self.connection.query_row(
             "SELECT id FROM documents WHERE path = ?1",
             params![path],
             |row| row.get(0),
-        )?)
+        )?))
     }
 
     pub fn document(&self, path: &Path) -> Result<Option<DocumentRecord>, StoreError> {
@@ -293,7 +311,8 @@ mod tests {
 
         let first = Store::open(&file).unwrap();
         first
-            .record_document(&path("a.md"), Some("A"), 100)
+            .record_document(&path("a.md"), Some("A"), 100, Metadata::Summary)
+            .unwrap()
             .unwrap();
         drop(first);
 
@@ -342,9 +361,13 @@ mod tests {
     fn recording_a_document_twice_updates_rather_than_duplicates() {
         let store = store();
         let first = store
-            .record_document(&path("note.md"), Some("Note"), 100)
+            .record_document(&path("note.md"), Some("Note"), 100, Metadata::Summary)
+            .unwrap()
             .unwrap();
-        let second = store.record_document(&path("note.md"), None, 200).unwrap();
+        let second = store
+            .record_document(&path("note.md"), None, 200, Metadata::Summary)
+            .unwrap()
+            .unwrap();
 
         assert_eq!(first, second, "the same file is one document");
 
@@ -362,10 +385,12 @@ mod tests {
     fn a_later_title_replaces_an_earlier_one() {
         let store = store();
         store
-            .record_document(&path("n.md"), Some("Draft"), 1)
+            .record_document(&path("n.md"), Some("Draft"), 1, Metadata::Summary)
+            .unwrap()
             .unwrap();
         store
-            .record_document(&path("n.md"), Some("Final"), 2)
+            .record_document(&path("n.md"), Some("Final"), 2, Metadata::Summary)
+            .unwrap()
             .unwrap();
 
         assert_eq!(
@@ -384,7 +409,13 @@ mod tests {
         let store = store();
         for (index, name) in ["a.md", "b.md", "c.md"].iter().enumerate() {
             store
-                .record_document(&path(name), None, i64::try_from(index).unwrap())
+                .record_document(
+                    &path(name),
+                    None,
+                    i64::try_from(index).unwrap(),
+                    Metadata::Summary,
+                )
+                .unwrap()
                 .unwrap();
         }
 
@@ -397,7 +428,10 @@ mod tests {
     #[test]
     fn tagging_is_idempotent_and_case_insensitive() {
         let store = store();
-        let id = store.record_document(&path("n.md"), None, 1).unwrap();
+        let id = store
+            .record_document(&path("n.md"), None, 1, Metadata::Summary)
+            .unwrap()
+            .unwrap();
 
         store.tag_document(id, "Rust").unwrap();
         store.tag_document(id, "rust").unwrap();
@@ -413,7 +447,10 @@ mod tests {
     #[test]
     fn a_blank_tag_is_ignored_rather_than_stored() {
         let store = store();
-        let id = store.record_document(&path("n.md"), None, 1).unwrap();
+        let id = store
+            .record_document(&path("n.md"), None, 1, Metadata::Summary)
+            .unwrap()
+            .unwrap();
         store.tag_document(id, "   ").unwrap();
         store.tag_document(id, "").unwrap();
 
@@ -423,7 +460,10 @@ mod tests {
     #[test]
     fn tags_are_trimmed_so_the_same_word_is_the_same_tag() {
         let store = store();
-        let id = store.record_document(&path("n.md"), None, 1).unwrap();
+        let id = store
+            .record_document(&path("n.md"), None, 1, Metadata::Summary)
+            .unwrap()
+            .unwrap();
         store.tag_document(id, " rust ").unwrap();
         store.tag_document(id, "rust").unwrap();
 
@@ -433,7 +473,10 @@ mod tests {
     #[test]
     fn untagging_removes_only_that_tag() {
         let store = store();
-        let id = store.record_document(&path("n.md"), None, 1).unwrap();
+        let id = store
+            .record_document(&path("n.md"), None, 1, Metadata::Summary)
+            .unwrap()
+            .unwrap();
         store.tag_document(id, "rust").unwrap();
         store.tag_document(id, "notes").unwrap();
 
@@ -444,9 +487,18 @@ mod tests {
     #[test]
     fn documents_can_be_found_by_tag() {
         let store = store();
-        let a = store.record_document(&path("a.md"), None, 1).unwrap();
-        let b = store.record_document(&path("b.md"), None, 2).unwrap();
-        let c = store.record_document(&path("c.md"), None, 3).unwrap();
+        let a = store
+            .record_document(&path("a.md"), None, 1, Metadata::Summary)
+            .unwrap()
+            .unwrap();
+        let b = store
+            .record_document(&path("b.md"), None, 2, Metadata::Summary)
+            .unwrap()
+            .unwrap();
+        let c = store
+            .record_document(&path("c.md"), None, 3, Metadata::Summary)
+            .unwrap()
+            .unwrap();
         store.tag_document(a, "rust").unwrap();
         store.tag_document(c, "rust").unwrap();
         store.tag_document(b, "prose").unwrap();
@@ -461,7 +513,10 @@ mod tests {
     fn forgetting_a_document_takes_its_tag_links_with_it() {
         // Which only happens because foreign keys are on.
         let store = store();
-        let id = store.record_document(&path("n.md"), None, 1).unwrap();
+        let id = store
+            .record_document(&path("n.md"), None, 1, Metadata::Summary)
+            .unwrap()
+            .unwrap();
         store.tag_document(id, "rust").unwrap();
 
         assert!(store.forget_document(&path("n.md")).unwrap());
@@ -487,7 +542,10 @@ mod tests {
     fn unicode_paths_and_titles_round_trip() {
         let store = store();
         let file = PathBuf::from("/notes/日本語のノート.md");
-        store.record_document(&file, Some("日本語"), 1).unwrap();
+        store
+            .record_document(&file, Some("日本語"), 1, Metadata::Summary)
+            .unwrap()
+            .unwrap();
 
         let record = store.document(&file).unwrap().unwrap();
         assert_eq!(record.title, Some("日本語".to_owned()));
@@ -504,7 +562,7 @@ mod tests {
             use std::os::unix::ffi::OsStrExt;
             let bad = PathBuf::from(OsStr::from_bytes(b"/notes/\xff\xfe.md"));
             assert!(matches!(
-                store().record_document(&bad, None, 1),
+                store().record_document(&bad, None, 1, Metadata::Summary),
                 Err(StoreError::UnsupportedPath(_))
             ));
         }
@@ -518,7 +576,8 @@ mod tests {
         // that waits on a security profile. Nothing here takes a body.
         let store = store();
         let id = store
-            .record_document(&path("secret.md"), Some("Title"), 1)
+            .record_document(&path("secret.md"), Some("Title"), 1, Metadata::Summary)
+            .unwrap()
             .unwrap();
         store.tag_document(id, "tag").unwrap();
 
@@ -538,5 +597,72 @@ mod tests {
                 "documents.{forbidden} would hold document content"
             );
         }
+    }
+
+    // --- security policy --------------------------------------------------
+
+    #[test]
+    fn path_only_records_the_path_and_forgets_the_title() {
+        // ADR-0019's reasoning as policy: the path is a fact about the
+        // filesystem, the title is a summary of what the user wrote.
+        let store = store();
+        let id = store
+            .record_document(
+                &path("notes.md"),
+                Some("Quarterly Layoffs"),
+                10,
+                Metadata::PathOnly,
+            )
+            .unwrap()
+            .expect("the path is still recorded");
+
+        assert!(id > 0);
+        let record = store.document(&path("notes.md")).unwrap().unwrap();
+        assert_eq!(
+            record.title, None,
+            "the title must not survive a PathOnly policy"
+        );
+    }
+
+    #[test]
+    fn disabled_records_nothing_at_all_not_even_the_path() {
+        // "This document exists and was opened at 14:05" is itself something
+        // a Confidential document should not leave behind.
+        let store = store();
+
+        let recorded = store
+            .record_document(&path("secret.md"), Some("Title"), 10, Metadata::Disabled)
+            .unwrap();
+
+        assert_eq!(recorded, None);
+        assert_eq!(store.document(&path("secret.md")).unwrap(), None);
+    }
+
+    #[test]
+    fn a_tightened_policy_does_not_overwrite_a_title_already_stored() {
+        // The upsert keeps an existing title when handed `None`, which is
+        // right for "no title extracted yet" and wrong for "policy forbids
+        // it". This pins the current behaviour so the difference is a
+        // decision rather than a surprise: recording under PathOnly leaves an
+        // earlier Summary title in place, and clearing it needs its own
+        // deliberate operation.
+        let store = store();
+        store
+            .record_document(&path("a.md"), Some("Original"), 10, Metadata::Summary)
+            .unwrap()
+            .unwrap();
+
+        store
+            .record_document(&path("a.md"), Some("Newer"), 20, Metadata::PathOnly)
+            .unwrap()
+            .unwrap();
+
+        let record = store.document(&path("a.md")).unwrap().unwrap();
+        assert_eq!(
+            record.title.as_deref(),
+            Some("Original"),
+            "a PathOnly write must not smuggle a new title in, and does not \
+             erase the old one either -- erasing is a separate operation"
+        );
     }
 }

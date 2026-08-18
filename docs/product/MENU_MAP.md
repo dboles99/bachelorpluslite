@@ -78,6 +78,14 @@ no data rows rather than a column of greyed ones.
 | Document Statistics | **live** — `bp_semantic::statistics` into the status bar, one pass on a menu click and never on the typing path |
 | Tags, classification, related notes, properties, history | planned — phase 9 |
 
+## Security
+
+| Row | State |
+| --- | --- |
+| Standard / Private / Confidential / Maximum | **live** — the active document's profile; exactly one ticks, and a Custom policy ticks none |
+| What the profile permits (recovery, clipboard, network) | **live** — a readout, greyed because it is not clickable. A profile is a promise about invisible behaviour, and a promise nobody can see is not one |
+| Encrypt Document (.bpadx), Privacy Mode, secret scanning, redaction | planned — phase 15 |
+
 ## Notebook
 
 Enable mode, new cell, run, run selection, run all, convert selection,
@@ -101,14 +109,18 @@ findings, methods, datasets. All planned — phase 13.
 Run selection/cell/document, choose interpreter, stop, history, Rust
 scratchpad. All planned — phase 12.
 
-## Security
+## Security (the rest)
 
 Lock, encrypt/decrypt, passphrase protection, secure clipboard, integrity,
 hash, sign, verify, redact, scan secrets, privacy mode, metadata inspector,
-audit, settings. All planned — phases 14 to 16.
+audit, settings. All planned — phases 15 and 16.
 
-Three shipped things are waiting on the profiles this menu configures: the
-recovery journal, clipboard history, and `bp-storage`.
+The three things that were waiting on profiles now read them: the recovery
+journal refuses rather than writing plaintext under a profile that forbids it,
+clipboard history is cleared and stops recording, and `bp-storage`'s
+`record_document` honours `Metadata`. `bp-storage` is still not called by the
+application — that is ADR-0019's product decision, not a security one any
+more.
 
 ## Tools
 

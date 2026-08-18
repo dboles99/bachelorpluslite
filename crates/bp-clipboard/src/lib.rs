@@ -16,6 +16,8 @@
 
 #![forbid(unsafe_code)]
 
+use bp_security::Clipboard;
+
 /// Crate identity used by workspace smoke tests and diagnostics.
 pub const CRATE_NAME: &str = "bp-clipboard";
 
@@ -422,7 +424,17 @@ impl History {
     /// already at the front are ignored: the clipboard is polled, so the same
     /// content arrives over and over and a history full of duplicates is
     /// useless.
-    pub fn push(&mut self, text: &str) -> bool {
+    /// Record `text`, if the active document's policy permits a history.
+    ///
+    /// The history is one list for the whole application while a policy
+    /// belongs to a document, so the policy that applies is the *active*
+    /// document's -- you copy out of the document you are looking at, and
+    /// there is nothing in an OS clipboard read that says where the text came
+    /// from.
+    pub fn push(&mut self, text: &str, policy: Clipboard) -> bool {
+        if policy == Clipboard::Disabled {
+            return false;
+        }
         if text.trim().is_empty() {
             return false;
         }
@@ -463,6 +475,35 @@ impl History {
     }
 
     /// Forget everything unpinned.
+    /// Bring the history into line with `policy`, dropping what it forbids.
+    ///
+    /// Returns whether anything was removed, so the caller can rebuild its
+    /// menus only when something changed.
+    ///
+    /// Separate from [`push`](Self::push) because recording and retention are
+    /// different decisions: `push` answers "may this be added", and this
+    /// answers "may what is already here stay". Folding the second into the
+    /// first would mean the history was only ever cleaned when something new
+    /// was copied, which is exactly when it does not matter.
+    ///
+    /// **Pinned entries go too.** A pin is a request to keep something, not
+    /// an exemption from policy, and an entry that survived a profile change
+    /// because somebody had pinned it would be the one piece of text most
+    /// likely to matter.
+    ///
+    /// This is a real cost and worth naming: switching to a document whose
+    /// profile disables the clipboard discards a history gathered under a
+    /// looser one. The alternative is keeping copied text alive alongside a
+    /// document whose profile says it must not exist, and between losing
+    /// convenience and keeping a leak, this loses the convenience.
+    pub fn enforce(&mut self, policy: Clipboard) -> bool {
+        if policy != Clipboard::Disabled || self.entries.is_empty() {
+            return false;
+        }
+        self.entries.clear();
+        true
+    }
+
     pub fn clear(&mut self) {
         self.entries.retain(|e| e.pinned);
     }
@@ -480,8 +521,8 @@ mod tests {
     #[test]
     fn newest_first() {
         let mut h = History::new();
-        h.push("one");
-        h.push("two");
+        h.push("one", Clipboard::InMemory);
+        h.push("two", Clipboard::InMemory);
         assert_eq!(h.entries()[0].text, "two");
         assert_eq!(h.entries()[1].text, "one");
     }
@@ -490,17 +531,17 @@ mod tests {
     fn a_repeat_of_the_front_entry_is_ignored() {
         // The clipboard is polled, so the same content arrives repeatedly.
         let mut h = History::new();
-        assert!(h.push("same"));
-        assert!(!h.push("same"));
+        assert!(h.push("same", Clipboard::InMemory));
+        assert!(!h.push("same", Clipboard::InMemory));
         assert_eq!(h.entries().len(), 1);
     }
 
     #[test]
     fn copying_something_again_moves_it_to_the_front() {
         let mut h = History::new();
-        h.push("a");
-        h.push("b");
-        h.push("a");
+        h.push("a", Clipboard::InMemory);
+        h.push("b", Clipboard::InMemory);
+        h.push("a", Clipboard::InMemory);
 
         assert_eq!(h.entries().len(), 2, "moved, not duplicated");
         assert_eq!(h.entries()[0].text, "a");
@@ -509,8 +550,8 @@ mod tests {
     #[test]
     fn blank_text_is_not_recorded() {
         let mut h = History::new();
-        assert!(!h.push(""));
-        assert!(!h.push("   \n\t "));
+        assert!(!h.push("", Clipboard::InMemory));
+        assert!(!h.push("   \n\t ", Clipboard::InMemory));
         assert!(h.is_empty());
     }
 
@@ -518,7 +559,7 @@ mod tests {
     fn capacity_is_enforced() {
         let mut h = History::new();
         for i in 0..(MAX_ENTRIES + 10) {
-            h.push(&format!("entry {i}"));
+            h.push(&format!("entry {i}"), Clipboard::InMemory);
         }
         assert_eq!(h.entries().len(), MAX_ENTRIES);
         assert_eq!(h.entries()[0].text, format!("entry {}", MAX_ENTRIES + 9));
@@ -529,11 +570,11 @@ mod tests {
         // Pinning is a promise. A history that discards what was pinned is
         // worse than one with no pinning at all.
         let mut h = History::new();
-        h.push("precious");
+        h.push("precious", Clipboard::InMemory);
         h.toggle_pin(0);
 
         for i in 0..(MAX_ENTRIES + 10) {
-            h.push(&format!("filler {i}"));
+            h.push(&format!("filler {i}"), Clipboard::InMemory);
         }
 
         assert!(
@@ -545,9 +586,9 @@ mod tests {
     #[test]
     fn clear_keeps_pinned_and_clear_all_does_not() {
         let mut h = History::new();
-        h.push("keep");
+        h.push("keep", Clipboard::InMemory);
         h.toggle_pin(0);
-        h.push("drop");
+        h.push("drop", Clipboard::InMemory);
 
         h.clear();
         assert_eq!(h.entries().len(), 1);
@@ -836,5 +877,70 @@ mod tests {
             apply(Transform::JoinLines, text),
             Some("日本語 テスト行".to_string())
         );
+    }
+
+    // --- security policy --------------------------------------------------
+
+    #[test]
+    fn a_profile_that_disables_the_clipboard_records_nothing() {
+        let mut h = History::new();
+        assert!(!h.push("secret", Clipboard::Disabled));
+        assert!(h.is_empty());
+    }
+
+    #[test]
+    fn both_permitted_policies_record() {
+        // `Persistent` and `InMemory` differ in whether history reaches disk,
+        // which is not this type's business -- nothing here is written down.
+        // Both record.
+        for policy in [Clipboard::InMemory, Clipboard::Persistent] {
+            let mut h = History::new();
+            assert!(h.push("copied", policy), "{policy:?} should record");
+            assert_eq!(h.entries().len(), 1);
+        }
+    }
+
+    #[test]
+    fn enforcing_a_disabling_policy_drops_what_was_already_captured() {
+        // The counterpart to `push` refusing: stopping new entries while
+        // leaving the old ones in a menu the user can page through would
+        // protect nothing.
+        let mut h = History::new();
+        h.push("captured while Standard", Clipboard::InMemory);
+        assert_eq!(h.entries().len(), 1);
+
+        assert!(h.enforce(Clipboard::Disabled), "something was removed");
+        assert!(h.is_empty());
+    }
+
+    #[test]
+    fn enforcing_takes_pinned_entries_too() {
+        // A pin is a request to keep something, not an exemption from policy
+        // -- and an entry somebody bothered to pin is the one most likely to
+        // matter if it leaked.
+        let mut h = History::new();
+        h.push("precious", Clipboard::InMemory);
+        h.toggle_pin(0);
+
+        h.enforce(Clipboard::Disabled);
+
+        assert!(h.is_empty(), "a pin must not outrank the profile");
+    }
+
+    #[test]
+    fn enforcing_a_permitting_policy_changes_nothing() {
+        let mut h = History::new();
+        h.push("kept", Clipboard::InMemory);
+
+        assert!(!h.enforce(Clipboard::InMemory), "nothing to remove");
+        assert_eq!(h.entries().len(), 1);
+    }
+
+    #[test]
+    fn enforcing_an_empty_history_reports_no_change() {
+        // The caller rebuilds its menus on `true`, so a spurious one would
+        // rebuild them on every poll of an empty history.
+        let mut h = History::new();
+        assert!(!h.enforce(Clipboard::Disabled));
     }
 }
