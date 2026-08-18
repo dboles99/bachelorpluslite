@@ -11,6 +11,7 @@ members = [
     "crates/bp-clipboard",
     "crates/bp-config",
     "crates/bp-core",
+    "crates/bp-crypto",
     "crates/bp-data",
     "crates/bp-editor",
     "crates/bp-formats",
@@ -45,3 +46,13 @@ time = { version = "0.3", features = ["local-offset"] }
 tempfile = "3"
 proptest = "1"
 toml = "1"
+
+# --- cryptography (ADR-0021) -------------------------------------------
+# All RustCrypto, all composed rather than reimplemented, which is the line
+# ADR-0011 draws. Pinned at the workspace so one version of each primitive is
+# in the tree -- two versions of an AEAD is two implementations to trust.
+argon2 = "0.5"
+chacha20poly1305 = "0.10"
+aes-gcm = "0.10"
+getrandom = "0.3"
+zeroize = { version = "1", features = ["zeroize_derive"] }
