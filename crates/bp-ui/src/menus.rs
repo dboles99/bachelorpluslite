@@ -863,6 +863,47 @@ mod tests {
     }
 
     #[test]
+    fn a_full_clipboard_history_makes_the_edit_menu_taller_than_any_window() {
+        // The Edit menu's height is user data, not a constant: one row per
+        // clipboard entry plus up to three for the transformations it offers,
+        // and the line operations sit *after* that block. At capacity the menu
+        // wants more rows than a screen has.
+        //
+        // This is the reason `MenuPopup` caps its height and scrolls instead
+        // of binding to `content.preferred-height`. Without the cap the rows
+        // that fall off the bottom are simply unreachable, and observed on a
+        // 719px window, five copied clips were already enough to hide every
+        // row below them.
+        let clips: Vec<bp_clipboard::Entry> = (0..bp_clipboard::MAX_ENTRIES)
+            .map(|i| bp_clipboard::Entry::new(&format!("first line {i}\nsecond line {i}")))
+            .collect();
+        let items = edit(&clips, true);
+
+        // A row is 28px. Against the 680px client area the window starts with,
+        // and menus opening 28px down, about 23 rows is all that fits.
+        assert!(
+            items.len() > 60,
+            "a full history should ask for far more rows than a window can \
+             show, so that the cap is doing something; got {}",
+            items.len()
+        );
+        // The rows most worth reaching are the ones furthest down, and five of
+        // these have no keyboard shortcut at all.
+        for action in [
+            action::LINES_SORT_ASC,
+            action::LINES_DEDUPE,
+            action::LINES_TRIM,
+            action::MOVE_LINE_DOWN,
+        ] {
+            assert!(
+                items.iter().any(|i| i.action == action),
+                "action {action} must still be in the menu -- scrolling is \
+                 what puts it back in reach"
+            );
+        }
+    }
+
+    #[test]
     fn an_entry_with_only_rejected_transforms_offers_no_transform_row() {
         // A path with no backslashes: `transforms_for(Path)` offers only
         // `ForwardSlashes`, and `apply` refuses because nothing would

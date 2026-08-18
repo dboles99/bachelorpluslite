@@ -539,9 +539,18 @@ export component AppWindow inherits Window {
     // Popups sit outside the layout so they can position freely. `x` tracks
     // the label plus the menu bar's 4px padding, which is the only horizontal
     // offset between the label's layout parent and the window.
+    //
+    // `menu-max-height` has to follow the window rather than be a constant:
+    // the menus open 28px down, and the Edit menu's length is however much the
+    // user has copied. The 12px keeps the last row clear of the bottom edge so
+    // it reads as a menu that ends rather than one that is cut off, and the
+    // floor stops a very short window producing a menu with no rows in it.
+    property <length> menu-max-height: max(160px, root.height - 28px - 12px);
+
     file-menu := MenuPopup {
         x: file-label.x + 4px;
         y: 28px;
+        menu-max-height: root.menu-max-height;
         items: root.file-items;
         chosen(a) => {
             root.dispatch(a);
@@ -550,6 +559,7 @@ export component AppWindow inherits Window {
     edit-menu := MenuPopup {
         x: edit-label.x + 4px;
         y: 28px;
+        menu-max-height: root.menu-max-height;
         items: root.edit-items;
         chosen(a) => {
             root.dispatch(a);
@@ -558,6 +568,7 @@ export component AppWindow inherits Window {
     view-menu := MenuPopup {
         x: view-label.x + 4px;
         y: 28px;
+        menu-max-height: root.menu-max-height;
         items: root.view-items;
         chosen(a) => {
             root.dispatch(a);
@@ -566,6 +577,7 @@ export component AppWindow inherits Window {
     insert-menu := MenuPopup {
         x: insert-label.x + 4px;
         y: 28px;
+        menu-max-height: root.menu-max-height;
         items: root.insert-items;
         chosen(a) => {
             root.dispatch(a);
@@ -574,6 +586,7 @@ export component AppWindow inherits Window {
     format-menu := MenuPopup {
         x: format-label2.x + 4px;
         y: 28px;
+        menu-max-height: root.menu-max-height;
         items: root.format-items;
         chosen(a) => {
             root.dispatch(a);
@@ -582,6 +595,7 @@ export component AppWindow inherits Window {
     data-menu := MenuPopup {
         x: data-label.x + 4px;
         y: 28px;
+        menu-max-height: root.menu-max-height;
         items: root.data-items;
         chosen(a) => {
             root.dispatch(a);
@@ -590,6 +604,7 @@ export component AppWindow inherits Window {
     note-menu := MenuPopup {
         x: note-label.x + 4px;
         y: 28px;
+        menu-max-height: root.menu-max-height;
         items: root.note-items;
         chosen(a) => {
             root.dispatch(a);
@@ -598,6 +613,7 @@ export component AppWindow inherits Window {
     notebook-menu := MenuPopup {
         x: notebook-label.x + 4px;
         y: 28px;
+        menu-max-height: root.menu-max-height;
         items: root.notebook-items;
         chosen(a) => {
             root.dispatch(a);
@@ -606,6 +622,7 @@ export component AppWindow inherits Window {
     organize-menu := MenuPopup {
         x: organize-label.x + 4px;
         y: 28px;
+        menu-max-height: root.menu-max-height;
         items: root.organize-items;
         chosen(a) => {
             root.dispatch(a);
@@ -614,6 +631,7 @@ export component AppWindow inherits Window {
     research-menu := MenuPopup {
         x: research-label.x + 4px;
         y: 28px;
+        menu-max-height: root.menu-max-height;
         items: root.research-items;
         chosen(a) => {
             root.dispatch(a);
@@ -622,6 +640,7 @@ export component AppWindow inherits Window {
     run-menu := MenuPopup {
         x: run-label.x + 4px;
         y: 28px;
+        menu-max-height: root.menu-max-height;
         items: root.run-items;
         chosen(a) => {
             root.dispatch(a);
@@ -630,6 +649,7 @@ export component AppWindow inherits Window {
     security-menu := MenuPopup {
         x: security-label.x + 4px;
         y: 28px;
+        menu-max-height: root.menu-max-height;
         items: root.security-items;
         chosen(a) => {
             root.dispatch(a);
@@ -638,6 +658,7 @@ export component AppWindow inherits Window {
     tools-menu := MenuPopup {
         x: tools-label.x + 4px;
         y: 28px;
+        menu-max-height: root.menu-max-height;
         items: root.tools-items;
         chosen(a) => {
             root.dispatch(a);
@@ -646,6 +667,7 @@ export component AppWindow inherits Window {
     help-menu := MenuPopup {
         x: help-label.x + 4px;
         y: 28px;
+        menu-max-height: root.menu-max-height;
         items: root.help-items;
         chosen(a) => {
             root.dispatch(a);
