@@ -10,6 +10,7 @@
 //! names the phase it arrives in, so the UI doubles as the roadmap.
 
 use bp_core::{Encoding, LineEnding};
+use bp_editor::Indent;
 use bp_formats::Format;
 use bp_theme::ThemeId;
 
@@ -26,11 +27,32 @@ pub mod action {
     pub const SAVE_ALL: i32 = 5;
     pub const RELOAD: i32 = 6;
     pub const CLOSE_TAB: i32 = 7;
+    /// Write a copy elsewhere without adopting it. In the File block because
+    /// that is where the user looks for it, not because it shares any code
+    /// with Save As -- it deliberately shares none.
+    pub const SAVE_COPY: i32 = 8;
+    /// Tab context menu. `CLOSE_TAB` closes the active tab; these act on the
+    /// tab that was right-clicked, which the shell puts in `AppState` before
+    /// dispatching, so the ids stay position-free.
+    pub const CLOSE_OTHER_TABS: i32 = 9;
+    pub const CLOSE_ALL_TABS: i32 = 10;
+    pub const COPY_TAB_PATH: i32 = 11;
+
+    /// Insert ▸ Date / Time, one per `bp_naming::Stamp::all()`, in that
+    /// order. A base plus an offset rather than five constants, so the menu
+    /// and the dispatch cannot disagree about which row is which -- the same
+    /// shape as `RECENT_BASE`, and bounded by [`super::stamp_end`] for the
+    /// same reason.
+    pub const STAMP_BASE: i32 = 12;
 
     pub const THEME_LIGHT: i32 = 20;
     pub const THEME_DARK: i32 = 21;
     pub const THEME_ORGANIC: i32 = 22;
     pub const THEME_GREEN: i32 = 23;
+    /// Follow the desktop's light/dark preference (specs §16). Resolves to
+    /// one of the four palettes above rather than adding a fifth -- ADR-0009
+    /// makes themes data, and a theme nobody can override would not be.
+    pub const THEME_SYSTEM: i32 = 24;
 
     pub const TOGGLE_GUTTER: i32 = 30;
     pub const TOGGLE_WRAP: i32 = 31;
@@ -49,6 +71,14 @@ pub mod action {
     pub const LINE_ENDING_CRLF: i32 = 41;
     pub const ENCODING_UTF8: i32 = 42;
     pub const ENCODING_UTF8_BOM: i32 = 43;
+
+    /// Indentation, in the Format block: it is a property of the text, like
+    /// the line ending and the encoding beside it. 48 and 49 are free.
+    pub const INDENT_TABS: i32 = 44;
+    pub const INDENT_SPACES: i32 = 45;
+    pub const TAB_WIDTH_2: i32 = 46;
+    pub const TAB_WIDTH_4: i32 = 47;
+    pub const TAB_WIDTH_8: i32 = 48;
 
     pub const SHORTCUTS: i32 = 50;
     pub const ABOUT: i32 = 51;
@@ -81,6 +111,12 @@ pub mod action {
     pub const NOTE_SUMMARY: i32 = 82;
     pub const NOTE_KEYWORDS: i32 = 83;
     pub const NOTE_OUTLINE: i32 = 84;
+    /// Document statistics -- `bp_semantic::statistics`, so it sits with the
+    /// rest of that crate's rows. 86-89 are free.
+    pub const DOCUMENT_STATS: i32 = 85;
+    /// Go to Line. Opens the bar; the line number arrives as text, not as an
+    /// id, so one action is enough for the whole feature.
+    pub const GO_TO_LINE: i32 = 86;
 
     /// Line operations that need no caret: a whole-document replace, like a
     /// data operation.
@@ -198,6 +234,14 @@ pub(crate) fn clip_end() -> i32 {
     action::CLIP_BASE + i32::try_from(bp_clipboard::MAX_ENTRIES).unwrap_or(0)
 }
 
+/// One past the last id `STAMP_BASE` can produce.
+///
+/// Sized from `Stamp::all()` rather than written down, so adding a sixth
+/// stamp cannot leave the dispatch matching five and silently ignoring it.
+pub(crate) fn stamp_end() -> i32 {
+    action::STAMP_BASE + i32::try_from(bp_naming::Stamp::all().len()).unwrap_or(0)
+}
+
 /// One past the last paste-transformation id.
 pub(crate) fn clip_transform_end() -> i32 {
     action::CLIP_TRANSFORM_BASE
@@ -308,6 +352,10 @@ pub fn file(any_dirty: bool, has_path: bool, recent: &[std::path::PathBuf]) -> V
             enabled: has_path,
             ..row_end("Reload from Disk", "", action::RELOAD)
         },
+        MenuItem {
+            separator_after: true,
+            ..row("Save a Copy...", "", action::SAVE_COPY)
+        },
         row("Close Tab", "Ctrl+W", action::CLOSE_TAB),
     ]);
     items
@@ -397,20 +445,37 @@ pub fn edit(clips: &[bp_clipboard::Entry], editor_view: bool) -> Vec<MenuItem> {
             enabled: editor_view,
             ..row_end("Move Line Down", "Alt+Down", action::MOVE_LINE_DOWN)
         },
+        // Caret work as well -- `Editor::go_to_line` moves the caret we own,
+        // and `TextInput`'s cannot be moved from here.
+        MenuItem {
+            enabled: editor_view,
+            ..row_end("Go to Line...", "Ctrl+G", action::GO_TO_LINE)
+        },
         planned("Multi-cursor"),
         arrives("phase 2"),
     ]);
     items
 }
 
-pub fn view(theme: ThemeId, gutter: bool, wrap: bool, font_size: u8) -> Vec<MenuItem> {
+pub fn view(
+    theme: ThemeId,
+    follow_system: bool,
+    gutter: bool,
+    wrap: bool,
+    font_size: u8,
+) -> Vec<MenuItem> {
+    // The four names tick only when they were chosen by name. Following the
+    // system resolves to one of them, so ticking both would say the user
+    // picked Dark when what they picked was "whatever the desktop is".
+    let chosen = |id: ThemeId| !follow_system && theme == id;
     vec![
-        toggle("Light", theme == ThemeId::Light, action::THEME_LIGHT),
-        toggle("Dark", theme == ThemeId::Dark, action::THEME_DARK),
-        toggle("Organic", theme == ThemeId::Organic, action::THEME_ORGANIC),
+        toggle("Light", chosen(ThemeId::Light), action::THEME_LIGHT),
+        toggle("Dark", chosen(ThemeId::Dark), action::THEME_DARK),
+        toggle("Organic", chosen(ThemeId::Organic), action::THEME_ORGANIC),
+        toggle("Green", chosen(ThemeId::Green), action::THEME_GREEN),
         MenuItem {
             separator_after: true,
-            ..toggle("Green", theme == ThemeId::Green, action::THEME_GREEN)
+            ..toggle("Follow System", follow_system, action::THEME_SYSTEM)
         },
         toggle("Line Numbers", gutter, action::TOGGLE_GUTTER),
         MenuItem {
@@ -448,7 +513,7 @@ pub fn view(theme: ThemeId, gutter: bool, wrap: bool, font_size: u8) -> Vec<Menu
     ]
 }
 
-pub fn format(encoding: Encoding, line_ending: LineEnding) -> Vec<MenuItem> {
+pub fn format(encoding: Encoding, line_ending: LineEnding, indent: Indent) -> Vec<MenuItem> {
     vec![
         toggle("LF", line_ending == LineEnding::Lf, action::LINE_ENDING_LF),
         MenuItem {
@@ -468,9 +533,76 @@ pub fn format(encoding: Encoding, line_ending: LineEnding) -> Vec<MenuItem> {
                 action::ENCODING_UTF8_BOM,
             )
         },
-        planned("Indentation"),
+        toggle("Indent with Tabs", !indent.spaces, action::INDENT_TABS),
+        MenuItem {
+            separator_after: true,
+            ..toggle("Indent with Spaces", indent.spaces, action::INDENT_SPACES)
+        },
+        toggle("Tab Width 2", indent.width == 2, action::TAB_WIDTH_2),
+        toggle("Tab Width 4", indent.width == 4, action::TAB_WIDTH_4),
+        MenuItem {
+            separator_after: true,
+            ..toggle("Tab Width 8", indent.width == 8, action::TAB_WIDTH_8)
+        },
         arrives("phase 5"),
     ]
+}
+
+/// The tab strip's context menu.
+///
+/// `others` is how many other tabs are open and `has_path` whether the
+/// right-clicked document has ever been saved -- both are why a row is live
+/// or grey, and neither is knowable from the id alone.
+pub fn tab_context(others: usize, has_path: bool) -> Vec<MenuItem> {
+    vec![
+        row("Close Tab", "Ctrl+W", action::CLOSE_TAB),
+        MenuItem {
+            enabled: others > 0,
+            ..row("Close Other Tabs", "", action::CLOSE_OTHER_TABS)
+        },
+        MenuItem {
+            separator_after: true,
+            ..row("Close All Tabs", "", action::CLOSE_ALL_TABS)
+        },
+        MenuItem {
+            // An unsaved document has no path to copy, and copying the
+            // display name instead would put "Untitled" on the clipboard,
+            // which is worse than the row being visibly unavailable.
+            enabled: has_path,
+            ..row("Copy Full Path", "", action::COPY_TAB_PATH)
+        },
+    ]
+}
+
+/// Insert ▸ Date / Time.
+///
+/// The rows and their order come from `Stamp::all()`, and the preview text
+/// from `render` at the instant the menu was built -- so what the row says is
+/// exactly what clicking it inserts, rather than a description of it.
+///
+/// Caret rows, like Duplicate Line: inserting at the caret needs a caret, and
+/// `TextInput` does not expose one (ADR-0018).
+pub fn insert(at: time::OffsetDateTime, editor_view: bool) -> Vec<MenuItem> {
+    let mut items: Vec<MenuItem> = bp_naming::Stamp::all()
+        .iter()
+        .enumerate()
+        .map(|(index, stamp)| MenuItem {
+            enabled: editor_view,
+            ..row(
+                stamp.label(),
+                &shorten(&bp_naming::render(*stamp, at), 24),
+                action::STAMP_BASE + i32::try_from(index).unwrap_or(0),
+            )
+        })
+        .collect();
+    if let Some(last) = items.last_mut() {
+        last.separator_after = true;
+    }
+    items.extend([
+        planned("Markdown constructs, citation, code block, table"),
+        arrives("phase 6"),
+    ]);
+    items
 }
 
 /// The Data menu, which depends entirely on what the document is.
@@ -541,6 +673,10 @@ pub fn note(has_content: bool) -> Vec<MenuItem> {
             enabled: has_content,
             ..row_end("Outline", "", action::NOTE_OUTLINE)
         },
+        // Not gated on `has_content`: "0 words" is a legitimate answer to
+        // "how long is this", and an empty document is exactly when someone
+        // might check they are looking at the right tab.
+        row_end("Document Statistics", "", action::DOCUMENT_STATS),
         planned("Tags"),
         planned("Related Notes"),
         planned("Revision History"),
@@ -660,6 +796,93 @@ pub fn planned_menu(name: &str) -> Vec<MenuItem> {
 mod tests {
     use super::*;
 
+    /// A fixed instant, so a stamp preview is the same on every run and in
+    /// every timezone. `bp-naming` never reads a clock, which is what makes
+    /// pinning one here enough.
+    const STAMP_CLOCK: time::OffsetDateTime = time::macros::datetime!(2026-08-19 14:05:09 UTC);
+
+    #[test]
+    fn every_stamp_row_is_inside_the_range_dispatch_matches() {
+        // `stamp_end` is sized from `Stamp::all()`, so a sixth stamp extends
+        // the window with the menu. This fails if the two ever part company.
+        let items = insert(STAMP_CLOCK, true);
+        let rows: Vec<&MenuItem> = items.iter().filter(|i| i.action != action::NONE).collect();
+
+        assert_eq!(rows.len(), bp_naming::Stamp::all().len());
+        for (index, row) in rows.iter().enumerate() {
+            let expected = action::STAMP_BASE + i32::try_from(index).unwrap();
+            assert_eq!(row.action, expected, "row {index} has the wrong id");
+            assert!(
+                (action::STAMP_BASE..stamp_end()).contains(&row.action),
+                "id {} is outside the window dispatch matches",
+                row.action
+            );
+        }
+    }
+
+    #[test]
+    fn a_stamp_row_shows_what_it_will_actually_insert() {
+        // The label names the format; the hint is the format applied to the
+        // clock. A row reading "ISO 8601" tells you nothing about whether it
+        // is the one you want.
+        let items = insert(STAMP_CLOCK, true);
+        let iso = items
+            .iter()
+            .find(|i| i.label.contains("ISO"))
+            .expect("an ISO 8601 row");
+        assert!(
+            iso.shortcut.contains("2026-08-19"),
+            "the hint should be the rendered stamp; got {:?}",
+            iso.shortcut
+        );
+    }
+
+    #[test]
+    fn the_stamp_rows_are_disabled_without_the_custom_editor_view() {
+        // Inserting at the caret needs a caret. `TextInput` does not expose
+        // one, so the rows grey rather than silently doing nothing.
+        for row in insert(STAMP_CLOCK, false)
+            .iter()
+            .filter(|i| i.action != action::NONE)
+        {
+            assert!(!row.enabled, "'{}' should be greyed", row.label);
+        }
+        assert!(
+            insert(STAMP_CLOCK, true)
+                .iter()
+                .filter(|i| i.action != action::NONE)
+                .all(|i| i.enabled)
+        );
+    }
+
+    #[test]
+    fn close_other_tabs_is_unavailable_when_there_are_no_others() {
+        let alone = tab_context(0, true);
+        assert!(
+            alone
+                .iter()
+                .find(|i| i.action == action::CLOSE_OTHER_TABS)
+                .is_some_and(|i| !i.enabled)
+        );
+        assert!(
+            tab_context(3, true)
+                .iter()
+                .find(|i| i.action == action::CLOSE_OTHER_TABS)
+                .is_some_and(|i| i.enabled)
+        );
+    }
+
+    #[test]
+    fn copy_full_path_greys_out_when_there_is_no_path() {
+        assert!(
+            tab_context(1, false)
+                .iter()
+                .find(|i| i.action == action::COPY_TAB_PATH)
+                .is_some_and(|i| !i.enabled),
+            "copying 'Untitled' is worse than an unavailable row"
+        );
+    }
+
     #[test]
     fn save_all_is_disabled_when_nothing_is_unsaved() {
         let items = file(false, true, &[]);
@@ -686,7 +909,13 @@ mod tests {
 
     #[test]
     fn the_active_theme_is_ticked_and_only_it() {
-        let items = view(ThemeId::Green, true, false, bp_config::DEFAULT_FONT_SIZE);
+        let items = view(
+            ThemeId::Green,
+            false,
+            true,
+            false,
+            bp_config::DEFAULT_FONT_SIZE,
+        );
         let ticked: Vec<_> = items
             .iter()
             .filter(|i| {
@@ -700,7 +929,7 @@ mod tests {
 
     #[test]
     fn the_zoom_rows_grey_out_at_the_bound_they_cannot_pass() {
-        let at_max = view(ThemeId::Dark, true, false, bp_config::MAX_FONT_SIZE);
+        let at_max = view(ThemeId::Dark, false, true, false, bp_config::MAX_FONT_SIZE);
         let zoom_in = at_max
             .iter()
             .find(|i| i.action == action::ZOOM_IN)
@@ -719,7 +948,7 @@ mod tests {
             "Zoom Out is still available at the largest size"
         );
 
-        let at_min = view(ThemeId::Dark, true, false, bp_config::MIN_FONT_SIZE);
+        let at_min = view(ThemeId::Dark, false, true, false, bp_config::MIN_FONT_SIZE);
         assert!(
             at_min
                 .iter()
@@ -736,14 +965,26 @@ mod tests {
 
     #[test]
     fn reset_zoom_is_inert_at_the_size_it_would_reset_to() {
-        let items = view(ThemeId::Dark, true, false, bp_config::DEFAULT_FONT_SIZE);
+        let items = view(
+            ThemeId::Dark,
+            false,
+            true,
+            false,
+            bp_config::DEFAULT_FONT_SIZE,
+        );
         let reset = items
             .iter()
             .find(|i| i.action == action::ZOOM_RESET)
             .expect("Reset Zoom row");
         assert!(!reset.enabled, "already at the default");
 
-        let zoomed = view(ThemeId::Dark, true, false, bp_config::DEFAULT_FONT_SIZE + 2);
+        let zoomed = view(
+            ThemeId::Dark,
+            false,
+            true,
+            false,
+            bp_config::DEFAULT_FONT_SIZE + 2,
+        );
         assert!(
             zoomed
                 .iter()
@@ -756,7 +997,7 @@ mod tests {
     fn the_reset_row_names_the_size_currently_in_force() {
         // The question a zoom menu is opened to answer. A row reading "Reset
         // Zoom" alone leaves the user no way to tell 13 pt from 15 pt.
-        let items = view(ThemeId::Dark, true, false, 22);
+        let items = view(ThemeId::Dark, false, true, false, 22);
         let reset = items
             .iter()
             .find(|i| i.action == action::ZOOM_RESET)
@@ -770,14 +1011,26 @@ mod tests {
 
     #[test]
     fn view_toggles_reflect_their_state() {
-        let on = view(ThemeId::Dark, true, true, bp_config::DEFAULT_FONT_SIZE);
+        let on = view(
+            ThemeId::Dark,
+            false,
+            true,
+            true,
+            bp_config::DEFAULT_FONT_SIZE,
+        );
         let gutter = on
             .iter()
             .find(|i| i.action == action::TOGGLE_GUTTER)
             .unwrap();
         assert!(gutter.label.starts_with('✓'));
 
-        let off = view(ThemeId::Dark, false, false, bp_config::DEFAULT_FONT_SIZE);
+        let off = view(
+            ThemeId::Dark,
+            false,
+            false,
+            false,
+            bp_config::DEFAULT_FONT_SIZE,
+        );
         let gutter = off
             .iter()
             .find(|i| i.action == action::TOGGLE_GUTTER)
@@ -787,15 +1040,67 @@ mod tests {
 
     #[test]
     fn format_ticks_the_documents_actual_settings() {
-        let items = format(Encoding::Utf8Bom, LineEnding::CrLf);
+        let items = format(Encoding::Utf8Bom, LineEnding::CrLf, Indent::default());
         let ticked: Vec<&str> = items
             .iter()
             .filter(|i| i.label.starts_with('✓'))
             .map(|i| i.label.as_str())
             .collect();
-        assert_eq!(ticked.len(), 2, "one line ending and one encoding");
+        assert_eq!(
+            ticked.len(),
+            4,
+            "one line ending, one encoding, one indent mode and one tab width \
+             -- exactly one from each group, or the menu is claiming the \
+             document is two things at once; got {ticked:?}"
+        );
         assert!(ticked.iter().any(|l| l.contains("CRLF")));
         assert!(ticked.iter().any(|l| l.contains("BOM")));
+        assert!(ticked.iter().any(|l| l.contains("Tabs")));
+        assert!(ticked.iter().any(|l| l.contains("Width 4")));
+    }
+
+    #[test]
+    fn the_indent_rows_tick_exactly_one_mode_and_one_width() {
+        // The two groups are independent -- a width applies to tabs as well
+        // as to spaces -- so switching mode must not disturb the width.
+        let soft = format(
+            Encoding::Utf8,
+            LineEnding::Lf,
+            Indent {
+                spaces: true,
+                width: 8,
+            },
+        );
+        let ticked: Vec<&str> = soft
+            .iter()
+            .filter(|i| i.label.starts_with('✓'))
+            .map(|i| i.label.as_str())
+            .collect();
+        assert!(ticked.iter().any(|l| l.contains("Spaces")));
+        assert!(!ticked.iter().any(|l| l.contains("Tabs")));
+        assert!(ticked.iter().any(|l| l.contains("Width 8")));
+        assert!(!ticked.iter().any(|l| l.contains("Width 4")));
+    }
+
+    #[test]
+    fn an_indent_width_that_is_not_offered_ticks_no_width_row() {
+        // `--tab-width=3` is legitimate config; the menu offers 2, 4 and 8.
+        // Ticking the nearest would tell the user their setting is something
+        // it is not.
+        let items = format(
+            Encoding::Utf8,
+            LineEnding::Lf,
+            Indent {
+                spaces: false,
+                width: 3,
+            },
+        );
+        assert!(
+            !items
+                .iter()
+                .any(|i| i.label.starts_with('✓') && i.label.contains("Width")),
+            "no width row should claim to be a width of 3"
+        );
     }
 
     #[test]
@@ -830,11 +1135,12 @@ mod tests {
         all.extend(edit(&[], true));
         all.extend(view(
             ThemeId::Organic,
+            false,
             true,
             false,
             bp_config::DEFAULT_FONT_SIZE,
         ));
-        all.extend(format(Encoding::Utf8, LineEnding::Lf));
+        all.extend(format(Encoding::Utf8, LineEnding::Lf, Indent::default()));
         all.extend(data(Format::Csv));
         all.extend(help());
 
@@ -920,15 +1226,18 @@ mod tests {
         rust_side.extend(file(true, true, &[std::path::PathBuf::from("/a.txt")]));
         rust_side.extend(view(
             ThemeId::Green,
+            false,
             true,
             false,
             bp_config::DEFAULT_FONT_SIZE,
         ));
-        rust_side.extend(format(Encoding::Utf8, LineEnding::Lf));
+        rust_side.extend(format(Encoding::Utf8, LineEnding::Lf, Indent::default()));
         rust_side.extend(note(true));
         rust_side.extend(data(Format::Json));
         rust_side.extend(data(Format::Csv));
         rust_side.extend(help());
+        rust_side.extend(insert(STAMP_CLOCK, true));
+        rust_side.extend(tab_context(2, true));
 
         for item in rust_side.iter().filter(|i| i.enabled) {
             assert!(

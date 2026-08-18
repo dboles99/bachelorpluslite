@@ -8,12 +8,16 @@ use std::rc::Rc;
 use crate::state::AppState;
 use crate::{AppWindow, EditorRow, SelectionBox};
 
-/// Tab stops the surface draws with. Four, matching this repository's Rust.
+/// Tab stops the surface draws with, as the shell currently has them set.
 ///
-/// A constant rather than a setting for now: it has to be the same number on
-/// both sides of the boundary, and one place to change it is better than a
-/// setting nothing reads yet.
-pub(crate) const TAB_WIDTH: usize = 4;
+/// Read from `AppState` rather than a constant, because the same number has
+/// to serve three purposes that must never disagree: how wide a tab is drawn,
+/// how a click resolves to a character, and how far a soft tab reaches. A
+/// drawing width that differed from the click arithmetic would put the caret
+/// somewhere other than where the pointer was, on tab-indented lines only.
+fn tab_width(state: &AppState) -> usize {
+    state.indent.width.max(1)
+}
 
 pub(crate) fn clamp_i32(value: usize) -> i32 {
     i32::try_from(value).unwrap_or(i32::MAX)
@@ -77,6 +81,7 @@ pub(crate) enum ClickSelection {
 /// already placed the caret through the other one.
 pub(crate) fn select_at_cell(state: &mut AppState, row: i32, column: i32, what: ClickSelection) {
     let first = state.first_line;
+    let width = tab_width(state);
     let Some(editor) = state.active_editor_mut() else {
         return;
     };
@@ -85,7 +90,7 @@ pub(crate) fn select_at_cell(state: &mut AppState, row: i32, column: i32, what: 
         first,
         usize::try_from(row).unwrap_or(0),
         usize::try_from(column).unwrap_or(0),
-        TAB_WIDTH,
+        width,
     );
     match what {
         ClickSelection::Word => editor.select_word_at(offset),
@@ -96,6 +101,7 @@ pub(crate) fn select_at_cell(state: &mut AppState, row: i32, column: i32, what: 
 /// Move the caret to a clicked cell, extending the selection if asked.
 pub(crate) fn place_caret(state: &mut AppState, row: i32, column: i32, extend: bool) {
     let first = state.first_line;
+    let width = tab_width(state);
     let Some(editor) = state.active_editor_mut() else {
         return;
     };
@@ -104,7 +110,7 @@ pub(crate) fn place_caret(state: &mut AppState, row: i32, column: i32, extend: b
         first,
         usize::try_from(row).unwrap_or(0),
         usize::try_from(column).unwrap_or(0),
-        TAB_WIDTH,
+        width,
     );
 
     if extend {
@@ -140,6 +146,7 @@ pub(crate) fn push_editor_view(ui: &AppWindow, state: &mut AppState) {
 pub(crate) fn draw_editor_view(ui: &AppWindow, state: &AppState) {
     let rows = state.visible_rows.max(1);
     let first = state.first_line;
+    let width = tab_width(state);
     let Some(editor) = state.active_editor() else {
         return;
     };
@@ -161,7 +168,7 @@ pub(crate) fn draw_editor_view(ui: &AppWindow, state: &AppState) {
                 buffer,
                 &range,
                 bp_editor::view::Metrics {
-                    tab_width: TAB_WIDTH,
+                    tab_width: width,
                     ..bp_editor::view::Metrics::default()
                 },
                 first,
@@ -178,7 +185,7 @@ pub(crate) fn draw_editor_view(ui: &AppWindow, state: &AppState) {
         .collect();
     ui.set_editor_selection(Rc::new(slint::VecModel::from(boxes)).into());
 
-    let (row, column) = bp_editor::view::caret_cell(buffer, first, editor.cursor(), TAB_WIDTH);
+    let (row, column) = bp_editor::view::caret_cell(buffer, first, editor.cursor(), width);
     // A row outside the viewport is reported as -1 rather than drawn off the
     // edge, which is what the surface checks before showing the caret.
     let visible_row = usize::try_from(row)
@@ -195,6 +202,16 @@ pub(crate) fn draw_editor_view(ui: &AppWindow, state: &AppState) {
 /// OS clipboard is the shell's business, and a crate tested without a window
 /// has no way to reach one.
 pub(crate) fn apply_editor_command(state: &mut AppState, command: &bp_editor::Command) -> bool {
+    // Told here rather than when the editor was created, because the setting
+    // can change while documents are open and every one of them has to follow
+    // it. One assignment of a `Copy` struct on the typing path is cheaper
+    // than a bookkeeping pass over the map each time the setting moves, and
+    // it cannot fall out of step.
+    let indent = state.indent;
+    if let Some(editor) = state.active_editor_mut() {
+        editor.set_indent(indent);
+    }
+
     match command {
         bp_editor::Command::Ignore => false,
 
@@ -342,10 +359,10 @@ mod tests {
         state.editor_view = true;
         state.edit("\tindented word\nsecond".to_owned());
 
-        // A tab is TAB_WIDTH columns wide on screen but one character in the
-        // document, so this cell is only reachable correctly through the
+        // A tab is `tab_width` columns wide on screen but one character in
+        // the document, so this cell is only reachable correctly through the
         // shared resolution.
-        let column = i32::try_from(TAB_WIDTH).unwrap() + 2;
+        let column = i32::try_from(tab_width(&state)).unwrap() + 2;
         place_caret(&mut state, 0, column, false);
         let caret = state.active_editor().unwrap().cursor();
 

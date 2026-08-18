@@ -111,6 +111,54 @@ pub struct Editor {
     /// wrong place: the caret would take the short line's column with it and
     /// never recover the one the user started from.
     goal_column: Option<usize>,
+    indent: Indent,
+}
+
+/// What the Tab key puts in the document.
+///
+/// A tab is one character but several columns wide, so these two fields are
+/// not the same setting wearing different hats: `width` decides how far a
+/// literal tab reaches *and* how far a soft tab goes, which is why both
+/// modes need it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Indent {
+    /// Insert spaces rather than a tab character.
+    pub spaces: bool,
+    /// Columns per indent level.
+    pub width: usize,
+}
+
+impl Default for Indent {
+    /// Tabs, four columns wide -- what the editor did before the setting
+    /// existed, so a document typed today is byte-identical to one typed
+    /// before it.
+    fn default() -> Self {
+        Self {
+            spaces: false,
+            width: 4,
+        }
+    }
+}
+
+impl Indent {
+    /// The text a Tab inserts with the caret at `visual_column` (0-based).
+    ///
+    /// A soft tab goes to the *next stop*, not a fixed number of spaces. At
+    /// column 3 with width 4 that is one space, and typing Tab twice from
+    /// column 0 gives eight -- which is what makes soft tabs line up in a
+    /// column at all. A fixed `width` spaces would drift by whatever the
+    /// caret already sat at.
+    #[must_use]
+    pub fn text_at(self, visual_column: usize) -> String {
+        // Guarding here rather than trusting the field: `width` is public and
+        // a zero would make the remainder below a division by zero.
+        let width = self.width.max(1);
+        if self.spaces {
+            " ".repeat(width - visual_column % width)
+        } else {
+            "\t".to_owned()
+        }
+    }
 }
 
 impl Default for Editor {
@@ -129,7 +177,20 @@ impl Editor {
             redo: Vec::new(),
             coalesce: Coalesce::Closed,
             goal_column: None,
+            indent: Indent::default(),
         }
+    }
+
+    /// How the Tab key should indent from now on.
+    ///
+    /// Per editor rather than global, because it follows the document: the
+    /// setting is what the *shell* holds, and each document's editor is told.
+    pub fn set_indent(&mut self, indent: Indent) {
+        self.indent = indent;
+    }
+
+    pub const fn indent(&self) -> Indent {
+        self.indent
     }
 
     pub fn buffer(&self) -> &Buffer {
@@ -840,6 +901,23 @@ impl Editor {
         match command {
             Command::Insert(text) => {
                 self.insert(text);
+                true
+            }
+            Command::Indent => {
+                // Measured from the selection's near edge, not the caret. A
+                // Tab with text selected replaces it, so the indent lands
+                // where the selection started -- taking the column from the
+                // caret would compute the stop from where the text being
+                // replaced *ended*.
+                let at = self.selection().map_or(self.cursor, |range| range.start);
+                let position = self.buffer.position_of(at);
+                let line = self.buffer.line(position.line - 1);
+                let column = crate::view::visual_column(
+                    line.trim_end_matches(['\n', '\r']),
+                    position.column - 1,
+                    self.indent.width,
+                );
+                self.insert(&self.indent.text_at(column));
                 true
             }
             Command::DeleteBackward => {
@@ -1883,5 +1961,119 @@ mod tests {
         e.select_line_at(0);
         assert_eq!(e.selection(), Some(0..5));
         assert_eq!(e.buffer().slice(0..5), "one\r\n");
+    }
+
+    // --- indentation --------------------------------------------------
+
+    #[test]
+    fn tabs_are_the_default_so_a_document_typed_today_matches_one_typed_before() {
+        let mut e = Editor::new("");
+        assert!(e.apply(&Command::Indent));
+        assert_eq!(e.text(), "\t");
+    }
+
+    #[test]
+    fn a_soft_tab_reaches_the_next_stop_rather_than_inserting_a_fixed_width() {
+        // The whole point of soft tabs: two presses from column 0 land on
+        // column 8, not "four spaces then four more from wherever we were".
+        let mut e = Editor::new("");
+        e.set_indent(Indent {
+            spaces: true,
+            width: 4,
+        });
+
+        e.insert("ab");
+        e.apply(&Command::Indent);
+        assert_eq!(e.text(), "ab  ", "column 2 needs two spaces to reach 4");
+
+        e.apply(&Command::Indent);
+        assert_eq!(e.text(), "ab      ", "and four more to reach 8");
+    }
+
+    #[test]
+    fn a_soft_tab_measures_from_columns_not_characters() {
+        // A literal tab already in the line is one character and `width`
+        // columns. Counting characters would put the next stop in the wrong
+        // place on every line that mixes the two.
+        let mut e = Editor::new("\tx");
+        e.set_indent(Indent {
+            spaces: true,
+            width: 4,
+        });
+        e.set_cursor(2); // after the tab and the x: visual column 5
+
+        e.apply(&Command::Indent);
+        assert_eq!(e.text(), "\tx   ", "column 5 needs three spaces to reach 8");
+    }
+
+    #[test]
+    fn indenting_over_a_selection_measures_from_where_the_selection_starts() {
+        // Tab replaces the selection, so the indent lands at its near edge.
+        // Measuring from the caret would compute the stop from where the
+        // replaced text ended and indent by the wrong amount.
+        let mut e = Editor::new("ab cdef");
+        e.set_indent(Indent {
+            spaces: true,
+            width: 4,
+        });
+        e.select(2, 7); // " cdef", starting at column 2
+
+        e.apply(&Command::Indent);
+        assert_eq!(e.text(), "ab  ");
+    }
+
+    #[test]
+    fn indenting_is_one_undo_step_like_any_other_insertion() {
+        let mut e = Editor::new("x");
+        e.set_indent(Indent {
+            spaces: true,
+            width: 8,
+        });
+        e.set_cursor(1);
+        e.apply(&Command::Indent);
+        let indented = e.text();
+        assert_eq!(indented, "x       ");
+
+        assert!(e.undo());
+        assert_eq!(e.text(), "x", "one press, one undo");
+    }
+
+    #[test]
+    fn a_zero_indent_width_does_not_divide_by_zero() {
+        // `Indent::width` is public, so a caller can hand over a zero.
+        let mut e = Editor::new("");
+        e.set_indent(Indent {
+            spaces: true,
+            width: 0,
+        });
+        e.apply(&Command::Indent);
+        assert_eq!(e.text(), " ");
+    }
+
+    #[test]
+    fn a_soft_tab_never_inserts_nothing_and_never_overshoots_the_stop() {
+        // The property: from any column, one press lands exactly on the next
+        // multiple of the width, and always inserts at least one space. An
+        // off-by-one in the remainder gives either a no-op press or a stop
+        // the caret sails past.
+        for width in 1..=8usize {
+            for column in 0..24usize {
+                let indent = Indent {
+                    spaces: true,
+                    width,
+                };
+                let inserted = indent.text_at(column).len();
+                assert!(inserted >= 1, "width {width}, column {column} did nothing");
+                assert_eq!(
+                    (column + inserted) % width,
+                    0,
+                    "width {width}, column {column} did not land on a stop"
+                );
+                assert!(
+                    inserted <= width,
+                    "width {width}, column {column} overshot by {inserted}"
+                );
+            }
+        }
     }
 }

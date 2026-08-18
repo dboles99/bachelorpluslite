@@ -78,6 +78,16 @@ pub struct AppState {
     /// How many lines fit in it. Slint measures and tells us.
     pub(crate) visible_rows: usize,
     pub(crate) theme: ThemeId,
+    /// Track the desktop's light/dark preference rather than staying put.
+    ///
+    /// A flag beside `theme` rather than a fifth `ThemeId`, because the theme
+    /// in force is always one of the four either way -- this only says where
+    /// it came from, and therefore whether a later preference change should
+    /// move it. ADR-0009 keeps themes as data; this is not one.
+    pub(crate) follow_system_theme: bool,
+    /// What the desktop last said, or `None` if it will not say. Slint
+    /// reports it; nothing here asks the platform directly.
+    pub(crate) system_dark: Option<bool>,
     pub(crate) error: Option<String>,
     /// Cached gutter text, and the line count it was built for.
     ///
@@ -90,6 +100,12 @@ pub struct AppState {
     gutter_lines: usize,
     pub(crate) show_gutter: bool,
     pub(crate) wrap_text: bool,
+    /// How the Tab key indents, and how wide a tab is drawn.
+    ///
+    /// One value serving both, because they are the same number seen from two
+    /// sides -- a document indented to eight columns and drawn at four does
+    /// not look wrong, it looks like a different document.
+    pub(crate) indent: bp_editor::Indent,
     /// Editor font size in points, and the only place it is decided.
     ///
     /// Held here rather than read back off the widget because both editor
@@ -109,7 +125,20 @@ pub struct AppState {
     pub(crate) matches: Vec<bp_search::Match>,
     match_index: usize,
     pub(crate) find_status: String,
+    /// What the go-to-line bar is reporting. Separate from `error`, which is
+    /// the status bar's: a bar with its own input owns its own message, or
+    /// "there are only 42 lines" would appear at the far end of the window
+    /// from the box it is about.
+    pub(crate) goto_status: String,
     pub(crate) journal: bp_history::Journal,
+    /// The tab the context menu was opened on.
+    ///
+    /// Held rather than passed with the click, because opening the menu and
+    /// choosing a row are two separate events -- by the time a row is
+    /// clicked the pointer has moved and the tab under it may be a different
+    /// one. `None` means the menu is not open, in which case the rows fall
+    /// back to the active tab.
+    pub(crate) tab_context: Option<DocumentId>,
     /// Cross-file search results, indexed by the row the user clicks.
     pub(crate) file_hits: Vec<bp_search::FileHit>,
     pub(crate) clips: bp_clipboard::History,
@@ -130,11 +159,14 @@ impl AppState {
             // a height; only Page Up before the first frame would see this.
             visible_rows: 30,
             theme: ThemeId::default(),
+            follow_system_theme: false,
+            system_dark: None,
             error: None,
             gutter: String::new(),
             gutter_lines: usize::MAX,
             show_gutter: true,
             wrap_text: false,
+            indent: bp_editor::Indent::default(),
             font_size: bp_config::DEFAULT_FONT_SIZE,
             stamps: HashMap::new(),
             recent: bp_config::load_recent(),
@@ -142,7 +174,9 @@ impl AppState {
             matches: Vec::new(),
             match_index: 0,
             find_status: String::new(),
+            goto_status: String::new(),
             journal: bp_history::Journal::new(recovery_dir()),
+            tab_context: None,
             file_hits: Vec::new(),
             clips: bp_clipboard::History::new(),
         }
@@ -706,6 +740,145 @@ impl AppState {
                 SaveResult::Failed
             }
         }
+    }
+
+    /// Write `id`'s current text to `target` without adopting it.
+    ///
+    /// Deliberately not a call into [`save_document`](Self::save_document)
+    /// with a path. A copy is a different operation that happens to write the
+    /// same bytes, and the three things it must *not* do are exactly the
+    /// three that one does: it must not move the document's path, must not
+    /// mark it clean, and must not touch the recent-files list or the disk
+    /// stamp. Sharing the code would mean sharing all four behaviours and
+    /// then subtracting three, which is how Save Copy quietly becomes
+    /// Save As.
+    ///
+    /// Only the encoding is shared, because bytes written differently from a
+    /// real save would make the copy a different file from the original.
+    pub(crate) fn save_copy(&mut self, id: DocumentId, target: &Path) -> SaveResult {
+        self.error = None;
+        let Some(doc) = self.workspace.get(id) else {
+            return SaveResult::Saved;
+        };
+
+        let bytes = match encode(&self.text_of(id), doc.encoding(), doc.line_ending()) {
+            Ok(b) => b,
+            Err(message) => {
+                self.error = Some(message);
+                return SaveResult::Failed;
+            }
+        };
+
+        match atomic_write(target, &bytes, SaveOptions::default()) {
+            Ok(_) => {
+                // Reported, because a write that leaves no trace anywhere in
+                // the window is indistinguishable from one that did not
+                // happen -- the tab does not change, and neither does the
+                // save state.
+                self.error = Some(format!("copy written to {}", target.display()));
+                SaveResult::Saved
+            }
+            Err(e) => {
+                self.error = Some(e.to_string());
+                SaveResult::Failed
+            }
+        }
+    }
+
+    /// Report the active document's statistics into the status bar.
+    ///
+    /// A one-off on a menu click, which is what makes reading the whole
+    /// document acceptable here: `active_text()` copies it, so this must
+    /// never move onto the typing path or into `refresh` (see the trap in
+    /// R011).
+    pub(crate) fn report_statistics(&mut self) {
+        let stats = bp_semantic::statistics(&self.active_text());
+        self.error = Some(format!(
+            "{} words, {} lines, {} paragraphs, {} characters ({} without spaces)",
+            stats.words,
+            stats.lines,
+            stats.paragraphs,
+            stats.characters,
+            stats.characters_no_whitespace,
+        ));
+    }
+
+    /// Insert a date or time stamp at the caret.
+    ///
+    /// The clock is read here rather than in `bp-naming`, which is pure and
+    /// never reads one -- so the shell decides *when*, and the crate only
+    /// decides how that instant is written.
+    ///
+    /// Caret work, so it needs the editor we own. Under `TextInput` there is
+    /// no readable caret (ADR-0018) and the rows are disabled instead.
+    pub(crate) fn insert_stamp(&mut self, index: usize) -> bool {
+        let Some(stamp) = bp_naming::Stamp::all().get(index).copied() else {
+            return false;
+        };
+        let text = bp_naming::render(stamp, now());
+        let Some(editor) = self.active_editor_mut() else {
+            return false;
+        };
+        editor.insert(&text);
+        self.mark_edited();
+        true
+    }
+
+    /// Which document the tab context menu's rows should act on.
+    ///
+    /// The right-clicked tab, or the active one when the menu was not opened
+    /// from a tab -- so the same ids serve a keyboard route later without the
+    /// rows changing meaning.
+    pub(crate) fn tab_context_id(&self) -> Option<DocumentId> {
+        self.tab_context.or_else(|| self.workspace.active_id())
+    }
+
+    /// What the tab context menu needs to know: how many other tabs are open,
+    /// and whether the one under the pointer has a path to copy.
+    pub(crate) fn tab_context_shape(&self) -> (usize, bool) {
+        let target = self.tab_context_id();
+        let others = self.workspace.len().saturating_sub(1);
+        let has_path = target
+            .and_then(|id| self.workspace.get(id))
+            .and_then(Document::path)
+            .is_some();
+        (others, has_path)
+    }
+
+    /// Move the caret to the line the user typed, and say what happened.
+    ///
+    /// `Editor::go_to_line` moves somewhere sensible *and* reports whether
+    /// the line existed, so a number past the end lands at the last line and
+    /// says why rather than doing nothing and looking broken.
+    ///
+    /// Caret work, so `--editor-view` only: `TextInput`'s caret cannot be
+    /// moved from here (ADR-0018).
+    pub(crate) fn go_to_line(&mut self, text: &str) -> Option<std::ops::Range<usize>> {
+        if !self.editor_view {
+            self.goto_status = "Go to Line needs --editor-view".to_owned();
+            return None;
+        }
+        let trimmed = text.trim();
+        if trimmed.is_empty() {
+            self.goto_status.clear();
+            return None;
+        }
+        // Parsed rather than trusted: `input-type: number` is a hint to the
+        // keyboard, not a guarantee from the backend.
+        let Ok(line) = trimmed.parse::<usize>() else {
+            self.goto_status = "not a line number".to_owned();
+            return None;
+        };
+        let editor = self.active_editor_mut()?;
+        let existed = editor.go_to_line(line);
+        let cursor = editor.cursor();
+        let total = editor.buffer().len_lines();
+        self.goto_status = if existed {
+            String::new()
+        } else {
+            format!("there are only {total} lines")
+        };
+        Some(cursor..cursor)
     }
 
     /// True if `id`'s file changed underneath us since we last read or wrote
@@ -1383,6 +1556,234 @@ mod tests {
         let before = state.active_text();
         state.run_data_action(action::NOTE_TITLE);
         assert_eq!(state.active_text(), before);
+    }
+
+    // --- Save Copy ------------------------------------------------------
+
+    /// A document with a path and unsaved edits -- the state in which every
+    /// difference between Save Copy and Save As is visible.
+    fn dirty_saved_state(dir: &std::path::Path) -> (AppState, DocumentId, PathBuf) {
+        let original = dir.join("original.txt");
+        std::fs::write(&original, "first\n").unwrap();
+
+        let mut state = AppState::new();
+        state.open(original.clone());
+        let id = state.workspace.active_id().unwrap();
+        state.edit("first\nsecond\n".to_owned());
+        assert!(state.workspace.get(id).unwrap().is_dirty());
+        (state, id, original)
+    }
+
+    #[test]
+    fn a_copy_does_not_become_the_documents_path() {
+        // The difference that turns Save Copy into Save As. If the path
+        // moves, the next Ctrl+S writes the copy and leaves the original
+        // behind, unsaved and unmentioned.
+        let dir = tempfile::tempdir().unwrap();
+        let (mut state, id, original) = dirty_saved_state(dir.path());
+        let copy = dir.path().join("copy.txt");
+
+        assert_eq!(state.save_copy(id, &copy), SaveResult::Saved);
+
+        assert_eq!(
+            state.workspace.get(id).unwrap().path(),
+            Some(original.as_path()),
+            "the document still belongs to the file it was opened from"
+        );
+    }
+
+    #[test]
+    fn a_copy_leaves_the_document_unsaved() {
+        // The dangerous one. A cleared dirty flag means the close prompt
+        // never appears and the real edits are discarded in silence.
+        let dir = tempfile::tempdir().unwrap();
+        let (mut state, id, _) = dirty_saved_state(dir.path());
+
+        state.save_copy(id, &dir.path().join("copy.txt"));
+
+        assert!(
+            state.workspace.get(id).unwrap().is_dirty(),
+            "the original still has edits that are not on disk"
+        );
+    }
+
+    #[test]
+    fn a_copy_does_not_join_the_recent_files_list() {
+        // Recent files is "documents you worked on". A copy is an export;
+        // reopening it would give a stale fork of the document.
+        let dir = tempfile::tempdir().unwrap();
+        let (mut state, id, _) = dirty_saved_state(dir.path());
+        let copy = dir.path().join("copy.txt");
+        let before = state.recent.paths().to_vec();
+
+        state.save_copy(id, &copy);
+
+        assert_eq!(state.recent.paths(), before.as_slice());
+        assert!(
+            !state.recent.paths().contains(&copy),
+            "the copy must not appear in Open Recent"
+        );
+    }
+
+    #[test]
+    fn a_copy_contains_the_edits_that_are_not_yet_on_disk() {
+        // The point of the feature: it writes what is in the buffer, not
+        // what is in the file it was opened from.
+        let dir = tempfile::tempdir().unwrap();
+        let (mut state, id, original) = dirty_saved_state(dir.path());
+        let copy = dir.path().join("copy.txt");
+
+        state.save_copy(id, &copy);
+
+        assert_eq!(std::fs::read_to_string(&copy).unwrap(), "first\nsecond\n");
+        assert_eq!(
+            std::fs::read_to_string(&original).unwrap(),
+            "first\n",
+            "and the original on disk is untouched"
+        );
+    }
+
+    #[test]
+    fn a_copy_that_cannot_be_written_says_so_rather_than_reporting_success() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut state, id, _) = dirty_saved_state(dir.path());
+        // A directory that does not exist: the write fails, and the user has
+        // to be told, or they will believe a copy exists.
+        let unwritable = dir.path().join("no-such-folder").join("copy.txt");
+
+        assert_eq!(state.save_copy(id, &unwritable), SaveResult::Failed);
+        assert!(
+            state.error.is_some(),
+            "a failed copy must reach the status bar"
+        );
+    }
+
+    // --- statistics, stamps and go-to-line -------------------------------
+
+    #[test]
+    fn document_statistics_report_without_changing_the_document() {
+        let mut state = AppState::new();
+        state.edit("one two three\n\nfour\n".to_owned());
+        let before = state.active_text();
+
+        state.report_statistics();
+
+        assert_eq!(state.active_text(), before, "a report must not edit");
+        let message = state.error.expect("statistics in the status bar");
+        assert!(message.contains("4 words"), "got {message}");
+        assert!(message.contains("2 paragraphs"), "got {message}");
+    }
+
+    #[test]
+    fn a_stamp_is_inserted_at_the_caret_and_marks_the_document_unsaved() {
+        let mut state = AppState::new();
+        state.editor_view = true;
+        state.edit("ab".to_owned());
+        state.active_editor_mut().unwrap().set_cursor(1);
+
+        assert!(state.insert_stamp(0), "Date is the first stamp");
+
+        let text = state.active_text();
+        assert!(
+            text.starts_with('a') && text.ends_with('b') && text.len() > 2,
+            "the stamp landed at the caret; got {text:?}"
+        );
+        assert!(state.workspace.active().unwrap().is_dirty());
+    }
+
+    #[test]
+    fn a_stamp_index_past_the_end_of_the_list_changes_nothing() {
+        // The ids are a base plus an offset, so an id from a stale menu can
+        // name a row that no longer exists.
+        let mut state = AppState::new();
+        state.editor_view = true;
+        state.edit("text".to_owned());
+
+        assert!(!state.insert_stamp(99));
+        assert_eq!(state.active_text(), "text");
+    }
+
+    #[test]
+    fn going_to_a_line_past_the_end_says_how_many_there_are() {
+        // `Editor::go_to_line` moves somewhere sensible *and* reports that
+        // the line did not exist, so the bar can do both.
+        let mut state = AppState::new();
+        state.editor_view = true;
+        state.edit("one\ntwo\n".to_owned());
+
+        assert!(state.go_to_line("99").is_some(), "the caret still moves");
+        assert!(
+            state.goto_status.contains("only"),
+            "got {:?}",
+            state.goto_status
+        );
+    }
+
+    #[test]
+    fn going_to_a_line_that_exists_reports_nothing() {
+        let mut state = AppState::new();
+        state.editor_view = true;
+        state.edit("one\ntwo\nthree".to_owned());
+
+        let moved = state.go_to_line("2").expect("moved");
+        assert_eq!(moved.start, 4, "the start of line two");
+        assert!(state.goto_status.is_empty(), "success is silent");
+    }
+
+    #[test]
+    fn a_line_number_that_is_not_a_number_is_reported_rather_than_ignored() {
+        // `input-type: number` is a hint to the keyboard, not a guarantee
+        // from the backend, so the text still has to be parsed.
+        let mut state = AppState::new();
+        state.editor_view = true;
+        state.edit("one\ntwo".to_owned());
+
+        assert!(state.go_to_line("seven").is_none());
+        assert_eq!(state.goto_status, "not a line number");
+    }
+
+    #[test]
+    fn go_to_line_without_the_custom_view_says_why_instead_of_doing_nothing() {
+        let mut state = AppState::new();
+        state.edit("one\ntwo".to_owned());
+
+        assert!(state.go_to_line("2").is_none());
+        assert!(
+            state.goto_status.contains("--editor-view"),
+            "got {:?}",
+            state.goto_status
+        );
+    }
+
+    // --- tab context menu -------------------------------------------------
+
+    #[test]
+    fn the_tab_menu_acts_on_the_right_clicked_tab_not_the_active_one() {
+        // The whole reason the target is stored: opening the menu and
+        // choosing a row are two events, and between them the active tab is
+        // still whatever it was.
+        let mut state = AppState::new();
+        let first = state.workspace.active_id().unwrap();
+        state.new_document();
+        let second = state.workspace.active_id().unwrap();
+        assert_ne!(first, second);
+
+        state.tab_context = Some(first);
+        assert_eq!(state.tab_context_id(), Some(first));
+
+        // With no menu open the rows fall back to the active tab.
+        state.tab_context = None;
+        assert_eq!(state.tab_context_id(), Some(second));
+    }
+
+    #[test]
+    fn copy_full_path_is_unavailable_for_a_document_that_has_never_been_saved() {
+        let mut state = AppState::new();
+        state.new_document();
+
+        let (others, has_path) = state.tab_context_shape();
+        assert_eq!(others, 1, "one other tab is open");
+        assert!(!has_path, "an untitled document has no path to copy");
     }
 
     #[test]

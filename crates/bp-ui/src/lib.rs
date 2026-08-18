@@ -115,6 +115,18 @@ fn refresh(ui: &AppWindow, state: &mut state::AppState, push_text: state::PushTe
         .unwrap_or_default();
     ui.set_error_message(notice.into());
 
+    // Read on every refresh rather than once, because the desktop's setting
+    // can change while the window is open -- which is the whole point of
+    // following it.
+    state.system_dark = ui.get_system_known().then(|| ui.get_system_dark());
+    if state.follow_system_theme
+        && let Some(theme) = ThemeId::for_system(state.system_dark)
+    {
+        state.theme = theme;
+        apply_theme(ui, state.theme);
+        ui.set_theme_name(state.theme.name().into());
+    }
+
     ui.set_show_gutter(state.show_gutter);
     ui.set_wrap_text(state.wrap_text);
     // Points to Slint's `length`. Both editor views read this one property,
@@ -134,13 +146,22 @@ fn refresh(ui: &AppWindow, state: &mut state::AppState, push_text: state::PushTe
     )));
     ui.set_view_items(model(menus::view(
         state.theme,
+        state.follow_system_theme,
         state.show_gutter,
         state.wrap_text,
         state.font_size,
     )));
     if let Some(doc) = state.workspace.active() {
-        ui.set_format_items(model(menus::format(doc.encoding(), doc.line_ending())));
+        ui.set_format_items(model(menus::format(
+            doc.encoding(),
+            doc.line_ending(),
+            state.indent,
+        )));
     }
+    // Rebuilt rather than set once, because the previews are rendered from
+    // the clock: a menu built at startup would still be offering this
+    // morning's time this afternoon.
+    ui.set_insert_items(model(menus::insert(state::now(), state.editor_view)));
     ui.set_data_items(model(menus::data(format)));
     ui.set_note_items(model(menus::note(state.active_has_content())));
     ui.set_edit_items(model(menus::edit(state.clips.entries(), state.editor_view)));
@@ -150,7 +171,6 @@ fn refresh(ui: &AppWindow, state: &mut state::AppState, push_text: state::PushTe
 fn set_static_menus(ui: &AppWindow) {
     let model = |items: Vec<MenuItem>| slint::ModelRc::new(slint::VecModel::from(items));
     ui.set_help_items(model(menus::help()));
-    ui.set_insert_items(model(menus::planned_menu("Insert")));
     ui.set_notebook_items(model(menus::planned_menu("Notebook")));
     ui.set_organize_items(model(menus::planned_menu("Organize")));
     ui.set_research_items(model(menus::planned_menu("Research")));
@@ -408,6 +428,23 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
     {
         let cell = Rc::clone(&state);
         let weak = ui.as_weak();
+        let target = Rc::clone(&state);
+        let target_weak = ui.as_weak();
+        ui.on_tab_context_target(move |raw| {
+            let Some(ui) = target_weak.upgrade() else {
+                return;
+            };
+            let mut s = target.borrow_mut();
+            s.tab_context = state::find_id(&s.workspace, raw);
+            // Built now rather than on every refresh: it is the only menu
+            // whose contents depend on which tab the pointer is over, and
+            // that is knowable only at this moment.
+            let (others, has_path) = s.tab_context_shape();
+            ui.set_tab_items(slint::ModelRc::new(slint::VecModel::from(
+                menus::tab_context(others, has_path),
+            )));
+        });
+
         ui.on_select_tab(move |raw| {
             {
                 let mut s = cell.borrow_mut();
@@ -692,6 +729,22 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
             }
             ui.set_find_status(cell.borrow().find_status.as_str().into());
             refresh(&ui, &mut cell.borrow_mut(), state::PushText::Yes);
+        });
+    }
+
+    {
+        let cell = Rc::clone(&state);
+        let weak = ui.as_weak();
+        ui.on_goto_submitted(move || {
+            let Some(ui) = weak.upgrade() else { return };
+            let moved = cell.borrow_mut().go_to_line(&ui.get_goto_line());
+            ui.set_goto_status(cell.borrow().goto_status.as_str().into());
+            if let Some(range) = moved {
+                // The bar stays open: going to a line is often the first of
+                // several, and closing it would make the second one two
+                // keystrokes further away.
+                dispatch::select(&ui, &mut cell.borrow_mut(), &range);
+            }
         });
     }
 

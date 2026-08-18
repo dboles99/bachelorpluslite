@@ -23,9 +23,11 @@
 // global, which Rust fills from `bp-theme`. ADR-0009 requires themes to be
 // data, and a hex code here would be a theme a user could never override.
 
+import { Palette as SystemPalette } from "std-widgets.slint";
 import { MenuLabel, MenuPopup } from "menu.slint";
 import { EditorSurface } from "editor_surface.slint";
 import { FindBar } from "find_bar.slint";
+import { GotoBar } from "goto_bar.slint";
 import { ResultsPanel } from "results_panel.slint";
 import { StatusBar } from "status_bar.slint";
 import { Tab } from "tab.slint";
@@ -53,6 +55,15 @@ export component AppWindow inherits Window {
     in property <string> cursor-label;
     in property <string> theme-name;
     in property <string> error-message;
+    /// What the desktop's appearance setting says, reported to Rust so
+    /// `bp_theme::ThemeId::for_system` can resolve it.
+    ///
+    /// Sourced from std-widgets' `Palette`, which is the only place Slint
+    /// exposes it. Two properties rather than one tri-state, because Slint
+    /// has no `Option`: `system-known` false means the platform would not
+    /// say, which is different from saying "light".
+    out property <bool> system-known: SystemPalette.color-scheme != ColorScheme.unknown;
+    out property <bool> system-dark: SystemPalette.color-scheme == ColorScheme.dark;
 
     // View toggles, driven from the View menu.
     in property <bool> show-gutter: true;
@@ -82,6 +93,9 @@ export component AppWindow inherits Window {
     in property <[MenuItem]> security-items;
     in property <[MenuItem]> tools-items;
     in property <[MenuItem]> help-items;
+    /// The tab strip's context menu. Not a menu-bar menu, but built the same
+    /// way and dispatched through the same ids.
+    in property <[MenuItem]> tab-items;
 
     callback new-document();
     callback open-document();
@@ -89,6 +103,9 @@ export component AppWindow inherits Window {
     callback save-as-document();
     callback select-tab(int);
     callback close-tab(int);
+    /// A tab was right-clicked. Sent before the menu opens, so the rows act
+    /// on that tab rather than on whichever happens to be active.
+    callback tab-context-target(int);
     callback close-active-tab();
     callback cycle-theme();
     callback text-edited(string);
@@ -145,6 +162,14 @@ export component AppWindow inherits Window {
     callback search-folder();
     callback open-hit(int);
 
+    // --- go to line -----------------------------------------------------
+    // in-out: the menu row and Ctrl+G open it, the × closes it.
+    in-out property <bool> goto-open;
+    in-out property <string> goto-line;
+    /// "there are only 42 lines", or empty once it worked.
+    in property <string> goto-status;
+    callback goto-submitted();
+
     /// Select a range in the editor. Called from Rust once it has worked out
     /// where the next match is -- `set-selection-offsets` is a function on
     /// the widget, so only Slint can invoke it.
@@ -178,6 +203,11 @@ export component AppWindow inherits Window {
     public function focus-find() {
         root.find-open = true;
         find-bar.focus-query();
+    }
+
+    public function focus-goto() {
+        root.goto-open = true;
+        goto-bar.focus-input();
     }
 
     /// Put the caret back in whichever editor is in use.
@@ -320,9 +350,16 @@ export component AppWindow inherits Window {
             }
         }
         KeyBinding {
+            keys: @keys(Control + "g");
+            activated => {
+                root.focus-goto();
+            }
+        }
+        KeyBinding {
             keys: @keys(Escape);
             activated => {
                 root.find-open = false;
+                root.goto-open = false;
                 root.focus-editor();
             }
         }
@@ -444,6 +481,15 @@ export component AppWindow inherits Window {
                         closed => {
                             root.close-tab(tab.id);
                         }
+                        context-menu(offset) => {
+                            // Told which tab first, because the rows act on
+                            // the tab that was right-clicked rather than the
+                            // active one -- and clicking a row is a separate
+                            // event, by which time the pointer is elsewhere.
+                            root.tab-context-target(tab.id);
+                            root.tab-menu-x = offset + 6px;
+                            tab-menu.show();
+                        }
                     }
 
                     MenuLabel {
@@ -561,6 +607,20 @@ export component AppWindow inherits Window {
                 }
                 closed => {
                     root.find-open = false;
+                    root.focus-editor();
+                }
+            }
+
+            goto-bar := GotoBar {
+                open: root.goto-open;
+                line-text <=> root.goto-line;
+                status: root.goto-status;
+
+                submitted => {
+                    root.goto-submitted();
+                }
+                closed => {
+                    root.goto-open = false;
                     root.focus-editor();
                 }
             }
@@ -722,6 +782,22 @@ export component AppWindow inherits Window {
         y: 28px;
         menu-max-height: root.menu-max-height;
         items: root.tools-items;
+        chosen(a) => {
+            root.dispatch(a);
+        }
+    }
+    // The tab strip's context menu. `x` is set from the tab that was clicked
+    // rather than bound to a label, and `y` clears the menu bar and the strip
+    // together (28 + 32).
+    // A `PopupWindow`'s own `x` cannot be assigned from outside it, so the
+    // position travels through a property the popup binds to instead.
+    property <length> tab-menu-x;
+
+    tab-menu := MenuPopup {
+        x: root.tab-menu-x;
+        y: 60px;
+        menu-max-height: root.menu-max-height;
+        items: root.tab-items;
         chosen(a) => {
             root.dispatch(a);
         }

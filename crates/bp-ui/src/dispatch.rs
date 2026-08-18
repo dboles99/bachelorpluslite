@@ -190,10 +190,36 @@ pub fn handle_menu_action(
             }
         }
 
-        action::THEME_LIGHT => state.borrow_mut().theme = ThemeId::Light,
-        action::THEME_DARK => state.borrow_mut().theme = ThemeId::Dark,
-        action::THEME_ORGANIC => state.borrow_mut().theme = ThemeId::Organic,
-        action::THEME_GREEN => state.borrow_mut().theme = ThemeId::Green,
+        // Picking a theme by name stops following the system. Leaving the
+        // flag set would let the next preference change silently undo the
+        // choice the user just made.
+        action::THEME_LIGHT | action::THEME_DARK | action::THEME_ORGANIC | action::THEME_GREEN => {
+            let mut s = state.borrow_mut();
+            s.theme = match id {
+                action::THEME_LIGHT => ThemeId::Light,
+                action::THEME_DARK => ThemeId::Dark,
+                action::THEME_ORGANIC => ThemeId::Organic,
+                _ => ThemeId::Green,
+            };
+            s.follow_system_theme = false;
+        }
+        action::THEME_SYSTEM => {
+            let mut s = state.borrow_mut();
+            s.follow_system_theme = true;
+            match ThemeId::for_system(s.system_dark) {
+                Some(theme) => s.theme = theme,
+                // Not an error, and not a guess: a desktop that will not say
+                // leaves the current theme alone. The row still ticks, so the
+                // preference is remembered for when an answer arrives.
+                None => {
+                    s.error = Some(
+                        "this desktop does not report a light or dark preference; \
+                                    keeping the current theme"
+                            .to_owned(),
+                    );
+                }
+            }
+        }
 
         action::TOGGLE_GUTTER => {
             let mut s = state.borrow_mut();
@@ -218,6 +244,106 @@ pub fn handle_menu_action(
         action::ZOOM_RESET => {
             state.borrow_mut().font_size = bp_config::DEFAULT_FONT_SIZE;
             push = PushText::No;
+        }
+
+        // A copy, deliberately not a save: `save_copy` leaves the path, the
+        // dirty flag and the recent-files list exactly where they were.
+        action::SAVE_COPY => {
+            // Same shape as Save As -- the borrow ends with the statement,
+            // before anything takes a mutable one.
+            let target = state.borrow().workspace.active_id();
+            if let Some(id) = target {
+                let chosen = pick_save_path(&state.borrow(), id);
+                if let Some(path) = chosen {
+                    state.borrow_mut().save_copy(id, &path);
+                }
+            }
+            // The document did not change, so its text must not be re-pushed:
+            // under `TextInput` that would throw away the caret for an
+            // operation that did not touch the document at all.
+            push = PushText::No;
+        }
+
+        action::DOCUMENT_STATS => {
+            state.borrow_mut().report_statistics();
+            push = PushText::No;
+        }
+
+        // Tab context menu. All three act on `tab_context` -- the tab that was
+        // right-clicked -- falling back to the active one, so a row can never
+        // act on a tab the user was not pointing at.
+        action::CLOSE_OTHER_TABS | action::CLOSE_ALL_TABS => {
+            let keep = (id == action::CLOSE_OTHER_TABS)
+                .then(|| state.borrow().tab_context_id())
+                .flatten();
+            let doomed: Vec<DocumentId> = state
+                .borrow()
+                .workspace
+                .iter()
+                .map(Document::id)
+                .filter(|id| Some(*id) != keep)
+                .collect();
+            // `close_with_prompt` for each, so unsaved work still asks --
+            // closing several tabs is exactly when losing one would hurt.
+            for id in doomed {
+                close_with_prompt(state, id);
+            }
+            refresh(ui, &mut state.borrow_mut(), PushText::Yes);
+            return None;
+        }
+        action::COPY_TAB_PATH => {
+            let path = {
+                let s = state.borrow();
+                s.tab_context_id()
+                    .and_then(|id| s.workspace.get(id))
+                    .and_then(Document::path)
+                    .map(|p| p.display().to_string())
+            };
+            let mut s = state.borrow_mut();
+            s.error = match path {
+                Some(path) if crate::set_os_clipboard(&path) => Some(format!("copied {path}")),
+                Some(_) => Some("could not reach the clipboard".to_owned()),
+                None => Some("this document has never been saved".to_owned()),
+            };
+            push = PushText::No;
+        }
+
+        action::GO_TO_LINE => {
+            // The bar owns the interaction from here; opening it is all the
+            // menu row does, which is why one action id covers the feature.
+            ui.invoke_focus_goto();
+            return None;
+        }
+
+        // Indentation. The width applies to both modes -- it is how far a
+        // literal tab reaches as well as how far a soft one goes.
+        action::INDENT_TABS | action::INDENT_SPACES => {
+            let mut s = state.borrow_mut();
+            s.indent.spaces = id == action::INDENT_SPACES;
+            push = PushText::No;
+        }
+        action::TAB_WIDTH_2 | action::TAB_WIDTH_4 | action::TAB_WIDTH_8 => {
+            let mut s = state.borrow_mut();
+            s.indent.width = match id {
+                action::TAB_WIDTH_2 => 2,
+                action::TAB_WIDTH_8 => 8,
+                _ => 4,
+            };
+            push = PushText::No;
+        }
+
+        id if (action::STAMP_BASE..menus::stamp_end()).contains(&id) => {
+            let index = usize::try_from(id - action::STAMP_BASE).unwrap_or(0);
+            let mut s = state.borrow_mut();
+            if !s.insert_stamp(index) {
+                // The rows are disabled without the custom editor view, so
+                // this is only reachable by a keyboard route that does not
+                // exist yet -- but a silent no-op would be a bug report
+                // nobody could describe.
+                s.error = Some("date and time insertion needs --editor-view".to_owned());
+            }
+            // `PushText::Yes`, the default: the document changed, same as
+            // Duplicate Line beside it.
         }
 
         action::LINE_ENDING_LF => state.borrow_mut().set_line_ending(LineEnding::Lf),

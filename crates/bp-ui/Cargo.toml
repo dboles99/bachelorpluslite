@@ -43,3 +43,7 @@ slint-build = "1.17"
 
 [dev-dependencies]
 time = { workspace = true, features = ["macros"] }
+# Save Copy's guarantees are about what reaches the disk and what does not, so
+# testing them needs a real file. Already a workspace dependency (bp-files,
+# bp-history), and a dev-dependency here -- nothing new ships.
+tempfile.workspace = true

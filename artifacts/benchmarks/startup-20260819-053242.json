@@ -1,0 +1,29 @@
+{
+  "measured_at": "2026-08-19T05:32:42.7154592+07:00",
+  "host_os": "Microsoft Windows NT 10.0.19045.0",
+  "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+  "runs": 7,
+  "note": "WindowMs is measured externally and is comparable across renderers. ReadyMedianMs needs a rendering notifier; null means the renderer has none.",
+  "results": [
+    {
+      "Variant": "gpu (femtovg)",
+      "BinaryMB": 16.5,
+      "WindowMs": 139.9,
+      "ColdWallMs": null,
+      "WarmMedianMs": null,
+      "ReadyMedianMs": null,
+      "IdleWorkingMB": 21.8,
+      "IdlePrivateMB": 6.9
+    },
+    {
+      "Variant": "software",
+      "BinaryMB": 16.5,
+      "WindowMs": 35.7,
+      "ColdWallMs": null,
+      "WarmMedianMs": null,
+      "ReadyMedianMs": null,
+      "IdleWorkingMB": 21.9,
+      "IdlePrivateMB": 6.9
+    }
+  ]
+}

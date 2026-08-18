@@ -58,23 +58,25 @@ cargo run --release -- --editor-view   # with the custom editor view (ADR-0018)
 
 ## Current state (2026-08-19)
 
-**15 crates, 555 tests, green on Windows and Linux.** The app opens, edits and
+**15 crates, 585 tests, green on Windows and Linux.** The app opens, edits and
 saves atomically, and does rather more than that:
 
 | Area | What works |
 | --- | --- |
-| Editing | Tabs, four themes, zoom, honest save state, atomic save, undo/cut/copy/paste, sort / deduplicate / reverse / trim lines, duplicate and move lines |
+| Editing | Tabs, four themes plus Follow System, zoom, indentation (tabs or soft tabs, 2/4/8), honest save state, atomic save, undo/cut/copy/paste, sort / deduplicate / reverse / trim lines, duplicate and move lines, go to line |
 | Storage | A rope buffer holds every document; whole-document operations are one undo step |
 | Safety | Unsaved-changes prompts, external-change detection, crash recovery journal |
-| Files | Open/Save/Save As/Save All/Reload, recent files, command-line file opening |
+| Files | Open/Save/Save As/Save All/Save a Copy/Reload, recent files, tab context menu, command-line file opening |
 | Search | Find and replace with case-sensitive, whole-word and regex toggles, changes shown before they are applied, recursive cross-file search |
 | Data | JSON / JSONL / TOML validate, format, minify, convert; RFC 4180 CSV/TSV shape report, conversion to JSON and JSON Lines, column types |
-| Semantic | Title, keywords, summary and outline extracted from the document |
+| Semantic | Title, keywords, summary and outline extracted from the document; document statistics; date and time insertion |
 | Clipboard | History with kind detection, paste from history, format-aware paste transformations |
 | Metadata | A SQLite store with migrations — built and tested, not yet wired in ([ADR-0019](docs/decisions/ADR-0019.md)) |
 
 Startup, with the software renderer ([ADR-0017](docs/decisions/ADR-0017.md)):
-**36 ms to window, 19.2 MB idle**, against targets of 150 ms and 50 MB.
+**35.7 ms to window, 21.9 MB idle**, against targets of 150 ms and 50 MB.
+Idle memory rose ~2.7 MB this session; `std-widgets` is imported now, for the
+one thing that reports the desktop's light/dark preference.
 
 Configuration precedence: command line (`--theme=`, `--renderer=`, `--log=`,
 `--font-size=`, `--tab-width=`, `--indent-spaces=`),
@@ -96,10 +98,14 @@ starting.
   `--editor-view`**, which is why the default is still Slint's `TextInput`.
   Both are parity conditions for switching; soft wrap is the deep one, because
   it makes a visual line differ from a document line.
-- **Some rows are built but not reachable**: indentation settings, date and
-  time insertion, document statistics, go-to-line. Each is a tested library
-  function waiting for a menu row.
-  [MENU_MAP.md](docs/product/MENU_MAP.md) marks which is which.
+- **Drag and drop to open does not work, and cannot yet.** specs §4 wants it.
+  On Slint 1.17.1 the winit backend has no file-drop plumbing and
+  `DataTransfer` carries only plain text or an image, so there is no channel a
+  dropped file's path could arrive through. Blocked on Slint, not on effort.
+- **Five features are enabled only under `--editor-view`**: duplicate and move
+  line, date and time insertion, and go to line. All need the caret
+  `TextInput` does not expose. [MENU_MAP.md](docs/product/MENU_MAP.md) marks
+  which rows those are.
 - **Little of this has been used in anger.** The tests cover the pieces in
   isolation; the integrated behaviour has had one manual pass, several
   sessions ago.

@@ -12,6 +12,11 @@ export component Tab inherits Rectangle {
     in property <bool> active;
     callback selected();
     callback closed();
+    /// Right-clicked, with the x offset of the tab within the strip so the
+    /// window can put its menu under the pointer. The offset travels with the
+    /// event because only the tab knows where it ended up -- the strip is a
+    /// `for`, and its children have no ids to measure from outside.
+    callback context-menu(length);
 
     height: 30px;
     width: 190px;
@@ -20,8 +25,17 @@ export component Tab inherits Rectangle {
     border-width: 1px;
 
     select-area := TouchArea {
-        clicked => {
-            root.selected();
+        // Both buttons, because a right-click has to be seen to be acted on;
+        // `clicked` alone is left-button only.
+        pointer-event(event) => {
+            if (event.kind != PointerEventKind.down) {
+                return;
+            }
+            if (event.button == PointerEventButton.right) {
+                root.context-menu(root.x);
+            } else if (event.button == PointerEventButton.left) {
+                root.selected();
+            }
         }
     }
 

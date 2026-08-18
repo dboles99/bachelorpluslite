@@ -58,6 +58,11 @@ impl Modifiers {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
     Insert(String),
+    /// The Tab key. Not an `Insert` with its text already decided, because
+    /// what a soft tab inserts depends on the caret's visual column -- at
+    /// column 3 with width 4 it is two spaces, not four -- and `command_for`
+    /// does not know where the caret is. `Editor::apply` expands it.
+    Indent,
     Move {
         motion: Motion,
         select: bool,
@@ -107,10 +112,11 @@ pub fn command_for(key: Key, modifiers: Modifiers, page_rows: usize) -> Command 
         Key::Backspace => Command::DeleteBackward,
         Key::Delete => Command::DeleteForward,
 
-        // A newline and a tab are ordinary insertions, which is what makes
-        // them undo, coalesce and replace a selection like everything else.
+        // A newline is an ordinary insertion, which is what makes it undo,
+        // coalesce and replace a selection like everything else. So is a tab,
+        // once expanded -- see `Command::Indent`.
         Key::Enter => Command::Insert("\n".to_owned()),
-        Key::Tab => Command::Insert("\t".to_owned()),
+        Key::Tab => Command::Indent,
         Key::Escape => Command::Ignore,
 
         Key::Char(ch) if modifiers.is_chord() => match ch.to_ascii_lowercase() {
@@ -174,7 +180,7 @@ mod tests {
         // Which is what makes them undo and replace a selection like any
         // other typing.
         assert_eq!(cmd(Key::Enter, NONE), Command::Insert("\n".to_owned()));
-        assert_eq!(cmd(Key::Tab, NONE), Command::Insert("\t".to_owned()));
+        assert_eq!(cmd(Key::Tab, NONE), Command::Indent);
     }
 
     #[test]

@@ -107,6 +107,28 @@ impl ThemeId {
             .find(|t| t.name().eq_ignore_ascii_case(name))
     }
 
+    /// The theme that matches the desktop's light/dark preference.
+    ///
+    /// Resolves to one of the four rather than becoming a fifth. ADR-0009
+    /// makes themes data, and a "System" palette would be one the user could
+    /// never open, edit or override -- so "follow the system" is a *choice
+    /// about which theme to use*, not a theme.
+    ///
+    /// `None` means the platform would not say, which is not an error: a
+    /// desktop with no such preference is normal, and the caller keeps what
+    /// it had rather than guessing.
+    #[must_use]
+    pub const fn for_system(dark: Option<bool>) -> Option<Self> {
+        match dark {
+            // Dark maps to Dark rather than to the Green default: someone who
+            // asked their desktop for dark has said what they want, and Green
+            // is a dark-ish theme with a colour cast they did not ask for.
+            Some(true) => Some(Self::Dark),
+            Some(false) => Some(Self::Light),
+            None => None,
+        }
+    }
+
     pub const fn palette(self) -> Palette {
         match self {
             Self::Light => Palette {
@@ -244,6 +266,30 @@ mod tests {
         assert_eq!(ThemeId::from_name("organic"), Some(ThemeId::Organic));
         assert_eq!(ThemeId::from_name("GREEN"), Some(ThemeId::Green));
         assert_eq!(ThemeId::from_name("Puce"), None);
+    }
+
+    #[test]
+    fn following_the_system_resolves_to_a_theme_that_already_exists() {
+        // ADR-0009 makes themes data. "System" resolving to a fifth palette
+        // would be one nobody could open, edit or override, so this asserts
+        // it always lands on one of the four.
+        for dark in [Some(true), Some(false)] {
+            let resolved = ThemeId::for_system(dark).expect("a stated preference resolves");
+            assert!(
+                ThemeId::ALL.contains(&resolved),
+                "{resolved:?} is not one of the built-in themes"
+            );
+        }
+        assert_eq!(ThemeId::for_system(Some(true)), Some(ThemeId::Dark));
+        assert_eq!(ThemeId::for_system(Some(false)), Some(ThemeId::Light));
+    }
+
+    #[test]
+    fn a_desktop_that_will_not_say_gets_no_answer_rather_than_a_guess() {
+        // Not an error and not a default: the caller keeps the theme it had.
+        // Returning `Green` here would silently override a user's choice on
+        // every platform that does not report a preference.
+        assert_eq!(ThemeId::for_system(None), None);
     }
 
     #[test]

@@ -17,7 +17,7 @@ yet — those are the cheapest items in `project/WORK_QUEUE.md`.
 | Row | State |
 | --- | --- |
 | New, Open, Open Recent, Save, Save As, Save All, Reload, Close Tab | **live** |
-| Save Copy | planned — `bp_files::atomic_write` is enough; the risk is leaving the document's path and dirty flag alone |
+| Save a Copy | **live** — writes the buffer elsewhere without moving the document's path, clearing its dirty flag, or touching Open Recent; all three are pinned by tests |
 | New Window, Open Folder, Revert, Print | planned |
 
 ## Edit
@@ -39,14 +39,14 @@ yet — those are the cheapest items in `project/WORK_QUEUE.md`.
 | Light / Dark / Organic / Green | **live** |
 | Line Numbers, Word Wrap | **live** |
 | Zoom In / Zoom Out / Reset Zoom | **live** — Ctrl+= / Ctrl+- / Ctrl+0, bounded by `bp_config::{MIN,MAX}_FONT_SIZE`; the rows grey at the bound and the reset row names the size in force |
-| Follow System theme | planned — specs §16 |
+| Follow System | **live** — `ThemeId::for_system` resolves the desktop's preference to Light or Dark; a desktop that will not say leaves the theme alone and says so |
 | Split / Preview, panels, inspectors | planned |
 
 ## Insert
 
 | Row | State |
 | --- | --- |
-| Date, Time, Date and Time, ISO 8601, Filename date | **built** — `bp_naming::Stamp::all()` gives the rows and their labels |
+| Date, Time, Date and Time, ISO 8601, Filename date | **caret** — each row's hint is the stamp rendered from the clock, so the row shows what it will insert |
 | Markdown constructs, citation, code block, table, notebook cell | planned |
 
 ## Format
@@ -54,7 +54,7 @@ yet — those are the cheapest items in `project/WORK_QUEUE.md`.
 | Row | State |
 | --- | --- |
 | LF / CRLF, UTF-8 / UTF-8 with BOM | **live** |
-| Indentation (tab width, spaces or tabs) | **built** — `Config::{tab_width, indent_spaces}`, no row yet |
+| Indent with Tabs / Spaces, Tab Width 2 / 4 / 8 | **live** — one width serves both the Tab key and how wide a tab is drawn; a soft tab goes to the next stop, not a fixed count |
 
 ## Data
 
@@ -75,7 +75,7 @@ no data rows rather than a column of greyed ones.
 | Row | State |
 | --- | --- |
 | Suggest Title, Semantic Rename, Summary, Keywords, Outline | **live** |
-| Document statistics | **built** — `bp_semantic::statistics`, no row yet |
+| Document Statistics | **live** — `bp_semantic::statistics` into the status bar, one pass on a menu click and never on the typing path |
 | Tags, classification, related notes, properties, history | planned — phase 9 |
 
 ## Notebook
@@ -135,6 +135,27 @@ Not a menu. The bar itself is **live**, and so are its three options.
 
 ## Go to Line
 
-Not a menu of its own — it belongs in Edit or a find-bar-style input.
-`Editor::go_to_line` is **built** and reports whether the line existed, so the
-caller can move somewhere sensible *and* say "there are only 42 lines".
+Not a menu of its own. Edit ▸ Go to Line and Ctrl+G open a bar beside the find
+bar, built the same way and for the same reason: a modal dialog is a heavy
+answer to "which line?". `Editor::go_to_line` reports whether the line existed,
+so an out-of-range number moves the caret to the end *and* says "there are only
+42 lines". **caret** — `TextInput`'s caret cannot be moved from Rust.
+
+## Tab strip context menu
+
+Right-click a tab. The rows act on the tab that was clicked, not the active
+one — the target is recorded when the menu opens, because clicking a row is a
+separate event, by which time the pointer has moved.
+
+| Row | State |
+| --- | --- |
+| Close Tab, Close Other Tabs, Close All Tabs | **live** — each goes through the same unsaved-changes prompt as closing one |
+| Copy Full Path | **live** — greyed for a document that has never been saved |
+
+## Drag and drop to open
+
+**Blocked on Slint, not on effort.** specs §4 wants files dropped onto the
+window to open. `DropArea` exists and compiles, but on Slint 1.17.1 the winit
+backend has no file-drop plumbing and `DataTransfer` carries only plain text
+or an image — there is no channel a file path could arrive through. It works
+for drags that start inside a Slint window and nowhere else.
