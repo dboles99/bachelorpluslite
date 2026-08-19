@@ -1,0 +1,37 @@
+[package]
+name = "bp-integration-tests"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+# No library and no binary: this package exists only to hold tests that cross
+# crate boundaries. Every `bp-*` crate tests itself in isolation, which is what
+# makes each one's behaviour knowable -- and is exactly why nothing here was
+# ever exercised end to end. One manual pass found two defects no unit test
+# caught. This is where the seams get tested.
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+
+[dev-dependencies]
+bp-buffer = { path = "../../crates/bp-buffer" }
+bp-clipboard = { path = "../../crates/bp-clipboard" }
+bp-config = { path = "../../crates/bp-config" }
+bp-core = { path = "../../crates/bp-core" }
+bp-crypto = { path = "../../crates/bp-crypto" }
+bp-data = { path = "../../crates/bp-data" }
+bp-editor = { path = "../../crates/bp-editor" }
+bp-files = { path = "../../crates/bp-files" }
+bp-formats = { path = "../../crates/bp-formats" }
+bp-history = { path = "../../crates/bp-history" }
+bp-naming = { path = "../../crates/bp-naming" }
+bp-search = { path = "../../crates/bp-search" }
+bp-secrets = { path = "../../crates/bp-secrets" }
+bp-security = { path = "../../crates/bp-security" }
+bp-semantic = { path = "../../crates/bp-semantic" }
+bp-storage = { path = "../../crates/bp-storage" }
+bp-theme = { path = "../../crates/bp-theme" }
+proptest.workspace = true
+tempfile.workspace = true
