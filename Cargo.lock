@@ -749,6 +749,7 @@ dependencies = [
 name = "bp-audit"
 version = "0.1.0"
 dependencies = [
+ "bp-crypto",
  "bp-security",
  "proptest",
  "serde",
@@ -756,6 +757,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.20",
  "time",
+ "zeroize",
 ]
 
 [[package]]
@@ -834,6 +836,7 @@ version = "0.1.0"
 dependencies = [
  "bp-core",
  "bp-naming",
+ "proptest",
  "tempfile",
  "thiserror 2.0.20",
  "time",
@@ -991,6 +994,7 @@ dependencies = [
  "bp-formats",
  "bp-history",
  "bp-naming",
+ "bp-redaction",
  "bp-search",
  "bp-secrets",
  "bp-security",

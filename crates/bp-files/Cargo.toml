@@ -12,3 +12,6 @@ thiserror.workspace = true
 
 [dev-dependencies]
 time = { workspace = true, features = ["macros"] }
+# Already in the workspace and in nine other crates; nothing new enters the
+# tree. The load/encode inverse is a property, not three examples.
+proptest.workspace = true

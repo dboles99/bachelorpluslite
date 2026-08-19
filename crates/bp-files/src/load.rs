@@ -6,6 +6,13 @@ use std::path::{Path, PathBuf};
 use bp_core::{Encoding, LineEnding};
 use thiserror::Error;
 
+use crate::utf16::{self, Endian, Utf16Error};
+
+/// Why a file could not be turned into a document.
+///
+/// Every variant names the file and says what is wrong with it rather than
+/// what the code was doing. "os error 32" and "invalid utf-16" are not things
+/// a user can act on; "byte 4097 is half a character" is.
 #[derive(Debug, Error)]
 pub enum LoadError {
     #[error("cannot read {}: {source}", .path.display())]
@@ -18,8 +25,35 @@ pub enum LoadError {
     #[error("{} is not valid {}", .path.display(), .encoding.label())]
     InvalidText { path: PathBuf, encoding: Encoding },
 
-    #[error("{} is {}, which this build cannot open yet", .path.display(), .encoding.label())]
-    UnsupportedEncoding { path: PathBuf, encoding: Encoding },
+    /// The body of a UTF-16 file is an odd number of bytes, so its last code
+    /// unit is cut in half. Refused rather than dropping the stray byte: a
+    /// file this size is truncated or corrupt, and opening it would invite
+    /// the user to save the truncation back over whatever survived.
+    #[error(
+        "{} is {} but its text is {bytes} bytes -- an odd length, so the file is truncated or is not really {}",
+        .path.display(), .encoding.label(), .encoding.label()
+    )]
+    TruncatedUtf16 {
+        path: PathBuf,
+        encoding: Encoding,
+        bytes: usize,
+    },
+
+    /// A surrogate code unit with no partner. There is no character to
+    /// produce for it -- only U+FFFD, and substituting one would hand back a
+    /// document that looks intact and writes the damage back on the next
+    /// save.
+    #[error(
+        "{} is {} but has an unpaired surrogate at character {at}, so it is not valid text",
+        .path.display(), .encoding.label()
+    )]
+    UnpairedSurrogate {
+        path: PathBuf,
+        encoding: Encoding,
+        /// Index of the offending code unit within the text, after the
+        /// byte-order mark.
+        at: usize,
+    },
 }
 
 /// A file read from disk, with the properties the status bar reports.
@@ -37,9 +71,18 @@ pub struct LoadedFile {
 
 /// Read a text file, detecting its encoding and line endings.
 ///
-/// UTF-16 is detected and reported as [`LoadError::UnsupportedEncoding`]
-/// rather than being decoded. Refusing is deliberate: a lossy decode would
-/// let the user edit and save mangled text over their original.
+/// UTF-16 in either byte order is decoded, not refused. Windows tools have
+/// emitted UTF-16 with a byte-order mark for decades, so refusing meant a
+/// Windows editor that could not open a large class of Windows files. What
+/// the original refusal was protecting against -- a lossy decode the user
+/// then saves back over their original -- is protected against instead by
+/// [`LoadError::TruncatedUtf16`] and [`LoadError::UnpairedSurrogate`]:
+/// nothing is ever substituted, so anything that loads is exactly what was on
+/// disk and [`crate::encode`] writes it back byte for byte.
+///
+/// UTF-16 is recognised only by its byte-order mark. A UTF-16 file without
+/// one is indistinguishable from binary without statistical guessing, and a
+/// wrong guess is the mangling this crate refuses.
 pub fn load(path: &Path) -> Result<LoadedFile, LoadError> {
     let bytes = std::fs::read(path).map_err(|source| LoadError::Read {
         path: path.to_owned(),
@@ -47,22 +90,27 @@ pub fn load(path: &Path) -> Result<LoadedFile, LoadError> {
     })?;
     let bytes_on_disk = bytes.len() as u64;
     let encoding = Encoding::detect_bom(&bytes);
+    // `Encoding::Utf8` has an empty mark, so this covers all four cases.
+    let body = &bytes[encoding.bom().len()..];
 
-    let body = match encoding {
-        Encoding::Utf8 => &bytes[..],
-        Encoding::Utf8Bom => &bytes[encoding.bom().len()..],
-        Encoding::Utf16Le | Encoding::Utf16Be => {
-            return Err(LoadError::UnsupportedEncoding {
+    let text = match Endian::of(encoding) {
+        Some(endian) => utf16::decode(body, endian).map_err(|e| match e {
+            Utf16Error::OddByteCount { bytes } => LoadError::TruncatedUtf16 {
                 path: path.to_owned(),
                 encoding,
-            });
-        }
+                bytes,
+            },
+            Utf16Error::UnpairedSurrogate { at } => LoadError::UnpairedSurrogate {
+                path: path.to_owned(),
+                encoding,
+                at,
+            },
+        })?,
+        None => String::from_utf8(body.to_vec()).map_err(|_| LoadError::InvalidText {
+            path: path.to_owned(),
+            encoding,
+        })?,
     };
-
-    let text = String::from_utf8(body.to_vec()).map_err(|_| LoadError::InvalidText {
-        path: path.to_owned(),
-        encoding,
-    })?;
 
     let line_ending = LineEnding::detect(&text).unwrap_or_default();
 
@@ -135,19 +183,85 @@ mod tests {
     }
 
     #[test]
-    fn refuses_utf16_rather_than_mangling_it() {
+    fn decodes_utf16_in_both_byte_orders() {
         let dir = tempdir().unwrap();
-        let path = write_bytes(dir.path(), "e.txt", b"\xFF\xFEh\0i\0");
+
+        let le = write_bytes(dir.path(), "e-le.txt", b"\xFF\xFEh\0i\0");
+        let f = load(&le).unwrap();
+        assert_eq!(f.text, "hi", "the BOM must not appear in the buffer");
+        assert_eq!(f.encoding, Encoding::Utf16Le);
+        assert_eq!(f.bytes_on_disk, 6);
+
+        let be = write_bytes(dir.path(), "e-be.txt", b"\xFE\xFF\0h\0i");
+        let f = load(&be).unwrap();
+        assert_eq!(f.text, "hi");
+        assert_eq!(f.encoding, Encoding::Utf16Be);
+    }
+
+    #[test]
+    fn a_lone_utf16_byte_order_mark_is_an_empty_document() {
+        let dir = tempdir().unwrap();
+        let path = write_bytes(dir.path(), "e2.txt", b"\xFF\xFE");
+
+        let f = load(&path).unwrap();
+
+        assert_eq!(f.text, "");
+        assert_eq!(
+            f.encoding,
+            Encoding::Utf16Le,
+            "an empty UTF-16 file is still a UTF-16 file, and saving it must \
+             write the mark back"
+        );
+        assert_eq!(f.line_ending, LineEnding::platform_default());
+    }
+
+    #[test]
+    fn refuses_a_truncated_utf16_file_rather_than_dropping_the_stray_byte() {
+        let dir = tempdir().unwrap();
+        let path = write_bytes(dir.path(), "e3.txt", b"\xFF\xFEh\0i");
 
         let err = load(&path).unwrap_err();
 
         assert!(matches!(
             err,
-            LoadError::UnsupportedEncoding {
+            LoadError::TruncatedUtf16 {
                 encoding: Encoding::Utf16Le,
+                bytes: 3,
                 ..
             }
         ));
+        assert!(err.to_string().contains("e3.txt"));
+    }
+
+    #[test]
+    fn refuses_an_unpaired_surrogate_rather_than_substituting_u_fffd() {
+        let dir = tempdir().unwrap();
+        // "a" then a lone high surrogate.
+        let path = write_bytes(dir.path(), "e4.txt", b"\xFF\xFEa\0\x00\xD8");
+
+        let err = load(&path).unwrap_err();
+
+        assert!(matches!(
+            err,
+            LoadError::UnpairedSurrogate {
+                encoding: Encoding::Utf16Le,
+                at: 1,
+                ..
+            }
+        ));
+        assert!(err.to_string().contains("e4.txt"));
+    }
+
+    #[test]
+    fn utf16_line_endings_are_detected_after_decoding() {
+        let dir = tempdir().unwrap();
+        // "a\r\nb" little-endian.
+        let path = write_bytes(dir.path(), "e5.txt", b"\xFF\xFEa\0\r\0\n\0b\0");
+
+        let f = load(&path).unwrap();
+
+        assert_eq!(f.text, "a\r\nb");
+        assert_eq!(f.line_ending, LineEnding::CrLf);
     }
 
     #[test]

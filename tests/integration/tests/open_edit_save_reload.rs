@@ -15,15 +15,17 @@
 //! bp_files::load -> bp_buffer::Buffer -> edit -> render -> atomic_write -> load
 //! ```
 //!
-//! One deliberate gap, and it is a finding rather than an omission. `bp-files`
-//! has no encoding-aware writer: its only writer is `atomic_write(&[u8])`. The
-//! function that turns a document plus its `Encoding` and `LineEnding` into
-//! bytes is `bp_ui::state::encode`, which is `pub(crate)` inside the Slint
-//! shell. So the *decision* cannot be reached from any integration test, and
-//! what is checked below is that the pipeline is capable of being lossless
-//! and that `bp-core`'s model describes the bytes correctly -- not that the
-//! shell's encoder uses it correctly. See the report accompanying these
-//! tests.
+//! The gap these tests used to record is now closed. `bp-files` had no
+//! encoding-aware writer -- only `atomic_write(&[u8])` -- and the function
+//! turning a document plus its `Encoding` and `LineEnding` into bytes was
+//! `bp_ui::state::encode`, `pub(crate)` inside the Slint shell, so the
+//! *decision* could not be reached from any integration test. That encoder
+//! now lives in `bp_files::encode`, tested there against its own inverse.
+//!
+//! Most of what follows still models a save by hand, through `save_over`, and
+//! that is deliberate: it checks that `bp-core`'s model describes the bytes
+//! correctly, independently of any encoder. `bp_files::encode` is exercised
+//! directly only where the model alone cannot express the file -- UTF-16.
 
 mod common;
 
@@ -31,7 +33,7 @@ use common::{Doc, no_files};
 
 use bp_buffer::Buffer;
 use bp_core::{Encoding, LineEnding};
-use bp_files::{LoadedFile, SaveOptions, atomic_write, load};
+use bp_files::{LineEndingPolicy, LoadedFile, SaveOptions, atomic_write, load};
 use proptest::prelude::*;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
@@ -355,10 +357,50 @@ fn a_mixed_line_ending_document_is_not_converted_by_the_pipeline() {
 }
 
 #[test]
-fn utf16_is_refused_rather_than_decoded_into_the_rope() {
-    // The refusal is the feature. A lossy decode would let the user edit and
-    // then save mangled text over the original, which is the one failure a
-    // "cannot open this yet" message cannot cause.
-    let (_dir, path) = written(b"\xFF\xFEh\0i\0");
-    assert!(load(&path).is_err());
+fn utf16_round_trips_through_the_pipeline_byte_for_byte() {
+    // Refusing UTF-16 used to be the feature, because nothing here could
+    // decode it without substituting, and a lossy decode lets the user save
+    // mangled text over their original. `bp-files` now decodes both byte
+    // orders by hand and substitutes nothing, so the reason for the refusal
+    // is gone -- and this asserts the guarantee that replaced it: what goes
+    // through the pipeline comes back identical, byte-order mark included.
+    for (bytes, encoding) in [
+        (
+            &b"\xFF\xFEh\0i\0\r\0\n\0\x3D\xD8\x00\xDE"[..],
+            Encoding::Utf16Le,
+        ),
+        (
+            &b"\xFE\xFF\0h\0i\0\r\0\n\xD8\x3D\xDE\x00"[..],
+            Encoding::Utf16Be,
+        ),
+    ] {
+        let (_dir, path) = written(bytes);
+
+        let opened = load(&path).expect("load");
+        assert_eq!(opened.text, "hi\r\n😀", "the astral character survived");
+        assert_eq!(opened.encoding, encoding);
+        assert_eq!(opened.line_ending, LineEnding::CrLf);
+
+        // Through the rope, then out through the crate's own encoder.
+        let text = Buffer::from_text(&opened.text).to_string();
+        let out = bp_files::encode(&text, opened.encoding, LineEndingPolicy::Preserve);
+        atomic_write(&path, &out, SaveOptions::default()).expect("atomic_write");
+
+        assert_eq!(
+            std::fs::read(&path).expect("read"),
+            bytes,
+            "{} did not survive the round trip",
+            encoding.label()
+        );
+    }
+
+    // What is still refused: the two inputs that have no exact decoding. An
+    // odd byte count, and an unpaired surrogate. Neither is substituted.
+    let (_odd_dir, odd) = written(b"\xFF\xFEh\0i");
+    assert!(load(&odd).is_err(), "an odd byte count must not be padded");
+    let (_lone_dir, lone) = written(b"\xFF\xFE\x00\xD8");
+    assert!(
+        load(&lone).is_err(),
+        "an unpaired surrogate must not become U+FFFD"
+    );
 }

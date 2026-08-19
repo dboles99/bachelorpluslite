@@ -1,0 +1,11 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc c9adbad08af382cffadba3c71fe8f7ee01e814c72f0170e61bc6d2e19fa17079 # shrinks to text = "\r\r\n", target = Lf
+cc c89f65fc12512d10eedaf88e3a6f8af2f68da4de0f50f0f093bfa7eab347a74b # shrinks to text = "\r\r\n", target = Lf
+cc bf6f213c2efd19a4e9ee6eea3f635eb2e7f50f391f6552af3b47bd1b4d682612 # shrinks to text = "a", encoding = Utf16Be
+cc d9853891eb7bf7d44445839d411b67e732c0463a8f2dd120c384e62f3c648b0d # shrinks to text = "\r\n\n\r\n\n"
+cc b41c6c0743cdd082fbedc1c52b3f3a047187f42e04505acf3029da89d2e7f6e1 # shrinks to text = "\n\r\n", target = CrLf
