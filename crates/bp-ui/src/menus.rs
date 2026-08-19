@@ -90,6 +90,9 @@ pub mod action {
     /// Bounded by [`super::profile_end`]. 56-59 are free.
     pub const PROFILE_BASE: i32 = 52;
 
+    /// Encrypt the active document to a `.bpadx` file (ADR-0021). 57-59 free.
+    pub const ENCRYPT_DOCUMENT: i32 = 56;
+
     /// Clipboard history occupies `CLIP_BASE ..` (bounded by [`super::clip_end`]).
     ///
     /// Slint's `dispatch` routes exactly `UNDO..=SELECT_ALL` to the widget and
@@ -570,7 +573,7 @@ pub fn format(encoding: Encoding, line_ending: LineEnding, indent: Indent) -> Ve
 /// cannot see -- so the menu states the three that are observable today
 /// rather than making them infer it from behaviour that is, by design,
 /// invisible.
-pub fn security(current: bp_security::Security) -> Vec<MenuItem> {
+pub fn security(current: bp_security::Security, encrypted: bool) -> Vec<MenuItem> {
     let policy = current.policy();
     let mut items: Vec<MenuItem> = bp_security::Profile::all()
         .iter()
@@ -608,9 +611,18 @@ pub fn security(current: bp_security::Security) -> Vec<MenuItem> {
                 }
             ))
         },
-        planned("Encrypt Document (.bpadx)"),
+        row_enabled(
+            if encrypted {
+                "Encrypted (.bpadx)"
+            } else {
+                "Encrypt Document..."
+            },
+            "",
+            action::ENCRYPT_DOCUMENT,
+            !encrypted,
+        ),
         planned("Privacy Mode, secret scanning, redaction"),
-        arrives("phase 15"),
+        arrives("phase 16"),
     ]);
     items
 }
@@ -948,17 +960,28 @@ mod tests {
         // `profile_end` is sized from `Profile::all()`, so a fifth profile
         // extends the window with the menu rather than landing outside it and
         // silently doing nothing.
-        let items = security(bp_security::Security::default());
-        let rows: Vec<&MenuItem> = items
-            .iter()
-            .filter(|i| i.action >= action::PROFILE_BASE && i.action < 100)
-            .collect();
-
-        assert_eq!(rows.len(), bp_security::Profile::all().len());
-        for (index, row) in rows.iter().enumerate() {
+        let items = security(bp_security::Security::default(), false);
+        // The profile toggles are the leading rows, by construction. Taking
+        // them positionally rather than by id range is what lets the range
+        // itself be the thing under test.
+        let count = bp_security::Profile::all().len();
+        for (index, row) in items.iter().take(count).enumerate() {
             let expected = action::PROFILE_BASE + i32::try_from(index).unwrap();
-            assert_eq!(row.action, expected);
+            assert_eq!(row.action, expected, "row {index} has the wrong id");
             assert!((action::PROFILE_BASE..profile_end()).contains(&row.action));
+        }
+
+        // And nothing else in the menu may sit inside that window. Encrypt
+        // Document is the row that would collide first, being the next id
+        // allocated in this block.
+        for row in items.iter().skip(count) {
+            assert!(
+                !(action::PROFILE_BASE..profile_end()).contains(&row.action),
+                "'{}' ({}) is inside the profile window and would be dispatched \
+                 as a profile",
+                row.label,
+                row.action
+            );
         }
     }
 
@@ -967,7 +990,7 @@ mod tests {
         // Two ticks would say the document is governed by two policies; none
         // would leave the user unable to tell which is in force.
         for profile in bp_security::Profile::all() {
-            let items = security(bp_security::Security::Named(*profile));
+            let items = security(bp_security::Security::Named(*profile), false);
             let ticked: Vec<&str> = items
                 .iter()
                 .filter(|i| i.label.starts_with('✓'))
@@ -983,9 +1006,10 @@ mod tests {
     fn a_custom_policy_ticks_no_named_profile() {
         // Custom is not one of the four, and ticking the nearest would tell
         // the user their document is governed by a profile it is not.
-        let items = security(bp_security::Security::Custom(
-            bp_security::Profile::Maximum.policy(),
-        ));
+        let items = security(
+            bp_security::Security::Custom(bp_security::Profile::Maximum.policy()),
+            false,
+        );
         assert!(
             !items.iter().any(|i| i.label.starts_with('✓')),
             "a custom policy must not claim to be a named profile"
@@ -996,7 +1020,10 @@ mod tests {
     fn the_menu_states_what_the_profile_actually_does() {
         // A profile is a promise about invisible behaviour. A user cannot
         // check a promise they cannot see, so the menu says it.
-        let standard = security(bp_security::Security::Named(bp_security::Profile::Standard));
+        let standard = security(
+            bp_security::Security::Named(bp_security::Profile::Standard),
+            false,
+        );
         assert!(
             standard
                 .iter()
@@ -1008,7 +1035,10 @@ mod tests {
                 .collect::<Vec<_>>()
         );
 
-        let maximum = security(bp_security::Security::Named(bp_security::Profile::Maximum));
+        let maximum = security(
+            bp_security::Security::Named(bp_security::Profile::Maximum),
+            false,
+        );
         assert!(
             maximum
                 .iter()
@@ -1025,7 +1055,10 @@ mod tests {
     fn a_profile_wanting_encryption_says_recovery_is_off_not_encrypted() {
         // The honest readout while `bp-crypto` does not exist. Saying
         // "encrypted" here would be the exact lie ADR-0020 forbids.
-        let items = security(bp_security::Security::Named(bp_security::Profile::Private));
+        let items = security(
+            bp_security::Security::Named(bp_security::Profile::Private),
+            false,
+        );
         let row = items
             .iter()
             .find(|i| i.label.contains("Recovery journal"))
@@ -1421,7 +1454,7 @@ mod tests {
         rust_side.extend(help());
         rust_side.extend(insert(STAMP_CLOCK, true));
         rust_side.extend(tab_context(2, true));
-        rust_side.extend(security(bp_security::Security::default()));
+        rust_side.extend(security(bp_security::Security::default(), false));
 
         for item in rust_side.iter().filter(|i| i.enabled) {
             assert!(

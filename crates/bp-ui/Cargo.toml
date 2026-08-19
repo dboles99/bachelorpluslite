@@ -14,12 +14,15 @@ bp-editor = { path = "../bp-editor" }
 bp-formats = { path = "../bp-formats" }
 bp-history = { path = "../bp-history" }
 bp-search = { path = "../bp-search" }
+bp-crypto = { path = "../bp-crypto" }
 bp-security = { path = "../bp-security" }
 bp-semantic = { path = "../bp-semantic" }
 bp-files = { path = "../bp-files" }
 bp-naming = { path = "../bp-naming" }
 bp-theme = { path = "../bp-theme" }
 arboard = "3"
+# Passphrases and decrypted document bytes are wiped rather than dropped.
+zeroize.workspace = true
 slint = "1.17"
 # Native file dialogs. xdg-portal rather than gtk3 on Linux, so the app does
 # not need a specific desktop environment installed just to open a file

@@ -58,7 +58,7 @@ cargo run --release -- --editor-view   # with the custom editor view (ADR-0018)
 
 ## Current state (2026-08-19)
 
-**17 crates, 679 tests, green on Windows and Linux.** The app opens, edits and
+**17 crates, 690 tests, green on Windows and Linux.** The app opens, edits and
 saves atomically, and does rather more than that:
 
 | Area | What works |
@@ -72,7 +72,7 @@ saves atomically, and does rather more than that:
 | Semantic | Title, keywords, summary and outline extracted from the document; document statistics; date and time insertion |
 | Clipboard | History with kind detection, paste from history, format-aware paste transformations |
 | Metadata | A SQLite store with migrations — built and tested, not yet wired in ([ADR-0019](docs/decisions/ADR-0019.md)) |
-| Encryption | The `.bpadx` envelope — Argon2id, XChaCha20-Poly1305 or AES-256-GCM, chunked with position authenticated ([ADR-0021](docs/decisions/ADR-0021.md)). Built and tested; no menu row yet |
+| Encryption | `.bpadx` documents — Security ▸ Encrypt Document, unlock on open, and saves stay encrypted. Argon2id, XChaCha20-Poly1305 or AES-256-GCM, chunked with position authenticated ([ADR-0021](docs/decisions/ADR-0021.md)) |
 | Security | Per-document profiles (Standard / Private / Confidential / Maximum) governing the recovery journal, clipboard history and metadata store ([ADR-0020](docs/decisions/ADR-0020.md)) |
 
 Startup, with the software renderer ([ADR-0017](docs/decisions/ADR-0017.md)):

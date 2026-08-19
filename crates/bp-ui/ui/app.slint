@@ -28,6 +28,7 @@ import { MenuLabel, MenuPopup } from "menu.slint";
 import { EditorSurface } from "editor_surface.slint";
 import { FindBar } from "find_bar.slint";
 import { GotoBar } from "goto_bar.slint";
+import { PassphraseBar } from "passphrase_bar.slint";
 import { ResultsPanel } from "results_panel.slint";
 import { StatusBar } from "status_bar.slint";
 import { Tab } from "tab.slint";
@@ -172,6 +173,17 @@ export component AppWindow inherits Window {
     in property <string> goto-status;
     callback goto-submitted();
 
+    // --- passphrase -----------------------------------------------------
+    // The passphrase itself is *not* a property. A secret in an `AppWindow`
+    // property is a secret that gets copied around and outlives its use; it
+    // travels as a callback argument and nowhere else.
+    in-out property <bool> passphrase-open;
+    in property <string> passphrase-prompt;
+    in property <string> passphrase-status;
+    in property <string> passphrase-action;
+    callback passphrase-submitted(string);
+    callback passphrase-cancelled();
+
     /// Select a range in the editor. Called from Rust once it has worked out
     /// where the next match is -- `set-selection-offsets` is a function on
     /// the widget, so only Slint can invoke it.
@@ -210,6 +222,17 @@ export component AppWindow inherits Window {
     public function focus-goto() {
         root.goto-open = true;
         goto-bar.focus-input();
+    }
+
+    public function focus-passphrase() {
+        root.passphrase-open = true;
+        passphrase-bar.focus-input();
+    }
+
+    /// Wipe the box without closing the bar -- a wrong passphrase gets
+    /// another try, starting empty.
+    public function clear-passphrase() {
+        passphrase-bar.clear();
     }
 
     /// Put the caret back in whichever editor is in use.
@@ -362,6 +385,11 @@ export component AppWindow inherits Window {
             activated => {
                 root.find-open = false;
                 root.goto-open = false;
+                // Escape abandons a passphrase entry. Anything half-typed is
+                // discarded with it -- see `passphrase-cancelled`.
+                if (root.passphrase-open) {
+                    root.passphrase-cancelled();
+                }
                 root.focus-editor();
             }
         }
@@ -610,6 +638,20 @@ export component AppWindow inherits Window {
                 closed => {
                     root.find-open = false;
                     root.focus-editor();
+                }
+            }
+
+            passphrase-bar := PassphraseBar {
+                open: root.passphrase-open;
+                prompt: root.passphrase-prompt;
+                status: root.passphrase-status;
+                action-label: root.passphrase-action;
+
+                submitted(entered) => {
+                    root.passphrase-submitted(entered);
+                }
+                cancelled => {
+                    root.passphrase-cancelled();
                 }
             }
 

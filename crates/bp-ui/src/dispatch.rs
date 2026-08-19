@@ -75,6 +75,22 @@ pub(crate) fn pick_save_path(
         .save_file()
 }
 
+/// Give a chosen path the `.bpadx` extension.
+///
+/// The file dialog suggests the document's current name, and a user who
+/// accepts it would otherwise get an encrypted file called `notes.txt` --
+/// which the shell would happily reopen, but which every other program on the
+/// machine would treat as text and show as binary noise.
+fn with_bpadx_extension(path: PathBuf) -> PathBuf {
+    if path.extension().is_some_and(|e| e == "bpadx") {
+        path
+    } else {
+        let mut name = path.file_name().unwrap_or_default().to_os_string();
+        name.push(".bpadx");
+        path.with_file_name(name)
+    }
+}
+
 /// Show what Replace All would do, and ask before doing it.
 ///
 /// specs.md section 6 wants the changes visible before they are applied.
@@ -139,7 +155,14 @@ pub fn handle_menu_action(
         action::OPEN => {
             let chosen = pick_file(&state.borrow());
             if let Some(path) = chosen {
-                state.borrow_mut().open(path);
+                // An encrypted file does not become a tab until it is
+                // unlocked: a tab nobody can read looks like an empty
+                // document, and saving it would write emptiness over the
+                // real one.
+                if state.borrow_mut().open_maybe_encrypted(path) {
+                    ui.invoke_focus_passphrase();
+                    return None;
+                }
             }
         }
         action::SAVE => {
@@ -316,6 +339,23 @@ pub fn handle_menu_action(
                     .set_security(bp_security::Security::Named(profile));
             }
             push = PushText::No;
+        }
+
+        action::ENCRYPT_DOCUMENT => {
+            // Save As, not encrypt-in-place: the plaintext original is left
+            // where it was rather than silently destroyed by an operation
+            // that is irreversible without the passphrase. The tab then
+            // adopts the encrypted file, so later saves stay encrypted.
+            let target = state.borrow().workspace.active_id();
+            if let Some(id) = target {
+                let suggested = pick_save_path(&state.borrow(), id);
+                if let Some(path) = suggested {
+                    let path = with_bpadx_extension(path);
+                    state.borrow_mut().ask = Some(crate::passphrase::Ask::Set { id, target: path });
+                    ui.invoke_focus_passphrase();
+                }
+            }
+            return None;
         }
 
         action::GO_TO_LINE => {

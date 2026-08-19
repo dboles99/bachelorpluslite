@@ -27,7 +27,7 @@ Status as of **2026-08-19**. Three words, meaning three different things:
 | 12 | Notebook/execution system | Not started | [09-notebook](project/tasks/09-notebook/) | — |
 | 13 | Research mode | Not started | [10-research](project/tasks/10-research/) | — |
 | 14 | Security foundation | **Started** | [11-security](project/tasks/11-security/) | `bp-security` |
-| 15 | Encrypted `.bpadx` documents | **Built, unwired** | [11-security](project/tasks/11-security/) | `bp-crypto` |
+| 15 | Encrypted `.bpadx` documents | **Started** | [11-security](project/tasks/11-security/) | `bp-crypto` |
 | 16 | Advanced security | Not started | [11-security](project/tasks/11-security/) | — |
 | 17 | Themes/personality/accessibility | **Started** | [12-themes-brand](project/tasks/12-themes-brand/) | `bp-theme` |
 | 18 | Windows/Linux platform integration | Not started | [13-platform](project/tasks/13-platform/) | — |

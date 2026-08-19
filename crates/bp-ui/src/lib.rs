@@ -45,6 +45,7 @@ mod menus;
 
 mod dispatch;
 mod editor_view;
+mod passphrase;
 mod state;
 
 /// Crate identity used by workspace smoke tests and diagnostics.
@@ -140,6 +141,13 @@ fn refresh(ui: &AppWindow, state: &mut state::AppState, push_text: state::PushTe
         .into(),
     );
 
+    // What the passphrase bar is asking, if anything.
+    if let Some(ask) = &state.ask {
+        ui.set_passphrase_prompt(ask.prompt().into());
+        ui.set_passphrase_action(ask.action().into());
+    }
+    ui.set_passphrase_status(state.passphrase_status.as_str().into());
+
     ui.set_show_gutter(state.show_gutter);
     ui.set_wrap_text(state.wrap_text);
     // Points to Slint's `length`. Both editor views read this one property,
@@ -180,7 +188,11 @@ fn refresh(ui: &AppWindow, state: &mut state::AppState, push_text: state::PushTe
     ui.set_edit_items(model(menus::edit(state.clips.entries(), state.editor_view)));
     // Rebuilt rather than set once: it shows the *active* document's profile
     // and what that profile permits, both of which change with the tab.
-    ui.set_security_items(model(menus::security(state.security())));
+    let encrypted = state
+        .workspace
+        .active_id()
+        .is_some_and(|id| state.is_encrypted(id));
+    ui.set_security_items(model(menus::security(state.security(), encrypted)));
 }
 
 /// Menus whose contents never change. Set once, not on every refresh.
@@ -776,6 +788,46 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
                 // keystrokes further away.
                 dispatch::select(&ui, &mut cell.borrow_mut(), &range);
             }
+        });
+    }
+
+    {
+        let cell = Rc::clone(&state);
+        let weak = ui.as_weak();
+        ui.on_passphrase_submitted(move |entered| {
+            let Some(ui) = weak.upgrade() else { return };
+            let again = cell.borrow_mut().answer_passphrase(&entered);
+            // Wiped whatever happened. A passphrase left in the widget
+            // outlives the question it answered, and the next prompt would
+            // start pre-filled with the last one.
+            ui.invoke_clear_passphrase();
+            ui.set_passphrase_open(again);
+            if again {
+                ui.invoke_focus_passphrase();
+            } else {
+                ui.invoke_focus_editor();
+            }
+            refresh(&ui, &mut cell.borrow_mut(), state::PushText::Yes);
+        });
+    }
+
+    {
+        let cell = Rc::clone(&state);
+        let weak = ui.as_weak();
+        ui.on_passphrase_cancelled(move || {
+            let Some(ui) = weak.upgrade() else { return };
+            {
+                let mut s = cell.borrow_mut();
+                // Dropping the ask drops any half-entered passphrase with it
+                // -- the first of two entries travels inside `Ask::Confirm`
+                // precisely so it cannot outlive the question.
+                s.ask = None;
+                s.passphrase_status.clear();
+            }
+            ui.invoke_clear_passphrase();
+            ui.set_passphrase_open(false);
+            ui.invoke_focus_editor();
+            refresh(&ui, &mut cell.borrow_mut(), state::PushText::No);
         });
     }
 
