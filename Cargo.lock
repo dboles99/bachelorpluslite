@@ -862,6 +862,7 @@ dependencies = [
 name = "bp-integration-tests"
 version = "0.1.0"
 dependencies = [
+ "bp-audit",
  "bp-buffer",
  "bp-clipboard",
  "bp-config",
@@ -872,7 +873,11 @@ dependencies = [
  "bp-files",
  "bp-formats",
  "bp-history",
+ "bp-integrity",
  "bp-naming",
+ "bp-notebook",
+ "bp-platform",
+ "bp-redaction",
  "bp-search",
  "bp-secrets",
  "bp-security",
@@ -880,7 +885,9 @@ dependencies = [
  "bp-storage",
  "bp-theme",
  "proptest",
+ "serde_json",
  "tempfile",
+ "time",
 ]
 
 [[package]]

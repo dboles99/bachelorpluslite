@@ -61,6 +61,53 @@ Adding a decision means adding both.
 
 ## Open items
 
+- **`bp-naming` will generate a filename that Windows treats as a device, and
+  saving to it destroys the document.** This is the most serious thing the
+  cross-crate tests have found. `bp_naming::sanitize::is_reserved`
+  upper-cases the sanitised title and asks whether *the whole string* is a
+  reserved device name. Win32 does not work that way, and neither does
+  `bp_platform::paths::reserved_device_name`, which takes the stem before the
+  first dot and trims trailing spaces. A dot is not a forbidden character, so
+  it survives sanitising -- and the titles `con.txt`, `CON.notes`, `aux.log`,
+  `NUL.dat`, `lpt1.bak` and `prn.2026` all pass `bp-naming` untouched and
+  produce names `bp-platform` reports as `ReservedName`. Opening one of those
+  on Windows succeeds and reads or writes **the device**: the save appears to
+  work and the document is gone. The fix is in `is_reserved` -- test the stem
+  rather than the whole string. Its list also omits `CONIN$` and `CONOUT$`,
+  which `bp-platform` includes.
+- **`bp-files` never applies the `\\?\` extended-length prefix**, so a name
+  `bp-naming` is willing to generate can be unwritable. A filename at
+  `SemanticName::to_filename`'s own documented 255-byte maximum fails inside
+  any directory whose path pushes the total past 259 -- the system temp
+  directory alone does it. `bp-platform` has both the diagnosis
+  (`paths::needs_extended_length_prefix`, `path_problems`) and the fix
+  (`paths::to_extended_length`), and `bp-files` does not depend on it at all.
+  The error compounds it: `SaveError` blames a read-only file or another
+  program for what is `os error 3`, sending the user to look at the wrong
+  thing.
+- **`bp-notebook` silently runs unidentified code through the wrong
+  interpreter, and ADR-0025 says the opposite.** `ipynb.rs::infer_kind`
+  computes `stated.or(notebook_language)`, which conflates "the cell said
+  nothing about its language", where falling back to the kernelspec is right,
+  with "the cell named a language we cannot map", where it is a guess. No
+  warning distinguishes them. A cell another tool tagged
+  `vscode.languageId: "brainfuck"` imports as Python and appears in
+  `request_run_all` with the user told nothing. ADR-0025 states that such a
+  cell "becomes `CellKind::Raw` and an `ImportWarning::UnknownCodeLanguage`
+  says so" -- and that holds only for notebooks carrying no kernelspec, which
+  almost no real `.ipynb` is. `CellKind::from_language_name`'s own doc gives
+  the stakes: guessing wrong means offering to run someone's text through the
+  wrong interpreter.
+- **"A flipped bit anywhere in a `.sig` never verifies" is false, correctly.**
+  `Sidecar::parse` tolerates trailing whitespace so a signature survives being
+  mailed and pasted, so flipping bit 0 of the closing newline yields a
+  vertical tab and the file still verifies -- the document really is
+  unaltered and the signature really does hold. The property with teeth, and
+  the one now tested over every byte and every bit, is that a damaged sidecar
+  verifies *if and only if* it parses back to the identical key and
+  signature. Recorded because the naive version is the one somebody will
+  write next.
+
 - **The recent-files list roams on Windows, and it is full of absolute
   paths.** `recent.toml` sits beside `config.toml` in the config directory,
   which on Windows is `%APPDATA%` and therefore roams between machines --
