@@ -20,6 +20,7 @@ members = [
     "crates/bp-naming",
     "crates/bp-integrity",
     "crates/bp-notebook",
+    "crates/bp-platform",
     "crates/bp-redaction",
     "crates/bp-research",
     "crates/bp-search",

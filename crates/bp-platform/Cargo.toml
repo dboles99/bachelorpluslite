@@ -1,0 +1,26 @@
+[package]
+name = "bp-platform"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# No third-party dependencies, on purpose. Everything this crate needs from
+# the operating system -- the environment block, a directory, a file -- is in
+# `std`. The tempting crates (`winreg`, `directories`, `dirs`) would each buy
+# one small convenience and cost a supply-chain edge in the crate that by
+# definition sits closest to the user's machine; `winreg` in particular would
+# let this crate write to the registry, which ADR-0012 makes a decision rather
+# than a capability. Adding one is ADR material.
+[dependencies]
+
+[dev-dependencies]
+proptest.workspace = true
+tempfile.workspace = true
+# Test-only, and deliberately one-directional: it lets a test assert that
+# every extension this crate offers to register is one `bp-formats` can
+# actually identify, so the product never claims a file type it cannot open.
+# A real (non-dev) dependency would tie the registration table to the parser's
+# shape; they answer different questions about the same extension -- "how do I
+# read this" versus "what does the OS call it" -- and are allowed to move
+# apart.
+bp-formats = { path = "../bp-formats" }

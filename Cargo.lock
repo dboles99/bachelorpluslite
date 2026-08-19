@@ -913,6 +913,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "bp-platform"
+version = "0.1.0"
+dependencies = [
+ "bp-formats",
+ "proptest",
+ "tempfile",
+]
+
+[[package]]
 name = "bp-redaction"
 version = "0.1.0"
 dependencies = [

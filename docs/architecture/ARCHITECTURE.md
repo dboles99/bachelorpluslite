@@ -53,9 +53,9 @@ and this table carries the intent until then.
 | `bp-integrity` | **built, unwired** | `.sig` sidecars, signing-key files and hash manifests over `bp-crypto` (ADR-0026). Says what it cannot enforce per platform rather than implying it did. | 16 |
 | `bp-redaction` | **built, unwired** | Irreversible redaction with merging spans, and metadata inspection (ADR-0028). Documents exactly what verification cannot prove. Pure. | 16 |
 | `bp-audit` | **built, unwired** | Security audit history (ADR-0024). An event is `Copy`, so it cannot own a secret; documents are named by an opaque id, never a path. The sealed destination has no implementor yet, so it refuses. | 16 |
-| `bp-platform` | planned | Platform traits. The seam ADR-0001 requires. | 18 |
-| `bp-platform-windows` | planned | DPAPI, Hello, default-app registration, native clipboard history. | 18 |
-| `bp-platform-linux` | planned | Secret Service, `.desktop` and MIME registration. | 18 |
+| `bp-platform` | **built, unwired** | The seam ADR-0001 requires, and it carries rules rather than only traits: path legality per platform (reserved device names, forbidden characters, the length limits each platform counts in its own unit), config/data/cache directories from an injected environment, a capability register, and default-editor registration -- state, plan, artefacts. ADR-0012 is mechanised: a plan that would seize an association or touch Notepad is refused. Two `cfg` attributes in the whole crate, so all 103 tests run on both legs. | 18 |
+| `bp-platform-windows` | **not created, deliberately** | Everything it would hold is either a parameterised function in `bp-platform` or blocked: applying `HKCU` keys needs a Win32 call or a new dependency, and DPAPI/Hello wait on the signing-key decision. ADR-0001's own warning about `cfg`-gated code argues against a crate neither CI leg compiles. | 18 |
+| `bp-platform-linux` | **not created, deliberately** | Same reasoning. `.desktop` and MIME registration are in `bp-platform` and run on both legs; Secret Service waits on the same decision. | 18 |
 
 ## Current dependency edges
 
