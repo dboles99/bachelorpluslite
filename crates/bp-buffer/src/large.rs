@@ -44,9 +44,12 @@
 //!
 //! What the chunked path costs instead, on a 255 MiB file from the same run:
 //! opening it 0.19 ms, the first sixty lines 0.35 ms, indexing all 4,067,204
-//! lines 181 ms (1.38 GiB/s) into 768 KiB of index, and streaming every byte
-//! past a matcher 373 ms with a 2,056 KiB peak. Opening is `metadata`; the
-//! first frame is one seek and one chunk; neither grows with the file.
+//! lines 181 ms (1.38 GiB/s), and streaming every byte past a matcher 373 ms
+//! with a 2,056 KiB peak. The fully indexed reader held 768 KiB at the end of
+//! that run -- the index at its 512 KiB cap plus one 256 KiB chunk, which is
+//! what `resident_bytes` counts and is not the index alone. Opening is
+//! `metadata`; the first frame is one seek and one chunk; neither grows with
+//! the file.
 //!
 //! # Why this does not memory-map, and what it would take to
 //!
