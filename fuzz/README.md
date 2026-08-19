@@ -290,6 +290,52 @@ written down here because "generous but finite" is easier to review with the
 number attached. Test:
 `envelope::the_declared_kdf_cost_is_paid_before_anything_is_authenticated`.
 
+### The corpus is hostile to the editor, too
+
+Not a defect in anything this repository ships, and recorded because it costs
+somebody a confusing hour otherwise.
+
+`corpus/yaml/billion-laughs.yaml` is 570 bytes and it kills the YAML language
+server that Google's Cloud Code extension for VS Code runs. That server
+defaults to `cloudcode.yaml.yamlFileMatcher = "**/*.yaml"` — the whole
+workspace — and expands aliases eagerly, with no equivalent of ADR-0023's cap.
+Opening the workspace is enough. It climbs to the ~4 GB Node heap ceiling in
+about 50 seconds and aborts:
+
+```text
+FATAL ERROR: Ineffective mark-compacts near heap limit
+             Allocation failed - JavaScript heap out of memory
+[20292] 50336 ms: Incremental Mark-Compact (reduce) 3997.0 (4000.4) -> 3992.9 MB
+Server process exited with code 134.
+```
+
+Then it restarts, reopens the file and does it again — 21 times in one window
+before anyone looked. The user-visible symptom is three notifications that say
+nothing about YAML: *Restarting server failed*, *couldn't create connection to
+server*, *Pending response rejected since connection got disposed*. Nothing
+points at this directory, which is why it is written down here.
+
+Confirmed by driving that extension's own bundled server directly, capped at a
+1 GiB heap, with a single `didOpen` and no other input:
+
+| Document | Result |
+| --- | --- |
+| `corpus/yaml/billion-laughs.yaml` (570 bytes) | exit 134 after 12.3 s |
+| a four-line Kubernetes Pod manifest | survived 45 s, no crash |
+
+`.vscode/settings.json` now narrows that matcher to `**/k8s/**/*.yaml`, which
+this repository has none of, so the server never opens the file. The setting is
+checked in deliberately: `.gitignore` excludes `.vscode/*` but the file is
+tracked, and anyone who clones this repository with that extension installed
+meets the same crash loop.
+
+Two things generalise beyond one extension. **Any tool that walks the tree
+looking for YAML is a candidate** — the `.claude/worktrees/` copies multiply
+every hit, and the same corpus is reachable from editors, indexers and search
+tools that were never told what this directory is. And the caps ADR-0023
+argues for are not belt-and-braces: this is what the same input does to a
+mature parser written by somebody else that does not have them.
+
 ## Deliberately not covered
 
 - **Anything requiring nightly or a sanitizer.** No ASan, no MSan, no
