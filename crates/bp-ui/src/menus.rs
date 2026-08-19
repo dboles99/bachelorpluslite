@@ -134,6 +134,20 @@ pub mod action {
     pub const DATA_YAML_TO_JSON: i32 = 210;
     pub const DATA_JSON_TO_YAML: i32 = 211;
 
+    /// File ▸ Set as Default Editor (ADR-0012), opening a block of its own at
+    /// 220-229 for platform integration. 221-229 are free.
+    ///
+    /// Not one of the four ids left at 206-209, and not one of the eight at
+    /// 212-219: those are the Security operations' block and the Data
+    /// conversions', and a File action sitting inside either is how a block
+    /// stops meaning anything -- which is the whole argument `SCAN_SECRETS`'
+    /// comment makes about splitting a family across two blocks, seen from
+    /// the other direction.
+    ///
+    /// Above 100, so outside Slint's `UNDO..=SELECT_ALL` window, on the same
+    /// argument as the two blocks above.
+    pub const SET_DEFAULT_EDITOR: i32 = 220;
+
     /// Clipboard history occupies `CLIP_BASE ..` (bounded by [`super::clip_end`]).
     ///
     /// Slint's `dispatch` routes exactly `UNDO..=SELECT_ALL` to the widget and
@@ -415,7 +429,21 @@ pub fn file(any_dirty: bool, has_path: bool, recent: &[std::path::PathBuf]) -> V
             separator_after: true,
             ..row("Save a Copy...", "", action::SAVE_COPY)
         },
-        row("Close Tab", "Ctrl+W", action::CLOSE_TAB),
+        row_end("Close Tab", "Ctrl+W", action::CLOSE_TAB),
+        // Live on both platforms, and it is not the same amount of work on
+        // each: on Linux it writes the artefacts, on Windows it saves a `.reg`
+        // the user applies. Neither sets a default -- ADR-0012 leaves that to
+        // the operating system's own UI -- so the row asks first and says so.
+        //
+        // The preset is named in the hint rather than chosen out of sight.
+        // specs.md section 19 wants all five offered, which wants a settings
+        // screen; five more rows in the File menu would be a worse answer
+        // than one row that says which preset it means.
+        row(
+            "Set as Default Editor...",
+            "Notepad Replacement",
+            action::SET_DEFAULT_EDITOR,
+        ),
     ]);
     items
 }
@@ -619,6 +647,7 @@ pub fn security(
     encrypted: bool,
     privacy: bp_security::Privacy,
     has_content: bool,
+    has_path: bool,
 ) -> Vec<MenuItem> {
     // What is actually in force, which is the document's profile *and* the
     // session override. Showing the unclamped policy would tell the user their
@@ -720,10 +749,28 @@ pub fn security(
             action::SIGN_DOCUMENT,
             false,
         ),
-        // Live even though signing is not: verifying needs the *other*
-        // party's public key and their `.sig`, both of which the user
-        // supplies. It is the half of the feature that needs nothing stored.
-        row_end("Verify Signature...", "", action::VERIFY_SIGNATURE),
+        // Live even though signing is not: verifying needs the other party's
+        // signature and, to say more than "intact", their public key. It is
+        // the half of the feature that needs nothing stored.
+        //
+        // Greyed rather than `planned` for a document that has never been
+        // saved, and the reason is on the row: `bp_integrity::verify_file`
+        // checks the *file*, and a sidecar is named after a file name, so
+        // there is nothing to look beside. The hint names the convention, so
+        // the user knows which file to go and find before they click.
+        MenuItem {
+            separator_after: true,
+            ..row_enabled(
+                if has_path {
+                    "Verify Signature..."
+                } else {
+                    "Verify Signature — this document has never been saved"
+                },
+                if has_path { "document.ext.sig" } else { "" },
+                action::VERIFY_SIGNATURE,
+                has_path,
+            )
+        },
         planned("Lock Document, audit history"),
         arrives("phase 16"),
     ]);
@@ -1096,6 +1143,7 @@ mod tests {
             false,
             bp_security::Privacy::Off,
             true,
+            true,
         );
         // The profile toggles are the leading rows, by construction. Taking
         // them positionally rather than by id range is what lets the range
@@ -1131,6 +1179,7 @@ mod tests {
                 false,
                 bp_security::Privacy::Off,
                 true,
+                true,
             );
             let ticked: Vec<&str> = items
                 .iter()
@@ -1152,6 +1201,7 @@ mod tests {
             false,
             bp_security::Privacy::Off,
             true,
+            true,
         );
         assert!(
             !items.iter().any(|i| i.label.starts_with('✓')),
@@ -1167,6 +1217,7 @@ mod tests {
             bp_security::Security::Named(bp_security::Profile::Standard),
             false,
             bp_security::Privacy::Off,
+            true,
             true,
         );
         assert!(
@@ -1184,6 +1235,7 @@ mod tests {
             bp_security::Security::Named(bp_security::Profile::Maximum),
             false,
             bp_security::Privacy::Off,
+            true,
             true,
         );
         assert!(
@@ -1207,6 +1259,7 @@ mod tests {
             false,
             bp_security::Privacy::Off,
             true,
+            true,
         );
         let row = items
             .iter()
@@ -1226,6 +1279,7 @@ mod tests {
             bp_security::Security::default(),
             false,
             bp_security::Privacy::Off,
+            true,
             true,
         )
     }
@@ -1296,6 +1350,97 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn set_as_default_editor_sits_outside_every_range_dispatch_matches() {
+        // A File action at 220 is matched by an exact arm, and several arms
+        // above it match ranges -- a range arm comes first, so an id that
+        // strayed into one would silently paste a clipboard entry instead of
+        // registering a file type.
+        for (name, window) in range_dispatch_windows() {
+            assert!(
+                !window.contains(&action::SET_DEFAULT_EDITOR),
+                "id {} falls inside the {name} window and would be dispatched as one",
+                action::SET_DEFAULT_EDITOR
+            );
+        }
+        assert!(
+            (220..230).contains(&action::SET_DEFAULT_EDITOR),
+            "the comment on this id promises a block at 220-229"
+        );
+    }
+
+    #[test]
+    fn the_default_editor_row_names_the_preset_it_would_register_for() {
+        // The preset is a real choice and this row makes one. Naming it on
+        // the row is what keeps it from being made out of sight -- and the
+        // ellipsis is the house convention for a row that asks first, which
+        // this one does, because registration writes files.
+        let row = file(false, true, &[])
+            .into_iter()
+            .find(|i| i.action == action::SET_DEFAULT_EDITOR)
+            .expect("a default-editor row");
+
+        assert!(row.enabled, "the row is live on both platforms");
+        assert!(row.label.ends_with("..."), "got '{}'", row.label);
+        assert!(
+            row.shortcut.contains("Notepad Replacement"),
+            "the hint has to name the preset; got '{}'",
+            row.shortcut
+        );
+    }
+
+    #[test]
+    fn verifying_greys_out_for_a_document_that_has_never_been_saved() {
+        // `bp_integrity::verify_file` checks the *file*, and a sidecar is
+        // named after a file name -- so there is nothing to look beside.
+        // `row_enabled` rather than `planned`: the capability exists and what
+        // is missing is a file, which is a different sentence.
+        let items = security(
+            bp_security::Security::default(),
+            false,
+            bp_security::Privacy::Off,
+            true,
+            false,
+        );
+        let row = items
+            .iter()
+            .find(|i| i.action == action::VERIFY_SIGNATURE)
+            .expect("a verify row");
+
+        assert!(
+            !row.enabled,
+            "there is no file for a signature to sit beside"
+        );
+        assert_ne!(
+            row.action,
+            action::NONE,
+            "a real capability with nothing to act on is not a planned row"
+        );
+        assert!(
+            row.label.contains("never been saved"),
+            "the row must say why it is greyed; got '{}'",
+            row.label
+        );
+    }
+
+    #[test]
+    fn the_verify_row_names_where_it_will_look_for_the_signature() {
+        // `document.ext.sig`, appended and not substituted. The row is the
+        // last place to say so before a user goes hunting for the file, and
+        // saying it here is cheaper than a refusal that names a path.
+        let row = security_menu()
+            .into_iter()
+            .find(|i| i.action == action::VERIFY_SIGNATURE)
+            .expect("a verify row");
+
+        assert!(row.enabled);
+        assert!(
+            row.shortcut.contains(".sig"),
+            "the sidecar convention belongs on the row; got '{}'",
+            row.shortcut
+        );
     }
 
     #[test]
@@ -1408,6 +1553,7 @@ mod tests {
             false,
             bp_security::Privacy::Off,
             false,
+            true,
         );
         let row = items
             .iter()
@@ -1446,6 +1592,7 @@ mod tests {
                 false,
                 bp_security::Privacy::Off,
                 has_content,
+                true,
             );
             let row = items
                 .iter()
@@ -1916,7 +2063,17 @@ mod tests {
             .collect();
         let items = file(false, true, &recent);
 
-        let max = items.iter().map(|i| i.action).max().unwrap();
+        // The recent rows, picked out by their labels rather than by the id
+        // range under test -- a filter written from `RECENT_BASE` would agree
+        // with the code by construction and catch nothing. The File menu has
+        // fixed rows above 100 of its own now (Set as Default Editor), and
+        // those are not what this is about.
+        let max = items
+            .iter()
+            .filter(|i| i.label.ends_with(".txt"))
+            .map(|i| i.action)
+            .max()
+            .expect("a full list produces recent rows");
         assert!(
             max < 100,
             "recent ids reached {max}, which Slint would swallow"
@@ -1963,6 +2120,7 @@ mod tests {
             bp_security::Security::default(),
             false,
             bp_security::Privacy::Off,
+            true,
             true,
         ));
 

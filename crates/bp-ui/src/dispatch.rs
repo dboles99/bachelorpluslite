@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 
 use bp_core::{Document, DocumentId, Encoding, LineEnding};
+use bp_platform::editor::{Consent, InstallRefusal, RegistrationPlan};
 use bp_theme::ThemeId;
 
 use crate::menus::{self, action};
@@ -91,21 +92,6 @@ fn with_bpadx_extension(path: PathBuf) -> PathBuf {
     }
 }
 
-/// Choose the detached signature to check a document against.
-///
-/// A file the user points at, rather than one guessed from the document's
-/// own path: naming and finding `.sig` sidecars is `bp-integrity`'s to
-/// decide, and a second convention invented here is one the two could
-/// disagree about.
-fn pick_signature(state: &AppState) -> Option<PathBuf> {
-    rfd::FileDialog::new()
-        .set_title("Choose the signature file")
-        .set_directory(state.dialog_directory())
-        .add_filter("Detached signature", &["sig"])
-        .add_filter("Any file", &["*"])
-        .pick_file()
-}
-
 /// Choose the public key a signature is claimed to have been made with.
 fn pick_verifying_key(state: &AppState) -> Option<PathBuf> {
     rfd::FileDialog::new()
@@ -114,6 +100,44 @@ fn pick_verifying_key(state: &AppState) -> Option<PathBuf> {
         .add_filter("Public key", &["pub", "key", "txt"])
         .add_filter("Any file", &["*"])
         .pick_file()
+}
+
+/// Choose where to put the registry script Windows registration needs.
+///
+/// The file name comes from `bp-platform`'s own artefact, so what the user
+/// saves is what the plan names. Where it goes is entirely their choice --
+/// ADR-0012's whole position is that the user reads this file and applies it
+/// themselves, and a location chosen for them is one step back towards an
+/// installer writing the same keys invisibly.
+fn pick_registry_script(state: &AppState, plan: &RegistrationPlan) -> Option<PathBuf> {
+    rfd::FileDialog::new()
+        .set_title("Save the registry script")
+        .set_directory(state.dialog_directory())
+        .set_file_name(crate::default_editor::registry_script_name(plan))
+        .add_filter("Registry script", &["reg"])
+        .save_file()
+}
+
+/// Show what registration would do, and ask before doing any of it.
+///
+/// The body is built in `default_editor`, which puts the current
+/// associations above the plan: ADR-0012 is about the user keeping control,
+/// and a user cannot keep control of a change they were not shown the
+/// starting point of. The answer becomes the `Consent` value
+/// `bp_platform::editor::install` refuses to act without.
+fn confirm_registration(body: &str) -> Consent {
+    if rfd::MessageDialog::new()
+        .set_level(rfd::MessageLevel::Warning)
+        .set_title("Set as default editor")
+        .set_description(body)
+        .set_buttons(rfd::MessageButtons::OkCancel)
+        .show()
+        == rfd::MessageDialogResult::Ok
+    {
+        Consent::Granted
+    } else {
+        Consent::Withheld
+    }
 }
 
 /// Show what a redaction is about to destroy, and ask before destroying it.
@@ -444,13 +468,89 @@ pub fn handle_menu_action(
         }
 
         action::VERIFY_SIGNATURE => {
-            // Two files, both chosen by the user, and neither borrow held
-            // past the statement that opens its dialog. Cancelling either is
-            // an answer, not an error, so it leaves the status bar alone.
-            let signature = pick_signature(&state.borrow())?;
-            let key = pick_verifying_key(&state.borrow())?;
-            state.borrow_mut().verify_signature(&signature, &key);
             push = PushText::No;
+            // The first pass asks the user nothing, because a key cannot
+            // change its answer: whether a sidecar is there at all, whether
+            // it reads as one, and whether it holds against the key it itself
+            // names are all settled before anybody is asked for a file. A
+            // missing one fails here, closed, and stops.
+            let holds = state
+                .borrow_mut()
+                .verify_signature(&bp_integrity::Expectation::AnySigner);
+
+            // Only now is a key worth asking for. It is the one thing that
+            // tells "signed by who you expected" from "signed by somebody
+            // else" -- the verdict a bare 64-byte `.sig` cannot produce, and
+            // the reason ADR-0026's sidecar records a key at all. Cancelling
+            // leaves the first pass's answer standing, caveat and all, which
+            // is why that caveat is written.
+            if holds && let Some(path) = pick_verifying_key(&state.borrow()) {
+                let expect = state.borrow_mut().expected_signer(&path);
+                if let Some(expect) = expect {
+                    state.borrow_mut().verify_signature(&expect);
+                }
+            }
+        }
+
+        action::SET_DEFAULT_EDITOR => {
+            push = PushText::No;
+            // Nothing is borrowed while a dialog is up: `rfd` pumps events,
+            // and a re-entrant callback on a live `borrow_mut()` panics.
+            match crate::default_editor::offer() {
+                Err(reason) => state.borrow_mut().error = Some(reason),
+                Ok(offer) => {
+                    let consent = confirm_registration(&offer.body);
+                    let message = match (consent, offer.root.as_deref()) {
+                        (Consent::Withheld, _) => InstallRefusal::ConsentWithheld.describe(),
+                        // The only call in this application that writes into
+                        // a directory the desktop environment reads. It takes
+                        // the root `bp-platform` named and the consent the
+                        // user just gave, and neither has a default.
+                        (Consent::Granted, Some(root)) => {
+                            let (status, body) = crate::default_editor::install_outcome(
+                                bp_platform::editor::install(&offer.plan, root, consent),
+                                &offer.plan.handoff,
+                                root,
+                            );
+                            if let Some(body) = body {
+                                show_info("Set as default editor", &body);
+                            }
+                            status
+                        }
+                        // No install root means this platform has no
+                        // supported install -- Windows. The `.reg` script is
+                        // what ADR-0012 leaves in its place: a file the user
+                        // chose the location of and can read before running.
+                        (Consent::Granted, None) => {
+                            let chosen = pick_registry_script(&state.borrow(), &offer.plan);
+                            match chosen {
+                                Some(path) => {
+                                    match crate::default_editor::save_registry_script(
+                                        &offer.plan,
+                                        &path,
+                                    ) {
+                                        Ok(status) => {
+                                            let note = crate::default_editor::handoff_note(
+                                                &offer.plan.handoff,
+                                            );
+                                            show_info(
+                                                "Set as default editor",
+                                                &format!("{status}\n\n{note}"),
+                                            );
+                                            status
+                                        }
+                                        Err(refusal) => refusal,
+                                    }
+                                }
+                                None => "nothing was written — no location was chosen for the \
+                                         registry script"
+                                    .to_owned(),
+                            }
+                        }
+                    };
+                    state.borrow_mut().error = Some(message);
+                }
+            }
         }
 
         action::REDACT_SECRETS => {

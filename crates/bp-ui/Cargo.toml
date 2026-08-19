@@ -15,6 +15,18 @@ bp-formats = { path = "../bp-formats" }
 bp-history = { path = "../bp-history" }
 bp-search = { path = "../bp-search" }
 bp-crypto = { path = "../bp-crypto" }
+# Security ▸ Verify Signature (ADR-0026). It owns the `.sig` sidecar -- where
+# it lives beside the document, what is in it, and the five verdicts a user
+# has to be able to tell apart. `bp-crypto` stays because the shell still
+# hashes documents and still reads a public key in either spelling; the
+# signature half now goes through here, which re-exports `bp-crypto`'s types
+# unchanged, so both names refer to one `VerifyingKey`.
+bp-integrity = { path = "../bp-integrity" }
+# File ▸ Set as Default Editor (ADR-0012). Reports what opens a file type
+# today, plans a registration, and is the only crate here that may write into
+# a directory the desktop environment reads -- and only with an explicit
+# `Consent` and an explicit root.
+bp-platform = { path = "../bp-platform" }
 bp-security = { path = "../bp-security" }
 # Security ▸ Scan for Secrets. Pure, no dependencies of its own, and it
 # deliberately reports where a credential is without ever carrying it.

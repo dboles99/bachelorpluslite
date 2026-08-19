@@ -43,6 +43,7 @@ slint::include_modules!();
 
 mod menus;
 
+mod default_editor;
 mod dispatch;
 mod editor_view;
 mod passphrase;
@@ -205,6 +206,10 @@ fn refresh(ui: &AppWindow, state: &mut state::AppState, push_text: state::PushTe
         // scan: this runs on every refresh, and scanning the whole document
         // there is the trap R011 spends a paragraph on.
         state.active_has_content(),
+        // Verification reads the *file*, and looks for the sidecar beside it
+        // by name. Already computed above for Reload, which needs the same
+        // fact for the same underlying reason.
+        has_path,
     )));
 }
 

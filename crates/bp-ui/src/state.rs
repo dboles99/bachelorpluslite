@@ -1135,51 +1135,103 @@ impl AppState {
         ))
     }
 
-    /// Check a detached signature against the active document.
+    /// Check the active document against the `.sig` sidecar beside it.
     ///
-    /// The shell reads two files the user chose and calls `bp_crypto`; it
-    /// owns no sidecar convention of its own. Where a `.sig` lives, how it is
-    /// found and what else travels beside it are `bp-integrity`'s to decide,
-    /// and a second answer here would be one the two could disagree about.
-    pub(crate) fn verify_signature(&mut self, signature_path: &Path, key_path: &Path) {
-        let bytes = match self.active_bytes() {
-            Ok(bytes) => bytes,
+    /// The sidecar is found by `bp_integrity::sidecar_path` -- `document.ext`
+    /// is signed by `document.ext.sig` -- rather than asked for. Two callers
+    /// that disagree about that name produce a document one half of the
+    /// product believes is unsigned, which is why the convention is a
+    /// function in one crate and not a rule left to each caller.
+    ///
+    /// `expect` chooses between the two questions ADR-0026 keeps apart.
+    /// [`Expectation::AnySigner`](bp_integrity::Expectation::AnySigner)
+    /// answers "has this changed since the key named in the sidecar signed
+    /// it", which anybody who alters a document can pass by re-signing with a
+    /// key of their own; naming a key answers "was it *this* signer", and is
+    /// the only way `SignedByAnotherKey` can arise at all.
+    ///
+    /// Returns whether the check passed, so the caller knows whether naming a
+    /// key could still change the answer. It can only turn a pass into
+    /// `SignedByAnotherKey`; a failure is a failure whatever key is offered,
+    /// because `verify_file` tests the signature against the sidecar's own
+    /// key before it compares that key with anybody's expectation.
+    pub(crate) fn verify_signature(&mut self, expect: &bp_integrity::Expectation) -> bool {
+        let Some(path) = self
+            .workspace
+            .active()
+            .and_then(Document::path)
+            .map(Path::to_path_buf)
+        else {
+            self.error = Some(
+                "cannot verify — this document has never been saved, so there is no file \
+                 for a signature to sit beside"
+                    .to_owned(),
+            );
+            return false;
+        };
+
+        // A missing *document* is an error and a missing *signature* is a
+        // verdict -- and a failing one. `bp-integrity` draws that line, and
+        // the shell does not get to soften it: an unsigned document must not
+        // come back as anything but a failure, or deleting a file would be a
+        // way to pass the check.
+        let verification = match bp_integrity::verify_file(&path, expect) {
+            Ok(verification) => verification,
             Err(e) => {
-                self.error = Some(format!("cannot verify this document — {e}"));
-                return;
+                self.error = Some(format!("cannot verify — {e}"));
+                return false;
             }
         };
 
-        let signature = match read_signature(signature_path) {
-            Ok(signature) => signature,
-            Err(e) => {
-                self.error = Some(format!("could not read the signature — {e}"));
-                return;
-            }
-        };
-        let key = match read_verifying_key(key_path) {
-            Ok(key) => key,
+        let verified = verification.is_verified();
+        // `explain` rather than a second set of sentences here. Every verdict
+        // words itself in `bp-integrity`, beside the logic that produces it,
+        // so the status bar and any other surface say the same thing about
+        // the same answer -- and so the five outcomes ADR-0026 exists to keep
+        // apart stay five, rather than collapsing into "does not verify" on
+        // the way to a screen.
+        let mut message = format!(
+            "{} {}",
+            if verified { "✓" } else { "✗" },
+            verification.explain()
+        );
+
+        if verified && *expect == bp_integrity::Expectation::AnySigner {
+            // The caveat `Expectation::AnySigner` carries in its own doc
+            // comment. Without it a tick reads as "this is from who you
+            // think", which is a claim nothing here checked.
+            message.push_str(
+                " — no key was named, so this says only that the document has not changed \
+                 since the key above signed it; anyone who alters a document can re-sign it \
+                 with a key of their own",
+            );
+        }
+        if self.active_differs_from_disk() {
+            // The shell's own contribution, and the only sentence here it is
+            // in a position to write: the verdict is about the file, and the
+            // buffer on screen is not that file.
+            message.push_str(
+                " — this document has unsaved changes, so these are not the bytes anybody \
+                 signed; the check was made against the file on disk",
+            );
+        }
+        self.error = Some(message);
+        verified
+    }
+
+    /// Read the public key a signature is claimed to have been made with.
+    ///
+    /// Reports its own failure, because "could not read the key" and "the
+    /// signature does not match" are answers with different fixes and the
+    /// second must never be shown for the first.
+    pub(crate) fn expected_signer(&mut self, key_path: &Path) -> Option<bp_integrity::Expectation> {
+        match read_verifying_key(key_path) {
+            Ok(key) => Some(bp_integrity::Expectation::Key(key)),
             Err(e) => {
                 self.error = Some(format!("could not read the key — {e}"));
-                return;
+                None
             }
-        };
-
-        // A failure is reported as `SignError::DoesNotVerify` says it: the
-        // bytes do not distinguish an altered document from an altered
-        // signature from the wrong key. The one extra sentence the shell can
-        // honestly add is about its own state -- unsaved edits mean these are
-        // not the bytes anybody signed, and that is the likeliest explanation
-        // by far.
-        self.error = Some(match bp_crypto::verify_document(&key, &bytes, &signature) {
-            Ok(()) => format!(
-                "✓ signature verified — the holder of key {} approved these exact bytes",
-                key.to_hex()
-            ),
-            Err(_) if self.active_differs_from_disk() => "✗ signature does not match — this document has unsaved changes, so these \n                 are not the bytes that were signed; save it and verify again"
-                .to_owned(),
-            Err(e) => format!("✗ {e}"),
-        });
+        }
     }
 
     /// Insert a date or time stamp at the caret.
@@ -2302,7 +2354,8 @@ fn hash_report(digest: &bp_crypto::DocumentHash, bytes: usize, unsaved: bool) ->
 
 {}
 
-Taken over the {bytes} bytes this document would be written as,          so it matches the file once it is saved.",
+Taken over the {bytes} bytes this document would be written as, so it \
+        matches the file once it is saved.",
         digest.to_display(),
         digest.to_hex(),
     );
@@ -2312,16 +2365,11 @@ Taken over the {bytes} bytes this document would be written as,          so it m
         report.push_str(
             "
 
-This document has unsaved changes, so it is not yet the digest of              anything on disk.",
+This document has unsaved changes, so it is not yet the digest of \
+            anything on disk.",
         );
     }
     report
-}
-
-/// Read a detached signature from the file the user chose.
-fn read_signature(path: &Path) -> Result<bp_crypto::Signature, String> {
-    let raw = std::fs::read(path).map_err(|e| e.to_string())?;
-    bp_crypto::Signature::from_bytes(&raw).map_err(|e| e.to_string())
 }
 
 /// Read a verifying key from the file the user chose, in either spelling.
@@ -2726,6 +2774,10 @@ mod tests {
             action::HASH_DOCUMENT,
             action::SIGN_DOCUMENT,
             action::VERIFY_SIGNATURE,
+            // In the File menu, and therefore in the same *menu* as the
+            // recent rows -- which is where an id landing in that window
+            // would be least visible and most confusing.
+            action::SET_DEFAULT_EDITOR,
         ] {
             assert!(!window.contains(&id), "id {id} collides with recent files");
         }
@@ -3783,6 +3835,40 @@ mod tests {
     }
 
     #[test]
+    fn the_digest_report_wraps_in_the_source_without_wrapping_on_the_screen() {
+        // Both sentences in `hash_report` are wrapped to fit this file, and a
+        // string continuation is the only wrapping that leaves no trace. The
+        // escaped newline these two started as put a line break and
+        // eight spaces into the middle of a sentence in the dialog
+        // instead. Both branches are checked, because the unsaved
+        // sentence is its own literal and was separately wrong.
+        let mut unsaved_state = AppState::new();
+        unsaved_state.edit("draft".to_owned());
+        let unsaved = unsaved_state.hash_active_document().expect("a digest");
+
+        let dir = tempfile::tempdir().unwrap();
+        let (mut saved_doc, _) = saved_state(dir.path(), "notes.txt", "saved content\n");
+        let saved = saved_doc.hash_active_document().expect("a digest");
+
+        for report in [&unsaved, &saved] {
+            assert!(
+                report.contains("would be written as, so it matches the file"),
+                "the continuation has to close the sentence up; got {report}"
+            );
+            for line in report.lines() {
+                assert!(
+                    !line.starts_with(' '),
+                    "a wrapped literal leaked its indentation: {line:?}"
+                );
+            }
+        }
+        assert!(
+            unsaved.contains("not yet the digest of anything on disk"),
+            "got {unsaved}"
+        );
+    }
+
+    #[test]
     fn a_utf16_document_hashes_rather_than_refusing() {
         // This test used to assert the opposite, and it was right to: the
         // shell's own encoder refused UTF-16, and a digest over an empty
@@ -3807,55 +3893,260 @@ mod tests {
         );
     }
 
-    /// Write a signing identity's signature over `bytes`, plus its public
-    /// key, and return the two paths -- the shape the Verify row expects.
-    fn sign_to_files(dir: &std::path::Path, bytes: &[u8]) -> (PathBuf, PathBuf) {
-        let key = bp_crypto::SigningKey::generate().expect("the OS random source");
-        let signature = bp_crypto::sign_document(&key, bytes);
+    /// A signing identity that is the same on every run.
+    ///
+    /// A fixed seed rather than `SigningKey::generate`, so a failing
+    /// assertion names the same key twice and a test cannot fail once a
+    /// fortnight because the OS random source was briefly unavailable.
+    fn signer(seed: u8) -> bp_integrity::SigningKey {
+        bp_integrity::SigningKey::from_bytes(&[seed; bp_integrity::SIGNING_KEY_LEN])
+            .expect("32 bytes is a valid seed")
+    }
 
-        let sig_path = dir.join("document.sig");
-        let key_path = dir.join("document.pub");
-        std::fs::write(&sig_path, signature.to_bytes()).unwrap();
-        std::fs::write(&key_path, key.verifying_key().to_bytes()).unwrap();
-        (sig_path, key_path)
+    /// Write the public half where the Verify row's key picker would find it.
+    fn publish(dir: &std::path::Path, key: &bp_integrity::SigningKey) -> PathBuf {
+        let path = dir.join(format!("{}.pub", key.verifying_key().to_hex()));
+        std::fs::write(&path, key.verifying_key().to_hex()).unwrap();
+        path
+    }
+
+    /// A document open on a file that exists, with no unsaved edits.
+    fn saved_state(dir: &std::path::Path, name: &str, text: &str) -> (AppState, PathBuf) {
+        let path = dir.join(name);
+        std::fs::write(&path, text).unwrap();
+        let mut state = AppState::new();
+        state.open(path.clone());
+        (state, path)
     }
 
     #[test]
-    fn a_signature_over_the_documents_own_bytes_verifies() {
+    fn the_sidecar_is_found_beside_the_document_rather_than_asked_for() {
+        // `document.ext.sig`, appended and not substituted. Two callers that
+        // disagree about that name produce a document one half of the product
+        // believes is unsigned, which is why the convention is a function in
+        // `bp-integrity` and not a rule the shell writes down again.
         let dir = tempfile::tempdir().unwrap();
-        let mut state = AppState::new();
-        state.edit("signed content\n".to_owned());
-        let bytes = state.active_bytes().unwrap();
-        let (sig, key) = sign_to_files(dir.path(), &bytes);
+        let (mut state, path) = saved_state(dir.path(), "notes.txt", "signed content\n");
+        let key = signer(7);
+        bp_integrity::sign_file(&path, &key).expect("the sidecar is written");
 
-        state.verify_signature(&sig, &key);
         assert!(
-            state
-                .error
-                .as_deref()
-                .is_some_and(|e| e.starts_with('\u{2713}')),
-            "got {:?}",
-            state.error
+            dir.path().join("notes.txt.sig").is_file(),
+            "the sidecar is named after the whole file name"
+        );
+        assert!(state.verify_signature(&bp_integrity::Expectation::AnySigner));
+        let notice = state.error.clone().unwrap();
+        assert!(notice.starts_with('\u{2713}'), "got {notice}");
+        assert!(
+            notice.contains(&key.verifying_key().to_hex()),
+            "the signer has to be named; got {notice}"
         );
     }
 
     #[test]
-    fn a_verified_signature_names_the_key_and_claims_nothing_about_whose_it_is() {
-        // `bp-crypto` is explicit that it cannot say whose key it is, and the
-        // status bar must not quietly promise what the library refuses to.
+    fn a_missing_sidecar_fails_closed_and_says_where_it_looked() {
+        // The variant the whole design rests on. A signature that can be
+        // deleted to produce a pass is not a signature, so an unsigned
+        // document is a failure and not an absence of opinion.
         let dir = tempfile::tempdir().unwrap();
-        let mut state = AppState::new();
-        state.edit("signed content\n".to_owned());
-        let bytes = state.active_bytes().unwrap();
-        let (sig, key_path) = sign_to_files(dir.path(), &bytes);
-        let key = bp_crypto::VerifyingKey::from_bytes(&std::fs::read(&key_path).unwrap()).unwrap();
+        let (mut state, _) = saved_state(dir.path(), "notes.txt", "unsigned\n");
 
-        state.verify_signature(&sig, &key_path);
-        let notice = state.error.clone().unwrap();
-        assert!(notice.contains(&key.to_hex()), "got {notice}");
         assert!(
-            !notice.to_lowercase().contains("signed by the author"),
+            !state.verify_signature(&bp_integrity::Expectation::AnySigner),
+            "an unsigned document must not pass"
+        );
+        let notice = state.error.clone().unwrap();
+        assert!(notice.starts_with('\u{2717}'), "got {notice}");
+        assert!(notice.contains("Not signed"), "got {notice}");
+        assert!(
+            notice.contains("notes.txt.sig"),
+            "the user has to be told which file to go and find; got {notice}"
+        );
+    }
+
+    #[test]
+    fn a_malformed_sidecar_is_not_reported_as_a_tampered_document() {
+        // A truncated file is a copying accident and a bad signature is an
+        // accusation. Telling the user the second when the first happened
+        // sends them looking for an attacker who does not exist.
+        let dir = tempfile::tempdir().unwrap();
+        let (mut state, path) = saved_state(dir.path(), "notes.txt", "signed content\n");
+        bp_integrity::sign_file(&path, &signer(7)).unwrap();
+        std::fs::write(dir.path().join("notes.txt.sig"), "not a sidecar at all\n").unwrap();
+
+        assert!(!state.verify_signature(&bp_integrity::Expectation::AnySigner));
+        let notice = state.error.clone().unwrap();
+        assert!(notice.contains("cannot be read"), "got {notice}");
+        assert!(
+            !notice.contains("altered"),
+            "nothing here says anything about the document; got {notice}"
+        );
+    }
+
+    #[test]
+    fn a_document_altered_after_signing_does_not_match_and_the_signer_is_a_claim() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut state, path) = saved_state(dir.path(), "notes.txt", "signed content\n");
+        let key = signer(7);
+        bp_integrity::sign_file(&path, &key).unwrap();
+        // Changed on disk, not in the buffer: this is about the file.
+        std::fs::write(&path, "signed content, plus a line somebody added\n").unwrap();
+
+        assert!(!state.verify_signature(&bp_integrity::Expectation::AnySigner));
+        let notice = state.error.clone().unwrap();
+        assert!(notice.contains("does NOT match"), "got {notice}");
+        assert!(
+            notice.contains("could not be confirmed"),
+            "the named signer is a claim, not an attribution; got {notice}"
+        );
+        assert!(
+            notice.contains(&key.verifying_key().to_hex()),
             "got {notice}"
+        );
+    }
+
+    #[test]
+    fn an_intact_document_signed_by_somebody_else_is_its_own_answer() {
+        // The verdict a bare 64-byte `.sig` cannot produce, and the entire
+        // reason ADR-0026's sidecar records a key. Nothing is damaged and
+        // nothing was tampered with: this is a filing question, and reporting
+        // it as "does not match" would be an alarm about nothing.
+        let dir = tempfile::tempdir().unwrap();
+        let (mut state, path) = saved_state(dir.path(), "notes.txt", "signed content\n");
+        let colleague = signer(7);
+        let expected = signer(9);
+        bp_integrity::sign_file(&path, &colleague).unwrap();
+
+        assert!(!state.verify_signature(&bp_integrity::Expectation::Key(expected.verifying_key())));
+        let notice = state.error.clone().unwrap();
+        assert!(notice.contains("by a different key"), "got {notice}");
+        assert!(notice.contains("intact"), "got {notice}");
+        assert!(
+            notice.contains(&colleague.verifying_key().to_hex()),
+            "got {notice}"
+        );
+        assert!(
+            notice.contains(&expected.verifying_key().to_hex()),
+            "got {notice}"
+        );
+    }
+
+    #[test]
+    fn naming_the_expected_key_is_what_turns_a_pass_into_a_claim_about_a_person() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut state, path) = saved_state(dir.path(), "notes.txt", "signed content\n");
+        let key = signer(7);
+        bp_integrity::sign_file(&path, &key).unwrap();
+
+        assert!(state.verify_signature(&bp_integrity::Expectation::Key(key.verifying_key())));
+        let notice = state.error.clone().unwrap();
+        assert!(notice.starts_with('\u{2713}'), "got {notice}");
+        assert!(
+            !notice.contains("no key was named"),
+            "the caveat belongs only to the permissive check; got {notice}"
+        );
+    }
+
+    #[test]
+    fn a_pass_with_no_key_named_carries_the_caveat_that_makes_it_honest() {
+        // `Expectation::AnySigner` establishes only that the document has not
+        // changed since the key *in the sidecar* signed it. Anyone who alters
+        // a document can re-sign it with a key of their own and pass. A tick
+        // with no caveat reads as "this is from who you think", which is a
+        // claim nothing checked.
+        let dir = tempfile::tempdir().unwrap();
+        let (mut state, path) = saved_state(dir.path(), "notes.txt", "signed content\n");
+        bp_integrity::sign_file(&path, &signer(7)).unwrap();
+
+        assert!(state.verify_signature(&bp_integrity::Expectation::AnySigner));
+        let notice = state.error.clone().unwrap();
+        assert!(notice.contains("no key was named"), "got {notice}");
+        assert!(
+            notice.contains("re-sign it with a key of their own"),
+            "got {notice}"
+        );
+    }
+
+    #[test]
+    fn every_verdict_gets_its_own_sentence() {
+        // Four of the five are "no", and they are four rather than one
+        // because their fixes are four different things: find the file, get
+        // an undamaged copy, get an untampered document, get the right key. A
+        // shell that collapsed them would undo the point of the format.
+        let dir = tempfile::tempdir().unwrap();
+        let mut seen: Vec<String> = Vec::new();
+
+        // Verified, and signed by another key.
+        let (mut state, path) = saved_state(dir.path(), "a.txt", "content\n");
+        bp_integrity::sign_file(&path, &signer(7)).unwrap();
+        state.verify_signature(&bp_integrity::Expectation::Key(signer(7).verifying_key()));
+        seen.push(state.error.clone().unwrap());
+        state.verify_signature(&bp_integrity::Expectation::Key(signer(9).verifying_key()));
+        seen.push(state.error.clone().unwrap());
+
+        // Missing.
+        let (mut state, _) = saved_state(dir.path(), "b.txt", "content\n");
+        state.verify_signature(&bp_integrity::Expectation::AnySigner);
+        seen.push(state.error.clone().unwrap());
+
+        // Malformed.
+        let (mut state, path) = saved_state(dir.path(), "c.txt", "content\n");
+        bp_integrity::sign_file(&path, &signer(7)).unwrap();
+        std::fs::write(dir.path().join("c.txt.sig"), "rubbish\n").unwrap();
+        state.verify_signature(&bp_integrity::Expectation::AnySigner);
+        seen.push(state.error.clone().unwrap());
+
+        // Does not match.
+        let (mut state, path) = saved_state(dir.path(), "d.txt", "content\n");
+        bp_integrity::sign_file(&path, &signer(7)).unwrap();
+        std::fs::write(&path, "content, altered\n").unwrap();
+        state.verify_signature(&bp_integrity::Expectation::AnySigner);
+        seen.push(state.error.clone().unwrap());
+
+        let mut distinct = seen.clone();
+        distinct.sort();
+        distinct.dedup();
+        assert_eq!(
+            distinct.len(),
+            seen.len(),
+            "two verdicts share a message: {seen:#?}"
+        );
+    }
+
+    #[test]
+    fn unsaved_edits_are_reported_because_the_verdict_is_about_the_file() {
+        // The shell's own contribution and the only sentence here it is in a
+        // position to write: `verify_file` checks what is on the disk, and
+        // the buffer on screen is not that.
+        let dir = tempfile::tempdir().unwrap();
+        let (mut state, path) = saved_state(dir.path(), "notes.txt", "signed content\n");
+        bp_integrity::sign_file(&path, &signer(7)).unwrap();
+        state.edit("signed content\nand a line typed since\n".to_owned());
+
+        // The file still verifies -- it is untouched -- and saying so without
+        // the caveat would be a tick beside text nobody signed.
+        assert!(state.verify_signature(&bp_integrity::Expectation::AnySigner));
+        let notice = state.error.clone().unwrap();
+        assert!(notice.contains("unsaved changes"), "got {notice}");
+        assert!(
+            notice.contains("not the bytes anybody signed"),
+            "got {notice}"
+        );
+    }
+
+    #[test]
+    fn a_document_that_was_never_saved_has_nothing_for_a_sidecar_to_sit_beside() {
+        // The row is greyed for this, and the arm says it anyway: a silent
+        // no-op would be a bug report nobody could describe.
+        let mut state = AppState::new();
+        state.edit("never saved\n".to_owned());
+
+        assert!(!state.verify_signature(&bp_integrity::Expectation::AnySigner));
+        let notice = state.error.clone().unwrap();
+        assert!(notice.contains("never been saved"), "got {notice}");
+        assert!(
+            !notice.contains("  "),
+            "a wrapped literal leaked its indentation into the status bar: {notice:?}"
         );
     }
 
@@ -3865,76 +4156,30 @@ mod tests {
         // users to retype keys by hand, which is how a wrong key gets used.
         let dir = tempfile::tempdir().unwrap();
         let mut state = AppState::new();
-        state.edit("signed content\n".to_owned());
-        let bytes = state.active_bytes().unwrap();
-        let (sig, raw_key) = sign_to_files(dir.path(), &bytes);
+        let key = signer(7);
 
         let hex_key = dir.path().join("key.txt");
-        let key = bp_crypto::VerifyingKey::from_bytes(&std::fs::read(&raw_key).unwrap()).unwrap();
+        let text = key.verifying_key().to_hex();
         // Wrapped across two lines, exactly as an email client would leave it.
-        let text = key.to_hex();
         std::fs::write(&hex_key, format!("{}\n{}\n", &text[..32], &text[32..])).unwrap();
 
-        state.verify_signature(&sig, &hex_key);
-        assert!(
-            state
-                .error
-                .as_deref()
-                .is_some_and(|e| e.starts_with('\u{2713}')),
-            "got {:?}",
-            state.error
+        assert_eq!(
+            state.expected_signer(&hex_key),
+            Some(bp_integrity::Expectation::Key(key.verifying_key()))
         );
     }
 
     #[test]
-    fn a_signature_over_different_bytes_is_refused() {
-        let dir = tempfile::tempdir().unwrap();
-        let (sig, key) = sign_to_files(dir.path(), b"something else entirely");
-
-        let mut state = AppState::new();
-        state.edit("signed content\n".to_owned());
-        state.verify_signature(&sig, &key);
-        assert!(
-            state
-                .error
-                .as_deref()
-                .is_some_and(|e| e.starts_with('\u{2717}')),
-            "got {:?}",
-            state.error
-        );
-    }
-
-    #[test]
-    fn a_refusal_on_an_edited_document_says_the_edits_are_the_likely_reason() {
-        // The only sentence the shell can honestly add to `DoesNotVerify`:
-        // the library cannot tell an altered document from a wrong key, but
-        // we do know our own buffer is not what is on disk.
-        let dir = tempfile::tempdir().unwrap();
-        let (mut state, _, _) = dirty_saved_state(dir.path());
-        let (sig, key) = sign_to_files(dir.path(), b"first\n");
-
-        state.verify_signature(&sig, &key);
-        let notice = state.error.clone().unwrap();
-        assert!(notice.contains("unsaved changes"), "got {notice}");
-    }
-
-    #[test]
-    fn a_truncated_signature_file_is_reported_as_incomplete_not_as_a_mismatch() {
-        // A filing accident and a tampered document are different problems,
-        // and only one of them sends the user hunting for an attacker.
+    fn the_raw_thirty_two_byte_spelling_of_a_public_key_is_accepted_too() {
         let dir = tempfile::tempdir().unwrap();
         let mut state = AppState::new();
-        state.edit("signed content\n".to_owned());
-        let bytes = state.active_bytes().unwrap();
-        let (sig, key) = sign_to_files(dir.path(), &bytes);
-        std::fs::write(&sig, b"too short").unwrap();
+        let key = signer(7);
+        let raw = publish(dir.path(), &key);
+        std::fs::write(&raw, key.verifying_key().to_bytes()).unwrap();
 
-        state.verify_signature(&sig, &key);
-        let notice = state.error.clone().unwrap();
-        assert!(notice.contains("signature"), "got {notice}");
-        assert!(
-            notice.contains("64 bytes"),
-            "the length is the actionable part; got {notice}"
+        assert_eq!(
+            state.expected_signer(&raw),
+            Some(bp_integrity::Expectation::Key(key.verifying_key()))
         );
     }
 
@@ -3942,20 +4187,17 @@ mod tests {
     fn a_key_file_that_is_not_a_key_says_which_of_the_two_files_was_wrong() {
         let dir = tempfile::tempdir().unwrap();
         let mut state = AppState::new();
-        state.edit("signed content\n".to_owned());
-        let bytes = state.active_bytes().unwrap();
-        let (sig, _) = sign_to_files(dir.path(), &bytes);
-
-        let not_a_key = dir.path().join("notes.txt");
+        let not_a_key = dir.path().join("letter.txt");
         std::fs::write(&not_a_key, "dear bob, here is the file\n").unwrap();
 
-        state.verify_signature(&sig, &not_a_key);
+        assert_eq!(state.expected_signer(&not_a_key), None);
         let notice = state.error.clone().unwrap();
         assert!(
             notice.contains("key"),
             "the user has to know which file to replace; got {notice}"
         );
     }
+
     // --- Data ▸ YAML -------------------------------------------------------
 
     /// A document `run_data_action` will see as `Format::Yaml`.
