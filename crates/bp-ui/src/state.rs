@@ -157,6 +157,12 @@ pub struct AppState {
     /// A document with an entry here is encrypted; one without is not. That
     /// is the whole test, so there is no second flag to fall out of step.
     pub(crate) passphrases: HashMap<DocumentId, zeroize::Zeroizing<String>>,
+    /// Privacy Mode: a session-wide override that can only tighten.
+    ///
+    /// On `AppState` rather than on a document, because that is what it is
+    /// for -- one switch when you are about to share a screen, instead of
+    /// auditing every open tab.
+    pub(crate) privacy: bp_security::Privacy,
     /// What the passphrase bar is currently asking, if anything.
     pub(crate) ask: Option<crate::passphrase::Ask>,
     /// What the passphrase bar is reporting.
@@ -202,6 +208,7 @@ impl AppState {
             goto_status: String::new(),
             journal: bp_history::Journal::new(recovery_dir()),
             passphrases: HashMap::new(),
+            privacy: bp_security::Privacy::default(),
             ask: None,
             passphrase_status: String::new(),
             tab_context: None,
@@ -240,7 +247,7 @@ impl AppState {
             // The document's own profile, not a global setting: two tabs
             // open side by side can be governed differently, and the
             // stricter one must not be relaxed by the other being open.
-            let recovery = doc.policy().recovery;
+            let recovery = doc.security().policy_under(self.privacy).recovery;
             // Its own passphrase, if it has one. A sealed journal is
             // encrypted with the document's key so that it can be recovered
             // at unlock time and never needs a prompt of its own (ADR-0022).
@@ -905,10 +912,9 @@ impl AppState {
     /// site is how a permissive default gets applied to a document that asked
     /// for something stricter.
     pub(crate) fn policy(&self) -> bp_security::Policy {
-        self.workspace.active().map_or_else(
-            || bp_security::Security::default().policy(),
-            Document::policy,
-        )
+        // Through `policy_under`, always. Reading a document's own policy
+        // directly is how a caller ends up outside Privacy Mode's reach.
+        self.security().policy_under(self.privacy)
     }
 
     pub(crate) fn security(&self) -> bp_security::Security {
@@ -936,7 +942,7 @@ impl AppState {
             return;
         }
 
-        let policy = security.policy();
+        let policy = security.policy_under(self.privacy);
         if self.clips.enforce(policy.clipboard) {
             self.error = Some("clipboard history cleared to match this profile".to_owned());
         }
@@ -1131,6 +1137,35 @@ impl AppState {
                 true
             }
         }
+    }
+
+    /// Turn Privacy Mode on or off, and make the world match.
+    ///
+    /// Switching it on has to *act*, not merely be recorded: a mode that only
+    /// governed future writes would leave the clipboard history and the
+    /// journals gathered a moment ago exactly where they were, which is the
+    /// opposite of what somebody switching it on wants.
+    pub(crate) fn set_privacy(&mut self, privacy: bp_security::Privacy) {
+        if self.privacy == privacy {
+            return;
+        }
+        self.privacy = privacy;
+        if !privacy.is_on() {
+            // Turning it off restores each document's own profile. Nothing to
+            // clean up -- the clamp only ever removed permissions.
+            return;
+        }
+
+        let cleared = self.clips.enforce(self.policy().clipboard);
+        // Every document, not only the active one: the mode is session-wide,
+        // and a journal left behind for a background tab is exactly what it
+        // was switched on to prevent.
+        self.checkpoint_all();
+        self.error = Some(if cleared {
+            "Privacy Mode on -- clipboard history cleared and journals removed".to_owned()
+        } else {
+            "Privacy Mode on".to_owned()
+        });
     }
 
     /// Which document the tab context menu's rows should act on.
@@ -2344,6 +2379,75 @@ mod tests {
             state.journal.pending().is_empty(),
             "the earlier plaintext must be gone, not merely not added to"
         );
+    }
+
+    // --- privacy mode -----------------------------------------------------
+
+    #[test]
+    fn privacy_mode_clears_the_clipboard_and_removes_journals() {
+        // Switching it on has to *act*, not merely be recorded. A mode that
+        // only governed future writes would leave everything gathered a
+        // moment ago exactly where it was, which is the opposite of what
+        // somebody switching it on wants.
+        let dir = tempfile::tempdir().unwrap();
+        let mut state = AppState::new();
+        state.journal = bp_history::Journal::new(dir.path().to_path_buf());
+        state.edit("unsaved work".to_owned());
+        state
+            .clips
+            .push("copied earlier", bp_security::Clipboard::InMemory);
+        state.checkpoint_all();
+        assert_eq!(state.journal.pending().len(), 1);
+        assert!(!state.clips.is_empty());
+
+        state.set_privacy(bp_security::Privacy::On);
+
+        assert!(state.clips.is_empty(), "clipboard history survived");
+        assert!(state.journal.pending().is_empty(), "the journal survived");
+    }
+
+    #[test]
+    fn privacy_mode_acts_on_every_tab_not_only_the_active_one() {
+        // It is session-wide. A journal left behind for a background tab is
+        // exactly what it was switched on to prevent.
+        let dir = tempfile::tempdir().unwrap();
+        let mut state = AppState::new();
+        state.journal = bp_history::Journal::new(dir.path().to_path_buf());
+        state.edit("first tab".to_owned());
+        state.new_document();
+        state.edit("second tab".to_owned());
+        state.checkpoint_all();
+        assert_eq!(state.journal.pending().len(), 2);
+
+        state.set_privacy(bp_security::Privacy::On);
+
+        assert!(state.journal.pending().is_empty());
+    }
+
+    #[test]
+    fn privacy_mode_does_not_relax_a_document_that_was_already_stricter() {
+        // The clamp takes the stricter of each axis rather than substituting
+        // a policy. Substituting would drag a Maximum document *down* to
+        // whatever Privacy Mode specified.
+        let mut state = AppState::new();
+        state.set_security(bp_security::Security::Named(bp_security::Profile::Maximum));
+        let before = state.policy();
+
+        state.set_privacy(bp_security::Privacy::On);
+
+        assert_eq!(state.policy(), before);
+    }
+
+    #[test]
+    fn turning_privacy_mode_off_restores_each_documents_own_profile() {
+        let mut state = AppState::new();
+        let standard = state.policy();
+
+        state.set_privacy(bp_security::Privacy::On);
+        assert_ne!(state.policy(), standard);
+
+        state.set_privacy(bp_security::Privacy::Off);
+        assert_eq!(state.policy(), standard);
     }
 
     // --- encryption -------------------------------------------------------

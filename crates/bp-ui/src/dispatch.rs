@@ -341,6 +341,16 @@ pub fn handle_menu_action(
             push = PushText::No;
         }
 
+        action::PRIVACY_MODE => {
+            let next = if state.borrow().privacy.is_on() {
+                bp_security::Privacy::Off
+            } else {
+                bp_security::Privacy::On
+            };
+            state.borrow_mut().set_privacy(next);
+            push = PushText::No;
+        }
+
         action::ENCRYPT_DOCUMENT => {
             // Save As, not encrypt-in-place: the plaintext original is left
             // where it was rather than silently destroyed by an operation

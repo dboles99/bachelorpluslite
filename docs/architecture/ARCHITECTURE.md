@@ -47,9 +47,9 @@ and this table carries the intent until then.
 | `bp-notebook` | planned | Cell model, `.ipynb` import/export. | 12 |
 | `bp-execution` | planned | Runners and execution security. Never auto-runs (ADR-0011). | 12 |
 | `bp-research` | planned | Citations, paper metadata, research profile. | 13 |
-| `bp-security` | **live** | Security profiles resolving to a policy over seven axes (ADR-0020). Decides policy; performs none of it. Nothing consults it yet. | 14, 16 |
+| `bp-security` | **live** | Security profiles resolving to a policy over seven axes, plus Privacy Mode (ADR-0020). Decides policy; performs none of it. Read by the journal, the clipboard and the metadata store. | 14, 16 |
 | `bp-crypto` | **built, unwired** | The `.bpadx` envelope (ADR-0021): Argon2id, XChaCha20-Poly1305 and AES-256-GCM, chunked with the header and chunk position authenticated. Composes primitives, implements none. Reached from Security ▸ Encrypt Document and from opening a `.bpadx`. | 15 |
-| `bp-secrets` | planned | Platform key protection, secret scanning. | 16 |
+| `bp-secrets` | **built, unwired** | Secret scanning (specs §15): AWS/GitHub/GitLab/Slack tokens, PEM blocks, JWTs, connection strings, high-entropy assignments. Reports where a secret is, never what it is. No dependencies. Platform key protection is still planned. | 16 |
 | `bp-integrity` | planned | Hashing, signatures, verification. | 16 |
 | `bp-redaction` | planned | Redaction and metadata inspection. | 16 |
 | `bp-audit` | planned | Security audit history. | 16 |

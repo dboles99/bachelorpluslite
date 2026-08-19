@@ -857,13 +857,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bp-secrets"
-version = "0.1.0"
-dependencies = [
- "proptest",
-]
-
-[[package]]
 name = "bp-security"
 version = "0.1.0"
 dependencies = [

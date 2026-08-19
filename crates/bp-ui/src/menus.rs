@@ -92,6 +92,8 @@ pub mod action {
 
     /// Encrypt the active document to a `.bpadx` file (ADR-0021). 57-59 free.
     pub const ENCRYPT_DOCUMENT: i32 = 56;
+    /// Privacy Mode, a session-wide override (specs §15). 58-59 free.
+    pub const PRIVACY_MODE: i32 = 57;
 
     /// Clipboard history occupies `CLIP_BASE ..` (bounded by [`super::clip_end`]).
     ///
@@ -573,8 +575,15 @@ pub fn format(encoding: Encoding, line_ending: LineEnding, indent: Indent) -> Ve
 /// cannot see -- so the menu states the three that are observable today
 /// rather than making them infer it from behaviour that is, by design,
 /// invisible.
-pub fn security(current: bp_security::Security, encrypted: bool) -> Vec<MenuItem> {
-    let policy = current.policy();
+pub fn security(
+    current: bp_security::Security,
+    encrypted: bool,
+    privacy: bp_security::Privacy,
+) -> Vec<MenuItem> {
+    // What is actually in force, which is the document's profile *and* the
+    // session override. Showing the unclamped policy would tell the user their
+    // clipboard is kept while Privacy Mode is discarding it.
+    let policy = current.policy_under(privacy);
     let mut items: Vec<MenuItem> = bp_security::Profile::all()
         .iter()
         .enumerate()
@@ -621,7 +630,8 @@ pub fn security(current: bp_security::Security, encrypted: bool) -> Vec<MenuItem
             action::ENCRYPT_DOCUMENT,
             !encrypted,
         ),
-        planned("Privacy Mode, secret scanning, redaction"),
+        toggle("Privacy Mode", privacy.is_on(), action::PRIVACY_MODE),
+        planned("Secret scanning, redaction, audit history"),
         arrives("phase 16"),
     ]);
     items
@@ -960,7 +970,11 @@ mod tests {
         // `profile_end` is sized from `Profile::all()`, so a fifth profile
         // extends the window with the menu rather than landing outside it and
         // silently doing nothing.
-        let items = security(bp_security::Security::default(), false);
+        let items = security(
+            bp_security::Security::default(),
+            false,
+            bp_security::Privacy::Off,
+        );
         // The profile toggles are the leading rows, by construction. Taking
         // them positionally rather than by id range is what lets the range
         // itself be the thing under test.
@@ -990,7 +1004,11 @@ mod tests {
         // Two ticks would say the document is governed by two policies; none
         // would leave the user unable to tell which is in force.
         for profile in bp_security::Profile::all() {
-            let items = security(bp_security::Security::Named(*profile), false);
+            let items = security(
+                bp_security::Security::Named(*profile),
+                false,
+                bp_security::Privacy::Off,
+            );
             let ticked: Vec<&str> = items
                 .iter()
                 .filter(|i| i.label.starts_with('✓'))
@@ -1009,6 +1027,7 @@ mod tests {
         let items = security(
             bp_security::Security::Custom(bp_security::Profile::Maximum.policy()),
             false,
+            bp_security::Privacy::Off,
         );
         assert!(
             !items.iter().any(|i| i.label.starts_with('✓')),
@@ -1023,6 +1042,7 @@ mod tests {
         let standard = security(
             bp_security::Security::Named(bp_security::Profile::Standard),
             false,
+            bp_security::Privacy::Off,
         );
         assert!(
             standard
@@ -1038,6 +1058,7 @@ mod tests {
         let maximum = security(
             bp_security::Security::Named(bp_security::Profile::Maximum),
             false,
+            bp_security::Privacy::Off,
         );
         assert!(
             maximum
@@ -1058,6 +1079,7 @@ mod tests {
         let items = security(
             bp_security::Security::Named(bp_security::Profile::Private),
             false,
+            bp_security::Privacy::Off,
         );
         let row = items
             .iter()
@@ -1454,7 +1476,11 @@ mod tests {
         rust_side.extend(help());
         rust_side.extend(insert(STAMP_CLOCK, true));
         rust_side.extend(tab_context(2, true));
-        rust_side.extend(security(bp_security::Security::default(), false));
+        rust_side.extend(security(
+            bp_security::Security::default(),
+            false,
+            bp_security::Privacy::Off,
+        ));
 
         for item in rust_side.iter().filter(|i| i.enabled) {
             assert!(

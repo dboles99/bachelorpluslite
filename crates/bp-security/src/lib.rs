@@ -272,6 +272,57 @@ impl Profile {
     }
 }
 
+/// A session-wide override that can only ever tighten (specs.md §15).
+///
+/// Privacy Mode is not a fifth profile and not a `Policy`. It is a switch that
+/// takes whatever each document's profile permits and clamps it, so a user who
+/// is about to share their screen, or is on someone else's machine, can turn
+/// one thing on instead of auditing every open tab.
+///
+/// **It can only make things stricter.** That is the whole guarantee, and it
+/// is checked: applying it to any policy yields one at least as strict as the
+/// original, on every axis. A privacy mode that could relax something would be
+/// a switch that silently weakened a document the user had deliberately
+/// protected -- and it would be found out at exactly the wrong moment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Privacy {
+    /// Each document's own profile applies, unmodified.
+    #[default]
+    Off,
+    /// Nothing derived from any document is written down or leaves the
+    /// machine, whatever the individual profiles say.
+    On,
+}
+
+impl Privacy {
+    /// Apply the override to a policy.
+    ///
+    /// Takes the stricter of each axis rather than substituting a fixed
+    /// policy. Substituting would *relax* a Maximum document down to whatever
+    /// Privacy Mode happened to specify, which is the exact failure this type
+    /// exists to make impossible.
+    #[must_use]
+    pub fn clamp(self, policy: Policy) -> Policy {
+        match self {
+            Self::Off => policy,
+            Self::On => Policy {
+                recovery: policy.recovery.max(Recovery::Disabled),
+                clipboard: policy.clipboard.max(Clipboard::Disabled),
+                metadata: policy.metadata.max(Metadata::Disabled),
+                embeddings: policy.embeddings.max(Embeddings::None),
+                network: policy.network.max(Network::Denied),
+                temporary_files: policy.temporary_files.max(TemporaryFiles::Denied),
+                zeroise: policy.zeroise.max(Zeroise::On),
+            },
+        }
+    }
+
+    #[must_use]
+    pub const fn is_on(self) -> bool {
+        matches!(self, Self::On)
+    }
+}
+
 /// A document's security setting: a named profile, or one spelled out.
 ///
 /// `Custom` carries a `Policy` rather than being a fifth `Profile` variant,
@@ -290,13 +341,26 @@ impl Default for Security {
 }
 
 impl Security {
-    /// The policy in force. The one function every caller goes through.
+    /// The policy this document's own setting describes, before any
+    /// session-wide override.
+    ///
+    /// Most callers want [`policy_under`](Self::policy_under) instead: a
+    /// caller that reads this one directly is a caller that Privacy Mode does
+    /// not reach.
     #[must_use]
     pub const fn policy(&self) -> Policy {
         match self {
             Self::Named(profile) => profile.policy(),
             Self::Custom(policy) => *policy,
         }
+    }
+
+    /// The policy actually in force, given the session's Privacy Mode.
+    ///
+    /// The one function every caller should go through.
+    #[must_use]
+    pub fn policy_under(&self, privacy: Privacy) -> Policy {
+        privacy.clamp(self.policy())
     }
 
     /// What to show the user.
@@ -443,6 +507,81 @@ mod tests {
 
         assert!(!mixed.is_at_least_as_strict_as(&standard));
         assert!(!standard.is_at_least_as_strict_as(&mixed));
+    }
+
+    #[test]
+    fn privacy_mode_can_only_ever_tighten() {
+        // The whole guarantee. A privacy mode that could relax something
+        // would silently weaken a document the user had deliberately
+        // protected, and would be found out at the worst possible moment.
+        let mut policies: Vec<Policy> = Profile::all().iter().map(|p| p.policy()).collect();
+        // Plus a deliberately odd custom one, since Custom sits outside the
+        // monotonic chain and is where an unclamped axis would hide.
+        policies.push(Policy {
+            recovery: Recovery::Disabled,
+            clipboard: Clipboard::Persistent,
+            metadata: Metadata::Disabled,
+            embeddings: Embeddings::Cloud,
+            network: Network::Allowed,
+            temporary_files: TemporaryFiles::Denied,
+            zeroise: Zeroise::On,
+        });
+
+        for policy in policies {
+            let clamped = Privacy::On.clamp(policy);
+            assert!(
+                clamped.is_at_least_as_strict_as(&policy),
+                "Privacy Mode relaxed {policy:?} into {clamped:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn privacy_mode_off_changes_nothing() {
+        for profile in Profile::all() {
+            let policy = profile.policy();
+            assert_eq!(Privacy::Off.clamp(policy), policy);
+        }
+    }
+
+    #[test]
+    fn privacy_mode_does_not_relax_a_stricter_document() {
+        // Substituting a fixed policy -- rather than taking the stricter of
+        // each axis -- would drag a Maximum document *down* to whatever
+        // Privacy Mode specified. This is that bug, pinned.
+        let maximum = Profile::Maximum.policy();
+        assert_eq!(
+            Privacy::On.clamp(maximum),
+            maximum,
+            "Privacy Mode must be a floor, not a replacement"
+        );
+    }
+
+    #[test]
+    fn privacy_mode_denies_everything_worth_denying() {
+        // From the most permissive starting point, so every axis is actually
+        // exercised rather than already being at its strictest.
+        let clamped = Privacy::On.clamp(Profile::Standard.policy());
+
+        assert_eq!(clamped.recovery, Recovery::Disabled);
+        assert_eq!(clamped.clipboard, Clipboard::Disabled);
+        assert_eq!(clamped.metadata, Metadata::Disabled);
+        assert_eq!(clamped.embeddings, Embeddings::None);
+        assert_eq!(clamped.network, Network::Denied);
+        assert_eq!(clamped.temporary_files, TemporaryFiles::Denied);
+        assert_eq!(clamped.zeroise, Zeroise::On);
+    }
+
+    #[test]
+    fn the_policy_in_force_is_the_document_and_the_session_together() {
+        let security = Security::Named(Profile::Standard);
+
+        assert_eq!(security.policy_under(Privacy::Off), security.policy());
+        assert!(
+            security
+                .policy_under(Privacy::On)
+                .is_at_least_as_strict_as(&security.policy())
+        );
     }
 
     #[test]

@@ -132,8 +132,13 @@ fn refresh(ui: &AppWindow, state: &mut state::AppState, push_text: state::PushTe
     // document, and the readout earns its place only when something unusual
     // is in force.
     let security = state.security();
+    // Privacy Mode outranks the profile name here: it is the session-wide
+    // fact, and it is the thing somebody switches on precisely because they
+    // want to be able to see that it is on.
     ui.set_security_profile(
-        if security == bp_security::Security::default() {
+        if state.privacy.is_on() {
+            "Privacy Mode".to_owned()
+        } else if security == bp_security::Security::default() {
             String::new()
         } else {
             security.name().to_owned()
@@ -192,7 +197,11 @@ fn refresh(ui: &AppWindow, state: &mut state::AppState, push_text: state::PushTe
         .workspace
         .active_id()
         .is_some_and(|id| state.is_encrypted(id));
-    ui.set_security_items(model(menus::security(state.security(), encrypted)));
+    ui.set_security_items(model(menus::security(
+        state.security(),
+        encrypted,
+        state.privacy,
+    )));
 }
 
 /// Menus whose contents never change. Set once, not on every refresh.
