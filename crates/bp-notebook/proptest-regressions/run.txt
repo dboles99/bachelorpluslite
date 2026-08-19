@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 5ea32117bc881ff2fbed1153650fc8a907b5a95c625f1e8f8e612844d232ebe7 # shrinks to notebook = Notebook { cells: [Cell { id: CellId(1), kind: PlainText, source: "", collapsed: false, outputs: [], metadata: {} }], metadata: {} }

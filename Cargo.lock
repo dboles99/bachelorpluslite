@@ -750,6 +750,8 @@ name = "bp-buffer"
 version = "0.1.0"
 dependencies = [
  "ropey",
+ "tempfile",
+ "thiserror 2.0.20",
 ]
 
 [[package]]
@@ -857,6 +859,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "bp-secrets"
+version = "0.1.0"
+dependencies = [
+ "proptest",
+]
+
+[[package]]
 name = "bp-security"
 version = "0.1.0"
 dependencies = [
@@ -903,6 +912,7 @@ dependencies = [
  "bp-history",
  "bp-naming",
  "bp-search",
+ "bp-secrets",
  "bp-security",
  "bp-semantic",
  "bp-theme",
