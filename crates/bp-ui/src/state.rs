@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 use bp_config::Recent;
 use bp_core::{Document, DocumentId, Encoding, LineEnding, UNTITLED, Workspace};
-use bp_files::{DiskState, FileStamp, SaveOptions, atomic_write, load};
+use bp_files::{DiskState, FileStamp, LineEndingPolicy, SaveOptions, atomic_write, encode, load};
 use bp_formats::Format;
 use bp_naming::SemanticName;
 use bp_theme::ThemeId;
@@ -835,13 +835,16 @@ impl AppState {
             return SaveResult::NeedsPath;
         };
 
-        let bytes = match encode(&self.text_of(id), doc.encoding(), doc.line_ending()) {
-            Ok(b) => b,
-            Err(message) => {
-                self.error = Some(message);
-                return SaveResult::Failed;
-            }
-        };
+        // `Preserve`, not the document's declared line ending: a save must
+        // return the bytes the user was given. Converting here is what made
+        // every save quietly rewrite the minority convention in a mixed
+        // document, with nothing on screen to say it had happened. Format ▸
+        // LF / CRLF is where a conversion is asked for, and it asks first.
+        let bytes = encode(
+            &self.text_of(id),
+            doc.encoding(),
+            LineEndingPolicy::Preserve,
+        );
 
         // An encrypted document stays encrypted. The passphrase is held for
         // the session precisely so this does not ask again on every save --
@@ -906,13 +909,14 @@ impl AppState {
             return SaveResult::Saved;
         };
 
-        let bytes = match encode(&self.text_of(id), doc.encoding(), doc.line_ending()) {
-            Ok(b) => b,
-            Err(message) => {
-                self.error = Some(message);
-                return SaveResult::Failed;
-            }
-        };
+        // The same policy as a real save, for the same reason the encoding is
+        // shared: bytes written differently from the original would make the
+        // copy a different file.
+        let bytes = encode(
+            &self.text_of(id),
+            doc.encoding(),
+            LineEndingPolicy::Preserve,
+        );
 
         match atomic_write(target, &bytes, SaveOptions::default()) {
             Ok(_) => {
@@ -950,11 +954,16 @@ impl AppState {
 
     /// The active document as the bytes it would be written to disk as.
     ///
-    /// The encoded form rather than the buffer, because a digest and a
-    /// signature are claims about a *file*: hashing the buffer would print a
-    /// digest that `sha256sum` disagrees with for every CRLF document and
-    /// every one with a BOM, and a user comparing the two would conclude
-    /// their file had been tampered with.
+    /// The encoded form rather than the buffer, because a digest is a claim
+    /// about a *file*: hashing the buffer would print a digest that
+    /// `sha256sum` disagrees with for every document carrying a byte-order
+    /// mark, and a user comparing the two would conclude their file had been
+    /// tampered with.
+    ///
+    /// [`LineEndingPolicy::Preserve`], the same policy `save_document` uses,
+    /// and the two have to agree: a digest taken under one policy and a file
+    /// written under the other would differ for exactly the mixed-ending
+    /// documents somebody takes a digest to settle.
     ///
     /// A one-off on a menu click, like `report_statistics` -- it copies the
     /// whole document twice over and must never move onto the typing path.
@@ -962,8 +971,11 @@ impl AppState {
         let Some(doc) = self.workspace.active() else {
             return Err("there is no document to read".to_owned());
         };
-        let (encoding, line_ending) = (doc.encoding(), doc.line_ending());
-        encode(&self.active_text(), encoding, line_ending)
+        Ok(encode(
+            &self.active_text(),
+            doc.encoding(),
+            LineEndingPolicy::Preserve,
+        ))
     }
 
     /// Whether the active document differs from whatever is on disk.
@@ -1715,30 +1727,6 @@ pub(crate) fn clock(t: OffsetDateTime) -> String {
     bp_naming::render(bp_naming::Stamp::Time, t)
 }
 
-/// Encode the buffer for disk, honouring the document's encoding and line
-/// endings.
-///
-/// Round-tripping matters: a file opened as CRLF with a BOM must be written
-/// back that way, or saving silently rewrites every line of someone's file.
-pub(crate) fn encode(
-    text: &str,
-    encoding: Encoding,
-    line_ending: LineEnding,
-) -> Result<Vec<u8>, String> {
-    if matches!(encoding, Encoding::Utf16Le | Encoding::Utf16Be) {
-        return Err(format!("saving {} is not supported yet", encoding.label()));
-    }
-    // Normalise to LF first so mixed input converges on one convention.
-    let lf = text.replace("\r\n", "\n");
-    let body = match line_ending {
-        LineEnding::Lf => lf,
-        LineEnding::CrLf => lf.replace('\n', "\r\n"),
-    };
-    let mut out = encoding.bom().to_vec();
-    out.extend_from_slice(body.as_bytes());
-    Ok(out)
-}
-
 /// How redaction replaces what it destroys.
 ///
 /// [`bp_redaction::Replacement::Placeholder`], and the two it was chosen over
@@ -2446,37 +2434,60 @@ mod tests {
     }
 
     #[test]
-    fn encode_round_trips_line_endings() {
+    fn saving_a_mixed_document_does_not_rewrite_the_minority_line_break() {
+        // The defect this replaced. The shell used to normalise to LF and
+        // re-expand to the document's declared ending, so every save quietly
+        // converted whichever convention was in the minority -- and nothing
+        // on screen said so. `bp-files` owns the encoder now and the shell
+        // asks it for `Preserve`; this is the test that goes red if somebody
+        // "tidies" that back to the declared ending.
+        let dir = std::env::temp_dir().join(format!("bpad-ui-mixed-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("mixed.txt");
+
+        let mut state = AppState::new();
+        let id = state.workspace.active_id().unwrap();
+        state.edit("crlf\r\nlf\nend".to_owned());
+
         assert_eq!(
-            encode("a\nb", Encoding::Utf8, LineEnding::CrLf).unwrap(),
-            b"a\r\nb"
+            state.save_document(id, Some(path.clone())),
+            SaveResult::Saved
         );
         assert_eq!(
-            encode("a\r\nb", Encoding::Utf8, LineEnding::Lf).unwrap(),
-            b"a\nb"
+            std::fs::read(&path).unwrap(),
+            b"crlf\r\nlf\nend",
+            "both conventions survive a save exactly as the user left them"
         );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn encode_does_not_double_convert_existing_crlf() {
-        // Normalising to LF first is what stops "a\r\nb" becoming "a\r\r\nb".
-        assert_eq!(
-            encode("a\r\nb", Encoding::Utf8, LineEnding::CrLf).unwrap(),
-            b"a\r\nb"
-        );
-    }
+    fn the_digest_is_taken_over_the_same_bytes_a_save_would_write() {
+        // `active_bytes` and `save_document` have to agree on the policy, or
+        // a digest taken to settle a question about a file describes bytes
+        // that file does not contain -- and a mixed-ending document is
+        // exactly the kind somebody takes a digest to settle.
+        let dir = std::env::temp_dir().join(format!("bpad-ui-digest-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("mixed.txt");
 
-    #[test]
-    fn encode_writes_the_bom_back() {
-        assert_eq!(
-            encode("hi", Encoding::Utf8Bom, LineEnding::Lf).unwrap(),
-            b"\xEF\xBB\xBFhi"
-        );
-    }
+        let mut state = AppState::new();
+        let id = state.workspace.active_id().unwrap();
+        state.edit("crlf\r\nlf\nend".to_owned());
 
-    #[test]
-    fn encode_refuses_utf16_rather_than_writing_mojibake() {
-        assert!(encode("hi", Encoding::Utf16Le, LineEnding::Lf).is_err());
+        let hashed = state.active_bytes().expect("a document is open");
+        assert_eq!(
+            state.save_document(id, Some(path.clone())),
+            SaveResult::Saved
+        );
+        assert_eq!(
+            hashed,
+            std::fs::read(&path).unwrap(),
+            "the digest describes the file that was actually written"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -3772,20 +3783,25 @@ mod tests {
     }
 
     #[test]
-    fn a_document_that_cannot_be_encoded_says_so_instead_of_hashing_nothing() {
-        // `encode` refuses UTF-16 rather than writing mojibake, and a digest
-        // of an empty vector would be a perfectly plausible-looking wrong
-        // answer.
+    fn a_utf16_document_hashes_rather_than_refusing() {
+        // This test used to assert the opposite, and it was right to: the
+        // shell's own encoder refused UTF-16, and a digest over an empty
+        // vector would have been a plausible-looking wrong answer. `bp-files`
+        // encodes UTF-16 now, so the refusal is gone and what is worth
+        // pinning instead is that the digest covers the two-byte form with
+        // its byte-order mark -- the bytes the file would actually hold.
         let mut state = AppState::new();
         state.edit("hello".to_owned());
         state.set_encoding(Encoding::Utf16Le);
 
-        assert!(state.hash_active_document().is_none());
+        let bytes = state.active_bytes().expect("a document is open");
+        assert_eq!(
+            bytes.len(),
+            2 + "hello".len() * 2,
+            "a byte-order mark plus two bytes per character"
+        );
         assert!(
-            state
-                .error
-                .as_deref()
-                .is_some_and(|e| e.contains("cannot hash")),
+            state.hash_active_document().is_some(),
             "got {:?}",
             state.error
         );
