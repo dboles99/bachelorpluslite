@@ -9,12 +9,34 @@
 //! time. Positions are 1-based line and column, because that is what the
 //! status bar shows ("Ln 42, Col 18") and converting at the edge invites
 //! exactly one team member to forget.
+//!
+//! A rope is the right answer up to a point, and [`large`] is where that
+//! point is measured. Past it a document is not held in memory at all: it is
+//! indexed sparsely, read in chunks and streamed. `#![forbid(unsafe_code)]`
+//! holds for all of it, which is also why nothing here memory-maps -- the
+//! reasoning, and what it would take to change the answer, is written out in
+//! the [`large`] module docs rather than left as an omission.
 
 #![forbid(unsafe_code)]
 
 use std::ops::Range;
 
 use ropey::Rope;
+
+pub mod large;
+pub mod line_index;
+pub mod stream;
+
+pub use large::{
+    Access, CHUNK_BYTES, DisplayLine, HUGE_FILE_BYTES, INDEX_BUDGET_BYTES, IndexProgress,
+    LARGE_FILE_BYTES, LargeFile, LargeFileError, MAX_DISPLAY_BYTES, MAX_DISPLAY_LINE_BYTES,
+    MAX_DISPLAY_LINES, SizeClass,
+};
+pub use line_index::{LineIndex, LineLocation, MAX_ANCHORS, MAX_INDEX_HEAP_BYTES};
+pub use stream::{
+    DEFAULT_OVERLAP_BYTES, DEFAULT_WINDOW_BYTES, MAX_OVERLAP_BYTES, MIN_WINDOW_BYTES, StreamWindow,
+    WindowReader,
+};
 
 /// Crate identity used by workspace smoke tests and diagnostics.
 pub const CRATE_NAME: &str = "bp-buffer";
@@ -50,6 +72,7 @@ impl Position {
 #[derive(Debug, Clone, Default)]
 pub struct Buffer {
     rope: Rope,
+    access: Access,
 }
 
 impl Buffer {
@@ -60,7 +83,40 @@ impl Buffer {
     pub fn from_text(text: &str) -> Self {
         Self {
             rope: Rope::from_str(text),
+            access: Access::Editable,
         }
+    }
+
+    /// Whether this buffer accepts edits, and why not if it does not.
+    ///
+    /// Carried on the buffer rather than checked by every caller because
+    /// "read-only" enforced at the call sites is read-only until somebody
+    /// adds a call site. The rope is the one place every edit passes through.
+    pub fn access(&self) -> Access {
+        self.access
+    }
+
+    /// Shorthand for the common question.
+    pub fn is_read_only(&self) -> bool {
+        self.access.is_read_only()
+    }
+
+    /// Mark the buffer read-only, or editable again.
+    ///
+    /// Takes the reason, not a boolean: a buffer that is read-only because
+    /// the file is locked and one that is read-only because the document is
+    /// 2 GB need different words in the status bar, and a `bool` throws that
+    /// away at the only point where it is still known. See [`Access`].
+    pub fn set_access(&mut self, access: Access) {
+        self.access = access;
+    }
+
+    /// The same buffer, marked. For construction sites that would otherwise
+    /// need a `let mut` and a second statement.
+    #[must_use]
+    pub fn with_access(mut self, access: Access) -> Self {
+        self.access = access;
+        self
     }
 
     pub fn len_chars(&self) -> usize {
@@ -86,12 +142,23 @@ impl Buffer {
 
     /// Insert at a character index. Indices past the end clamp to the end
     /// rather than panicking -- this is reached from UI code.
+    ///
+    /// Does nothing when the buffer is read-only. Silently, and deliberately:
+    /// the caller is a keystroke, the answer is already on screen in the
+    /// status bar, and a dialog per character is not a better editor.
     pub fn insert(&mut self, char_idx: usize, text: &str) {
+        if self.is_read_only() {
+            return;
+        }
         self.rope.insert(char_idx.min(self.len_chars()), text);
     }
 
-    /// Remove a character range, clamped to the buffer.
+    /// Remove a character range, clamped to the buffer. Does nothing when the
+    /// buffer is read-only.
     pub fn remove(&mut self, range: Range<usize>) {
+        if self.is_read_only() {
+            return;
+        }
         let end = range.end.min(self.len_chars());
         let start = range.start.min(end);
         if start < end {
@@ -335,6 +402,53 @@ mod tests {
         assert_eq!(b.char_at(1), Some('é'), "chars, not bytes");
         assert_eq!(b.char_at(2), None);
         assert_eq!(b.char_at(999), None);
+    }
+
+    #[test]
+    fn a_buffer_is_editable_until_it_is_told_otherwise() {
+        // The default matters more than it looks: every existing caller
+        // builds a buffer without mentioning access, and all of them must
+        // keep working.
+        let mut b = Buffer::from_text("hi");
+        assert_eq!(b.access(), Access::Editable);
+        assert!(!b.is_read_only());
+        b.insert(2, "!");
+        assert_eq!(b.to_string(), "hi!");
+        assert_eq!(Buffer::new().access(), Access::Editable);
+        assert_eq!(Buffer::default().access(), Access::Editable);
+        assert_eq!(Buffer::from("x").access(), Access::Editable);
+    }
+
+    #[test]
+    fn a_read_only_buffer_refuses_every_edit_whatever_the_reason() {
+        // Both reasons must stop the edit. Only the message differs -- if
+        // one of them let a keystroke through, the difference between them
+        // would have become a correctness bug rather than a wording one.
+        for access in [
+            Access::ReadOnlyFile,
+            Access::ReadOnlyBySize {
+                bytes: HUGE_FILE_BYTES + 1,
+            },
+        ] {
+            let mut b = Buffer::from_text("hello").with_access(access);
+            assert!(b.is_read_only(), "{access:?}");
+            b.insert(0, "X");
+            b.remove(0..3);
+            assert_eq!(b.to_string(), "hello", "{access:?} let an edit through");
+            assert!(!b.access().message().is_empty(), "and must say why");
+        }
+    }
+
+    #[test]
+    fn a_buffer_can_be_made_editable_again() {
+        // Permissions change while a file is open, and reopening the
+        // document to pick that up would be a worse editor.
+        let mut b = Buffer::from_text("ab").with_access(Access::ReadOnlyFile);
+        b.insert(2, "c");
+        assert_eq!(b.to_string(), "ab");
+        b.set_access(Access::Editable);
+        b.insert(2, "c");
+        assert_eq!(b.to_string(), "abc");
     }
 
     #[test]
