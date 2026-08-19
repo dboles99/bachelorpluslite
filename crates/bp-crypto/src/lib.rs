@@ -44,9 +44,14 @@ use chacha20poly1305::XChaCha20Poly1305;
 use zeroize::{Zeroize, Zeroizing};
 
 mod header;
+mod sign;
 
 pub use header::{DEFAULT_CHUNK_SIZE, Header, KdfParams};
 use header::{MAGIC, MAX_CHUNK_SIZE, SALT_LEN, VERSION};
+pub use sign::{
+    DocumentHash, HashAlgorithm, SIGNATURE_LEN, SIGNING_KEY_LEN, SignError, Signature, SigningKey,
+    VERIFYING_KEY_LEN, VerifyingKey, hash_document, sign_document, verify_document,
+};
 
 /// Crate identity used by workspace smoke tests and diagnostics.
 pub const CRATE_NAME: &str = "bp-crypto";
@@ -173,6 +178,13 @@ impl Default for SealOptions {
         }
     }
 }
+
+/// Bytes an AEAD adds to a chunk: the authentication tag.
+///
+/// The same for both suites -- Poly1305 and GCM both produce 16 bytes -- which
+/// is why one constant serves. A suite with a different tag size would need
+/// this to move onto `Suite`.
+const TAG_OVERHEAD: usize = 16;
 
 /// A derived key, wiped when it goes out of scope.
 ///
@@ -337,9 +349,29 @@ pub fn open(document: &[u8], passphrase: &str) -> Result<Zeroizing<Vec<u8>>, Cry
     let header_bytes = &document[..header_len];
     let key = derive(passphrase, &header.salt, header.kdf)?;
 
-    let mut out: Vec<u8> = Vec::new();
+    // Wrapped and sized up front, both deliberately.
+    //
+    // `Zeroizing` from the start rather than only on the returned value:
+    // growing a plain `Vec` reallocates, and each reallocation copies the
+    // plaintext accumulated so far into a new buffer and frees the old one
+    // *unwiped*. Wrapping only at the end would leave every earlier
+    // allocation of a multi-chunk document lying in freed memory, which is
+    // precisely the guarantee this function's documentation makes.
+    //
+    // Reserving the plaintext's maximum size means there are no reallocations
+    // to leak through in the first place. It is bounded by the file's own
+    // length, so a hostile header cannot use it to demand memory.
+    let mut out: Zeroizing<Vec<u8>> = Zeroizing::new(Vec::with_capacity(
+        document.len().saturating_sub(header_len),
+    ));
     let mut at = header_len;
     let mut index: u64 = 0;
+
+    // What a single chunk may decrypt to, from the header the chunks
+    // themselves authenticate. Without this the declared chunk size is
+    // validated, authenticated, and then never used for anything -- which a
+    // reader would reasonably assume constrains the framing.
+    let max_ciphertext = (header.chunk_size as usize).saturating_add(TAG_OVERHEAD);
 
     loop {
         if at == document.len() {
@@ -348,18 +380,30 @@ pub fn open(document: &[u8], passphrase: &str) -> Result<Zeroizing<Vec<u8>>, Cry
             // act on the difference.
             return Err(CryptoError::Truncated);
         }
+        // `checked_add` rather than `+`, matching `header::take`. `len` is
+        // attacker-controlled up to `u32::MAX`, and on a 32-bit target a bare
+        // addition wraps -- panicking in debug, and in release yielding a
+        // bogus slice that happens to be in range.
+        let end = at.checked_add(4).ok_or(CryptoError::Truncated)?;
         let len_bytes: [u8; 4] = document
-            .get(at..at + 4)
+            .get(at..end)
             .ok_or(CryptoError::Truncated)?
             .try_into()
             .map_err(|_| CryptoError::Truncated)?;
-        at += 4;
+        at = end;
 
         let len = u32::from_le_bytes(len_bytes) as usize;
+        if len > max_ciphertext {
+            // Longer than the header says a chunk can be. The header is
+            // authenticated, so this is either damage or a forgery attempt,
+            // and either way there is nothing to decrypt.
+            return Err(CryptoError::Corrupt);
+        }
+        let end = at.checked_add(len).ok_or(CryptoError::Truncated)?;
         // A hostile length must not make this allocate before anything has
-        // authenticated. The slice below is bounded by the file itself.
-        let ciphertext = document.get(at..at + len).ok_or(CryptoError::Truncated)?;
-        at += len;
+        // authenticated. The slice is bounded by the file itself.
+        let ciphertext = document.get(at..end).ok_or(CryptoError::Truncated)?;
+        at = end;
 
         let last = at == document.len();
         match open_chunk(
@@ -374,13 +418,15 @@ pub fn open(document: &[u8], passphrase: &str) -> Result<Zeroizing<Vec<u8>>, Cry
                 chunk.zeroize();
             }
             Err(e) => {
+                // `out` wipes itself on drop, but doing it here says so at the
+                // point it matters rather than relying on the reader knowing.
                 out.zeroize();
                 return Err(e);
             }
         }
 
         if last {
-            return Ok(Zeroizing::new(out));
+            return Ok(out);
         }
         index += 1;
     }
@@ -604,7 +650,7 @@ mod tests {
     }
 
     #[test]
-    fn truncating_the_document_is_caught_and_named_as_such() {
+    fn truncating_the_document_is_caught() {
         // The attack the last-chunk flag exists for. Without it the remaining
         // chunks all authenticate and the document opens short -- silent data
         // loss presented as a successful decrypt.
