@@ -58,4 +58,18 @@ getrandom = "0.3"
 # Only for naming recovery-journal files by a stable digest of the document's
 # path (ADR-0022). Not used for key derivation -- that is Argon2id's job.
 sha2 = "0.10"
+# Ed25519 signatures (specs.md section 15). RustCrypto-adjacent, audited, and
+# the conventional choice; composed, never reimplemented (ADR-0011).
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+rand_core = { version = "0.6", features = ["getrandom"] }
 zeroize = { version = "1", features = ["zeroize_derive"] }
+
+# YAML (phase 6). `serde_yaml` is deprecated and `yaml-rust2` is superseded;
+# `saphyr` is the maintained successor and the only one of the three that is
+# YAML 1.2 compliant. `saphyr-parser` is its own event-level half, taken
+# directly because `bp-data` must measure a document's nesting depth *before*
+# a tree is built for it -- see `yaml_nesting_depth`. `default-features =
+# false` drops `encoding_rs`: every caller here hands us a `&str`, so the
+# encoding-sniffing half of `saphyr` is weight with no reader.
+saphyr = { version = "0.0.12", default-features = false }
+saphyr-parser = "0.0.12"

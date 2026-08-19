@@ -28,6 +28,7 @@ Adding a decision means adding both.
 | BP-ADR-0020 | 2026-08-19 | Security profiles resolve to a policy; named profiles are monotonic | Accepted | [ADR-0020](docs/decisions/ADR-0020.md) |
 | BP-ADR-0021 | 2026-08-19 | `.bpadx`: two AEADs versioned in the envelope, chunked, position authenticated | Accepted | [ADR-0021](docs/decisions/ADR-0021.md) |
 | BP-ADR-0022 | 2026-08-19 | The recovery journal is sealed with the document's passphrase and recovered at unlock | Accepted | [ADR-0022](docs/decisions/ADR-0022.md) |
+| BP-ADR-0023 | 2026-08-19 | YAML uses `saphyr`; nesting, alias expansion and duplicate keys are bounded before a tree exists | Accepted | [ADR-0023](docs/decisions/ADR-0023.md) |
 
 ## Decisions needed before the work they block
 
@@ -39,8 +40,6 @@ Adding a decision means adding both.
   providers and embeddings both imply sending document content somewhere.
   ADR-0006 keeps them optional; ADR-0011 governs what is permitted. Neither
   says which providers are acceptable.
-- **YAML parser** (phase 6). `serde_yaml` is deprecated. Picking a replacement
-  is a dependency decision with a long tail.
 - **Whether `bp-storage` may record extracted titles before phase 14 exists**
   (phase 9). ADR-0019 currently says no, and that is why the crate is built
   and unreachable. Everything phase 9 wants -- related notes, duplicate
