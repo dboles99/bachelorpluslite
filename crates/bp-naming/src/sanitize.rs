@@ -8,11 +8,21 @@
 /// but a name containing `:` or `?` is still a portability trap.
 const FORBIDDEN: [char; 9] = ['<', '>', ':', '"', '/', '\\', '|', '?', '*'];
 
-/// Windows reserved device names. Reserved with *any* extension, so
-/// `CON.txt` is as unusable as `CON`.
-const RESERVED: [&str; 22] = [
-    "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
-    "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+/// Windows reserved device names. Reserved with *any* extension, so `CON.txt`
+/// is as unusable as `CON` -- which is why the check below looks at the stem
+/// and not at the whole name.
+///
+/// `CONIN$` and `CONOUT$` are here because modern Windows reserves them even
+/// though the classic lists omit them. This list deliberately mirrors
+/// `bp_platform::paths::WINDOWS_RESERVED_NAMES` rather than importing it: this
+/// crate depends on nothing else in the workspace, which is what keeps the
+/// filename grammar cheap to test. The two lists are pinned to agree by a
+/// cross-crate test in `tests/integration`, so a divergence is a failure and
+/// not a discovery.
+const RESERVED: [&str; 24] = [
+    "CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$", "COM1", "COM2", "COM3", "COM4", "COM5",
+    "COM6", "COM7", "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8",
+    "LPT9",
 ];
 
 /// Used when sanitising leaves nothing usable.
@@ -49,12 +59,7 @@ pub fn sanitize_title(title: &str) -> String {
     // Trailing dots and spaces are dropped by Windows; trailing separators
     // would collide with the `_` we join components with.
     let trimmed = out.trim_end_matches([' ', '.', '_', '-']).trim_start();
-    let mut result = trimmed.to_owned();
-
-    if is_reserved(&result) {
-        // Suffixing keeps the user's word visible, which deleting would not.
-        result.push_str(" File");
-    }
+    let result = defuse_reserved(trimmed.to_owned());
 
     if result.is_empty() {
         return FALLBACK_TITLE.to_owned();
@@ -62,7 +67,31 @@ pub fn sanitize_title(title: &str) -> String {
     result
 }
 
+/// Make `title` safe to use as the leading part of a filename, whatever
+/// follows it.
+///
+/// Win32 does not ask whether a whole name is a device: it takes the stem --
+/// everything before the *first* dot, with trailing spaces ignored -- and asks
+/// about that. So `con.txt` is the console and not a file, and a check against
+/// the whole string misses it, because a dot is not a forbidden character and
+/// survives sanitising untouched. Opening a reserved name succeeds and reads
+/// or writes the *device*: the save reports success and the document is gone.
+///
+/// The word stays visible, as it did before -- ` File` is inserted after the
+/// stem rather than appended to the end, because appending would leave the
+/// stem, and therefore the device, exactly where it was.
+fn defuse_reserved(title: String) -> String {
+    let stem_end = title.find('.').unwrap_or(title.len());
+    let stem = title[..stem_end].trim_end_matches(' ');
+    if !is_reserved(stem) {
+        return title;
+    }
+    format!("{stem} File{}", &title[stem_end..])
+}
+
 /// True if `name` is a Windows reserved device name, ignoring case.
+///
+/// Takes a stem, not a name: see [`defuse_reserved`].
 fn is_reserved(name: &str) -> bool {
     let upper = name.to_ascii_uppercase();
     RESERVED.contains(&upper.as_str())
@@ -151,8 +180,45 @@ mod tests {
         assert_eq!(sanitize_title("CON"), "CON File");
         assert_eq!(sanitize_title("con"), "con File");
         assert_eq!(sanitize_title("LPT1"), "LPT1 File");
-        // Only exact matches are reserved.
+        // Reserved on modern Windows, absent from the classic lists.
+        assert_eq!(sanitize_title("CONIN$"), "CONIN$ File");
+        assert_eq!(sanitize_title("conout$"), "conout$ File");
+        // Only the stem is a device; a longer word that starts with one is a
+        // perfectly ordinary name.
         assert_eq!(sanitize_title("CONTENTS"), "CONTENTS");
+        assert_eq!(sanitize_title("console.log notes"), "console.log notes");
+    }
+
+    #[test]
+    fn defuses_a_device_name_that_a_dot_follows() {
+        // The whole point: Win32 asks about the stem, so `con.txt` is the
+        // console. A dot is not forbidden and survives sanitising, so a check
+        // on the whole string used to let all of these through -- and saving
+        // to one of them writes the device and loses the document.
+        assert_eq!(sanitize_title("con.txt"), "con File.txt");
+        assert_eq!(sanitize_title("CON.notes"), "CON File.notes");
+        assert_eq!(sanitize_title("aux.log"), "aux File.log");
+        assert_eq!(sanitize_title("NUL.dat"), "NUL File.dat");
+        assert_eq!(sanitize_title("lpt1.bak"), "lpt1 File.bak");
+        assert_eq!(sanitize_title("prn.2026"), "prn File.2026");
+        assert_eq!(sanitize_title("CONIN$.notes"), "CONIN$ File.notes");
+        // The *first* dot, not the last: `con.tar.gz` is still the console.
+        assert_eq!(sanitize_title("con.tar.gz"), "con File.tar.gz");
+    }
+
+    #[test]
+    fn a_device_name_padded_before_the_dot_is_still_a_device() {
+        // Win32 ignores trailing spaces in the stem, so `con .txt` is the
+        // console too. The padding goes rather than being preserved into a
+        // double space.
+        assert_eq!(sanitize_title("con .txt"), "con File.txt");
+    }
+
+    #[test]
+    fn a_dot_before_the_device_name_leaves_an_ordinary_stem() {
+        // The stem here is empty, which names no device, so nothing is done
+        // to a name that is merely unusual.
+        assert_eq!(sanitize_title(".con"), ".con");
     }
 
     #[test]

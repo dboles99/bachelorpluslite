@@ -61,20 +61,6 @@ Adding a decision means adding both.
 
 ## Open items
 
-- **`bp-naming` will generate a filename that Windows treats as a device, and
-  saving to it destroys the document.** This is the most serious thing the
-  cross-crate tests have found. `bp_naming::sanitize::is_reserved`
-  upper-cases the sanitised title and asks whether *the whole string* is a
-  reserved device name. Win32 does not work that way, and neither does
-  `bp_platform::paths::reserved_device_name`, which takes the stem before the
-  first dot and trims trailing spaces. A dot is not a forbidden character, so
-  it survives sanitising -- and the titles `con.txt`, `CON.notes`, `aux.log`,
-  `NUL.dat`, `lpt1.bak` and `prn.2026` all pass `bp-naming` untouched and
-  produce names `bp-platform` reports as `ReservedName`. Opening one of those
-  on Windows succeeds and reads or writes **the device**: the save appears to
-  work and the document is gone. The fix is in `is_reserved` -- test the stem
-  rather than the whole string. Its list also omits `CONIN$` and `CONOUT$`,
-  which `bp-platform` includes.
 - **`bp-files` never applies the `\\?\` extended-length prefix**, so a name
   `bp-naming` is willing to generate can be unwritable. A filename at
   `SemanticName::to_filename`'s own documented 255-byte maximum fails inside

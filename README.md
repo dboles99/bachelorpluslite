@@ -56,9 +56,9 @@ cargo run --release -- --editor-view   # with the custom editor view (ADR-0018)
 ./scripts/Measure-Startup.ps1  # startup and idle memory vs specs.md §22
 ```
 
-## Current state (2026-08-19)
+## Current state (2026-08-20)
 
-**24 crates, 1,543 tests, green on Windows and Linux.** The app opens, edits and
+**24 crates, 1,633 tests, green on Windows and Linux.** The app opens, edits and
 saves atomically, and does rather more than that:
 
 | Area | What works |
@@ -117,20 +117,33 @@ starting.
   line, date and time insertion, and go to line. All need the caret
   `TextInput` does not expose. [MENU_MAP.md](docs/product/MENU_MAP.md) marks
   which rows those are.
-- **The crates are now tested where they meet, and the first such pass found
-  four defects. Two are fixed.** Six files of cross-crate tests join
-  load/rope/atomic save, the `.bpadx` envelope over a real file, the security
-  profile against all three of its dependants, format detection against the
-  parser that then handles the file, search against the buffer, and journal
-  recovery. `bp-formats` no longer calls a pretty-printed JSON array "JSON
-  Lines", and the encoder that decides encodings and line endings now lives
-  in `bp-files` where it can be tested -- which is also how the silent
-  rewriting of minority line breaks on save got fixed. **One test remains
-  `#[ignore]`d and names a real defect**: `bp-search` counts only the
-  newline while `bp-buffer`'s rope also breaks on a bare carriage return and
-  four other separators, so find-in-files can scroll to the wrong line in any
-  file carrying one. One line definition has to win, and that is a decision
-  rather than a patch.
+- **The crates are tested where they meet, and that is where the defects
+  are.** Eleven files of cross-crate tests join load/rope/atomic save, the
+  `.bpadx` envelope over a real file, the security profile against all three
+  of its dependants, format detection against the parser that then handles
+  the file, search against the buffer, journal recovery, the notebook through
+  the file layer, the audit log, redaction, signing, and the filename grammar
+  against the platform's own rules. Between them they have found seven
+  defects that no unit test did. **Five are fixed.** The most serious is the
+  newest: `bp-naming` asked whether a *whole* sanitised title was a Windows
+  device name, while Win32 asks only about the stem before the first dot --
+  so `con.txt`, `aux.log` and `NUL.dat` passed untouched, and on Windows
+  saving to one of those writes **the device**, reports success, and the
+  document is gone. The sanitiser now tests the stem, its list gained
+  `CONIN$` and `CONOUT$`, and a property compares its verdict against
+  `bp-platform`'s stem by stem in both directions so the two lists cannot
+  drift apart quietly.
+
+  **Three tests remain `#[ignore]`d and each names a real defect**:
+  `bp-search` counts only the newline while `bp-buffer`'s rope also breaks on
+  a bare carriage return and four other separators, so find-in-files can
+  scroll to the wrong line in any file carrying one -- one line definition
+  has to win, and that is a decision rather than a patch; `bp-notebook`
+  cannot tell a cell that said nothing about its language from one that named
+  a language it cannot map, and runs the second through the kernel's
+  interpreter; and `bp-files` never applies `\\?\`, so a filename at
+  `SemanticName::to_filename`'s own documented maximum is unwritable in a
+  deep enough directory, blamed on a read-only file.
 - **Five crates are built and unreachable.** `bp-buffer`'s large-file engine,
   `bp-notebook`, `bp-research`, `bp-integrity` and `bp-platform` are each
   tested and have no way in, so opening a 2 GB file still loads 2 GB.

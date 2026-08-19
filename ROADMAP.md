@@ -60,16 +60,20 @@ engine, `bp-notebook`, `bp-research`, `bp-integrity` and `bp-platform` --
 so opening a 2 GB file still loads 2 GB, and none of the default-editor
 registration is offered anywhere.
 
-**The first thing anybody built across two crates found four defects, and two
-are now fixed.** Until this session every test in the repository tested one
-crate. Six files of cross-crate tests found that `bp-search` and `bp-buffer`
-disagree about what a line is, that `bp-formats` identified a pretty-printed
-JSON array as JSON Lines, that the encoder deciding encodings and line
-endings was `pub(crate)` inside the shell where no library test could reach
-it, and that YAML had no way in. Three of those are closed. The line
-definition is the one that remains, because it is a decision rather than a
-patch, and it is pinned by the single `#[ignore]`d test in the tree.
-`DECISIONS.md` has the evidence.
+**Cross-crate tests have found seven defects, and five are fixed.** Until the
+fourth session every test in the repository tested one crate. Eleven files of
+cross-crate tests found that `bp-search` and `bp-buffer` disagree about what a
+line is, that `bp-formats` identified a pretty-printed JSON array as JSON
+Lines, that the encoder deciding encodings and line endings was `pub(crate)`
+inside the shell where no library test could reach it, that YAML had no way
+in, that `bp-notebook` runs a cell whose language it could not map through the
+kernel's interpreter, that `bp-files` never applies the extended-length path
+prefix -- and, worst of the seven, that `bp-naming` would generate a filename
+Windows treats as a device. That last one is now fixed: the sanitiser tests
+the stem before the first dot, the way Win32 does, so `con.txt` becomes
+`con File.txt` rather than a save that reports success while writing to the
+console. Two defects and one decision remain, each pinned by an `#[ignore]`d
+test naming it. `DECISIONS.md` has the evidence.
 
 **The item that gated three sessions is no longer gating.** The rope is the
 editor's storage, `bp-editor` owns caret, motion, undo and the line

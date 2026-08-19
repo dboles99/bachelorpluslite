@@ -15,9 +15,10 @@
 //!
 //! If it does not hold, a note created on Linux and synced to Windows becomes
 //! unopenable, or -- for a reserved device name -- a save appears to succeed
-//! and the document is gone. Two ways it does not hold are pinned as ignored
-//! tests at the bottom of this file; both are real defects and neither is
-//! fixed here.
+//! and the document is gone. The device-name half was one of the two ways it
+//! did not hold, and is now fixed: `bp-naming` tests the stem, as Win32 does.
+//! The other way is still pinned as an ignored test at the bottom of this
+//! file, and is a real defect.
 //!
 //! Nothing here writes outside a `tempfile` directory. The only strings
 //! involved are titles, drawn from a fixed alphabet, and none is a secret.
@@ -27,10 +28,13 @@ mod common;
 use common::no_files;
 
 use bp_files::{SaveOptions, atomic_write};
-use bp_naming::SemanticName;
+use bp_naming::{SemanticName, sanitize_title};
 use bp_platform::{
     Platform,
-    paths::{MAX_COMPONENT_LEN, PathProblem, component_len, file_name_problems},
+    paths::{
+        MAX_COMPONENT_LEN, PathProblem, WINDOWS_RESERVED_NAMES, component_len, file_name_problems,
+        reserved_device_name,
+    },
 };
 use proptest::prelude::*;
 use tempfile::tempdir;
@@ -186,10 +190,75 @@ fn a_hostile_extension_still_produces_a_writable_name() {
 
 #[test]
 fn a_bare_reserved_device_name_is_defused() {
-    // The case `bp-naming` does handle, worth pinning separately from the one
-    // it does not: the sanitiser's exact-match rule catches a title that *is*
-    // a device name, and the ignored test below shows how narrowly it misses.
-    for title in ["CON", "con", "NUL", "aux", "LPT1", "prn"] {
+    // The easy half, kept separate from the dotted one below so a regression
+    // says which of the two rules broke.
+    for title in [
+        "CON", "con", "NUL", "aux", "LPT1", "prn", "CONIN$", "conout$",
+    ] {
+        name_is_legal_and_writable(title, "txt");
+    }
+}
+
+#[test]
+fn every_device_name_bp_platform_knows_is_one_bp_naming_defuses() {
+    // The two crates keep separate lists, on purpose: `bp-naming` depends on
+    // nothing else in the workspace, and that is worth more than sharing a
+    // constant. What it costs is the risk of the lists drifting apart, and
+    // this is the payment -- `bp-platform` names the devices, `bp-naming` has
+    // to defuse every one of them, bare and with anything at all after a dot.
+    for &device in WINDOWS_RESERVED_NAMES {
+        for title in [device.to_owned(), format!("{device}.txt")] {
+            let name = SemanticName::new(&title, a_date(), "txt").to_filename();
+            assert!(
+                reserved_device_name(&name).is_none(),
+                "bp-naming let {title:?} through as {name:?}; bp-platform calls that the                  {device} device, and on Windows saving to it destroys the document",
+            );
+            name_is_legal(&name);
+        }
+    }
+}
+
+#[test]
+fn a_device_name_before_a_dot_is_defused() {
+    // The defect this file was written to find. A dot is not a forbidden
+    // character, so it survives sanitising -- and Win32 asks about the stem
+    // before the first dot, not about the whole name. Opening a reserved name
+    // succeeds and reads or writes the DEVICE: the save reports success and
+    // the document is gone.
+    //
+    // The write is attempted for each of these, because the whole point is
+    // that the generated name is an ordinary file. It is a name like
+    // `con File.txt_19AUG2026.txt`, whose stem is `con File` and names
+    // nothing.
+    for title in [
+        "con.txt",
+        "CON.notes",
+        "aux.log",
+        "NUL.dat",
+        "lpt1.bak",
+        "CONIN$.notes",
+        "CONOUT$.notes",
+        "prn.2026",
+        // The first dot, not the last.
+        "con.tar.gz",
+        // Win32 ignores trailing spaces in the stem, so this is the console.
+        "con .txt",
+    ] {
+        name_is_legal_and_writable(title, "txt");
+    }
+}
+
+#[test]
+fn a_word_that_merely_starts_with_a_device_name_is_left_alone() {
+    // The other direction, and the one an over-eager fix breaks: defusing is
+    // a stem match, so `CONTENTS` and `console.log` are ordinary titles and
+    // must reach the filename with their spelling intact.
+    for title in ["CONTENTS", "console.log", "AUXILIARY", "printer.cfg"] {
+        assert_eq!(
+            sanitize_title(title),
+            title,
+            "{title:?} was defused wrongly"
+        );
         name_is_legal_and_writable(title, "txt");
     }
 }
@@ -201,11 +270,10 @@ proptest! {
     ///
     /// The alphabet is every class that has ever caused this to break --
     /// forbidden characters, separators, dots, spaces, controls, multibyte and
-    /// astral characters -- **except** a device name followed by a dot, which
-    /// is a defect rather than a gap and is pinned by
-    /// `a_reserved_device_name_before_a_dot_survives_into_the_filename` below.
-    /// Generating it here would turn one loud, precise failure into a shrunk
-    /// one that says less.
+    /// astral characters. It *can* spell a device name followed by a dot, but
+    /// only by accident and not often enough to be evidence, so that class has
+    /// its own strategy in
+    /// `every_device_name_before_any_suffix_is_defused` below.
     #[test]
     fn every_generated_name_is_legal_on_both_platforms(
         title in "[a-zA-Z0-9 ._<>:\"/\\\\|?*\t\u{0}\u{7}\u{e9}\u{fc}\u{df}\u{7814}\u{1f3bc}-]{0,40}",
@@ -228,69 +296,54 @@ proptest! {
     }
 }
 
-// --- defect one: reserved device names ------------------------------------
+// --- what was defect one --------------------------------------------------
 
-#[test]
-#[ignore = "DEFECT: bp-naming's reserved-name check is an exact match on the whole \
-            sanitised title, while bp-platform (and Win32) test only the stem before the \
-            first dot. A title with a dot after a device name -- \"con.txt\", \"CON.notes\", \
-            \"aux.log\" -- passes bp-naming's check unchanged and yields a filename \
-            bp-platform calls ReservedName on Windows. Opening a reserved name succeeds \
-            and reads or writes the DEVICE, so the save appears to work and the document \
-            is gone. Fix belongs in bp-naming::sanitize::is_reserved, which should test \
-            the stem rather than the whole string, and whose list should also gain \
-            CONIN$ and CONOUT$. Left red rather than weakened, awaiting a human decision."]
-fn a_reserved_device_name_before_a_dot_survives_into_the_filename() {
-    // `bp_naming::sanitize::is_reserved` upper-cases the sanitised title and
-    // asks whether the *whole string* is in its reserved list.
-    // `bp_platform::paths::reserved_device_name` -- which is what Win32
-    // actually does -- takes the stem before the first dot, trims trailing
-    // spaces, and asks about that. A dot is not a forbidden character, so it
-    // survives sanitising, and the two checks then disagree about every title
-    // of the form `<device>.<anything>`.
-    //
-    // This asserts the verdict and deliberately does **not** attempt the
-    // write: writing to `CON` in a test would put the fixture on the console
-    // and would prove nothing the verdict does not already prove.
-    //
-    // A second, smaller disagreement rides along and is asserted here so a fix
-    // is measured against both: `bp-naming`'s list omits `CONIN$` and
-    // `CONOUT$`, which `bp-platform` includes because modern Windows reserves
-    // them. A bare `CONIN$` title is saved by the date suffix --
-    // `CONIN$_19AUG2026.txt` has stem `CONIN$_19AUG2026` -- but
-    // `CONIN$.notes` is not.
-    let mut offenders = Vec::new();
+proptest! {
+    #![proptest_config(no_files(256))]
 
-    for title in [
-        "con.txt",
-        "CON.notes",
-        "aux.log",
-        "NUL.dat",
-        "lpt1.bak",
-        "CONIN$.notes",
-        "CONOUT$.notes",
-        "prn.2026",
-    ] {
-        let name = SemanticName::new(title, a_date(), "txt").to_filename();
-        let problems = file_name_problems(Platform::Windows, &name);
-        if !problems.is_empty() {
-            offenders.push(format!(
-                "{title:?} -> {name:?}: {}",
-                problems
-                    .iter()
-                    .map(PathProblem::describe)
-                    .collect::<Vec<_>>()
-                    .join(" / ")
-            ));
-        }
+    /// Every device name, followed by anything at all, is defused.
+    ///
+    /// This was a defect and is the reason the sanitiser tests the stem: the
+    /// exact-match rule it replaced caught `CON` and missed `con.txt`, and the
+    /// second of those destroys the document it claims to have saved. The
+    /// suffix alphabet includes dots and spaces because those are what decide
+    /// where the stem ends.
+    #[test]
+    fn every_device_name_before_any_suffix_is_defused(
+        device in prop::sample::select(WINDOWS_RESERVED_NAMES),
+        upper in prop::bool::ANY,
+        suffix in "[a-zA-Z0-9 .]{0,12}",
+    ) {
+        let device = if upper { device.to_uppercase() } else { device.to_lowercase() };
+        let title = format!("{device}{suffix}");
+        let name = SemanticName::new(&title, a_date(), "txt").to_filename();
+
+        prop_assert!(
+            reserved_device_name(&name).is_none(),
+            "{title:?} became {name:?}, which names a device",
+        );
+        prop_assert!(problems_on_both(&name).is_empty(), "{name:?}");
     }
 
-    assert!(
-        offenders.is_empty(),
-        "bp-naming produced {} filename(s) Windows refuses:\n  {}",
-        offenders.len(),
-        offenders.join("\n  ")
-    );
+    /// The two reserved lists agree, in both directions.
+    ///
+    /// The alphabet is exactly the characters sanitising leaves untouched, so
+    /// the only reason `sanitize_title` can change one of these strings is
+    /// that it decided the string names a device. That makes the equality
+    /// below a direct comparison of the two crates' verdicts: neither a name
+    /// `bp-platform` reserves may pass, nor one it does not may be mangled.
+    #[test]
+    fn the_two_reserved_lists_decide_the_same_stems(stem in "[A-Za-z0-9$]{1,8}") {
+        let defused = sanitize_title(&stem) != stem;
+        prop_assert_eq!(
+            defused,
+            reserved_device_name(&stem).is_some(),
+            "the crates disagree about {:?}: bp-naming says {}, bp-platform says {}",
+            stem,
+            if defused { "device" } else { "file" },
+            if reserved_device_name(&stem).is_some() { "device" } else { "file" },
+        );
+    }
 }
 
 // --- defect two: MAX_PATH -------------------------------------------------
