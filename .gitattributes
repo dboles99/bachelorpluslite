@@ -17,3 +17,11 @@
 *.ico binary
 *.pdf binary
 *.zip binary
+
+# The hostile-input corpus is bytes, not text, and several entries exist
+# precisely because of the bytes `text=auto eol=lf` would rewrite --
+# `crlf-no-final-newline.csv`, `blank-and-crlf.jsonl`, the UTF-16 fixtures,
+# the truncated and byte-flipped envelopes. Normalising them does not break a
+# test; it silently turns the fixture into a different, harmless input, which
+# is worse. Store them exactly as seeded.
+fuzz/corpus/** -text
