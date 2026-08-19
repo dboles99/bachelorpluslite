@@ -40,6 +40,10 @@
 
 #![forbid(unsafe_code)]
 
+mod passphrase;
+
+pub use passphrase::PassphraseSealer;
+
 use std::fs::OpenOptions;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
@@ -540,6 +544,12 @@ impl Destination {
 /// envelope, so an audit log is readable by exactly the people who can read
 /// the document it describes. That is the correct access rule and it comes
 /// out for free.
+///
+/// [`PassphraseSealer`] is that implementation. It seals each line into its
+/// own `.bpadx` envelope rather than re-sealing the file, which is what keeps
+/// the log append-only and a write O(1); see its module for why an audit log
+/// is framed differently from ADR-0022's recovery journal even though both are
+/// sealed with the same key.
 pub trait Sealer {
     /// Seal one line. The output may be any bytes; the log hex-encodes them.
     ///
