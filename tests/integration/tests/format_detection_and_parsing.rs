@@ -222,33 +222,21 @@ proptest! {
 
 // --- the sniffing path, where the crates disagree -------------------------
 
-/// **DEFECT.** `bp_formats::sniff` calls a pretty-printed JSON array of
-/// objects "JSON Lines", and `bp-data` then refuses it.
-///
-/// `looks_like_json_lines` counts lines that begin with `{` or `[` and calls
-/// it JSON Lines at two or more. Its doc comment says "a pretty-printed JSON
-/// document has exactly one such line", which is only true of a document
-/// whose root is an object of scalars. A pretty-printed **array of objects**
-/// -- the single most common shape of JSON anybody has -- has one such line
-/// per element:
-///
-/// ```text
-/// [
-///   {"id": 1},
-///   {"id": 2}
-/// ]
-/// ```
+/// **Whatever `sniff` says a document is, `bp-data` can parse it as that.**
 ///
 /// Sniffing is reached whenever the file has no extension or an unrecognised
 /// one (`report.json.bak`, `data`, a pasted buffer that has never been
-/// saved). The user is then told the file is JSONL, and `jsonl_validate`
-/// reports a syntax error on line 1 of a file that is perfectly good JSON.
+/// saved), so the guess is what the user is shown and what the Data menu then
+/// acts on. A guess the parser refuses is a syntax error on a file that has
+/// none.
 ///
-/// Left failing rather than narrowed, because the fix is a judgement about
-/// the heuristic -- requiring the *first* non-blank line to be a complete
-/// JSON value would do it -- and belongs to whoever owns `bp-formats`.
+/// The fixtures below are the shape that used to break this: `sniff` counted
+/// lines beginning with `{` or `[` and called two or more of them JSON Lines,
+/// which is one line per element of a pretty-printed array of objects -- the
+/// single most common shape of JSON anybody has. `bp-formats` now asks
+/// instead whether the first line is a complete value with something after
+/// it, which no pretty-printed document's first line is.
 #[test]
-#[ignore = "known defect: bp_formats::sniff reports pretty-printed JSON arrays as JSON Lines, which bp-data rejects"]
 fn sniffing_agrees_with_the_parser_that_then_handles_the_file() {
     for text in [
         "[\n  {\"id\": 1},\n  {\"id\": 2}\n]\n",
@@ -270,8 +258,8 @@ fn sniffing_agrees_with_the_parser_that_then_handles_the_file() {
 
 #[test]
 fn sniffing_a_single_json_value_agrees_with_the_parser() {
-    // The half of the heuristic that does hold, kept so the ignored test
-    // above is understood as narrow rather than as "sniffing is broken".
+    // The half of the heuristic that always held, kept beside the test above
+    // so that the pair covers both of `sniff`'s answers for a `{` or `[`.
     for text in [
         "{\"a\": 1, \"b\": 2}",
         "[1, 2, 3]",
