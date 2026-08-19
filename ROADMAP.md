@@ -30,7 +30,7 @@ Status as of **2026-08-19**. Three words, meaning three different things:
 | 15 | Encrypted `.bpadx` documents | **Started** | [11-security](project/tasks/11-security/) | `bp-crypto` |
 | 16 | Advanced security | **Started** | [11-security](project/tasks/11-security/) | `bp-secrets`, `bp-redaction`, `bp-audit`, `bp-integrity` |
 | 17 | Themes/personality/accessibility | **Started** | [12-themes-brand](project/tasks/12-themes-brand/) | `bp-theme` |
-| 18 | Windows/Linux platform integration | Not started | [13-platform](project/tasks/13-platform/) | — |
+| 18 | Windows/Linux platform integration | **Built, unwired** | [13-platform](project/tasks/13-platform/) | `bp-platform` |
 | 19 | Hardening, fuzzing and benchmarks | Not started | [14-hardening](project/tasks/14-hardening/) | — |
 | 20 | Packaging, signing, release and upgrade testing | Not started | [14-hardening](project/tasks/14-hardening/) | — |
 
@@ -49,25 +49,27 @@ that points at them for no gain.
 ## Where the work actually is
 
 Phases 1 and 3 are complete. Phases 2, 5, 6, 7, 8, 11, 14, 15, 16 and 17 each
-have a tested slice reachable in the product. Phases 4, 9, 12 and 13 are built
-and have no way in.
+have a tested slice reachable in the product. Phases 4, 9, 12, 13 and 18 are
+built and have no way in.
 
-**Four phases gained a crate this session and none of them gained a menu
-row.** That is the honest shape of it: `bp-buffer` can open a 2 GB file
-without loading it, `bp-notebook` can read and write `.ipynb`, `bp-research`
-can parse BibTeX, and `bp-redaction`, `bp-audit` and `bp-integrity` exist --
-and a person running the application can reach none of it. Phase 16 counts as
-Started rather than Built, unwired only because secret scanning, hashing and
-signature verification did get rows.
+**The wiring backlog is real, and it shrank rather than grew.** Phase 6's
+YAML, phase 16's redaction and metadata inspector all have menu rows now, and
+the audit log's sealed destination has an implementor instead of refusing
+every append. What is still built and unreachable is `bp-buffer`'s large-file
+engine, `bp-notebook`, `bp-research`, `bp-integrity` and `bp-platform` --
+so opening a 2 GB file still loads 2 GB, and none of the default-editor
+registration is offered anywhere.
 
-**The first thing anybody built across two crates found four defects.** Until
-this session every test in the repository tested one crate. Six files of
-cross-crate tests found that `bp-search` and `bp-buffer` disagree about what a
-line is, that `bp-formats` identifies a pretty-printed JSON array as JSON
-Lines and `bp-data` then rejects it, that the encoder deciding encodings and
-line endings is `pub(crate)` inside the shell where no library test can reach
-it, and that YAML has no way in. `DECISIONS.md` has each with its evidence.
-None is hard to fix; none would have been found by more unit tests.
+**The first thing anybody built across two crates found four defects, and two
+are now fixed.** Until this session every test in the repository tested one
+crate. Six files of cross-crate tests found that `bp-search` and `bp-buffer`
+disagree about what a line is, that `bp-formats` identified a pretty-printed
+JSON array as JSON Lines, that the encoder deciding encodings and line
+endings was `pub(crate)` inside the shell where no library test could reach
+it, and that YAML had no way in. Three of those are closed. The line
+definition is the one that remains, because it is a decision rather than a
+patch, and it is pinned by the single `#[ignore]`d test in the tree.
+`DECISIONS.md` has the evidence.
 
 **The item that gated three sessions is no longer gating.** The rope is the
 editor's storage, `bp-editor` owns caret, motion, undo and the line

@@ -61,12 +61,32 @@ Adding a decision means adding both.
 
 ## Open items
 
+- **`bp-config` and `bp-platform` give two different answers for the config
+  directory.** `bp_config::config_path` has its own `cfg!(windows)`, covers
+  only the config directory, and *honours* a relative `$XDG_CONFIG_HOME`;
+  `bp_platform::dirs` covers config, data, cache and state, takes the
+  environment as a parameter so both legs test it, and treats a relative
+  `$XDG_CONFIG_HOME` as invalid and ignores it, which is what the XDG
+  specification requires. Same product, two answers, and the newer one is
+  right. `bp-config` should delegate. Found by the agent that built
+  `bp-platform`, which could not edit `bp-config` to fix it.
+- **Neither `bp-platform-windows` nor `bp-platform-linux` was created**, and
+  that is a decision rather than an omission. specs §20 and the crate map
+  name them. Everything they would hold is either already a parameterised
+  function in `bp-platform` -- tested on both legs -- or blocked on D8 and
+  the signing-key question. ADR-0001's own warning about `cfg`-gated code
+  argues against two crates whose contents each CI leg never compiles.
+  Revisit when something genuinely platform-specific has to be linked.
+
 - **`bp-search` and `bp-buffer` do not agree what a line is, and this is
   now a decision rather than a bug report.** `bp_search::Offsets` counts
   `'
 '`. `bp_buffer::Buffer` is a `ropey::Rope` built with ropey's default
   features, which include `unicode_lines`, so ropey also breaks on a bare
-  ``, ``, ``, U+0085, U+2028 and U+2029. For `"onetwoneedle"`
+  `
+`, ``, ``, U+0085, U+2028 and U+2029. For `"one
+two
+needle"`
   search reports line 1 and the buffer reports line 3, so a find-in-files
   result scrolls the editor to the wrong line in any file carrying a bare CR.
   The same split exists inside `bp-buffer` — the free `line_count` counts
