@@ -16,6 +16,9 @@ bp-history = { path = "../bp-history" }
 bp-search = { path = "../bp-search" }
 bp-crypto = { path = "../bp-crypto" }
 bp-security = { path = "../bp-security" }
+# Security ▸ Scan for Secrets. Pure, no dependencies of its own, and it
+# deliberately reports where a credential is without ever carrying it.
+bp-secrets = { path = "../bp-secrets" }
 bp-semantic = { path = "../bp-semantic" }
 bp-files = { path = "../bp-files" }
 bp-naming = { path = "../bp-naming" }

@@ -884,6 +884,122 @@ impl AppState {
         ));
     }
 
+    /// The active document as the bytes it would be written to disk as.
+    ///
+    /// The encoded form rather than the buffer, because a digest and a
+    /// signature are claims about a *file*: hashing the buffer would print a
+    /// digest that `sha256sum` disagrees with for every CRLF document and
+    /// every one with a BOM, and a user comparing the two would conclude
+    /// their file had been tampered with.
+    ///
+    /// A one-off on a menu click, like `report_statistics` -- it copies the
+    /// whole document twice over and must never move onto the typing path.
+    pub(crate) fn active_bytes(&self) -> Result<Vec<u8>, String> {
+        let Some(doc) = self.workspace.active() else {
+            return Err("there is no document to read".to_owned());
+        };
+        let (encoding, line_ending) = (doc.encoding(), doc.line_ending());
+        encode(&self.active_text(), encoding, line_ending)
+    }
+
+    /// Whether the active document differs from whatever is on disk.
+    ///
+    /// A never-saved document counts, which is why this is not simply
+    /// `is_dirty` at the call site: "there is no file on disk" and "the file
+    /// on disk is older than this" are the same fact as far as a digest or a
+    /// signature over these bytes is concerned.
+    fn active_differs_from_disk(&self) -> bool {
+        self.workspace
+            .active()
+            .is_some_and(|doc| doc.is_dirty() || doc.path().is_none())
+    }
+
+    /// Scan the active document for credentials, reporting into the status
+    /// bar and handing the findings back for a fuller listing.
+    ///
+    /// The findings are positions and classifications; `bp-secrets` refuses
+    /// to carry the matched text and this returns nothing that would
+    /// reintroduce it.
+    pub(crate) fn scan_for_secrets(&mut self) -> Vec<bp_secrets::Finding> {
+        let findings = bp_secrets::scan(&self.active_text());
+        self.error = Some(secret_scan_summary(&findings));
+        findings
+    }
+
+    /// Take a digest of the active document.
+    ///
+    /// Returns the body of the report to show, or `None` when the document
+    /// cannot be encoded -- in which case the status bar already says why.
+    /// The digest is not put in the status bar: it elides, and half a
+    /// checksum compares equal to nothing.
+    pub(crate) fn hash_active_document(&mut self) -> Option<String> {
+        let bytes = match self.active_bytes() {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                self.error = Some(format!("cannot hash this document — {e}"));
+                return None;
+            }
+        };
+        let digest = bp_crypto::hash_document(&bytes, bp_crypto::HashAlgorithm::Sha256);
+        self.error = Some(format!(
+            "{} taken over {} bytes",
+            digest.algorithm().name(),
+            bytes.len()
+        ));
+        Some(hash_report(
+            &digest,
+            bytes.len(),
+            self.active_differs_from_disk(),
+        ))
+    }
+
+    /// Check a detached signature against the active document.
+    ///
+    /// The shell reads two files the user chose and calls `bp_crypto`; it
+    /// owns no sidecar convention of its own. Where a `.sig` lives, how it is
+    /// found and what else travels beside it are `bp-integrity`'s to decide,
+    /// and a second answer here would be one the two could disagree about.
+    pub(crate) fn verify_signature(&mut self, signature_path: &Path, key_path: &Path) {
+        let bytes = match self.active_bytes() {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                self.error = Some(format!("cannot verify this document — {e}"));
+                return;
+            }
+        };
+
+        let signature = match read_signature(signature_path) {
+            Ok(signature) => signature,
+            Err(e) => {
+                self.error = Some(format!("could not read the signature — {e}"));
+                return;
+            }
+        };
+        let key = match read_verifying_key(key_path) {
+            Ok(key) => key,
+            Err(e) => {
+                self.error = Some(format!("could not read the key — {e}"));
+                return;
+            }
+        };
+
+        // A failure is reported as `SignError::DoesNotVerify` says it: the
+        // bytes do not distinguish an altered document from an altered
+        // signature from the wrong key. The one extra sentence the shell can
+        // honestly add is about its own state -- unsaved edits mean these are
+        // not the bytes anybody signed, and that is the likeliest explanation
+        // by far.
+        self.error = Some(match bp_crypto::verify_document(&key, &bytes, &signature) {
+            Ok(()) => format!(
+                "✓ signature verified — the holder of key {} approved these exact bytes",
+                key.to_hex()
+            ),
+            Err(_) if self.active_differs_from_disk() => "✗ signature does not match — this                  document has unsaved changes, so these are not the bytes that were signed;                  save it and verify again"
+                .to_owned(),
+            Err(e) => format!("✗ {e}"),
+        });
+    }
+
     /// Insert a date or time stamp at the caret.
     ///
     /// The clock is read here rather than in `bp-naming`, which is pure and
@@ -1453,6 +1569,131 @@ pub(crate) fn encode(
     Ok(out)
 }
 
+/// How many findings the status bar names before it stops counting them out.
+///
+/// The bar elides, so a list longer than this is a list whose tail nobody
+/// reads. The full set goes in the report instead.
+const SECRETS_IN_SUMMARY: usize = 3;
+
+/// One line for the status bar describing a secret scan.
+///
+/// Names the kinds and where they are, and never the matched text. That is
+/// not a nicety: `bp_secrets::Finding` deliberately holds no secret at all,
+/// so that no `Debug` print or log line can leak one, and a status bar that
+/// quoted the credential would put it back on screen -- and into the
+/// screenshot of the bug it was attached to.
+pub(crate) fn secret_scan_summary(findings: &[bp_secrets::Finding]) -> String {
+    if findings.is_empty() {
+        return "✓ no credentials found".to_owned();
+    }
+    let named: Vec<String> = findings
+        .iter()
+        .take(SECRETS_IN_SUMMARY)
+        .map(|f| format!("{} at line {} col {}", f.kind.label(), f.line, f.column))
+        .collect();
+    let rest = findings.len() - named.len();
+    format!(
+        "⚠ {} possible credential{} — {}{}",
+        findings.len(),
+        if findings.len() == 1 { "" } else { "s" },
+        named.join(", "),
+        if rest == 0 {
+            String::new()
+        } else {
+            format!(", and {rest} more")
+        }
+    )
+}
+
+/// The full listing of a scan, one finding per line.
+///
+/// Line and column first, because the reason to read this is to go and look
+/// at each one, and `bp-secrets` reports 1-based positions for exactly that.
+pub(crate) fn secret_scan_report(findings: &[bp_secrets::Finding]) -> String {
+    findings
+        .iter()
+        .map(|f| {
+            format!(
+                "line {}, column {} — {} ({})",
+                f.line,
+                f.column,
+                f.kind.label(),
+                confidence_label(f.confidence)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(
+            "
+",
+        )
+}
+
+/// How sure the scanner is, in the user's terms.
+///
+/// Presentation, so it lives here rather than in `bp-secrets`, which is pure
+/// and has no opinion about wording. Low is spelled out rather than left as a
+/// bare word: a row reading "low" beside a real password reads as "ignore
+/// me", and the whole point of the tier is that the user decides.
+const fn confidence_label(confidence: bp_secrets::Confidence) -> &'static str {
+    match confidence {
+        bp_secrets::Confidence::High => "high confidence",
+        bp_secrets::Confidence::Medium => "medium confidence",
+        bp_secrets::Confidence::Low => "low confidence, worth a look",
+    }
+}
+
+/// The report shown for a document digest.
+///
+/// Both spellings, because they are read by different people in different
+/// ways: the grouped one is for a human comparing two screens or reading it
+/// down a telephone, the unbroken one is for pasting beside what `sha256sum`
+/// or `certutil` printed. `bp_crypto` offers both and deliberately refuses to
+/// choose between them.
+fn hash_report(digest: &bp_crypto::DocumentHash, bytes: usize, unsaved: bool) -> String {
+    let mut report = format!(
+        "{}
+
+{}
+
+Taken over the {bytes} bytes this document would be written as,          so it matches the file once it is saved.",
+        digest.to_display(),
+        digest.to_hex(),
+    );
+    if unsaved {
+        // The one way this digest can be honestly wrong about the file, and
+        // it is invisible from the dialog otherwise.
+        report.push_str(
+            "
+
+This document has unsaved changes, so it is not yet the digest of              anything on disk.",
+        );
+    }
+    report
+}
+
+/// Read a detached signature from the file the user chose.
+fn read_signature(path: &Path) -> Result<bp_crypto::Signature, String> {
+    let raw = std::fs::read(path).map_err(|e| e.to_string())?;
+    bp_crypto::Signature::from_bytes(&raw).map_err(|e| e.to_string())
+}
+
+/// Read a verifying key from the file the user chose, in either spelling.
+///
+/// Thirty-two raw bytes is what `VerifyingKey::to_bytes` writes; hexadecimal
+/// is what arrives when somebody pastes a key out of an email into a text
+/// file, which is how a public key actually travels between people. The raw
+/// form is tried first because a 32-byte file cannot also be 64 hex digits,
+/// so the two can never be confused for one another.
+fn read_verifying_key(path: &Path) -> Result<bp_crypto::VerifyingKey, String> {
+    let raw = std::fs::read(path).map_err(|e| e.to_string())?;
+    if let Ok(key) = bp_crypto::VerifyingKey::from_bytes(&raw) {
+        return Ok(key);
+    }
+    let text = std::str::from_utf8(&raw)
+        .map_err(|_| "this is neither 32 raw bytes nor a key in hexadecimal".to_owned())?;
+    bp_crypto::VerifyingKey::from_hex(text).map_err(|e| e.to_string())
+}
+
 /// The user's Documents folder, if the platform names one.
 pub(crate) fn documents_dir() -> Option<PathBuf> {
     if cfg!(windows) {
@@ -1811,6 +2052,10 @@ mod tests {
             action::DATA_COLUMN_TYPES,
             action::NOTE_TITLE,
             action::NOTE_OUTLINE,
+            action::SCAN_SECRETS,
+            action::HASH_DOCUMENT,
+            action::SIGN_DOCUMENT,
+            action::VERIFY_SIGNATURE,
         ] {
             assert!(!window.contains(&id), "id {id} collides with recent files");
         }
@@ -2703,5 +2948,337 @@ mod tests {
 
         assert!(bp_search::find_all("axb", &literal).unwrap().is_empty());
         assert_eq!(bp_search::find_all("axb", &pattern).unwrap().len(), 1);
+    }
+
+    // --- Scan for Secrets --------------------------------------------------
+
+    /// A credential the scanner actually recognises, and a document with one
+    /// in it, so a test can assert the shell never repeats it back.
+    ///
+    /// Not one of the vendors' published `EXAMPLE` keys: `bp-secrets`
+    /// deliberately refuses those, on the grounds that documentation is not a
+    /// leak, so a fixture built from one would test nothing.
+    const LEAKED: &str = "AKIA3G7QVHBRN2WPKZ5F";
+    const LEAKY: &str = "notes\naws_access_key_id = AKIA3G7QVHBRN2WPKZ5F\ndone\n";
+
+    #[test]
+    fn a_clean_document_is_told_it_is_clean_rather_than_told_nothing() {
+        // Silence after a scan is indistinguishable from a scan that did not
+        // run, which is the one thing a security check must never be.
+        let mut state = AppState::new();
+        state.edit("nothing to see here\n".to_owned());
+        let findings = state.scan_for_secrets();
+
+        assert!(findings.is_empty());
+        assert_eq!(
+            state.error.as_deref(),
+            Some("\u{2713} no credentials found")
+        );
+    }
+
+    #[test]
+    fn a_scan_reports_the_count_the_kind_and_where_it_is() {
+        let mut state = AppState::new();
+        state.edit(LEAKY.to_owned());
+        let findings = state.scan_for_secrets();
+
+        assert_eq!(findings.len(), 1);
+        let notice = state.error.clone().expect("a status message");
+        assert!(
+            notice.contains('1'),
+            "the count belongs in it; got {notice}"
+        );
+        assert!(
+            notice.contains("AWS access key ID"),
+            "the kind belongs in it; got {notice}"
+        );
+        assert!(
+            notice.contains("line 2"),
+            "where it is is the actionable part; got {notice}"
+        );
+    }
+
+    #[test]
+    fn neither_the_summary_nor_the_report_ever_repeats_the_secret() {
+        // The whole design of `bp-secrets`: a `Finding` carries a position and
+        // a classification and deliberately not the matched text, so that no
+        // print of one can leak a credential. The shell is the last place that
+        // could undo that, by reaching back into the document to quote it.
+        let findings = bp_secrets::scan(LEAKY);
+        assert!(!findings.is_empty(), "the fixture must actually be found");
+
+        for line in [
+            secret_scan_summary(&findings),
+            secret_scan_report(&findings),
+        ] {
+            assert!(
+                !line.contains(LEAKED),
+                "the credential is back on screen: {line}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_long_scan_names_the_first_few_and_says_how_many_it_did_not() {
+        // The status bar elides, so a list longer than the bar is a list whose
+        // tail is invisible. Saying "and 2 more" is what stops the invisible
+        // part reading as "there were only three".
+        let text: String = (0..5)
+            .map(|i| format!("aws_access_key_id{i} = {LEAKED}\n"))
+            .collect();
+        let findings = bp_secrets::scan(&text);
+        assert_eq!(findings.len(), 5, "the fixture should yield five");
+
+        let summary = secret_scan_summary(&findings);
+        assert!(summary.contains('5'), "got {summary}");
+        assert!(summary.contains("and 2 more"), "got {summary}");
+    }
+
+    #[test]
+    fn the_full_report_has_a_line_per_finding_with_its_position() {
+        let findings = bp_secrets::scan(LEAKY);
+        let report = secret_scan_report(&findings);
+        assert_eq!(report.lines().count(), findings.len());
+        assert!(report.contains("line 2, column"), "got {report}");
+    }
+
+    // --- Hash, sign, verify ------------------------------------------------
+
+    #[test]
+    fn the_digest_is_taken_over_the_bytes_the_document_would_be_written_as() {
+        // Not over the buffer. The BOM is stripped on load and written back on
+        // save, so a digest of the buffer is one `sha256sum` disagrees with --
+        // and a user comparing the two would conclude their file had been
+        // altered when nothing had touched it.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("bom.txt");
+        std::fs::write(&path, b"\xEF\xBB\xBFone\ntwo\n").unwrap();
+
+        let mut state = AppState::new();
+        state.open(path.clone());
+        assert_eq!(
+            state.active_text(),
+            "one\ntwo\n",
+            "the BOM belongs on disk, not in the buffer"
+        );
+        let report = state.hash_active_document().expect("a digest");
+
+        let on_disk = std::fs::read(&path).unwrap();
+        let expected = bp_crypto::hash_document(&on_disk, bp_crypto::HashAlgorithm::Sha256);
+        assert!(
+            report.contains(&expected.to_hex()),
+            "the digest should match the file on disk; got {report}"
+        );
+        let of_the_buffer = bp_crypto::hash_document(
+            state.active_text().as_bytes(),
+            bp_crypto::HashAlgorithm::Sha256,
+        );
+        assert!(
+            !report.contains(&of_the_buffer.to_hex()),
+            "hashing the buffer would leave the BOM out and give the wrong answer"
+        );
+    }
+
+    #[test]
+    fn the_digest_is_offered_grouped_and_unbroken_and_names_its_algorithm() {
+        // Two spellings for two readers: grouped for a person comparing two
+        // screens or reading it aloud, unbroken for pasting beside what
+        // `sha256sum` printed.
+        let mut state = AppState::new();
+        state.edit("hello".to_owned());
+        let report = state.hash_active_document().expect("a digest");
+
+        let digest = bp_crypto::hash_document(b"hello", bp_crypto::HashAlgorithm::Sha256);
+        assert!(report.contains(&digest.to_display()), "got {report}");
+        assert!(report.contains(&digest.to_hex()), "got {report}");
+        assert!(
+            state
+                .error
+                .as_deref()
+                .is_some_and(|e| e.contains("SHA-256")),
+            "the status bar should name the algorithm; got {:?}",
+            state.error
+        );
+    }
+
+    #[test]
+    fn a_digest_of_an_unsaved_document_says_it_is_not_the_file_on_disk() {
+        let mut state = AppState::new();
+        state.edit("draft".to_owned());
+        let report = state.hash_active_document().expect("a digest");
+        assert!(
+            report.contains("unsaved changes"),
+            "an unsaved digest that claims to be the file's is a lie; got {report}"
+        );
+    }
+
+    #[test]
+    fn a_document_that_cannot_be_encoded_says_so_instead_of_hashing_nothing() {
+        // `encode` refuses UTF-16 rather than writing mojibake, and a digest
+        // of an empty vector would be a perfectly plausible-looking wrong
+        // answer.
+        let mut state = AppState::new();
+        state.edit("hello".to_owned());
+        state.set_encoding(Encoding::Utf16Le);
+
+        assert!(state.hash_active_document().is_none());
+        assert!(
+            state
+                .error
+                .as_deref()
+                .is_some_and(|e| e.contains("cannot hash")),
+            "got {:?}",
+            state.error
+        );
+    }
+
+    /// Write a signing identity's signature over `bytes`, plus its public
+    /// key, and return the two paths -- the shape the Verify row expects.
+    fn sign_to_files(dir: &std::path::Path, bytes: &[u8]) -> (PathBuf, PathBuf) {
+        let key = bp_crypto::SigningKey::generate().expect("the OS random source");
+        let signature = bp_crypto::sign_document(&key, bytes);
+
+        let sig_path = dir.join("document.sig");
+        let key_path = dir.join("document.pub");
+        std::fs::write(&sig_path, signature.to_bytes()).unwrap();
+        std::fs::write(&key_path, key.verifying_key().to_bytes()).unwrap();
+        (sig_path, key_path)
+    }
+
+    #[test]
+    fn a_signature_over_the_documents_own_bytes_verifies() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut state = AppState::new();
+        state.edit("signed content\n".to_owned());
+        let bytes = state.active_bytes().unwrap();
+        let (sig, key) = sign_to_files(dir.path(), &bytes);
+
+        state.verify_signature(&sig, &key);
+        assert!(
+            state
+                .error
+                .as_deref()
+                .is_some_and(|e| e.starts_with('\u{2713}')),
+            "got {:?}",
+            state.error
+        );
+    }
+
+    #[test]
+    fn a_verified_signature_names_the_key_and_claims_nothing_about_whose_it_is() {
+        // `bp-crypto` is explicit that it cannot say whose key it is, and the
+        // status bar must not quietly promise what the library refuses to.
+        let dir = tempfile::tempdir().unwrap();
+        let mut state = AppState::new();
+        state.edit("signed content\n".to_owned());
+        let bytes = state.active_bytes().unwrap();
+        let (sig, key_path) = sign_to_files(dir.path(), &bytes);
+        let key = bp_crypto::VerifyingKey::from_bytes(&std::fs::read(&key_path).unwrap()).unwrap();
+
+        state.verify_signature(&sig, &key_path);
+        let notice = state.error.clone().unwrap();
+        assert!(notice.contains(&key.to_hex()), "got {notice}");
+        assert!(
+            !notice.to_lowercase().contains("signed by the author"),
+            "got {notice}"
+        );
+    }
+
+    #[test]
+    fn a_public_key_pasted_out_of_an_email_as_hexadecimal_is_accepted() {
+        // The realistic way a public key travels. Refusing it would teach
+        // users to retype keys by hand, which is how a wrong key gets used.
+        let dir = tempfile::tempdir().unwrap();
+        let mut state = AppState::new();
+        state.edit("signed content\n".to_owned());
+        let bytes = state.active_bytes().unwrap();
+        let (sig, raw_key) = sign_to_files(dir.path(), &bytes);
+
+        let hex_key = dir.path().join("key.txt");
+        let key = bp_crypto::VerifyingKey::from_bytes(&std::fs::read(&raw_key).unwrap()).unwrap();
+        // Wrapped across two lines, exactly as an email client would leave it.
+        let text = key.to_hex();
+        std::fs::write(&hex_key, format!("{}\n{}\n", &text[..32], &text[32..])).unwrap();
+
+        state.verify_signature(&sig, &hex_key);
+        assert!(
+            state
+                .error
+                .as_deref()
+                .is_some_and(|e| e.starts_with('\u{2713}')),
+            "got {:?}",
+            state.error
+        );
+    }
+
+    #[test]
+    fn a_signature_over_different_bytes_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let (sig, key) = sign_to_files(dir.path(), b"something else entirely");
+
+        let mut state = AppState::new();
+        state.edit("signed content\n".to_owned());
+        state.verify_signature(&sig, &key);
+        assert!(
+            state
+                .error
+                .as_deref()
+                .is_some_and(|e| e.starts_with('\u{2717}')),
+            "got {:?}",
+            state.error
+        );
+    }
+
+    #[test]
+    fn a_refusal_on_an_edited_document_says_the_edits_are_the_likely_reason() {
+        // The only sentence the shell can honestly add to `DoesNotVerify`:
+        // the library cannot tell an altered document from a wrong key, but
+        // we do know our own buffer is not what is on disk.
+        let dir = tempfile::tempdir().unwrap();
+        let (mut state, _, _) = dirty_saved_state(dir.path());
+        let (sig, key) = sign_to_files(dir.path(), b"first\n");
+
+        state.verify_signature(&sig, &key);
+        let notice = state.error.clone().unwrap();
+        assert!(notice.contains("unsaved changes"), "got {notice}");
+    }
+
+    #[test]
+    fn a_truncated_signature_file_is_reported_as_incomplete_not_as_a_mismatch() {
+        // A filing accident and a tampered document are different problems,
+        // and only one of them sends the user hunting for an attacker.
+        let dir = tempfile::tempdir().unwrap();
+        let mut state = AppState::new();
+        state.edit("signed content\n".to_owned());
+        let bytes = state.active_bytes().unwrap();
+        let (sig, key) = sign_to_files(dir.path(), &bytes);
+        std::fs::write(&sig, b"too short").unwrap();
+
+        state.verify_signature(&sig, &key);
+        let notice = state.error.clone().unwrap();
+        assert!(notice.contains("signature"), "got {notice}");
+        assert!(
+            notice.contains("64 bytes"),
+            "the length is the actionable part; got {notice}"
+        );
+    }
+
+    #[test]
+    fn a_key_file_that_is_not_a_key_says_which_of_the_two_files_was_wrong() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut state = AppState::new();
+        state.edit("signed content\n".to_owned());
+        let bytes = state.active_bytes().unwrap();
+        let (sig, _) = sign_to_files(dir.path(), &bytes);
+
+        let not_a_key = dir.path().join("notes.txt");
+        std::fs::write(&not_a_key, "dear bob, here is the file\n").unwrap();
+
+        state.verify_signature(&sig, &not_a_key);
+        let notice = state.error.clone().unwrap();
+        assert!(
+            notice.contains("key"),
+            "the user has to know which file to replace; got {notice}"
+        );
     }
 }

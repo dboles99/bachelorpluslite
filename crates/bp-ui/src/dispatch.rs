@@ -11,7 +11,7 @@ use bp_core::{Document, DocumentId, Encoding, LineEnding};
 use bp_theme::ThemeId;
 
 use crate::menus::{self, action};
-use crate::state::{AppState, NoteOutcome, PushText, SaveResult};
+use crate::state::{AppState, NoteOutcome, PushText, SaveResult, secret_scan_report};
 use crate::{AppWindow, set_os_clipboard};
 
 const SHORTCUTS: &str = "\
@@ -89,6 +89,31 @@ fn with_bpadx_extension(path: PathBuf) -> PathBuf {
         name.push(".bpadx");
         path.with_file_name(name)
     }
+}
+
+/// Choose the detached signature to check a document against.
+///
+/// A file the user points at, rather than one guessed from the document's
+/// own path: naming and finding `.sig` sidecars is `bp-integrity`'s to
+/// decide, and a second convention invented here is one the two could
+/// disagree about.
+fn pick_signature(state: &AppState) -> Option<PathBuf> {
+    rfd::FileDialog::new()
+        .set_title("Choose the signature file")
+        .set_directory(state.dialog_directory())
+        .add_filter("Detached signature", &["sig"])
+        .add_filter("Any file", &["*"])
+        .pick_file()
+}
+
+/// Choose the public key a signature is claimed to have been made with.
+fn pick_verifying_key(state: &AppState) -> Option<PathBuf> {
+    rfd::FileDialog::new()
+        .set_title("Choose the public key to verify against")
+        .set_directory(state.dialog_directory())
+        .add_filter("Public key", &["pub", "key", "txt"])
+        .add_filter("Any file", &["*"])
+        .pick_file()
 }
 
 /// Show what Replace All would do, and ask before doing it.
@@ -366,6 +391,51 @@ pub fn handle_menu_action(
                 }
             }
             return None;
+        }
+
+        action::SCAN_SECRETS => {
+            let findings = state.borrow_mut().scan_for_secrets();
+            // The listing is a dialog rather than more status bar: the bar
+            // elides, and the positions are the part worth reading. Nothing
+            // here is the matched text -- a `Finding` does not carry it, and
+            // reaching back into the document to quote it would undo the one
+            // decision the crate is built around.
+            if !findings.is_empty() {
+                show_info("Possible credentials", &secret_scan_report(&findings));
+            }
+            push = PushText::No;
+        }
+
+        action::HASH_DOCUMENT => {
+            // The borrow ends with the statement, before the dialog opens:
+            // `rfd` pumps events, and a re-entrant callback on a live borrow
+            // panics.
+            let report = state.borrow_mut().hash_active_document();
+            if let Some(report) = report {
+                show_info("Document hash", &report);
+            }
+            push = PushText::No;
+        }
+
+        action::SIGN_DOCUMENT => {
+            // The row is greyed, so this is only reachable by a keyboard
+            // route that does not exist yet -- but a silent no-op would be a
+            // bug report nobody could describe, the same reasoning as the
+            // stamp arm above.
+            state.borrow_mut().error = Some(
+                "signing needs a signing key, and there is nowhere to keep one yet".to_owned(),
+            );
+            push = PushText::No;
+        }
+
+        action::VERIFY_SIGNATURE => {
+            // Two files, both chosen by the user, and neither borrow held
+            // past the statement that opens its dialog. Cancelling either is
+            // an answer, not an error, so it leaves the status bar alone.
+            let signature = pick_signature(&state.borrow())?;
+            let key = pick_verifying_key(&state.borrow())?;
+            state.borrow_mut().verify_signature(&signature, &key);
+            push = PushText::No;
         }
 
         action::GO_TO_LINE => {

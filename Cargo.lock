@@ -746,6 +746,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "bp-audit"
+version = "0.1.0"
+dependencies = [
+ "bp-security",
+ "proptest",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.20",
+ "time",
+]
+
+[[package]]
 name = "bp-buffer"
 version = "0.1.0"
 dependencies = [
@@ -842,11 +855,53 @@ dependencies = [
 ]
 
 [[package]]
+name = "bp-integrity"
+version = "0.1.0"
+dependencies = [
+ "bp-crypto",
+ "proptest",
+ "tempfile",
+ "thiserror 2.0.20",
+ "zeroize",
+]
+
+[[package]]
 name = "bp-naming"
 version = "0.1.0"
 dependencies = [
  "proptest",
  "time",
+]
+
+[[package]]
+name = "bp-notebook"
+version = "0.1.0"
+dependencies = [
+ "proptest",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.20",
+]
+
+[[package]]
+name = "bp-redaction"
+version = "0.1.0"
+dependencies = [
+ "proptest",
+ "tempfile",
+ "thiserror 2.0.20",
+]
+
+[[package]]
+name = "bp-research"
+version = "0.1.0"
+dependencies = [
+ "proptest",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.20",
 ]
 
 [[package]]

@@ -95,6 +95,21 @@ pub mod action {
     /// Privacy Mode, a session-wide override (specs §15). 58-59 free.
     pub const PRIVACY_MODE: i32 = 57;
 
+    /// Security operations that act on the *document* rather than on its
+    /// profile (specs §15): scanning, hashing, signing, verifying. 200-209,
+    /// a block of their own rather than the two spare ids at 58-59 -- four
+    /// rows do not fit in two, and splitting one family across two blocks is
+    /// how the fifth row later lands inside the recent-files window at 60.
+    ///
+    /// Above 100 for the same reason `CLIP_BASE` is: Slint's `dispatch`
+    /// routes exactly `UNDO..=SELECT_ALL` to the widget and everything else
+    /// to Rust, so a block only has to avoid that window rather than sit
+    /// below it. 204-209 are free.
+    pub const SCAN_SECRETS: i32 = 200;
+    pub const HASH_DOCUMENT: i32 = 201;
+    pub const SIGN_DOCUMENT: i32 = 202;
+    pub const VERIFY_SIGNATURE: i32 = 203;
+
     /// Clipboard history occupies `CLIP_BASE ..` (bounded by [`super::clip_end`]).
     ///
     /// Slint's `dispatch` routes exactly `UNDO..=SELECT_ALL` to the widget and
@@ -630,8 +645,34 @@ pub fn security(
             action::ENCRYPT_DOCUMENT,
             !encrypted,
         ),
-        toggle("Privacy Mode", privacy.is_on(), action::PRIVACY_MODE),
-        planned("Secret scanning, redaction, audit history"),
+        MenuItem {
+            separator_after: true,
+            ..toggle("Privacy Mode", privacy.is_on(), action::PRIVACY_MODE)
+        },
+        // Not gated on there being content: "no credentials found" is a real
+        // answer, and an empty document is exactly when somebody checks they
+        // are looking at the tab they think they are.
+        row("Scan for Secrets", "", action::SCAN_SECRETS),
+        // The algorithm is on the row rather than in the result, because a
+        // digest you are about to read down a telephone is useless unless you
+        // already know which of the two the other end took.
+        row("Hash Document (SHA-256)", "", action::HASH_DOCUMENT),
+        // Greyed with a reason, deliberately not `planned`. `bp_crypto`'s
+        // signing half exists and is tested; what does not exist is anywhere
+        // to keep a signing key, and inventing a key store on the way to a
+        // menu row would be a worse answer than the row saying so. The reason
+        // is in the label because the greying is the only thing on screen.
+        row_enabled(
+            "Sign Document — no signing key yet",
+            "",
+            action::SIGN_DOCUMENT,
+            false,
+        ),
+        // Live even though signing is not: verifying needs the *other*
+        // party's public key and their `.sig`, both of which the user
+        // supplies. It is the half of the feature that needs nothing stored.
+        row_end("Verify Signature...", "", action::VERIFY_SIGNATURE),
+        planned("Redaction, audit history"),
         arrives("phase 16"),
     ]);
     items
@@ -1093,6 +1134,158 @@ mod tests {
         );
     }
 
+    /// The Security menu as the shell builds it for an ordinary document.
+    fn security_menu() -> Vec<MenuItem> {
+        security(
+            bp_security::Security::default(),
+            false,
+            bp_security::Privacy::Off,
+        )
+    }
+
+    #[test]
+    fn the_security_operations_sit_outside_every_range_dispatch_matches() {
+        // The load-bearing one. Every id below is matched by an *exact* arm
+        // in `handle_menu_action`, but several arms above it match ranges --
+        // and a range arm comes first, so an id that strays into one silently
+        // opens a recent file or pastes a clipboard entry instead. That is
+        // the failure the recent-files window has already caused once.
+        let windows: [(&str, std::ops::Range<i32>); 6] = [
+            (
+                "recent files",
+                action::RECENT_BASE
+                    ..action::RECENT_BASE + i32::try_from(bp_config::MAX_RECENT).unwrap(),
+            ),
+            ("profiles", action::PROFILE_BASE..profile_end()),
+            ("stamps", action::STAMP_BASE..stamp_end()),
+            ("clipboard history", action::CLIP_BASE..clip_end()),
+            (
+                "paste transformations",
+                action::CLIP_TRANSFORM_BASE..clip_transform_end(),
+            ),
+            // Inclusive in dispatch; written as a half-open range one past
+            // the last so the two spellings cannot disagree.
+            ("editor commands", action::UNDO..action::SELECT_ALL + 1),
+        ];
+
+        for id in [
+            action::SCAN_SECRETS,
+            action::HASH_DOCUMENT,
+            action::SIGN_DOCUMENT,
+            action::VERIFY_SIGNATURE,
+        ] {
+            for (name, window) in &windows {
+                assert!(
+                    !window.contains(&id),
+                    "id {id} falls inside the {name} window and would be                      dispatched as one"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_security_operations_are_four_distinct_ids_in_their_documented_block() {
+        // The comment on `SCAN_SECRETS` promises 200-209. A fifth row taking
+        // 210 would compile and would sit two ids below nothing at all, which
+        // is exactly how a block stops being a block.
+        let ids = [
+            action::SCAN_SECRETS,
+            action::HASH_DOCUMENT,
+            action::SIGN_DOCUMENT,
+            action::VERIFY_SIGNATURE,
+        ];
+        for id in ids {
+            assert!((200..210).contains(&id), "id {id} is outside the block");
+        }
+        let mut sorted = ids;
+        sorted.sort_unstable();
+        sorted.windows(2).for_each(|pair| {
+            assert_ne!(pair[0], pair[1], "two security rows share an id");
+        });
+    }
+
+    #[test]
+    fn scanning_and_hashing_are_offered_on_every_document() {
+        // Neither needs a path, a profile or content: an empty document has a
+        // digest and has no credentials in it, and both are answers.
+        let items = security_menu();
+        for id in [action::SCAN_SECRETS, action::HASH_DOCUMENT] {
+            let row = items
+                .iter()
+                .find(|i| i.action == id)
+                .unwrap_or_else(|| panic!("no row for action {id}"));
+            assert!(row.enabled, "'{}' should be usable", row.label);
+        }
+    }
+
+    #[test]
+    fn the_hash_row_names_the_algorithm_before_it_is_clicked() {
+        // A digest read down a telephone is only comparable if both ends know
+        // which one was taken.
+        let items = security_menu();
+        let row = items
+            .iter()
+            .find(|i| i.action == action::HASH_DOCUMENT)
+            .expect("a hash row");
+        assert!(
+            row.label.contains("SHA-256"),
+            "the row should say which digest; got '{}'",
+            row.label
+        );
+    }
+
+    #[test]
+    fn signing_is_greyed_with_a_reason_rather_than_listed_as_not_existing() {
+        // `planned` means "this does not exist yet"; `bp_crypto::sign_document`
+        // does exist and is tested. What is missing is somewhere to keep a
+        // key, which is a different sentence -- and it has to be on the row,
+        // because the greying is all the user gets.
+        let items = security_menu();
+        let row = items
+            .iter()
+            .find(|i| i.action == action::SIGN_DOCUMENT)
+            .expect("a signing row");
+
+        assert!(!row.enabled, "there is nowhere to keep a signing key yet");
+        assert_ne!(
+            row.action,
+            action::NONE,
+            "a real capability with a missing prerequisite is not a planned row"
+        );
+        assert!(
+            row.label.contains("key"),
+            "the row must say why it is greyed; got '{}'",
+            row.label
+        );
+    }
+
+    #[test]
+    fn verifying_is_live_even_though_signing_is_not() {
+        // Verification needs the other party's public key and their `.sig`,
+        // both supplied by the user. Greying it alongside signing would hide
+        // the half of the feature that needs nothing stored.
+        let items = security_menu();
+        assert!(
+            items
+                .iter()
+                .find(|i| i.action == action::VERIFY_SIGNATURE)
+                .is_some_and(|i| i.enabled)
+        );
+    }
+
+    #[test]
+    fn the_security_menu_no_longer_calls_secret_scanning_planned() {
+        // The planned row and the live row would otherwise both be on screen,
+        // which reads as the feature being in two states at once.
+        let items = security_menu();
+        assert!(
+            !items
+                .iter()
+                .any(|i| i.action == action::NONE && i.label.contains("Secret scanning")),
+            "secret scanning is live; it must not also be listed as planned"
+        );
+    }
+
     #[test]
     fn close_other_tabs_is_unavailable_when_there_are_no_others() {
         let alone = tab_context(0, true);
@@ -1381,6 +1574,7 @@ mod tests {
         all.extend(format(Encoding::Utf8, LineEnding::Lf, Indent::default()));
         all.extend(data(Format::Csv));
         all.extend(help());
+        all.extend(security_menu());
 
         for item in all.iter().filter(|i| i.enabled) {
             assert_ne!(

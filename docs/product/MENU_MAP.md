@@ -85,7 +85,12 @@ no data rows rather than a column of greyed ones.
 | Standard / Private / Confidential / Maximum | **live** — the active document's profile; exactly one ticks, and a Custom policy ticks none. Private and Confidential seal the recovery journal with the document's passphrase, so they need the document encrypted |
 | What the profile permits (recovery, clipboard, network) | **live** — a readout, greyed because it is not clickable. A profile is a promise about invisible behaviour, and a promise nobody can see is not one |
 | Encrypt Document... | **live** — asks for a passphrase twice, writes a `.bpadx` beside the original, and the tab adopts it so later saves stay encrypted. Reads "Encrypted (.bpadx)" and greys once the document is |
-| Privacy Mode, secret scanning, redaction | planned — phase 16 |
+| Privacy Mode | **live** — a session-wide override that can only tighten |
+| Scan for Secrets | **live** — `bp_secrets::scan` over the active document. The status bar gives the count, the kinds and the first three positions; the full listing is a dialog, one line per finding. **Neither ever prints the matched text**: a `Finding` deliberately carries a position and a classification and nothing else, and the shell must not undo that by reaching back into the document to quote it |
+| Hash Document (SHA-256) | **live** — `bp_crypto::hash_document` over the bytes the document *would be written as*, not over the buffer, so the digest matches `sha256sum` on a document with a BOM or CRLF endings. Shown grouped in fours (to read down a telephone) and unbroken (to paste), and says so when unsaved edits mean it is not yet the digest of anything on disk |
+| Sign Document | **greyed, with the reason on the row** — `bp_crypto::sign_document` exists and is tested; there is nowhere to keep a signing key yet. Deliberately not a planned row: `planned` means "does not exist", and this exists and is missing a prerequisite |
+| Verify Signature... | **live** — the user chooses a `.sig` and a public key (32 raw bytes, or hexadecimal as pasted out of an email), and `bp_crypto::verify_document` answers. A refusal is reported as the library words it, since the bytes cannot tell an altered document from the wrong key; the one sentence the shell adds is that unsaved edits mean these are not the bytes anybody signed. The shell owns no sidecar convention — naming and finding `.sig` files is `bp-integrity`'s |
+| Lock Document, redaction, audit history | planned — phase 16 |
 
 ## Notebook
 
@@ -112,9 +117,17 @@ scratchpad. All planned — phase 12.
 
 ## Security (the rest)
 
-Lock, encrypt/decrypt, passphrase protection, secure clipboard, integrity,
-hash, sign, verify, redact, scan secrets, privacy mode, metadata inspector,
-audit, settings. All planned — phases 15 and 16.
+Lock, decrypt in place, secure clipboard, redact, metadata inspector, audit,
+settings. Planned — phases 15 and 16.
+
+Hash, sign and verify are no longer among them: `bp-crypto`'s signing half is
+wired into the rows above. **Signing is the one that is not**, and the reason
+is worth writing down rather than rediscovering — an Ed25519 signing key has
+to live somewhere, and this product has no key store, no platform-keyring
+integration and no decision on file permissions for a key on disk. That is a
+decision with consequences past one file, so the row greys and says why
+instead of a key appearing in the config directory because a menu row needed
+one.
 
 The three things that were waiting on profiles now read them: the recovery
 journal refuses rather than writing plaintext under a profile that forbids it,
