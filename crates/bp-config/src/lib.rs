@@ -22,16 +22,20 @@
 use std::fmt;
 use std::path::PathBuf;
 
+use bp_platform::dirs::{self, DirKind};
 use serde::Deserialize;
 
 pub mod recent;
 pub use recent::{MAX_RECENT, Recent, load_recent, save_recent};
 
+/// The platform's own view of the environment, re-exported so a caller can
+/// name [`config_path_in`]'s arguments without depending on `bp-platform`
+/// directly.
+pub use bp_platform::{EnvSnapshot, Platform};
+
 /// Crate identity used by workspace smoke tests and diagnostics.
 pub const CRATE_NAME: &str = "bp-config";
 
-/// Directory name used under the platform's configuration root.
-const APP_DIR: &str = "bachelorpad";
 const FILE_NAME: &str = "config.toml";
 
 /// Which renderer to ask Slint for. See ADR-0017.
@@ -252,23 +256,57 @@ pub struct Loaded {
     pub source: Option<PathBuf>,
 }
 
-/// Where the config file lives on this platform.
+/// Where the config file lives on the platform this binary runs on.
+///
+/// The edge: the one function in this crate that asks the operating system
+/// where the user's profile is. It reads the environment once, into a value,
+/// and hands that value to [`config_path_in`], which holds all of the actual
+/// rules. Everything below it is therefore testable on both legs of CI --
+/// including the Windows layout, from Linux.
+///
+/// Returns `None` when the environment provides no home at all, in which case
+/// the editor runs on defaults rather than guessing a path.
+#[must_use]
+pub fn config_path() -> Option<PathBuf> {
+    config_path_in(Platform::HOST, &EnvSnapshot::from_environment())
+}
+
+/// Where the config file lives, given a platform and an environment.
 ///
 /// Windows: `%APPDATA%\bachelorpad\config.toml`.
 /// Linux: `$XDG_CONFIG_HOME/bachelorpad/config.toml`, else
 /// `$HOME/.config/bachelorpad/config.toml`.
 ///
-/// Returns `None` when the environment provides no home at all, in which case
-/// the editor runs on defaults rather than guessing a path.
-pub fn config_path() -> Option<PathBuf> {
-    let root = if cfg!(windows) {
-        std::env::var_os("APPDATA").map(PathBuf::from)
-    } else {
-        std::env::var_os("XDG_CONFIG_HOME")
-            .map(PathBuf::from)
-            .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
-    };
-    Some(root?.join(APP_DIR).join(FILE_NAME))
+/// The directory half is [`bp_platform::dirs`]'s answer and not this crate's.
+/// It used to be this crate's, computed from a `cfg!(windows)` of its own, and
+/// the two answers had drifted: this one honoured a *relative*
+/// `$XDG_CONFIG_HOME`, which the XDG Base Directory specification says is
+/// invalid and must be ignored. Honouring it put a user's settings under
+/// whatever directory the editor happened to be launched from, so the next
+/// launch from elsewhere could not find them. Delegating removes that defect
+/// and the second answer at the same time.
+#[must_use]
+pub fn config_path_in(platform: Platform, env: &EnvSnapshot) -> Option<PathBuf> {
+    beside_the_config_file(platform, env, FILE_NAME)
+}
+
+/// A named file directly inside the product's configuration directory.
+///
+/// Shared with [`recent`] so that "beside `config.toml`" is one piece of code
+/// rather than a promise two modules each keep separately.
+///
+/// The join goes through [`bp_platform::paths::join`] rather than
+/// [`PathBuf::join`] because `PathBuf` uses the *host* separator: assembling
+/// the Windows answer on Linux would otherwise produce
+/// `C:\Users\me\AppData\Roaming\bachelorpad/config.toml`, which mostly works
+/// on Windows and is wrong in every assertion that compares the two legs.
+fn beside_the_config_file(platform: Platform, env: &EnvSnapshot, name: &str) -> Option<PathBuf> {
+    let directory = dirs::directory(platform, DirKind::Config, env)?;
+    Some(PathBuf::from(bp_platform::paths::join(
+        platform,
+        directory.to_str()?,
+        &[name],
+    )))
 }
 
 /// Resolve configuration from already-gathered inputs.
@@ -956,6 +994,188 @@ mod tests {
                 !rendered.to_lowercase().contains(forbidden),
                 "Config debug output must never carry {forbidden}"
             );
+        }
+    }
+
+    // --- where the config file lives -----------------------------------
+    //
+    // None of these read or write the real environment, and none of them
+    // touch a real user directory: every input is an `EnvSnapshot` built
+    // here. That is what lets the Windows layout be asserted from the Linux
+    // leg of CI, and it is also what keeps a test from leaving a
+    // `config.toml` in the developer's own `%APPDATA%`.
+
+    /// A profile the resolver can fully satisfy on either platform, so that a
+    /// test which varies one variable is varying only that one.
+    pub(super) fn whole_env() -> EnvSnapshot {
+        EnvSnapshot {
+            appdata: Some(r"C:\Users\me\AppData\Roaming".into()),
+            local_appdata: Some(r"C:\Users\me\AppData\Local".into()),
+            user_profile: Some(r"C:\Users\me".into()),
+            home: Some("/home/me".into()),
+            ..EnvSnapshot::default()
+        }
+    }
+
+    /// Values a `$XDG_*` variable may hold that are not a directory to put
+    /// anything in: relative in several spellings, blank, and whitespace.
+    /// The boundary case is `"/"`, which *is* absolute and must be honoured.
+    pub(super) const UNUSABLE_XDG: &[&str] = &[
+        "conf",
+        "relative/conf",
+        "./conf",
+        "../conf",
+        ".",
+        "..",
+        "",
+        "   ",
+    ];
+
+    /// A resolved path as *text*.
+    ///
+    /// Every assertion below compares strings rather than [`PathBuf`]s, which
+    /// matters more than it looks: `PathBuf`'s own comparison treats `\` as a
+    /// separator on Windows and as an ordinary character on Linux, so a
+    /// backslash where the Linux answer wants a slash is a difference only one
+    /// leg of CI would notice. Comparing text makes both legs check the same
+    /// thing, which is the whole reason the platform is a parameter here.
+    pub(super) fn text(path: Option<PathBuf>) -> String {
+        path.expect("this environment resolves")
+            .to_str()
+            .expect("built from Unicode input")
+            .to_owned()
+    }
+
+    #[test]
+    fn the_config_file_sits_where_the_platform_puts_settings() {
+        let env = whole_env();
+        assert_eq!(
+            text(config_path_in(Platform::Windows, &env)),
+            r"C:\Users\me\AppData\Roaming\bachelorpad\config.toml",
+            "the Windows answer must be spelt with backslashes on either leg"
+        );
+        assert_eq!(
+            text(config_path_in(Platform::Linux, &env)),
+            "/home/me/.config/bachelorpad/config.toml",
+            "the Linux answer must be spelt with slashes on either leg"
+        );
+    }
+
+    #[test]
+    fn a_relative_xdg_config_home_is_ignored_rather_than_honoured() {
+        // The defect this crate used to have. A relative `$XDG_CONFIG_HOME`
+        // is invalid per the XDG Base Directory specification, and honouring
+        // it put the user's settings beside whatever directory the editor was
+        // launched from -- so a second launch from elsewhere lost them.
+        for unusable in UNUSABLE_XDG {
+            let env = EnvSnapshot {
+                xdg_config_home: Some((*unusable).to_owned()),
+                ..whole_env()
+            };
+            assert_eq!(
+                text(config_path_in(Platform::Linux, &env)),
+                "/home/me/.config/bachelorpad/config.toml",
+                "{unusable:?} is not a directory to keep settings in; \
+                 the $HOME default must be used instead"
+            );
+        }
+    }
+
+    #[test]
+    fn an_absolute_xdg_config_home_is_still_honoured() {
+        // The other side of the rule, and the boundary: `/` is the shortest
+        // absolute path there is.
+        for (value, expected) in [
+            ("/etc/xdg", "/etc/xdg/bachelorpad/config.toml"),
+            ("/", "/bachelorpad/config.toml"),
+        ] {
+            let env = EnvSnapshot {
+                xdg_config_home: Some(value.to_owned()),
+                ..whole_env()
+            };
+            assert_eq!(
+                text(config_path_in(Platform::Linux, &env)),
+                expected,
+                "an absolute $XDG_CONFIG_HOME must win over the $HOME default"
+            );
+        }
+    }
+
+    #[test]
+    fn a_resolved_config_path_is_always_absolute() {
+        // The property the relative-`$XDG_*` rule exists to protect, stated
+        // once for every platform and every unusable value: whatever comes
+        // back, it is never a path relative to the working directory.
+        let mut envs = vec![whole_env()];
+        for unusable in UNUSABLE_XDG {
+            envs.push(EnvSnapshot {
+                xdg_config_home: Some((*unusable).to_owned()),
+                ..whole_env()
+            });
+            envs.push(EnvSnapshot {
+                appdata: Some((*unusable).to_owned()),
+                ..whole_env()
+            });
+        }
+
+        for &platform in Platform::ALL {
+            for env in &envs {
+                let path = text(config_path_in(platform, env));
+                assert!(
+                    bp_platform::paths::is_absolute(platform, &path),
+                    "{platform:?} produced the relative path {path:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn an_empty_environment_is_never_guessed_at() {
+        // An editor that writes its config next to whatever file the user
+        // happened to open is worse than one that runs on defaults.
+        for &platform in Platform::ALL {
+            assert_eq!(
+                config_path_in(platform, &EnvSnapshot::default()),
+                None,
+                "{platform:?} invented a path from an empty environment"
+            );
+        }
+    }
+
+    #[test]
+    fn the_host_wrapper_agrees_with_the_parameterised_function() {
+        // Computes paths only; reads no file and creates no directory. Guards
+        // the edge against being wired to a fixed platform instead of HOST.
+        assert_eq!(
+            config_path(),
+            config_path_in(Platform::HOST, &EnvSnapshot::from_environment())
+        );
+    }
+
+    #[test]
+    fn the_config_file_is_never_put_in_a_disposable_directory() {
+        // Settings are the thing worth backing up; a cache is disposable by
+        // definition and state is per-machine. `bp-platform` keeps the four
+        // apart, and this asserts that this crate asked for the right one.
+        //
+        // Prefixes are compared as text rather than through `Path::parent`,
+        // which cannot walk a Windows path while running on Linux.
+        let env = whole_env();
+        for &platform in Platform::ALL {
+            let path = text(config_path_in(platform, &env));
+            let settings = text(dirs::directory(platform, DirKind::Config, &env));
+            assert!(
+                path.starts_with(&settings),
+                "{platform:?}: {path:?} is not inside the configuration directory"
+            );
+            for kind in [DirKind::Data, DirKind::Cache, DirKind::State] {
+                let elsewhere = text(dirs::directory(platform, kind, &env));
+                assert!(
+                    !path.starts_with(&elsewhere),
+                    "{platform:?}: settings must not live in the {} directory",
+                    kind.token()
+                );
+            }
         }
     }
 }

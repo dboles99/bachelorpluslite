@@ -61,15 +61,17 @@ Adding a decision means adding both.
 
 ## Open items
 
-- **`bp-config` and `bp-platform` give two different answers for the config
-  directory.** `bp_config::config_path` has its own `cfg!(windows)`, covers
-  only the config directory, and *honours* a relative `$XDG_CONFIG_HOME`;
-  `bp_platform::dirs` covers config, data, cache and state, takes the
-  environment as a parameter so both legs test it, and treats a relative
-  `$XDG_CONFIG_HOME` as invalid and ignores it, which is what the XDG
-  specification requires. Same product, two answers, and the newer one is
-  right. `bp-config` should delegate. Found by the agent that built
-  `bp-platform`, which could not edit `bp-config` to fix it.
+- **The recent-files list roams on Windows, and it is full of absolute
+  paths.** `recent.toml` sits beside `config.toml` in the config directory,
+  which on Windows is `%APPDATA%` and therefore roams between machines --
+  and a recent list is machine-specific absolute paths, which is exactly what
+  `bp_platform::DirKind::roams` warns against. `bp-platform` names the
+  recent-files list as `DirKind::State` for this reason. It was not moved
+  when `bp-config` started delegating, deliberately: it is a product decision
+  with a user-visible effect rather than a deduplication, and `bp-ui`'s
+  `recovery_dir` derives its own path from `config_path`, so moving one
+  without the other would scatter the product's files. Both want doing
+  together, by something that owns both crates.
 - **Neither `bp-platform-windows` nor `bp-platform-linux` was created**, and
   that is a decision rather than an omission. specs §20 and the crate map
   name them. Everything they would hold is either already a parameterised
