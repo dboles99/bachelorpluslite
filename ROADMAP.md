@@ -16,7 +16,7 @@ Status as of **2026-08-19**. Three words, meaning three different things:
 | 1 | Foundation and workspace | **Done** | [01-foundation](project/tasks/01-foundation/) | `bp-core`, `bp-config`, `bp-theme`, `bp-ui` |
 | 2 | Core editor | **Started** | [02-core-editor](project/tasks/02-core-editor/) | `bp-buffer`, `bp-editor` |
 | 3 | File safety and recovery | **Done** | [03-file-safety](project/tasks/03-file-safety/) | `bp-files`, `bp-history` |
-| 4 | Large-file engine | Not started | [04-large-files](project/tasks/04-large-files/) | — |
+| 4 | Large-file engine | **Built, unwired** | [04-large-files](project/tasks/04-large-files/) | `bp-buffer` |
 | 5 | Format registry and parser framework | **Started** | [05-formats](project/tasks/05-formats/) | `bp-formats` |
 | 6 | Structured formats | **Started** | [05-formats](project/tasks/05-formats/) | `bp-data` |
 | 7 | Search engine | **Started** | [06-search](project/tasks/06-search/) | `bp-search` |
@@ -24,11 +24,11 @@ Status as of **2026-08-19**. Three words, meaning three different things:
 | 9 | Organization and related-note graph | **Built, unwired** | [07-semantic](project/tasks/07-semantic/) | `bp-storage` |
 | 10 | Semantic/hybrid search | Not started | [07-semantic](project/tasks/07-semantic/) | — |
 | 11 | Clipboard system | **Started** | [08-clipboard](project/tasks/08-clipboard/) | `bp-clipboard` |
-| 12 | Notebook/execution system | Not started | [09-notebook](project/tasks/09-notebook/) | — |
-| 13 | Research mode | Not started | [10-research](project/tasks/10-research/) | — |
+| 12 | Notebook/execution system | **Built, unwired** | [09-notebook](project/tasks/09-notebook/) | `bp-notebook` |
+| 13 | Research mode | **Built, unwired** | [10-research](project/tasks/10-research/) | `bp-research` |
 | 14 | Security foundation | **Started** | [11-security](project/tasks/11-security/) | `bp-security` |
 | 15 | Encrypted `.bpadx` documents | **Started** | [11-security](project/tasks/11-security/) | `bp-crypto` |
-| 16 | Advanced security | Not started | [11-security](project/tasks/11-security/) | — |
+| 16 | Advanced security | **Started** | [11-security](project/tasks/11-security/) | `bp-secrets`, `bp-redaction`, `bp-audit`, `bp-integrity` |
 | 17 | Themes/personality/accessibility | **Started** | [12-themes-brand](project/tasks/12-themes-brand/) | `bp-theme` |
 | 18 | Windows/Linux platform integration | Not started | [13-platform](project/tasks/13-platform/) | — |
 | 19 | Hardening, fuzzing and benchmarks | Not started | [14-hardening](project/tasks/14-hardening/) | — |
@@ -48,9 +48,26 @@ that points at them for no gain.
 
 ## Where the work actually is
 
-Phases 1 and 3 are complete. Phases 2, 5, 6, 7, 8, 11 and 17 each have a
-tested slice reachable in the product. Phase 9 has its foundation and no way
-in, on purpose.
+Phases 1 and 3 are complete. Phases 2, 5, 6, 7, 8, 11, 14, 15, 16 and 17 each
+have a tested slice reachable in the product. Phases 4, 9, 12 and 13 are built
+and have no way in.
+
+**Four phases gained a crate this session and none of them gained a menu
+row.** That is the honest shape of it: `bp-buffer` can open a 2 GB file
+without loading it, `bp-notebook` can read and write `.ipynb`, `bp-research`
+can parse BibTeX, and `bp-redaction`, `bp-audit` and `bp-integrity` exist --
+and a person running the application can reach none of it. Phase 16 counts as
+Started rather than Built, unwired only because secret scanning, hashing and
+signature verification did get rows.
+
+**The first thing anybody built across two crates found four defects.** Until
+this session every test in the repository tested one crate. Six files of
+cross-crate tests found that `bp-search` and `bp-buffer` disagree about what a
+line is, that `bp-formats` identifies a pretty-printed JSON array as JSON
+Lines and `bp-data` then rejects it, that the encoder deciding encodings and
+line endings is `pub(crate)` inside the shell where no library test can reach
+it, and that YAML has no way in. `DECISIONS.md` has each with its evidence.
+None is hard to fix; none would have been found by more unit tests.
 
 **The item that gated three sessions is no longer gating.** The rope is the
 editor's storage, `bp-editor` owns caret, motion, undo and the line

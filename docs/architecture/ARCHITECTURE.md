@@ -34,7 +34,7 @@ and this table carries the intent until then.
 | `bp-theme` | **live** | Palettes as data (ADR-0009). Green is the default. | 1, 17 |
 | `bp-config` | **live** | Settings precedence, config file, recent-files list, recovery from bad input. | 1 |
 | `bp-ui` | **live** | The Slint application shell (ADR-0015). Split into modules — see below. | 1 |
-| `bp-buffer` | **live** | Rope buffer, character indices, line/column maths. | 2, 4 |
+| `bp-buffer` | **live** | Rope buffer, character indices, line/column maths. Plus the large-file engine (ADR-0027): detection, chunked reading, a sparse line index and line-aligned streaming windows. The engine is not reached by the open path yet. | 2, 4 |
 | `bp-editor` | **live** | Caret, selection, motion, transaction-based undo/redo, line operations, key-to-command mapping, document-to-screen geometry. The editor's storage — see below. | 2 |
 | `bp-history` | **live** | Crash-safe recovery journal and autosave checkpoints. | 3 |
 | `bp-formats` | **live** | Format detection and profiles (ADR-0008). | 5 |
@@ -44,15 +44,15 @@ and this table carries the intent until then.
 | `bp-clipboard` | **live** | Clipboard history, kind detection and format-aware paste transformations (ADR-0010). In memory only. | 11 |
 | `bp-organize` | planned | Projects, topics, tags, related notes, duplicate detection. | 9 |
 | `bp-storage` | **live** | SQLite metadata store and migrations (ADR-0019). Documents, tags. Nothing writes to it yet. | 9 |
-| `bp-notebook` | planned | Cell model, `.ipynb` import/export. | 12 |
+| `bp-notebook` | **built, unwired** | Cell model and `.ipynb` interchange (ADR-0025). Eight cell kinds, split/merge/move/duplicate/collapse, outputs as data. A run needs a `UserGesture` no parsed file can produce. Pure. | 12 |
 | `bp-execution` | planned | Runners and execution security. Never auto-runs (ADR-0011). | 12 |
-| `bp-research` | planned | Citations, paper metadata, research profile. | 13 |
+| `bp-research` | **built, unwired** | BibTeX and CSL JSON in and out, DOI and arXiv identifiers, four reference styles, the research profile. Offline and deterministic; a test forbids a setting that could reach the network (ADR-0006). Pure. | 13 |
 | `bp-security` | **live** | Security profiles resolving to a policy over seven axes, plus Privacy Mode (ADR-0020). Decides policy; performs none of it. Read by the journal, the clipboard and the metadata store. | 14, 16 |
-| `bp-crypto` | **built, unwired** | The `.bpadx` envelope (ADR-0021): Argon2id, XChaCha20-Poly1305 and AES-256-GCM, chunked with the header and chunk position authenticated. Composes primitives, implements none. Reached from Security ▸ Encrypt Document and from opening a `.bpadx`. | 15 |
+| `bp-crypto` | **live** | The `.bpadx` envelope (ADR-0021): Argon2id, XChaCha20-Poly1305 and AES-256-GCM, chunked with the header and chunk position authenticated. Plus document hashing and detached Ed25519 signatures (specs §15). Composes primitives, implements none. Reached from Security ▸ Encrypt Document and from opening a `.bpadx`; the signing half is not reached yet. | 15, 16 |
 | `bp-secrets` | **built, unwired** | Secret scanning (specs §15): AWS/GitHub/GitLab/Slack tokens, PEM blocks, JWTs, connection strings, high-entropy assignments. Reports where a secret is, never what it is. No dependencies. Platform key protection is still planned. | 16 |
-| `bp-integrity` | planned | Hashing, signatures, verification. | 16 |
-| `bp-redaction` | planned | Redaction and metadata inspection. | 16 |
-| `bp-audit` | planned | Security audit history. | 16 |
+| `bp-integrity` | **built, unwired** | `.sig` sidecars, signing-key files and hash manifests over `bp-crypto` (ADR-0026). Says what it cannot enforce per platform rather than implying it did. | 16 |
+| `bp-redaction` | **built, unwired** | Irreversible redaction with merging spans, and metadata inspection (ADR-0028). Documents exactly what verification cannot prove. Pure. | 16 |
+| `bp-audit` | **built, unwired** | Security audit history (ADR-0024). An event is `Copy`, so it cannot own a secret; documents are named by an opaque id, never a path. The sealed destination has no implementor yet, so it refuses. | 16 |
 | `bp-platform` | planned | Platform traits. The seam ADR-0001 requires. | 18 |
 | `bp-platform-windows` | planned | DPAPI, Hello, default-app registration, native clipboard history. | 18 |
 | `bp-platform-linux` | planned | Secret Service, `.desktop` and MIME registration. | 18 |

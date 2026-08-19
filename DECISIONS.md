@@ -29,13 +29,22 @@ Adding a decision means adding both.
 | BP-ADR-0021 | 2026-08-19 | `.bpadx`: two AEADs versioned in the envelope, chunked, position authenticated | Accepted | [ADR-0021](docs/decisions/ADR-0021.md) |
 | BP-ADR-0022 | 2026-08-19 | The recovery journal is sealed with the document's passphrase and recovered at unlock | Accepted | [ADR-0022](docs/decisions/ADR-0022.md) |
 | BP-ADR-0023 | 2026-08-19 | YAML uses `saphyr`; nesting, alias expansion and duplicate keys are bounded before a tree exists | Accepted | [ADR-0023](docs/decisions/ADR-0023.md) |
+| BP-ADR-0024 | 2026-08-19 | An audit event is `Copy`, so it cannot carry a secret; the log's destination resolves from the existing policy axes | Accepted | [ADR-0024](docs/decisions/ADR-0024.md) |
+| BP-ADR-0025 | 2026-08-19 | Notebook kinds ride in namespaced `.ipynb` metadata; a run needs a `UserGesture` no parsed file can produce | Accepted | [ADR-0025](docs/decisions/ADR-0025.md) |
+| BP-ADR-0026 | 2026-08-19 | A `.sig` sidecar appends to the whole file name and records the signer's key; Windows enforces no key-file permission | Accepted | [ADR-0026](docs/decisions/ADR-0026.md) |
+| BP-ADR-0027 | 2026-08-19 | Large-file thresholds are measured; the line index is sparse; memory mapping is declined with reasons | Accepted | [ADR-0027](docs/decisions/ADR-0027.md) |
+| BP-ADR-0028 | 2026-08-19 | Redaction merges overlapping and adjacent spans, resolves every offset against the original, and states what verification cannot prove | Accepted | [ADR-0028](docs/decisions/ADR-0028.md) |
 
 ## Decisions needed before the work they block
 
-- **`.bpadx` envelope format** (phase 15). ADR-0011 says established KDF and
-  AEAD implementations and no custom cryptography, which constrains this more
-  than it looks: the choice of crate, envelope layout and versioning scheme
-  should be agreed before code exists, not discovered during it.
+- **Where a signing key lives** (phase 16). `bp-crypto` signs and verifies,
+  and both are tested; Verify Signature is reachable and Sign Document is
+  greyed, because an Ed25519 signing key has to be kept somewhere and this
+  product has no key store, no platform-keyring integration (Windows DPAPI,
+  Linux Secret Service -- phase 18) and no decision on file permissions for a
+  key sitting on disk. specs.md section 15 asks for all three. The row states
+  the gap rather than a key appearing in the config directory because a menu
+  row needed one.
 - **What may leave the machine** (phase 8 layer three, phase 10). Generative
   providers and embeddings both imply sending document content somewhere.
   ADR-0006 keeps them optional; ADR-0011 governs what is permitted. Neither
@@ -52,6 +61,49 @@ Adding a decision means adding both.
 
 ## Open items
 
+- **`bp-search` and `bp-buffer` do not agree what a line is, and this is
+  now a decision rather than a bug report.** `bp_search::Offsets` counts
+  `'
+'`. `bp_buffer::Buffer` is a `ropey::Rope` built with ropey's default
+  features, which include `unicode_lines`, so ropey also breaks on a bare
+  ``, ``, ``, U+0085, U+2028 and U+2029. For `"onetwoneedle"`
+  search reports line 1 and the buffer reports line 3, so a find-in-files
+  result scrolls the editor to the wrong line in any file carrying a bare CR.
+  The same split exists inside `bp-buffer` — the free `line_count` counts
+  newlines, `Buffer::len_lines` asks the rope — and `bp-ui` uses one for the
+  `TextInput` status bar and the other for the `EditorSurface` one, so the
+  same document reports two line counts depending on which view draws.
+  Either `bp-search` adopts ropey's break set or `bp-buffer` builds its rope
+  without `unicode_lines`; one line definition has to win, and that is an
+  ADR. Found by the cross-crate tests, pinned as an ignored test naming it.
+- **`bp_formats::sniff` calls a pretty-printed JSON array "JSON Lines".**
+  `looks_like_json_lines` declares JSONL at two or more lines opening with
+  `{` or `[`, and its own comment claims a pretty-printed document has
+  exactly one such line — false for an array of objects, the commonest JSON
+  shape there is. `bp-data` then rejects the file. Reached whenever the
+  extension is missing or unrecognised. Unlike the item above this is a
+  plain defect with an obvious fix, not a decision.
+- **The encoding and line-ending encoder is in the shell, where nothing can
+  test it.** `bp-files` has no encoding-aware writer; the function turning a
+  document plus its `Encoding` and `LineEnding` into bytes is `pub(crate)`
+  in `bp-ui`. The crates are provably lossless through load, rope and atomic
+  save; the code that actually writes the file is out of reach of every
+  library test, and by inspection it normalises to `
+` and re-expands to
+  the declared ending, silently rewriting every minority line break in a
+  mixed-ending document. R013 says decisions live in `bp-*` crates and the
+  shell only connects them; this one escaped.
+- **YAML has no way in.** ADR-0023's parser, its three bounds and its
+  multi-document handling are all done and verified through the cross-crate
+  tests, and nothing in `bp-ui` calls any of `yaml_validate`, `yaml_format`,
+  `yaml_minify`, `yaml_to_json` or `json_to_yaml`. Pure wiring.
+- **`bp-audit`'s sealed destination has no implementor.** The crate takes a
+  `Sealer` trait so it need not depend on `bp-crypto`, and nothing in the
+  tree implements it, so `Destination::Sealed` currently always resolves to
+  `NotWritten(NoSealer)` — refusing loudly, which is the specified
+  behaviour, but refusing every time. The wiring is the shell's, the same
+  way `bp-storage` waits in ADR-0019.
+
 - **Time to first interaction is unmeasurable under the software renderer.**
   Slint exposes no rendering notifier there, so half of the ADR-0017 startup
   target has no measurement behind it. A hole, not a pass.
@@ -66,20 +118,19 @@ Adding a decision means adding both.
   (2026-08-17, manual test). `KeyBinding` in a wrapping `FocusScope` matches
   during the capture phase, so the focused `TextInput` no longer swallows
   Ctrl+S.
-- **Three things want security profiles, and the profiles now exist as a
-  model.** The recovery journal writes unsaved text to disk in plaintext;
-  clipboard history keeps copied secrets in memory; and `bp-storage` is
-  built, tested and deliberately unwired, because the useful thing to record
-  — a document's extracted title — is a summary of what the user wrote.
-  ADR-0020 says what each profile permits over all three. **None of them
-  reads it yet**, which is the next piece of work: the model makes the leaks
-  describable, not fixed.
+- **The three dependants now read the security profile.** The recovery
+  journal refuses rather than writing plaintext, and deletes what a looser
+  profile already wrote; clipboard history stops recording and is cleared;
+  and `bp-storage`'s `record_document` drops the title under `PathOnly` and
+  records nothing under `Disabled`. Privacy Mode clamps all of it for the
+  session without replacing the document's profile, so leaving it restores
+  what the document had rather than the default.
 
-  Two of the four profiles require an encrypted recovery journal, which
-  needs `bp-crypto` and does not exist until phase 15. ADR-0020 requires that
-  to fail loudly — the journal is refused rather than silently written in
-  clear — so those profiles are not fully honourable yet, deliberately and
-  visibly.
+  What ADR-0020 required to fail loudly no longer has to. The two profiles
+  wanting an encrypted recovery journal are honoured, because `bp-crypto`
+  ships and ADR-0022 seals the journal with the document's own passphrase.
+  The remaining hole is narrower, and is the next item: a *plaintext*
+  document under those profiles has no key, so it gets no journal at all.
 - **The custom editor view has never been typed into.** Its rules are covered
   by 147 tests in `bp-editor`; the widget has been verified to exactly one
   standard, that it renders a frame with a real file open without panicking.
