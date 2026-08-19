@@ -47,7 +47,7 @@ and this table carries the intent until then.
 | `bp-notebook` | planned | Cell model, `.ipynb` import/export. | 12 |
 | `bp-execution` | planned | Runners and execution security. Never auto-runs (ADR-0011). | 12 |
 | `bp-research` | planned | Citations, paper metadata, research profile. | 13 |
-| `bp-security` | **built, unread** | Security profiles resolving to a policy over seven axes (ADR-0020). Decides policy; performs none of it. Nothing consults it yet. | 14, 16 |
+| `bp-security` | **live** | Security profiles resolving to a policy over seven axes (ADR-0020). Decides policy; performs none of it. Nothing consults it yet. | 14, 16 |
 | `bp-crypto` | **built, unwired** | The `.bpadx` envelope (ADR-0021): Argon2id, XChaCha20-Poly1305 and AES-256-GCM, chunked with the header and chunk position authenticated. Composes primitives, implements none. Reached from Security ▸ Encrypt Document and from opening a `.bpadx`. | 15 |
 | `bp-secrets` | planned | Platform key protection, secret scanning. | 16 |
 | `bp-integrity` | planned | Hashing, signatures, verification. | 16 |

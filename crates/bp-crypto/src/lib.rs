@@ -386,6 +386,27 @@ pub fn open(document: &[u8], passphrase: &str) -> Result<Zeroizing<Vec<u8>>, Cry
     }
 }
 
+/// A stable, filesystem-safe name derived from arbitrary bytes.
+///
+/// For naming recovery-journal files after the document they belong to,
+/// without writing the path down (ADR-0022). SHA-256 truncated to 32 hex
+/// characters -- ample against accidental collision, and short enough to stay
+/// a sane filename.
+///
+/// **This is not a secret.** Anyone holding the recovery directory can test a
+/// guessed path against it, so it hides *which* documents have unsaved work
+/// only from someone who cannot guess their paths. That is the trade the
+/// alternative -- writing the path in clear beside the ciphertext -- loses
+/// outright.
+///
+/// Not used for key derivation anywhere. Keys come from Argon2id.
+#[must_use]
+pub fn stable_name(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(bytes);
+    digest.iter().take(16).map(|b| format!("{b:02x}")).collect()
+}
+
 /// Whether `bytes` begins with the `.bpadx` magic.
 ///
 /// Cheap enough to call on every file open, so the shell can route a document

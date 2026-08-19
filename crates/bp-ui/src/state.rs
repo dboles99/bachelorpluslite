@@ -241,7 +241,14 @@ impl AppState {
             // open side by side can be governed differently, and the
             // stricter one must not be relaxed by the other being open.
             let recovery = doc.policy().recovery;
-            match self.journal.checkpoint(id.get(), &entry, recovery) {
+            // Its own passphrase, if it has one. A sealed journal is
+            // encrypted with the document's key so that it can be recovered
+            // at unlock time and never needs a prompt of its own (ADR-0022).
+            let passphrase = self.passphrases.get(&id).map(|p| p.to_string());
+            match self
+                .journal
+                .checkpoint(id.get(), &entry, recovery, passphrase.as_deref())
+            {
                 Ok(bp_history::Written::Yes) => {
                     if let Some(doc) = self.workspace.get_mut(id) {
                         doc.record_checkpoint(at);
@@ -792,6 +799,11 @@ impl AppState {
                     // Only now, after a verified write, is the document clean.
                     doc.record_disk_save(now());
                 }
+                // Both forms of journal go once the work is on disk. The
+                // sealed one is keyed by path rather than by session id, so
+                // it has to be discarded by path.
+                let _ = self.journal.discard(id.get());
+                let _ = self.journal.discard_sealed_for(&target);
                 // Re-stamp from what we just wrote, or our own save would
                 // look like somebody else's change on the next poll.
                 self.mark_in_step(id, &target);
@@ -939,8 +951,10 @@ impl AppState {
             text: self.text_of(id).to_owned(),
             written_at: bp_history::now_unix(),
         };
+        let passphrase = self.passphrases.get(&id).map(|p| p.to_string());
         if let Ok(bp_history::Written::Refused(refusal)) =
-            self.journal.checkpoint(id.get(), &entry, policy.recovery)
+            self.journal
+                .checkpoint(id.get(), &entry, policy.recovery, passphrase.as_deref())
             && let Some(message) = refusal.notice()
         {
             self.error = Some(message.to_owned());
@@ -1037,12 +1051,37 @@ impl AppState {
                 // file only this program can open.
                 let text = String::from_utf8_lossy(&plain).into_owned();
                 let id = self.workspace.open_path(path.clone(), now());
+
+                // Unsaved work from a crashed session, if there is any. This
+                // is the only moment it can be read: the journal is sealed
+                // with this passphrase, which nothing had until now. Recovery
+                // therefore never needs a prompt of its own -- a program
+                // asking for a passphrase unprompted is the habit that makes
+                // phishing work.
+                let recovered = self.journal.sealed_pending(&path, passphrase);
+                let text = match &recovered {
+                    Some(checkpoint) => checkpoint.text.clone(),
+                    None => text,
+                };
+
                 self.editors.insert(id, bp_editor::Editor::new(&text));
                 self.passphrases
                     .insert(id, zeroize::Zeroizing::new(passphrase.to_owned()));
                 self.mark_in_step(id, &path);
                 self.passphrase_status.clear();
-                self.error = None;
+
+                if recovered.is_some() {
+                    // Marked modified, because what is on screen is *not*
+                    // what is in the file. Leaving it clean would let the
+                    // user close the tab and lose the recovered work without
+                    // being asked.
+                    if let Some(doc) = self.workspace.get_mut(id) {
+                        doc.mark_modified();
+                    }
+                    self.error = Some("recovered unsaved work from a previous session".to_owned());
+                } else {
+                    self.error = None;
+                }
                 false
             }
             Err(e) => {
@@ -2190,16 +2229,97 @@ mod tests {
     }
 
     #[test]
-    fn a_profile_needing_encryption_reports_that_recovery_is_off() {
-        // ADR-0020: fail loudly rather than degrade. The user has been told
-        // the journal is encrypted, and it is not being written at all.
+    fn a_plaintext_document_under_a_strict_profile_is_told_how_to_fix_it() {
+        // ADR-0020: fail loudly rather than degrade. The journal is sealed
+        // with the document's own passphrase, so a plaintext document has no
+        // key -- and the message says what turns recovery back on rather than
+        // only that it is off.
         let mut state = AppState::new();
         state.set_security(bp_security::Security::Named(bp_security::Profile::Private));
 
         let message = state.error.expect("a capability gap reaches the user");
         assert!(
-            message.contains("phase 15") || message.contains("clipboard"),
+            message.contains("encrypt") || message.contains("clipboard"),
             "got {message}"
+        );
+    }
+
+    #[test]
+    fn an_encrypted_document_gets_an_encrypted_journal_and_recovers_at_unlock() {
+        // The whole point of keying the sealed journal by path: a crashed
+        // session's work comes back when the document is unlocked, and never
+        // needs a prompt of its own.
+        let recovery = tempfile::tempdir().unwrap();
+        let docs = tempfile::tempdir().unwrap();
+        let target = docs.path().join("notes.bpadx");
+
+        let mut before = AppState::new();
+        before.journal = bp_history::Journal::new(recovery.path().to_path_buf());
+        before.edit("saved text".to_owned());
+        let id = before.workspace.active_id().unwrap();
+        before.ask = Some(crate::passphrase::Ask::Set {
+            id,
+            target: target.clone(),
+        });
+        before.answer_passphrase("hunter2");
+        before.answer_passphrase("hunter2");
+
+        // Work done after the save, then the session "crashes".
+        before.set_security(bp_security::Security::Named(bp_security::Profile::Private));
+        before.edit("saved text plus unsaved".to_owned());
+        before.checkpoint_all();
+
+        // Nothing readable without the passphrase, but something is there.
+        assert!(before.journal.pending().is_empty());
+        assert_eq!(before.journal.sealed_count(), 1);
+
+        let mut after = AppState::new();
+        after.journal = bp_history::Journal::new(recovery.path().to_path_buf());
+        after.open_maybe_encrypted(target);
+        after.answer_passphrase("hunter2");
+
+        assert_eq!(
+            after.active_text(),
+            "saved text plus unsaved",
+            "the unsaved work did not come back at unlock"
+        );
+        assert!(
+            after.workspace.active().unwrap().is_dirty(),
+            "recovered work is not on disk, so the tab must be dirty or the \
+             user can close it and lose it without being asked"
+        );
+    }
+
+    #[test]
+    fn saving_an_encrypted_document_discards_its_sealed_journal() {
+        // The work is on disk now. A journal left behind would offer to
+        // "recover" a stale copy at the next unlock.
+        let recovery = tempfile::tempdir().unwrap();
+        let docs = tempfile::tempdir().unwrap();
+        let target = docs.path().join("notes.bpadx");
+
+        let mut state = AppState::new();
+        state.journal = bp_history::Journal::new(recovery.path().to_path_buf());
+        state.edit("first".to_owned());
+        let id = state.workspace.active_id().unwrap();
+        state.ask = Some(crate::passphrase::Ask::Set {
+            id,
+            target: target.clone(),
+        });
+        state.answer_passphrase("hunter2");
+        state.answer_passphrase("hunter2");
+        state.set_security(bp_security::Security::Named(bp_security::Profile::Private));
+
+        state.edit("first and second".to_owned());
+        state.checkpoint_all();
+        assert_eq!(state.journal.sealed_count(), 1);
+
+        assert_eq!(state.save_document(id, None), SaveResult::Saved);
+
+        assert_eq!(
+            state.journal.sealed_count(),
+            0,
+            "a stale sealed journal would be offered at the next unlock"
         );
     }
 

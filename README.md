@@ -58,14 +58,14 @@ cargo run --release -- --editor-view   # with the custom editor view (ADR-0018)
 
 ## Current state (2026-08-19)
 
-**17 crates, 690 tests, green on Windows and Linux.** The app opens, edits and
+**17 crates, 700 tests, green on Windows and Linux.** The app opens, edits and
 saves atomically, and does rather more than that:
 
 | Area | What works |
 | --- | --- |
 | Editing | Tabs, four themes plus Follow System, zoom, indentation (tabs or soft tabs, 2/4/8), honest save state, atomic save, undo/cut/copy/paste, sort / deduplicate / reverse / trim lines, duplicate and move lines, go to line |
 | Storage | A rope buffer holds every document; whole-document operations are one undo step |
-| Safety | Unsaved-changes prompts, external-change detection, crash recovery journal |
+| Safety | Unsaved-changes prompts, external-change detection, crash recovery journal — encrypted and recovered at unlock for encrypted documents ([ADR-0022](docs/decisions/ADR-0022.md)) |
 | Files | Open/Save/Save As/Save All/Save a Copy/Reload, recent files, tab context menu, command-line file opening |
 | Search | Find and replace with case-sensitive, whole-word and regex toggles, changes shown before they are applied, recursive cross-file search |
 | Data | JSON / JSONL / TOML validate, format, minify, convert; RFC 4180 CSV/TSV shape report, conversion to JSON and JSON Lines, column types |
@@ -119,14 +119,18 @@ starting.
 - **Little of this has been used in anger.** The tests cover the pieces in
   isolation; the integrated behaviour has had one manual pass, several
   sessions ago.
-- **Security profiles govern the three things that hold sensitive data, but
-  two of the four profiles cannot yet be honoured.** The recovery journal,
-  clipboard history and `bp-storage` all read the document's policy
-  ([ADR-0020](docs/decisions/ADR-0020.md)). Private and Confidential require
-  an encrypted journal, and `bp-crypto` does not exist until phase 15 — so
-  recovery is refused rather than downgraded, and the Security menu says
-  "off until encryption ships". `bp-storage` is still not called by the
-  application: that is ADR-0019's product decision, not a security one.
+- **`bp-storage` is still not called by the application.** That is now a
+  product decision rather than a security one: ADR-0020 permits recording a
+  summary under Standard, and `record_document` honours the policy. What
+  remains is ADR-0019's judgement plus a design pass.
+- **A plaintext document under Private or Confidential gets no crash
+  recovery.** The journal for those profiles is sealed with the document's
+  own passphrase ([ADR-0022](docs/decisions/ADR-0022.md)), so a document
+  that is not encrypted has no key to use. The status bar says what fixes
+  it: encrypt the document.
+- **Recovery for an encrypted document is invisible until you open it.** Its
+  journal is filed under a digest of its path and can only be read once you
+  have unlocked the document, so nothing prompts at startup — deliberately.
 
 [ROADMAP.md](ROADMAP.md) has per-phase status;
 [MENU_MAP.md](docs/product/MENU_MAP.md) says which menu rows are real;
