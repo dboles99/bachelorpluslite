@@ -480,6 +480,35 @@ impl AppState {
         }
     }
 
+    /// Apply a YAML rewrite, and say what it cost or why it refused.
+    ///
+    /// Two things ADR-0023 requires the caller to say, and neither is
+    /// `bp-data`'s to say for it.
+    ///
+    /// On success: `saphyr` parses YAML into data, so a comment -- which is
+    /// not data -- has nothing to be put back from, and an alias is resolved
+    /// into a copy of what it pointed at. Both preserve what the document
+    /// *means* while changing what it says. The menu row warns before the
+    /// click; this says it again after, because the status bar is what is on
+    /// screen when the user looks at the result.
+    ///
+    /// On failure: that **nothing changed**. The library's own sentence
+    /// follows verbatim rather than being re-worded here -- the three
+    /// refusals ADR-0023 designs for each name their limit and where it was
+    /// hit, and a shell that paraphrased them would be a second place for
+    /// that wording to drift.
+    fn apply_yaml(&mut self, result: Result<String, bp_data::DataError>, did: &str) {
+        match result {
+            Ok(text) => {
+                self.edit(text);
+                self.error = Some(format!(
+                    "✓ {did} — comments were not kept and aliases were expanded; Ctrl+Z undoes it"
+                ));
+            }
+            Err(e) => self.error = Some(format!("this YAML was left unchanged — {e}")),
+        }
+    }
+
     /// Apply a whole-document line operation.
     ///
     /// An ordinary edit, like the data operations: undoable, and nothing
@@ -555,6 +584,21 @@ impl AppState {
                     Err(e) => format!("invalid TOML — {e}"),
                 });
             }
+            // The document count is part of the answer rather than a nicety.
+            // A YAML file is a *stream*: Format and Minify write every
+            // document back and Convert to JSON refuses more than one, so the
+            // first place a user learns there are three must not be the
+            // refusal (ADR-0023).
+            (action::DATA_VALIDATE, Format::Yaml) => {
+                let count = bp_data::yaml_validate(&text)
+                    .and_then(|()| bp_data::yaml_document_count(&text));
+                self.error = Some(match count {
+                    Ok(0) => "✓ valid YAML — no documents in this file".to_owned(),
+                    Ok(1) => "✓ valid YAML".to_owned(),
+                    Ok(n) => format!("✓ valid YAML — {n} documents"),
+                    Err(e) => format!("invalid YAML — {e}"),
+                });
+            }
             (action::DATA_FORMAT, Format::Json) => {
                 self.apply_to_active(bp_data::json_format(&text));
             }
@@ -563,6 +607,26 @@ impl AppState {
             }
             (action::DATA_MINIFY, Format::Json) => {
                 self.apply_to_active(bp_data::json_minify(&text));
+            }
+            (action::DATA_FORMAT, Format::Yaml) => {
+                self.apply_yaml(bp_data::yaml_format(&text), "formatted");
+            }
+            (action::DATA_MINIFY, Format::Yaml) => {
+                self.apply_yaml(bp_data::yaml_minify(&text), "rewritten in flow style");
+            }
+            (action::DATA_YAML_TO_JSON, _) => {
+                self.apply_yaml(bp_data::yaml_to_json(&text), "converted to JSON");
+            }
+            // The one direction that loses nothing, so it is the one that
+            // does not go through `apply_yaml`: every JSON value has a YAML
+            // spelling, and there are no comments in JSON to drop.
+            (action::DATA_JSON_TO_YAML, _) => {
+                let converted = bp_data::json_to_yaml(&text);
+                let ok = converted.is_ok();
+                self.apply_to_active(converted);
+                if ok {
+                    self.error = Some("✓ converted to YAML".to_owned());
+                }
             }
             (action::DATA_TO_JSONL, _) => self.apply_to_active(bp_data::json_to_jsonl(&text)),
             (action::DATA_TO_JSON, _) => self.apply_to_active(bp_data::jsonl_to_json(&text)),
@@ -926,6 +990,112 @@ impl AppState {
         findings
     }
 
+    /// Plan a redaction of whatever a scan of the active document finds.
+    ///
+    /// Scans, says what it found, and hands back a plan for the caller to get
+    /// consent for -- redaction destroys text, so the shell asks before it
+    /// happens rather than offering undo afterwards as the whole answer.
+    ///
+    /// `None` means there is nothing this can act on, and the status bar
+    /// already says which of the reasons it is.
+    pub(crate) fn plan_redaction(&mut self) -> Option<RedactionPlan> {
+        let text = self.active_text();
+        let findings = bp_secrets::scan(&text);
+        let plan = RedactionPlan::from_scan(text, &findings);
+        if plan.spans.is_empty() {
+            self.error = Some(plan.refusal());
+            return None;
+        }
+        self.error = Some(secret_scan_summary(&findings));
+        Some(plan)
+    }
+
+    /// Say that the user declined a redaction they were shown.
+    ///
+    /// Not silence. Cancelling a file dialog leaves the status bar alone
+    /// because nothing was claimed; here the bar is showing a scan summary
+    /// and the user has just been asked a question, so the answer belongs on
+    /// screen -- otherwise "I clicked Cancel" and "it did nothing" look the
+    /// same.
+    pub(crate) fn decline_redaction(&mut self, plan: &RedactionPlan) {
+        self.error = Some(format!(
+            "nothing was redacted — {} possible credential{} {} still in this document",
+            plan.spans.len(),
+            if plan.spans.len() == 1 { "" } else { "s" },
+            if plan.spans.len() == 1 { "is" } else { "are" },
+        ));
+    }
+
+    /// Carry out a redaction the user has agreed to, and check it.
+    ///
+    /// An ordinary edit, like a data operation: undoable, and nothing reaches
+    /// disk until the user saves. That is the only honest shape for this.
+    /// Redaction is irreversible *in the string it returns*, but the document
+    /// is not the file, and quietly rewriting the file instead would destroy
+    /// the user's only copy of text a scanner guessed about.
+    ///
+    /// Returns whether the document changed, so the caller knows whether to
+    /// re-push the text into the widget.
+    pub(crate) fn apply_redaction(&mut self, plan: &RedactionPlan) -> bool {
+        // The offsets were measured when the dialog opened, and `rfd` pumps
+        // events while it is up. ADR-0028 is built on the rule that stale
+        // offsets destroy the wrong text and report success, and its own
+        // `PastEnd` catches only the half of that which runs off the end --
+        // an edit that left the length alone would slip straight through. So
+        // the document is compared rather than trusted.
+        if self.active_text() != plan.original {
+            self.error = Some(
+                concat!(
+                    "nothing was redacted — the document changed while the ",
+                    "dialog was open, so these positions no longer describe it; scan again"
+                )
+                .to_owned(),
+            );
+            return false;
+        }
+
+        let redacted = match bp_redaction::redact(&plan.original, &plan.spans, REDACTION_MODE) {
+            Ok(redacted) => redacted,
+            Err(e) => {
+                self.error = Some(format!("nothing was redacted — {e}"));
+                return false;
+            }
+        };
+
+        // `verify` re-derives what was removed from the original rather than
+        // being handed it, so checking costs nobody a variable holding a
+        // secret. It answers in indices into `applied`; those become line
+        // numbers here and never text, which is the whole reason the type
+        // reports indices in the first place.
+        let survivors = bp_redaction::verify(&plan.original, &plan.spans, &redacted.text)
+            .ok()
+            .map(|verification| {
+                verification
+                    .surviving
+                    .iter()
+                    .filter_map(|index| redacted.applied.get(*index))
+                    .map(|applied| line_at(&plan.original, applied.start))
+                    .collect::<Vec<usize>>()
+            });
+
+        let written = redacted.applied.len();
+        self.edit(redacted.text);
+        self.error = Some(plan.outcome(written, survivors.as_deref()));
+        true
+    }
+
+    /// Report what identifying metadata the active document carries.
+    ///
+    /// Returns the body of the listing to show, or `None` when the status bar
+    /// has already said everything there is to say.
+    pub(crate) fn inspect_metadata(&mut self) -> Option<String> {
+        let container = container_of(self.workspace.active().and_then(Document::path));
+        let findings = bp_redaction::inspect(&self.active_text());
+        self.error = Some(metadata_summary(&findings, container));
+        (!findings.is_empty() || !container.hidden().is_empty())
+            .then(|| metadata_report(&findings, container))
+    }
+
     /// Take a digest of the active document.
     ///
     /// Returns the body of the report to show, or `None` when the document
@@ -994,7 +1164,7 @@ impl AppState {
                 "✓ signature verified — the holder of key {} approved these exact bytes",
                 key.to_hex()
             ),
-            Err(_) if self.active_differs_from_disk() => "✗ signature does not match — this                  document has unsaved changes, so these are not the bytes that were signed;                  save it and verify again"
+            Err(_) if self.active_differs_from_disk() => "✗ signature does not match — this document has unsaved changes, so these \n                 are not the bytes that were signed; save it and verify again"
                 .to_owned(),
             Err(e) => format!("✗ {e}"),
         });
@@ -1567,6 +1737,495 @@ pub(crate) fn encode(
     let mut out = encoding.bom().to_vec();
     out.extend_from_slice(body.as_bytes());
     Ok(out)
+}
+
+/// How redaction replaces what it destroys.
+///
+/// [`bp_redaction::Replacement::Placeholder`], and the two it was chosen over
+/// matter more than the one it is.
+///
+/// `Mask` with `MaskWidth::MatchOriginal` is out on its own terms: it draws
+/// one character per character removed, which publishes the *length* of what
+/// was there. For a name that is nearly nothing; for a PIN, a short token, or
+/// an answer from a fixed set of options it is most of the secret, and a
+/// redaction that discloses the secret is the failure ADR-0028 exists to
+/// prevent.
+///
+/// `Remove` closes the gap, so the document reads as though the credential
+/// had never been typed. That is right when the withholding itself should be
+/// invisible. It is wrong here: the user is about to be told to save, to
+/// rotate the key and to deal with every other copy, and a change they cannot
+/// see on screen is one they will not act on.
+///
+/// `Placeholder` leaves `[REDACTED: AWS access key ID]`. The label is
+/// `SecretKind::label` -- the name of the rule that matched, never what it
+/// matched -- so the marker says what kind of thing was taken out without
+/// putting it back. The cost is real, and is why this is a decision rather
+/// than a default: the marker tells whoever reads the document afterwards
+/// that an AWS key was there. That is a disclosure an author cleaning up
+/// their own note can live with, and it is what makes a redaction findable
+/// again later, which `bp_redaction::PLACEHOLDER` is public for.
+const REDACTION_MODE: bp_redaction::Replacement = bp_redaction::Replacement::Placeholder;
+
+/// A redaction the user has been shown and has not yet agreed to.
+///
+/// Holds the text the spans were measured against, so that a buffer edited
+/// while the confirmation dialog was up is caught rather than redacted
+/// against offsets that no longer describe it.
+///
+/// Carries no secret: `spans` are positions, `listing` is line numbers and
+/// rule names, and `original` is the document the user is already looking at.
+pub(crate) struct RedactionPlan {
+    original: String,
+    spans: Vec<bp_redaction::Span<'static>>,
+    /// Line and kind per span, for the confirmation dialog. Never the text.
+    listing: Vec<(usize, &'static str)>,
+    /// Private-key blocks deliberately left alone. See [`RedactionPlan::from_scan`].
+    key_blocks: usize,
+    /// Findings whose position did not resolve to a range of this document.
+    unlocatable: usize,
+    /// Everything the scan reported, including what is not being redacted.
+    total: usize,
+}
+
+impl RedactionPlan {
+    /// Turn a scan of `original` into byte spans `bp_redaction` can act on.
+    ///
+    /// The conversion is the whole job, and it is not a formality.
+    /// `bp_secrets::Finding` reports a 1-based line, a **character** column
+    /// and a length in **characters**, because those are what a caret is
+    /// moved to. `bp_redaction::Span` is in bytes, because those are what a
+    /// `&str` can be sliced at. On any line holding a multi-byte character
+    /// the two disagree, and ADR-0028 is explicit that a span in the wrong
+    /// unit destroys the wrong text and reports success. A finding that does
+    /// not resolve is counted and dropped rather than clamped, for the same
+    /// reason `bp_redaction` refuses rather than clamping.
+    ///
+    /// A `PrivateKeyBlock` is deliberately left out. `bp-secrets` documents
+    /// that its finding covers the `-----BEGIN ... PRIVATE KEY-----` marker
+    /// only -- one line, column and length cannot describe a block that runs
+    /// on to a matching `END` -- so redacting that span would take out the
+    /// label and leave the key material in the document under a `[REDACTED]`
+    /// marker. That is exactly the black-rectangle failure ADR-0028 is
+    /// written against, so it is refused and named rather than half done.
+    fn from_scan(original: String, findings: &[bp_secrets::Finding]) -> Self {
+        let lines = line_spans(&original);
+        let mut spans = Vec::new();
+        let mut listing = Vec::new();
+        let mut key_blocks = 0usize;
+        let mut unlocatable = 0usize;
+
+        for finding in findings {
+            if finding.kind == bp_secrets::SecretKind::PrivateKeyBlock {
+                key_blocks += 1;
+                continue;
+            }
+            let Some((offset, line)) = finding
+                .line
+                .checked_sub(1)
+                .and_then(|index| lines.get(index))
+                .copied()
+            else {
+                unlocatable += 1;
+                continue;
+            };
+            let first = finding.column.saturating_sub(1);
+            let start = byte_of_char(line, first);
+            let end = byte_of_char(line, first.saturating_add(finding.length));
+            if start >= end {
+                unlocatable += 1;
+                continue;
+            }
+            spans.push(bp_redaction::Span::labelled(
+                offset + start,
+                offset + end,
+                finding.kind.label(),
+            ));
+            listing.push((finding.line, finding.kind.label()));
+        }
+
+        Self {
+            original,
+            spans,
+            listing,
+            key_blocks,
+            unlocatable,
+            total: findings.len(),
+        }
+    }
+
+    /// Why there is nothing to redact, when there is nothing to redact.
+    ///
+    /// Three different sentences, because they ask three different things of
+    /// the user. "No credentials found" is an all-clear; the other two are
+    /// not, and reporting them as one would be the quiet lie.
+    fn refusal(&self) -> String {
+        if self.key_blocks > 0 {
+            return format!(
+                concat!(
+                    "nothing was redacted — the {} private key block{} found {} marked only by ",
+                    "the BEGIN line, and replacing that would leave the key body in the ",
+                    "document; remove {} by hand",
+                ),
+                self.key_blocks,
+                if self.key_blocks == 1 { "" } else { "s" },
+                if self.key_blocks == 1 { "is" } else { "are" },
+                if self.key_blocks == 1 { "it" } else { "them" },
+            );
+        }
+        if self.unlocatable > 0 {
+            return format!(
+                concat!(
+                    "nothing was redacted — {} of the {} finding{} could not be located in ",
+                    "this text; scan again",
+                ),
+                self.unlocatable,
+                self.total,
+                if self.total == 1 { "" } else { "s" },
+            );
+        }
+        "nothing to redact — no credentials found".to_owned()
+    }
+
+    /// What the user is agreeing to, in full, before anything is destroyed.
+    ///
+    /// Line numbers and rule names only. The value is never printed here for
+    /// the same reason the scan's own listing never prints it: a dialog is a
+    /// thing people screenshot into bug reports.
+    pub(crate) fn consent_body(&self) -> String {
+        let mut body = format!(
+            "{} credential{} will be replaced with {}: kind] markers:\n\n",
+            self.listing.len(),
+            if self.listing.len() == 1 { "" } else { "s" },
+            // Built from the constant rather than written out, so the shape
+            // the dialog promises and the shape a later search for previous
+            // redactions looks for cannot drift apart.
+            bp_redaction::PLACEHOLDER.trim_end_matches(']'),
+        );
+        for (line, kind) in &self.listing {
+            let _ = writeln!(body, "    line {line} — {kind}");
+        }
+        body.push_str(concat!(
+            "\nPositions and kinds only. The marker names the rule that matched, ",
+            "never what it matched.\n",
+        ));
+        if self.key_blocks > 0 {
+            let _ = write!(
+                body,
+                concat!(
+                    "\n{} private key block{} will be left alone: the scan marks only the ",
+                    "-----BEGIN ... PRIVATE KEY----- line, and replacing that would take out ",
+                    "the label and leave the key body in the document. Remove {} by hand.\n",
+                ),
+                self.key_blocks,
+                if self.key_blocks == 1 { "" } else { "s" },
+                if self.key_blocks == 1 { "it" } else { "them" },
+            );
+        }
+        if self.unlocatable > 0 {
+            let _ = write!(
+                body,
+                concat!(
+                    "\n{} finding{} could not be located in this text and will be left alone. ",
+                    "That should not happen; scan again before trusting this.\n",
+                ),
+                self.unlocatable,
+                if self.unlocatable == 1 { "" } else { "s" },
+            );
+        }
+        body.push_str(concat!(
+            "\nThis changes the document in front of you, not the file on disk, and undo ",
+            "restores what was removed. The file you saved earlier, its recovery journal, ",
+            "the undo history, and anything already copied to the clipboard or sent still ",
+            "hold the originals. Redacting here deals with one of the places this text ",
+            "lives.\n",
+        ));
+        body
+    }
+
+    /// One line for the status bar once the redaction has been carried out.
+    ///
+    /// `survivors` are the lines of redactions whose text still occurs
+    /// somewhere in the result, or `None` when the check itself could not be
+    /// run. ADR-0028 is careful that a survivor is a reason to look and not a
+    /// verdict -- the same value appearing somewhere the scan did not mark is
+    /// the usual cause -- so the wording says look, rather than failed.
+    fn outcome(&self, written: usize, survivors: Option<&[usize]>) -> String {
+        let mut line = match survivors {
+            Some([]) => format!(
+                concat!(
+                    "✓ {} redaction{} written — undo brings the originals back, and the copy ",
+                    "on disk still holds them until you save",
+                ),
+                written,
+                if written == 1 { "" } else { "s" },
+            ),
+            Some(lines) => format!(
+                concat!(
+                    "⚠ {} redaction{} written, but {} still occurs elsewhere in this ",
+                    "document (line{} {}) — the scan did not mark that copy; look at it and ",
+                    "redact it by hand",
+                ),
+                written,
+                if written == 1 { "" } else { "s" },
+                lines.len(),
+                if lines.len() == 1 { "" } else { "s" },
+                lines
+                    .iter()
+                    .map(usize::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            ),
+            None => format!(
+                concat!(
+                    "⚠ {} redaction{} written, but the check that nothing survived could not ",
+                    "be run",
+                ),
+                written,
+                if written == 1 { "" } else { "s" },
+            ),
+        };
+        if self.key_blocks > 0 {
+            let _ = write!(
+                line,
+                "; {} private key block{} left alone, marked only by the BEGIN line",
+                self.key_blocks,
+                if self.key_blocks == 1 { "" } else { "s" },
+            );
+        }
+        line
+    }
+}
+
+/// Byte offset and text of every line, split exactly as `str::lines` splits.
+///
+/// `bp_secrets` numbers its findings by enumerating `text.lines()`, so this
+/// has to agree with it line for line -- including that `lines` drops the
+/// carriage return of a CRLF ending, which shifts every byte offset after it
+/// if it is not put back.
+fn line_spans(text: &str) -> Vec<(usize, &str)> {
+    let mut spans = Vec::new();
+    let mut offset = 0usize;
+    for line in text.lines() {
+        spans.push((offset, line));
+        offset += line.len();
+        if text[offset..].starts_with('\r') {
+            offset += 1;
+        }
+        if text[offset..].starts_with('\n') {
+            offset += 1;
+        }
+    }
+    spans
+}
+
+/// The byte offset of character `index`, or the end of the line past it.
+///
+/// The end rather than `None`, so a column that runs off the line collapses
+/// to an empty span, which the caller counts as unlocatable rather than
+/// redacting something it guessed at.
+fn byte_of_char(line: &str, index: usize) -> usize {
+    line.char_indices()
+        .nth(index)
+        .map_or(line.len(), |(offset, _)| offset)
+}
+
+/// The 1-based line a byte offset falls on.
+fn line_at(text: &str, offset: usize) -> usize {
+    text[..offset.min(text.len())]
+        .bytes()
+        .filter(|byte| *byte == b'\n')
+        .count()
+        + 1
+}
+
+/// Which shape a document arrived in, from its extension.
+///
+/// By extension rather than through `bp_formats::detect`, because every
+/// format `bp-formats` knows is one whose bytes *are* its content -- there is
+/// no `Format::Docx` to ask about. The question here is the opposite one: is
+/// this a container whose metadata reading the text cannot reach?
+///
+/// An unknown extension, and a document that has never been saved, are
+/// [`bp_redaction::Container::PlainText`]. That claims nothing about hidden
+/// metadata and still carries the sentence about the filesystem entry around
+/// the file, which is the honest answer where there is no evidence either way.
+fn container_of(path: Option<&Path>) -> bp_redaction::Container {
+    use bp_redaction::Container;
+
+    let extension = path
+        .and_then(Path::extension)
+        .and_then(std::ffi::OsStr::to_str)
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    match extension.as_str() {
+        "docx" | "docm" | "xlsx" | "xlsm" | "pptx" | "pptm" => Container::OfficeOpenXml,
+        "odt" | "ods" | "odp" | "odg" | "odf" => Container::OpenDocument,
+        "pdf" => Container::Pdf,
+        "rtf" => Container::RichText,
+        "png" | "jpg" | "jpeg" | "gif" | "tif" | "tiff" | "webp" | "heic" | "heif" | "avif" => {
+            Container::Image
+        }
+        _ => Container::PlainText,
+    }
+}
+
+/// How many metadata findings the status bar names, for the same reason
+/// [`SECRETS_IN_SUMMARY`] exists.
+const METADATA_IN_SUMMARY: usize = 3;
+
+/// One line for the status bar describing a metadata inspection.
+///
+/// Kinds and positions, never the value -- `MetadataFinding` deliberately
+/// carries neither, and a status bar that reached back into the document to
+/// quote an email address would undo that.
+///
+/// The container half is not garnish. For a format this build cannot see
+/// inside, "nothing found" reads to a user as an all-clear and would be a
+/// lie, so what was *not* looked at is said in the same sentence as what was.
+pub(crate) fn metadata_summary(
+    findings: &[bp_redaction::MetadataFinding],
+    container: bp_redaction::Container,
+) -> String {
+    let hidden = container.hidden();
+    let found = if findings.is_empty() {
+        "nothing identifying in the text".to_owned()
+    } else {
+        let named: Vec<String> = findings
+            .iter()
+            .take(METADATA_IN_SUMMARY)
+            .map(|f| format!("{} at line {}", f.kind.label(), f.line))
+            .collect();
+        let rest = findings.len() - named.len();
+        format!(
+            "{} identifying item{} — {}{}",
+            findings.len(),
+            if findings.len() == 1 { "" } else { "s" },
+            named.join(", "),
+            if rest == 0 {
+                String::new()
+            } else {
+                format!(", and {rest} more")
+            }
+        )
+    };
+
+    if hidden.is_empty() {
+        if findings.is_empty() {
+            format!(
+                concat!(
+                    "✓ {} — the file's own timestamps, ownership and extended attributes are ",
+                    "outside this check",
+                ),
+                found,
+            )
+        } else {
+            format!("⚠ {found}")
+        }
+    } else {
+        // "but" rather than "and" when the text came back clean, because
+        // that clause is the one contradicting the clause before it: a clean
+        // text scan is exactly what a user would otherwise read as an
+        // all-clear for the whole file.
+        format!(
+            "⚠ {found}{} this {} file also carries {} where reading its text cannot look",
+            if findings.is_empty() {
+                ", but"
+            } else {
+                ", and"
+            },
+            container.label(),
+            join_and(&hidden.iter().map(|kind| kind.label()).collect::<Vec<_>>()),
+        )
+    }
+}
+
+/// The full listing of a metadata inspection, one finding per line.
+///
+/// Ends with what was *not* looked at, in every case. For plain text that is
+/// the filesystem entry around the file, which `bp-redaction` says explicitly
+/// is the shell's and not its own; for anything else it is the container's
+/// own metadata and what a build would need to read it.
+pub(crate) fn metadata_report(
+    findings: &[bp_redaction::MetadataFinding],
+    container: bp_redaction::Container,
+) -> String {
+    let mut body = if findings.is_empty() {
+        "Nothing identifying was found in the text.\n".to_owned()
+    } else {
+        let mut listing = format!(
+            "{} item{} of identifying metadata in the text:\n\n",
+            findings.len(),
+            if findings.len() == 1 { "" } else { "s" },
+        );
+        for finding in findings {
+            let _ = writeln!(
+                listing,
+                "    line {} — {} ({})",
+                finding.line,
+                finding.kind.label(),
+                exposure_label(finding.exposure),
+            );
+        }
+        listing.push_str("\nPositions and kinds only. The value itself is never printed here.\n");
+        listing
+    };
+
+    match container.requires() {
+        None => body.push_str(concat!(
+            "\nThe bytes of a plain text file are the whole document, so this looked at all ",
+            "of it. What it cannot see is the filesystem entry around the file: modification ",
+            "and creation times, ownership, extended attributes and, on Windows, alternate ",
+            "data streams. Those identify a document too, and they travel with a copy.\n",
+        )),
+        // No article in front of the label: a sentence that had to choose
+        // between "a PDF" and "an Office Open XML" would need to know which,
+        // and `Container` grows.
+        Some(needs) => {
+            let _ = write!(
+                body,
+                concat!(
+                    "\nThis {} file also carries {} that reading its text cannot reach; ",
+                    "seeing those would need {}. Nothing above is an all-clear for ",
+                    "this file.\n",
+                ),
+                container.label(),
+                join_and(
+                    &container
+                        .hidden()
+                        .iter()
+                        .map(|kind| kind.label())
+                        .collect::<Vec<_>>()
+                ),
+                needs,
+            );
+        }
+    }
+    body
+}
+
+/// How far a finding goes towards identifying somebody, in the user's terms.
+///
+/// Presentation, so it lives here rather than in `bp-redaction`, on the same
+/// argument as [`confidence_label`]: the crate is pure and has no opinion
+/// about wording, and a bare "circumstantial" beside a real name reads as
+/// "ignore me".
+const fn exposure_label(exposure: bp_redaction::Exposure) -> &'static str {
+    match exposure {
+        bp_redaction::Exposure::Attributable => "names a person",
+        bp_redaction::Exposure::Identifying => "names a machine, account or organisation",
+        bp_redaction::Exposure::Circumstantial => "narrows the field",
+    }
+}
+
+/// `"a, b and c"`. A sentence rather than a list, because these are read once
+/// rather than scanned.
+fn join_and(items: &[&str]) -> String {
+    match items {
+        [] => String::new(),
+        [only] => (*only).to_owned(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+    }
 }
 
 /// How many findings the status bar names before it stops counting them out.
@@ -3279,6 +3938,618 @@ mod tests {
         assert!(
             notice.contains("key"),
             "the user has to know which file to replace; got {notice}"
+        );
+    }
+    // --- Data ▸ YAML -------------------------------------------------------
+
+    /// A document `run_data_action` will see as `Format::Yaml`.
+    ///
+    /// Detection is extension-first, so the path is what decides it and no
+    /// file has to exist -- the same trick `csv_state` uses.
+    fn yaml_state(text: &str) -> AppState {
+        let mut state = AppState::new();
+        let id = state.workspace.active_id().unwrap();
+        state
+            .workspace
+            .get_mut(id)
+            .unwrap()
+            .set_path(PathBuf::from("config.yaml"));
+        state.edit(text.to_owned());
+        state
+    }
+
+    /// The "billion laughs" document from ADR-0023: ten anchors, each a
+    /// sequence of ten references to the one before. Around 200 bytes, and it
+    /// names more nodes than the machine has memory for.
+    fn billion_laughs() -> String {
+        let mut text = String::from("a: &a [x,x,x,x,x,x,x,x,x,x]\n");
+        for (name, previous) in [
+            ('b', 'a'),
+            ('c', 'b'),
+            ('d', 'c'),
+            ('e', 'd'),
+            ('f', 'e'),
+            ('g', 'f'),
+        ] {
+            let refs = std::iter::repeat_n(format!("*{previous}"), 10)
+                .collect::<Vec<_>>()
+                .join(",");
+            text.push_str(&format!("{name}: &{name} [{refs}]\n"));
+        }
+        text
+    }
+
+    #[test]
+    fn validating_yaml_says_how_many_documents_the_file_holds() {
+        // A YAML file is a stream. Format writes every document back and
+        // Convert to JSON refuses more than one, so the refusal must not be
+        // where the user first learns there are three.
+        let mut state = yaml_state("one: 1\n---\ntwo: 2\n---\nthree: 3\n");
+        state.run_data_action(action::DATA_VALIDATE);
+        let notice = state.error.clone().expect("a status message");
+
+        assert!(notice.starts_with('✓'), "got {notice}");
+        assert!(
+            notice.contains('3'),
+            "the count belongs in it; got {notice}"
+        );
+    }
+
+    #[test]
+    fn a_single_yaml_document_is_not_counted_out_at_the_user() {
+        let mut state = yaml_state("one: 1\n");
+        state.run_data_action(action::DATA_VALIDATE);
+        assert_eq!(state.error.as_deref(), Some("✓ valid YAML"));
+    }
+
+    #[test]
+    fn formatting_yaml_says_that_the_comments_did_not_survive() {
+        // ADR-0023's one place where "never silently change the user's data"
+        // needs a warning rather than an error: `saphyr` parses YAML into
+        // data, and a comment is not data.
+        let mut state = yaml_state("# why this value matters\nkey:   value\n");
+        state.run_data_action(action::DATA_FORMAT);
+        let notice = state.error.clone().expect("a status message");
+
+        assert!(
+            !state.active_text().contains("why this value matters"),
+            "the fixture must actually lose its comment, or this proves nothing"
+        );
+        assert!(
+            notice.contains("comments"),
+            "the user has to be told what went; got {notice}"
+        );
+        assert!(
+            notice.contains("Ctrl+Z"),
+            "and how to get it back; got {notice}"
+        );
+    }
+
+    #[test]
+    fn minifying_yaml_rewrites_it_in_flow_style_and_says_the_same_thing() {
+        let mut state = yaml_state("key:\n  - one\n  - two\n");
+        state.run_data_action(action::DATA_MINIFY);
+        let notice = state.error.clone().expect("a status message");
+
+        assert!(
+            state.active_text().contains('['),
+            "got {}",
+            state.active_text()
+        );
+        assert!(notice.contains("comments"), "got {notice}");
+    }
+
+    #[test]
+    fn yaml_nested_past_the_limit_is_refused_with_the_limit_named() {
+        // Not a taste judgement. `saphyr`'s loader recurses one stack frame
+        // per level and a stack overflow aborts the process, so this refusal
+        // is the only form the answer can take -- and the number has to be in
+        // it, because "too deep" is not something a person can act on.
+        let deep = format!(
+            "{}{}",
+            "[".repeat(bp_data::MAX_YAML_NESTING + 1),
+            "]".repeat(bp_data::MAX_YAML_NESTING + 1)
+        );
+        let mut state = yaml_state(&deep);
+        state.run_data_action(action::DATA_FORMAT);
+        let notice = state.error.clone().expect("a status message");
+
+        assert!(
+            notice.contains("left unchanged"),
+            "the user has to know the document was not touched; got {notice}"
+        );
+        assert!(
+            notice.contains(&bp_data::MAX_YAML_NESTING.to_string()),
+            "the limit belongs in it; got {notice}"
+        );
+        assert!(
+            notice.contains("line 1, column"),
+            "and where it was hit; got {notice}"
+        );
+        assert_eq!(state.active_text(), deep, "nothing may have been rewritten");
+    }
+
+    #[test]
+    fn yaml_that_expands_past_the_node_budget_is_refused_before_it_is_built() {
+        // Around 200 bytes, so neither the file size nor the nesting cap sees
+        // it coming -- the document is only ever seven levels deep.
+        let laughs = billion_laughs();
+        assert!(
+            laughs.len() < 400,
+            "the fixture must stay small to mean anything"
+        );
+
+        let mut state = yaml_state(&laughs);
+        state.run_data_action(action::DATA_FORMAT);
+        let notice = state.error.clone().expect("a status message");
+
+        assert!(notice.contains("left unchanged"), "got {notice}");
+        assert!(
+            notice.contains(&bp_data::MAX_YAML_NODES.to_string()),
+            "the budget belongs in it; got {notice}"
+        );
+        assert_eq!(state.active_text(), laughs);
+    }
+
+    #[test]
+    fn a_duplicate_yaml_key_is_refused_in_words_that_say_why_it_matters() {
+        // The whole reason this is an error rather than a merge: `saphyr`
+        // drops the earlier value on the way into the map, so formatting the
+        // file would delete a line and report success. A message that read
+        // like an ordinary parse error would leave the user editing their
+        // YAML looking for a missing colon.
+        let mut state = yaml_state("name: first\nname: second\n");
+        state.run_data_action(action::DATA_FORMAT);
+        let notice = state.error.clone().expect("a status message");
+
+        assert!(notice.contains("duplicate key"), "got {notice}");
+        assert!(
+            notice.contains("replace"),
+            "it has to say what would have been lost, not just that it refused; got {notice}"
+        );
+        assert!(
+            notice.contains("line 2"),
+            "and which of the two keys to go and look at; got {notice}"
+        );
+        assert_eq!(state.active_text(), "name: first\nname: second\n");
+    }
+
+    #[test]
+    fn a_duplicate_key_is_reported_by_validate_as_well_as_by_format() {
+        // Validate is where somebody checks a file they are about to hand
+        // over, and it is the row that must not answer "fine".
+        let mut state = yaml_state("name: first\nname: second\n");
+        state.run_data_action(action::DATA_VALIDATE);
+        let notice = state.error.clone().expect("a status message");
+
+        assert!(!notice.starts_with('✓'), "got {notice}");
+        assert!(notice.contains("duplicate key"), "got {notice}");
+    }
+
+    #[test]
+    fn converting_a_yaml_stream_to_json_refuses_and_names_the_count() {
+        // JSON has one root value. Wrapping three documents in an array would
+        // hand back a different shape from the one on screen.
+        let mut state = yaml_state("one: 1\n---\ntwo: 2\n");
+        state.run_data_action(action::DATA_YAML_TO_JSON);
+        let notice = state.error.clone().expect("a status message");
+
+        assert!(notice.contains("left unchanged"), "got {notice}");
+        assert!(
+            notice.contains('2'),
+            "the count belongs in it; got {notice}"
+        );
+        assert_eq!(state.active_text(), "one: 1\n---\ntwo: 2\n");
+    }
+
+    #[test]
+    fn converting_one_yaml_document_to_json_replaces_the_document() {
+        let mut state = yaml_state("key: value\n");
+        state.run_data_action(action::DATA_YAML_TO_JSON);
+
+        assert!(
+            state.active_text().contains("\"key\""),
+            "got {}",
+            state.active_text()
+        );
+        assert!(state.error.as_deref().is_some_and(|e| e.starts_with('✓')));
+    }
+
+    #[test]
+    fn converting_json_to_yaml_promises_nothing_was_lost() {
+        // The asymmetry ADR-0023 draws: every JSON value has a YAML spelling,
+        // so this direction has no warning to carry -- and a warning attached
+        // to it anyway would teach the user to ignore the ones that matter.
+        let mut state = AppState::new();
+        let id = state.workspace.active_id().unwrap();
+        state
+            .workspace
+            .get_mut(id)
+            .unwrap()
+            .set_path(PathBuf::from("data.json"));
+        state.edit("{\"key\": \"value\"}".to_owned());
+        state.run_data_action(action::DATA_JSON_TO_YAML);
+
+        assert!(
+            state.active_text().contains("key: value"),
+            "got {}",
+            state.active_text()
+        );
+        assert_eq!(state.error.as_deref(), Some("✓ converted to YAML"));
+        assert!(
+            !state.error.as_deref().unwrap().contains("comments"),
+            "there are no comments in JSON to lose"
+        );
+    }
+
+    // --- Security ▸ Redact -------------------------------------------------
+
+    /// The same fake credential the scan tests use, on a line with multi-byte
+    /// characters in front of it.
+    ///
+    /// The byte offset of the key and its character column differ by three
+    /// here, which is the entire point: `bp_secrets::Finding` counts
+    /// characters and `bp_redaction::Span` counts bytes, and a shell that
+    /// treated them as the same unit would destroy the wrong text.
+    const LEAKY_MULTIBYTE: &str = "«clé» aws_access_key_id = AKIA3G7QVHBRN2WPKZ5F\n";
+
+    /// A PEM block, whose finding covers the BEGIN line and not the key.
+    const PEM: &str =
+        "-----BEGIN RSA PRIVATE KEY-----\nMIIBOgIBAAJBAKtQ\n-----END RSA PRIVATE KEY-----\n";
+
+    #[test]
+    fn redacting_takes_the_credential_out_and_leaves_a_marker_where_it_was() {
+        let mut state = AppState::new();
+        state.edit(LEAKY.to_owned());
+        let plan = state.plan_redaction().expect("a plan");
+
+        assert!(state.apply_redaction(&plan), "the document should change");
+        let after = state.active_text();
+        assert!(
+            !after.contains(LEAKED),
+            "the credential is still there: {after}"
+        );
+        assert!(
+            after.contains(bp_redaction::PLACEHOLDER.trim_end_matches(']')),
+            "a redaction nobody can see is one nobody will act on; got {after}"
+        );
+        assert!(
+            after.contains("AWS access key ID"),
+            "the marker names the rule that matched; got {after}"
+        );
+        assert!(
+            after.starts_with("notes\n"),
+            "only the span may go; got {after}"
+        );
+    }
+
+    #[test]
+    fn a_credential_after_multibyte_text_is_located_in_bytes_not_characters() {
+        // The conversion this shell owns, and the one place an off-by-three
+        // would destroy the wrong words and report success.
+        let mut state = AppState::new();
+        state.edit(LEAKY_MULTIBYTE.to_owned());
+        let plan = state.plan_redaction().expect("a plan");
+        assert!(state.apply_redaction(&plan));
+
+        let after = state.active_text();
+        assert!(!after.contains(LEAKED), "got {after}");
+        assert!(
+            after.starts_with("«clé» aws_access_key_id = "),
+            "everything before the credential must survive intact; got {after}"
+        );
+        assert!(
+            after.ends_with("]\n"),
+            "and nothing after it may be eaten; got {after}"
+        );
+    }
+
+    #[test]
+    fn redaction_is_an_edit_to_the_document_and_not_to_the_file() {
+        // Irreversible in the string it returns, and deliberately not
+        // irreversible on disk. `bp-redaction` rewrites one string;
+        // ADR-0028's first consequence is that a shell which saved over the
+        // original would have dealt with exactly one of the places the text
+        // lives and told the user it had dealt with all of them.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("leaky.txt");
+        let mut state = AppState::new();
+        state.edit(LEAKY.to_owned());
+        let id = state.workspace.active_id().unwrap();
+        assert_eq!(
+            state.save_document(id, Some(path.clone())),
+            SaveResult::Saved
+        );
+
+        let plan = state.plan_redaction().expect("a plan");
+        assert!(state.apply_redaction(&plan));
+
+        assert!(
+            state.is_dirty(id),
+            "the redaction is unsaved work like any edit"
+        );
+        assert!(
+            std::fs::read_to_string(&path).unwrap().contains(LEAKED),
+            "nothing may have been written to the file"
+        );
+
+        // And it is on the undo stack, which is the honest reading of "undo
+        // brings the originals back" in the status bar.
+        assert!(state.active_editor_mut().unwrap().undo());
+        assert!(state.active_text().contains(LEAKED));
+    }
+
+    #[test]
+    fn nothing_the_redaction_says_ever_repeats_the_credential() {
+        // The guarantee the scan already makes, extended to the half of the
+        // feature that has the document in its hand: the plan, the
+        // confirmation dialog and every status line it produces.
+        let mut state = AppState::new();
+        state.edit(LEAKY.to_owned());
+        let plan = state.plan_redaction().expect("a plan");
+        let planned = state.error.clone().expect("a status message");
+        let consent = plan.consent_body();
+        assert!(state.apply_redaction(&plan));
+        let outcome = state.error.clone().expect("a status message");
+
+        for line in [planned, consent, outcome, plan.refusal()] {
+            assert!(
+                !line.contains(LEAKED),
+                "the credential is back on screen: {line}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_private_key_block_is_left_alone_and_named_rather_than_half_redacted() {
+        // `bp-secrets` marks the BEGIN line only -- one line, column and
+        // length cannot describe a block that runs to a matching END -- so
+        // redacting the span would take out the label and leave the key
+        // material under a `[REDACTED]` marker. That is the black-rectangle
+        // failure ADR-0028 exists to prevent.
+        let mut state = AppState::new();
+        state.edit(PEM.to_owned());
+
+        assert!(
+            state.plan_redaction().is_none(),
+            "there is nothing here this can safely destroy"
+        );
+        let notice = state.error.clone().expect("a status message");
+        assert!(notice.contains("nothing was redacted"), "got {notice}");
+        assert!(notice.contains("private key"), "got {notice}");
+        assert!(
+            notice.contains("BEGIN"),
+            "the user has to know why, or they will read it as a bug; got {notice}"
+        );
+        assert!(
+            state.active_text().contains("MIIBOgIBAAJBAKtQ"),
+            "the key body must be exactly where it was"
+        );
+    }
+
+    #[test]
+    fn a_clean_document_is_told_there_is_nothing_to_redact() {
+        let mut state = AppState::new();
+        state.edit("nothing to see here\n".to_owned());
+        assert!(state.plan_redaction().is_none());
+        assert_eq!(
+            state.error.as_deref(),
+            Some("nothing to redact — no credentials found")
+        );
+    }
+
+    #[test]
+    fn declining_a_redaction_says_so_rather_than_leaving_the_bar_alone() {
+        // Cancelling a file dialog leaves the status bar alone because
+        // nothing was claimed. Here the user was asked a question, and
+        // "I pressed Cancel" and "the row does nothing" must not look alike.
+        let mut state = AppState::new();
+        state.edit(LEAKY.to_owned());
+        let plan = state.plan_redaction().expect("a plan");
+        state.decline_redaction(&plan);
+        let notice = state.error.clone().expect("a status message");
+
+        assert!(notice.contains("nothing was redacted"), "got {notice}");
+        assert!(notice.contains("still in this document"), "got {notice}");
+        assert_eq!(state.active_text(), LEAKY);
+    }
+
+    #[test]
+    fn a_plan_measured_against_text_that_has_since_changed_is_refused() {
+        // `rfd` pumps events while its dialog is up, so a callback can edit
+        // the buffer underneath one. `RedactionError::PastEnd` only catches
+        // the half of that which runs off the end -- an edit that left the
+        // length alone would redact the wrong bytes and report success.
+        let mut state = AppState::new();
+        state.edit(LEAKY.to_owned());
+        let plan = state.plan_redaction().expect("a plan");
+        state.edit(format!("prefix\n{LEAKY}"));
+
+        assert!(
+            !state.apply_redaction(&plan),
+            "stale offsets must not be applied"
+        );
+        let notice = state.error.clone().expect("a status message");
+        assert!(notice.contains("nothing was redacted"), "got {notice}");
+        assert!(
+            notice.contains("changed while the dialog was open"),
+            "got {notice}"
+        );
+        assert!(
+            state.active_text().contains(LEAKED),
+            "and nothing was destroyed"
+        );
+    }
+
+    #[test]
+    fn a_copy_the_scan_did_not_mark_is_reported_as_surviving() {
+        // ADR-0028 is careful that this is a reason to look and not a verdict:
+        // every named span was destroyed, and the same text simply also
+        // appears where nothing marked it. Reporting it as a failure would
+        // teach the user to ignore it; saying nothing would be worse.
+        let mut state = AppState::new();
+        state.edit(format!(
+            "aws_access_key_id = {LEAKED}\nnote: xx{LEAKED}xx\n"
+        ));
+        let plan = state.plan_redaction().expect("a plan");
+        assert_eq!(
+            plan.spans.len(),
+            1,
+            "the fixture must yield exactly one finding"
+        );
+
+        assert!(state.apply_redaction(&plan));
+        let notice = state.error.clone().expect("a status message");
+        assert!(notice.starts_with('⚠'), "got {notice}");
+        assert!(notice.contains("still occurs elsewhere"), "got {notice}");
+        assert!(
+            notice.contains("line 1"),
+            "the survivor is reported by position, never by text; got {notice}"
+        );
+        assert!(!notice.contains(LEAKED), "got {notice}");
+    }
+
+    #[test]
+    fn the_outcome_says_the_original_is_still_everywhere_else() {
+        // The sentence ADR-0028 makes the shell's obligation. Redacting the
+        // buffer deals with one of the places the text lives, and a status
+        // bar that reads "redacted" full stop tells the same lie the black
+        // rectangle does.
+        let plan = RedactionPlan::from_scan(LEAKY.to_owned(), &bp_secrets::scan(LEAKY));
+        let clean = plan.outcome(1, Some(&[]));
+
+        assert!(clean.starts_with('✓'), "got {clean}");
+        assert!(clean.contains("undo"), "got {clean}");
+        assert!(clean.contains("disk"), "got {clean}");
+    }
+
+    #[test]
+    fn a_redaction_whose_check_could_not_run_does_not_report_it_as_clean() {
+        let plan = RedactionPlan::from_scan(LEAKY.to_owned(), &bp_secrets::scan(LEAKY));
+        let unchecked = plan.outcome(1, None);
+
+        assert!(unchecked.starts_with('⚠'), "got {unchecked}");
+        assert!(unchecked.contains("could not"), "got {unchecked}");
+    }
+
+    #[test]
+    fn the_consent_dialog_lists_what_will_go_and_what_it_does_not_reach() {
+        let plan = RedactionPlan::from_scan(LEAKY.to_owned(), &bp_secrets::scan(LEAKY));
+        let body = plan.consent_body();
+
+        assert!(body.contains("line 2 — AWS access key ID"), "got {body}");
+        assert!(body.contains("not the file on disk"), "got {body}");
+        assert!(body.contains("recovery journal"), "got {body}");
+        assert!(body.contains("clipboard"), "got {body}");
+    }
+
+    // --- Security ▸ Inspect Metadata ---------------------------------------
+
+    #[test]
+    fn a_container_this_build_cannot_open_never_reports_an_all_clear() {
+        // The failure `Container::hidden` exists to prevent: an inspector
+        // that quietly says "no metadata found" about a `.docx` is worse than
+        // no inspector, because the user believes it and sends the file.
+        let summary = metadata_summary(&[], bp_redaction::Container::OfficeOpenXml);
+
+        assert!(!summary.starts_with('✓'), "got {summary}");
+        assert!(summary.contains("author name"), "got {summary}");
+        assert!(summary.contains("cannot look"), "got {summary}");
+    }
+
+    #[test]
+    fn plain_text_says_the_filesystem_entry_is_outside_the_check() {
+        // `bp-redaction` is explicit that modification times, ownership and
+        // extended attributes are the shell's and not its own, so the shell
+        // is the only place that sentence can be said.
+        let summary = metadata_summary(&[], bp_redaction::Container::PlainText);
+        assert!(summary.starts_with('✓'), "got {summary}");
+        assert!(summary.contains("ownership"), "got {summary}");
+
+        let report = metadata_report(&[], bp_redaction::Container::PlainText);
+        assert!(report.contains("alternate data streams"), "got {report}");
+    }
+
+    #[test]
+    fn the_report_for_a_container_names_what_a_build_would_need_to_read_it() {
+        let report = metadata_report(&[], bp_redaction::Container::Pdf);
+        assert!(report.contains("PDF parser"), "got {report}");
+        assert!(
+            report.contains("all-clear"),
+            "the reader has to be told not to take the empty list as one; got {report}"
+        );
+    }
+
+    #[test]
+    fn a_metadata_report_names_positions_and_kinds_and_never_the_value() {
+        // The same rule as the secret scan, and for the same reason: a dialog
+        // is a thing people screenshot into bug reports.
+        let text = "author: Daniel Boles <daniel@example.com>\nnotes\n";
+        let findings = bp_redaction::inspect(text);
+        assert!(!findings.is_empty(), "the fixture must actually be found");
+
+        for line in [
+            metadata_summary(&findings, bp_redaction::Container::PlainText),
+            metadata_report(&findings, bp_redaction::Container::PlainText),
+        ] {
+            assert!(!line.contains("Daniel Boles"), "got {line}");
+            assert!(!line.contains("daniel@example.com"), "got {line}");
+            assert!(line.contains("line 1"), "got {line}");
+        }
+    }
+
+    #[test]
+    fn inspecting_a_clean_plain_document_says_so_without_opening_a_dialog() {
+        let mut state = AppState::new();
+        state.edit("nothing identifying here\n".to_owned());
+
+        assert!(
+            state.inspect_metadata().is_none(),
+            "a dialog with nothing in it is worse than the status bar line"
+        );
+        assert!(state.error.as_deref().is_some_and(|e| e.starts_with('✓')));
+    }
+
+    #[test]
+    fn inspecting_a_document_in_a_container_opens_the_dialog_even_when_the_text_is_clean() {
+        let mut state = AppState::new();
+        let id = state.workspace.active_id().unwrap();
+        state
+            .workspace
+            .get_mut(id)
+            .unwrap()
+            .set_path(PathBuf::from("report.docx"));
+        state.edit("nothing identifying here\n".to_owned());
+
+        let report = state
+            .inspect_metadata()
+            .expect("the part that was not looked at is the answer");
+        assert!(report.contains("ZIP reader"), "got {report}");
+    }
+
+    #[test]
+    fn container_of_recognises_the_shapes_a_text_only_inspection_cannot_open() {
+        use bp_redaction::Container;
+
+        for (name, expected) in [
+            ("notes.txt", Container::PlainText),
+            ("notes", Container::PlainText),
+            ("report.DOCX", Container::OfficeOpenXml),
+            ("sheet.ods", Container::OpenDocument),
+            ("paper.pdf", Container::Pdf),
+            ("letter.rtf", Container::RichText),
+            ("photo.JPEG", Container::Image),
+        ] {
+            assert_eq!(
+                container_of(Some(&PathBuf::from(name))),
+                expected,
+                "{name} was classified wrongly"
+            );
+        }
+        assert_eq!(
+            container_of(None),
+            Container::PlainText,
+            "a document that has never been saved claims nothing about hidden metadata"
         );
     }
 }

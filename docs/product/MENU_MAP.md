@@ -67,7 +67,8 @@ no data rows rather than a column of greyed ones.
 | JSON Lines: validate, to JSON | **live** |
 | TOML: validate, format | **live** |
 | CSV/TSV: shape report, to JSON, to JSON Lines, column types | **live** |
-| YAML | blocked — `serde_yaml` is deprecated and the replacement wants a decision |
+| YAML: validate, format, minify, to JSON | **live** — `saphyr`, per ADR-0023. Validate names how many documents the file holds, because Format writes all of them back and Convert to JSON refuses more than one. The Format and Minify rows carry "comments not kept" as their hint and say it again in the status bar: a tree round trip has nothing to put a comment back from and resolves aliases into copies, and ADR-0023 names a row that offers this silently as a trap. Three refusals are the feature and not a failure mode — nesting past 128 levels (a 200-byte paste would otherwise overflow the stack and abort the process), alias expansion past 1,000,000 nodes, and a duplicate mapping key, which is refused rather than merged because formatting such a file would delete a line and report success. Each names its limit and where it was hit, and says the document was left unchanged. Sort Keys is not offered: there is no ordering over YAML nodes yet |
+| JSON: to YAML | **live** — the direction that cannot lose anything, so it is the one with no warning on the row |
 | Filter, query, schema, export | planned |
 
 ## Note
@@ -90,7 +91,9 @@ no data rows rather than a column of greyed ones.
 | Hash Document (SHA-256) | **live** — `bp_crypto::hash_document` over the bytes the document *would be written as*, not over the buffer, so the digest matches `sha256sum` on a document with a BOM or CRLF endings. Shown grouped in fours (to read down a telephone) and unbroken (to paste), and says so when unsaved edits mean it is not yet the digest of anything on disk |
 | Sign Document | **greyed, with the reason on the row** — `bp_crypto::sign_document` exists and is tested; there is nowhere to keep a signing key yet. Deliberately not a planned row: `planned` means "does not exist", and this exists and is missing a prerequisite |
 | Verify Signature... | **live** — the user chooses a `.sig` and a public key (32 raw bytes, or hexadecimal as pasted out of an email), and `bp_crypto::verify_document` answers. A refusal is reported as the library words it, since the bytes cannot tell an altered document from the wrong key; the one sentence the shell adds is that unsaved edits mean these are not the bytes anybody signed. The shell owns no sidecar convention — naming and finding `.sig` files is `bp-integrity`'s |
-| Lock Document, redaction, audit history | planned — phase 16 |
+| Redact Found Secrets... | **live** — `bp_secrets::scan` produces the spans and `bp_redaction::redact` destroys them. `Placeholder`, not `Mask`: `MatchOriginal` publishes the length of what was removed, which for a PIN or a short token is most of the secret. The marker is `[REDACTED: kind]`, labelled with the name of the rule that matched and never with what it matched. A confirmation dialog lists line and kind first and states plainly that this changes the document and not the file — the file on disk, the recovery journal, the undo history and the clipboard all still hold the originals, and saying "redacted" without saying that is the same lie the black rectangle tells. Applied as an ordinary undoable edit for the same reason. **A private key block is deliberately not redacted**: `bp-secrets` marks only its `-----BEGIN` line, so redacting the span would take out the label and leave the key body — the row says so rather than half-doing it. `bp_redaction::verify` runs afterwards and a survivor is reported by line number, never by text. Greyed on an empty document, with the reason on the row |
+| Inspect Metadata | **live** — `bp_redaction::metadata::inspect` over the text, reporting kind, exposure and line and never the value. For a container this build cannot open — `.docx`, `.pdf`, `.rtf`, an image — `Container::hidden()` and `requires()` are reported instead of silence: "no metadata found" about a `.docx` reads as an all-clear and would be a lie. For plain text it says the opposite thing it is easy to leave out — that the filesystem entry around the file, its timestamps, ownership and alternate data streams, is not part of the check |
+| Lock Document, audit history | planned — phase 16 |
 
 ## Notebook
 
@@ -117,8 +120,9 @@ scratchpad. All planned — phase 12.
 
 ## Security (the rest)
 
-Lock, decrypt in place, secure clipboard, redact, metadata inspector, audit,
-settings. Planned — phases 15 and 16.
+Lock, decrypt in place, secure clipboard, audit, settings. Planned — phases 15
+and 16. Redaction and the metadata inspector are no longer among them; both are
+rows above.
 
 Hash, sign and verify are no longer among them: `bp-crypto`'s signing half is
 wired into the rows above. **Signing is the one that is not**, and the reason

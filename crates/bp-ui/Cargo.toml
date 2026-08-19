@@ -19,6 +19,11 @@ bp-security = { path = "../bp-security" }
 # Security ▸ Scan for Secrets. Pure, no dependencies of its own, and it
 # deliberately reports where a credential is without ever carrying it.
 bp-secrets = { path = "../bp-secrets" }
+# Security ▸ Redact and Inspect Metadata (ADR-0028). Pure, no dependencies of
+# its own, and it deliberately depends on no scanner -- the spans come from
+# here, which is the only place `bp-secrets` and `bp-redaction` are both
+# visible.
+bp-redaction = { path = "../bp-redaction" }
 bp-semantic = { path = "../bp-semantic" }
 bp-files = { path = "../bp-files" }
 bp-naming = { path = "../bp-naming" }

@@ -104,11 +104,35 @@ pub mod action {
     /// Above 100 for the same reason `CLIP_BASE` is: Slint's `dispatch`
     /// routes exactly `UNDO..=SELECT_ALL` to the widget and everything else
     /// to Rust, so a block only has to avoid that window rather than sit
-    /// below it. 204-209 are free.
+    /// below it. 206-209 are free.
     pub const SCAN_SECRETS: i32 = 200;
     pub const HASH_DOCUMENT: i32 = 201;
     pub const SIGN_DOCUMENT: i32 = 202;
     pub const VERIFY_SIGNATURE: i32 = 203;
+    /// Redact what the scan found (ADR-0028). Beside `SCAN_SECRETS` because
+    /// it is the same document operation continued -- the scan produces the
+    /// spans and this destroys them -- and a family split across two blocks
+    /// is how the next row lands somewhere it is dispatched as something
+    /// else.
+    pub const REDACT_SECRETS: i32 = 204;
+    /// Report what identifying metadata the document carries (ADR-0028).
+    pub const INSPECT_METADATA: i32 = 205;
+
+    /// The YAML conversions (ADR-0023), in a block of their own rather than
+    /// in the Data block at 70-79.
+    ///
+    /// 79 was the only id left there and these are two, and splitting a pair
+    /// across two blocks is precisely the mistake `SCAN_SECRETS`' comment
+    /// describes. They get their own ids rather than sharing `DATA_TO_JSON`
+    /// for the same reason `DATA_CSV_TO_JSON` does: a different library
+    /// function behind an identically worded row, and sharing an id would
+    /// make `run_data_action`'s match depend on the format to know which one
+    /// a click meant.
+    ///
+    /// Above 100, so outside Slint's window, on the same argument as the
+    /// block above. 212-219 are free.
+    pub const DATA_YAML_TO_JSON: i32 = 210;
+    pub const DATA_JSON_TO_YAML: i32 = 211;
 
     /// Clipboard history occupies `CLIP_BASE ..` (bounded by [`super::clip_end`]).
     ///
@@ -594,6 +618,7 @@ pub fn security(
     current: bp_security::Security,
     encrypted: bool,
     privacy: bp_security::Privacy,
+    has_content: bool,
 ) -> Vec<MenuItem> {
     // What is actually in force, which is the document's profile *and* the
     // session override. Showing the unclamped policy would tell the user their
@@ -653,6 +678,33 @@ pub fn security(
         // answer, and an empty document is exactly when somebody checks they
         // are looking at the tab they think they are.
         row("Scan for Secrets", "", action::SCAN_SECRETS),
+        // Greyed rather than `planned`, and the label carries the reason:
+        // `bp-redaction` exists and is tested, and what is missing is a
+        // document to act on. An empty document has nothing to redact, and a
+        // row that looked live and then reported "nothing found" would be a
+        // worse answer than one that says so before the click.
+        //
+        // The ellipsis is the house convention for a row that asks first, and
+        // this one asks: redaction destroys text, so it takes consent rather
+        // than assuming it.
+        row_enabled(
+            if has_content {
+                "Redact Found Secrets..."
+            } else {
+                "Redact Found Secrets — this document is empty"
+            },
+            "",
+            action::REDACT_SECRETS,
+            has_content,
+        ),
+        // Not gated on content, and not gated on the format either. For a
+        // container this build cannot see inside -- a .docx, a PDF -- the
+        // answer worth having is exactly "there is metadata here that was not
+        // looked at", and an empty buffer does not change that.
+        MenuItem {
+            separator_after: true,
+            ..row("Inspect Metadata", "", action::INSPECT_METADATA)
+        },
         // The algorithm is on the row rather than in the result, because a
         // digest you are about to read down a telephone is useless unless you
         // already know which of the two the other end took.
@@ -672,7 +724,7 @@ pub fn security(
         // party's public key and their `.sig`, both of which the user
         // supplies. It is the half of the feature that needs nothing stored.
         row_end("Verify Signature...", "", action::VERIFY_SIGNATURE),
-        planned("Redaction, audit history"),
+        planned("Lock Document, audit history"),
         arrives("phase 16"),
     ]);
     items
@@ -769,6 +821,34 @@ pub fn data(format: Format) -> Vec<MenuItem> {
             row("Minify", "", action::DATA_MINIFY),
             row_end("Sort Keys", "", action::DATA_FORMAT),
             row("Convert to JSON Lines", "", action::DATA_TO_JSONL),
+            // No warning on this one, and the asymmetry is the point:
+            // every JSON value has a YAML spelling, so this is the
+            // direction that cannot lose anything (ADR-0023).
+            row("Convert to YAML", "", action::DATA_JSON_TO_YAML),
+        ],
+        // The same shape as JSON above, minus Sort Keys: sorting a YAML
+        // mapping needs an ordering over YAML nodes that ADR-0023 says does
+        // not exist yet, and an unimplemented row is not offered.
+        //
+        // The hints are not decoration. `saphyr` parses YAML into data, and a
+        // comment is not data, so a round trip has nothing to put a comment
+        // back from; an alias is resolved on the way in, so the output
+        // repeats a value rather than referring to it. ADR-0023 names a
+        // Format row that does not say so as a trap, and the row is the last
+        // place to say it before the document changes.
+        Format::Yaml => vec![
+            row_end("Validate", "", action::DATA_VALIDATE),
+            row("Format", "comments not kept", action::DATA_FORMAT),
+            row_end("Minify", "comments not kept", action::DATA_MINIFY),
+            // Not greyed for a file holding several documents, even though
+            // the conversion refuses one: knowing how many there are means
+            // parsing the whole document, and the Data menu is rebuilt on
+            // every refresh. The refusal names the count instead.
+            row(
+                "Convert to JSON",
+                "comments not kept",
+                action::DATA_YAML_TO_JSON,
+            ),
         ],
         Format::JsonLines => vec![
             row_end("Validate", "", action::DATA_VALIDATE),
@@ -1015,6 +1095,7 @@ mod tests {
             bp_security::Security::default(),
             false,
             bp_security::Privacy::Off,
+            true,
         );
         // The profile toggles are the leading rows, by construction. Taking
         // them positionally rather than by id range is what lets the range
@@ -1049,6 +1130,7 @@ mod tests {
                 bp_security::Security::Named(*profile),
                 false,
                 bp_security::Privacy::Off,
+                true,
             );
             let ticked: Vec<&str> = items
                 .iter()
@@ -1069,6 +1151,7 @@ mod tests {
             bp_security::Security::Custom(bp_security::Profile::Maximum.policy()),
             false,
             bp_security::Privacy::Off,
+            true,
         );
         assert!(
             !items.iter().any(|i| i.label.starts_with('✓')),
@@ -1084,6 +1167,7 @@ mod tests {
             bp_security::Security::Named(bp_security::Profile::Standard),
             false,
             bp_security::Privacy::Off,
+            true,
         );
         assert!(
             standard
@@ -1100,6 +1184,7 @@ mod tests {
             bp_security::Security::Named(bp_security::Profile::Maximum),
             false,
             bp_security::Privacy::Off,
+            true,
         );
         assert!(
             maximum
@@ -1121,6 +1206,7 @@ mod tests {
             bp_security::Security::Named(bp_security::Profile::Private),
             false,
             bp_security::Privacy::Off,
+            true,
         );
         let row = items
             .iter()
@@ -1140,17 +1226,19 @@ mod tests {
             bp_security::Security::default(),
             false,
             bp_security::Privacy::Off,
+            true,
         )
     }
 
-    #[test]
-    fn the_security_operations_sit_outside_every_range_dispatch_matches() {
-        // The load-bearing one. Every id below is matched by an *exact* arm
-        // in `handle_menu_action`, but several arms above it match ranges --
-        // and a range arm comes first, so an id that strays into one silently
-        // opens a recent file or pastes a clipboard entry instead. That is
-        // the failure the recent-files window has already caused once.
-        let windows: [(&str, std::ops::Range<i32>); 6] = [
+    /// Every range `handle_menu_action` matches with `contains`, in one place.
+    ///
+    /// Written out rather than derived, because the point is to be a second
+    /// copy of what the dispatch says: a list generated from the same
+    /// constants the dispatch uses would agree with it by construction and
+    /// catch nothing. Adding a range arm there means adding a line here, and
+    /// forgetting to is what the tests below are for.
+    fn range_dispatch_windows() -> Vec<(&'static str, std::ops::Range<i32>)> {
+        vec![
             (
                 "recent files",
                 action::RECENT_BASE
@@ -1166,33 +1254,232 @@ mod tests {
             // Inclusive in dispatch; written as a half-open range one past
             // the last so the two spellings cannot disagree.
             ("editor commands", action::UNDO..action::SELECT_ALL + 1),
-        ];
+            ("note actions", action::NOTE_TITLE..action::NOTE_OUTLINE + 1),
+            (
+                "data operations",
+                action::DATA_VALIDATE..action::DATA_COLUMN_TYPES + 1,
+            ),
+            (
+                "YAML conversions",
+                action::DATA_YAML_TO_JSON..action::DATA_JSON_TO_YAML + 1,
+            ),
+            (
+                "line operations",
+                action::LINES_SORT_ASC..action::LINES_TRIM + 1,
+            ),
+            (
+                "caret line edits",
+                action::DUPLICATE_LINE..action::MOVE_LINE_DOWN + 1,
+            ),
+        ]
+    }
 
+    #[test]
+    fn the_security_operations_sit_outside_every_range_dispatch_matches() {
+        // The load-bearing one. Every id below is matched by an *exact* arm
+        // in `handle_menu_action`, but several arms above it match ranges --
+        // and a range arm comes first, so an id that strays into one silently
+        // opens a recent file or pastes a clipboard entry instead. That is
+        // the failure the recent-files window has already caused once.
         for id in [
             action::SCAN_SECRETS,
             action::HASH_DOCUMENT,
             action::SIGN_DOCUMENT,
             action::VERIFY_SIGNATURE,
+            action::REDACT_SECRETS,
+            action::INSPECT_METADATA,
         ] {
-            for (name, window) in &windows {
+            for (name, window) in range_dispatch_windows() {
                 assert!(
                     !window.contains(&id),
-                    "id {id} falls inside the {name} window and would be                      dispatched as one"
+                    "id {id} falls inside the {name} window and would be dispatched as one"
                 );
             }
         }
     }
 
     #[test]
-    fn the_security_operations_are_four_distinct_ids_in_their_documented_block() {
-        // The comment on `SCAN_SECRETS` promises 200-209. A fifth row taking
-        // 210 would compile and would sit two ids below nothing at all, which
-        // is exactly how a block stops being a block.
+    fn the_yaml_conversions_sit_outside_every_other_range_dispatch_matches() {
+        // Same failure, from the other side. These two *are* a dispatch
+        // window, so they are checked against all the others -- an id that
+        // strayed into the recent-files window would open a file instead of
+        // converting a document, and neither the menu nor the compiler would
+        // notice.
+        for id in [action::DATA_YAML_TO_JSON, action::DATA_JSON_TO_YAML] {
+            for (name, window) in range_dispatch_windows() {
+                if name == "YAML conversions" {
+                    continue;
+                }
+                assert!(
+                    !window.contains(&id),
+                    "id {id} falls inside the {name} window and would be dispatched as one"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn yaml_offers_the_shape_json_offers_next_door() {
+        // Deliberately the same idiom rather than a second one: the two rows
+        // a user reaches for on a data file are Validate and Format, and a
+        // menu where YAML spells them differently from JSON is a menu the
+        // user has to read twice.
+        let items = data(Format::Yaml);
+        for id in [
+            action::DATA_VALIDATE,
+            action::DATA_FORMAT,
+            action::DATA_MINIFY,
+            action::DATA_YAML_TO_JSON,
+        ] {
+            let row = items
+                .iter()
+                .find(|i| i.action == id)
+                .unwrap_or_else(|| panic!("YAML is missing action {id}"));
+            assert!(
+                row.enabled,
+                "'{}' should not be offered disabled",
+                row.label
+            );
+        }
+    }
+
+    #[test]
+    fn the_yaml_rewriting_rows_say_what_they_will_lose_before_they_are_clicked() {
+        // ADR-0023 names this exactly: a Format row that does not say
+        // comments will go is a trap. The row is the last place to say it
+        // while the document is still intact.
+        let items = data(Format::Yaml);
+        for id in [
+            action::DATA_FORMAT,
+            action::DATA_MINIFY,
+            action::DATA_YAML_TO_JSON,
+        ] {
+            let row = items.iter().find(|i| i.action == id).unwrap();
+            assert!(
+                row.shortcut.contains("comments"),
+                "'{}' rewrites through a tree and must say so; got hint '{}'",
+                row.label,
+                row.shortcut
+            );
+        }
+    }
+
+    #[test]
+    fn yaml_is_not_offered_sort_keys() {
+        // `bp-data` has no ordering over YAML nodes (ADR-0023), so there is
+        // nothing behind the row. A row that did nothing would read as broken,
+        // and a greyed one would claim the feature exists.
+        let items = data(Format::Yaml);
+        assert!(
+            items.iter().all(|i| !i.label.contains("Sort")),
+            "sorting a YAML mapping is not implemented"
+        );
+    }
+
+    #[test]
+    fn converting_json_to_yaml_carries_no_warning_and_yaml_to_json_does() {
+        // The asymmetry is the feature. Every JSON value has a YAML spelling,
+        // so that direction loses nothing; the reverse goes through a tree
+        // that has nowhere to keep a comment.
+        let to_yaml = data(Format::Json)
+            .into_iter()
+            .find(|i| i.action == action::DATA_JSON_TO_YAML)
+            .expect("JSON offers a conversion to YAML");
+        assert!(
+            to_yaml.shortcut.is_empty(),
+            "nothing is lost converting JSON to YAML; got hint '{}'",
+            to_yaml.shortcut
+        );
+
+        let to_json = data(Format::Yaml)
+            .into_iter()
+            .find(|i| i.action == action::DATA_YAML_TO_JSON)
+            .expect("YAML offers a conversion to JSON");
+        assert!(!to_json.shortcut.is_empty());
+    }
+
+    #[test]
+    fn a_document_with_nothing_in_it_greys_redaction_and_says_why() {
+        // `row_enabled` rather than `planned`: `bp-redaction` exists and is
+        // tested, and what is missing is a document to act on. The reason has
+        // to be on the row, because the greying is all the user gets.
+        let items = security(
+            bp_security::Security::default(),
+            false,
+            bp_security::Privacy::Off,
+            false,
+        );
+        let row = items
+            .iter()
+            .find(|i| i.action == action::REDACT_SECRETS)
+            .expect("a redaction row");
+
+        assert!(!row.enabled, "there is nothing to redact");
+        assert_ne!(
+            row.action,
+            action::NONE,
+            "a real capability with nothing to act on is not a planned row"
+        );
+        assert!(
+            row.label.contains("empty"),
+            "the row must say why it is greyed; got '{}'",
+            row.label
+        );
+        assert!(
+            security_menu()
+                .iter()
+                .find(|i| i.action == action::REDACT_SECRETS)
+                .is_some_and(|i| i.enabled),
+            "a document with content can be redacted"
+        );
+    }
+
+    #[test]
+    fn the_metadata_inspector_is_offered_on_every_document() {
+        // Not gated on content, and not on the format. For a container this
+        // build cannot see inside, "there is metadata here that was not looked
+        // at" is the answer worth having, and an empty buffer does not change
+        // it.
+        for has_content in [false, true] {
+            let items = security(
+                bp_security::Security::default(),
+                false,
+                bp_security::Privacy::Off,
+                has_content,
+            );
+            let row = items
+                .iter()
+                .find(|i| i.action == action::INSPECT_METADATA)
+                .expect("a metadata row");
+            assert!(row.enabled, "'{}' should be usable", row.label);
+        }
+    }
+
+    #[test]
+    fn the_security_menu_no_longer_calls_redaction_planned() {
+        // The planned row and the live rows would otherwise both be on screen,
+        // which reads as the feature being in two states at once.
+        let items = security_menu();
+        assert!(
+            !items
+                .iter()
+                .any(|i| i.action == action::NONE && i.label.contains("Redaction")),
+            "redaction is live; it must not also be listed as planned"
+        );
+    }
+
+    #[test]
+    fn the_security_operations_are_distinct_ids_in_their_documented_block() {
+        // The comment on `SCAN_SECRETS` promises 200-209. A row taking 210
+        // would compile, and would sit inside the YAML conversions instead,
+        // which is exactly how a block stops being a block.
         let ids = [
             action::SCAN_SECRETS,
             action::HASH_DOCUMENT,
             action::SIGN_DOCUMENT,
             action::VERIFY_SIGNATURE,
+            action::REDACT_SECRETS,
+            action::INSPECT_METADATA,
         ];
         for id in ids {
             assert!((200..210).contains(&id), "id {id} is outside the block");
@@ -1573,6 +1860,7 @@ mod tests {
         ));
         all.extend(format(Encoding::Utf8, LineEnding::Lf, Indent::default()));
         all.extend(data(Format::Csv));
+        all.extend(data(Format::Yaml));
         all.extend(help());
         all.extend(security_menu());
 
@@ -1667,6 +1955,7 @@ mod tests {
         rust_side.extend(note(true));
         rust_side.extend(data(Format::Json));
         rust_side.extend(data(Format::Csv));
+        rust_side.extend(data(Format::Yaml));
         rust_side.extend(help());
         rust_side.extend(insert(STAMP_CLOCK, true));
         rust_side.extend(tab_context(2, true));
@@ -1674,6 +1963,7 @@ mod tests {
             bp_security::Security::default(),
             false,
             bp_security::Privacy::Off,
+            true,
         ));
 
         for item in rust_side.iter().filter(|i| i.enabled) {

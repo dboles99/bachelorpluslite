@@ -116,6 +116,21 @@ fn pick_verifying_key(state: &AppState) -> Option<PathBuf> {
         .pick_file()
 }
 
+/// Show what a redaction is about to destroy, and ask before destroying it.
+///
+/// The listing is not bounded the way `confirm_replace`'s is. A scan that
+/// found four hundred credentials is a document nobody should redact without
+/// reading the list, and a truncated list is one nobody read.
+fn confirm_redaction(plan: &crate::state::RedactionPlan) -> bool {
+    rfd::MessageDialog::new()
+        .set_level(rfd::MessageLevel::Warning)
+        .set_title("Redact")
+        .set_description(plan.consent_body())
+        .set_buttons(rfd::MessageButtons::OkCancel)
+        .show()
+        == rfd::MessageDialogResult::Ok
+}
+
 /// Show what Replace All would do, and ask before doing it.
 ///
 /// specs.md section 6 wants the changes visible before they are applied.
@@ -438,6 +453,43 @@ pub fn handle_menu_action(
             push = PushText::No;
         }
 
+        action::REDACT_SECRETS => {
+            // Three statements, each ending its borrow before the next, and
+            // the dialog in between opened while nothing is borrowed at all:
+            // `rfd` pumps events, and a re-entrant callback on a live
+            // `borrow_mut()` panics.
+            //
+            // The consent is not ceremony. Redaction destroys text the user
+            // wrote, in places on the screen they cannot all see at once, and
+            // it is offered because a scanner *guessed* the text was a
+            // credential. Replace All is confirmed for the weaker version of
+            // the same reason.
+            let plan = state.borrow_mut().plan_redaction();
+            push = PushText::No;
+            if let Some(plan) = plan {
+                if confirm_redaction(&plan) {
+                    // The document changed, so its text has to be re-pushed
+                    // -- and only then, because re-pushing throws away
+                    // `TextInput`'s caret.
+                    if state.borrow_mut().apply_redaction(&plan) {
+                        push = PushText::Yes;
+                    }
+                } else {
+                    state.borrow_mut().decline_redaction(&plan);
+                }
+            }
+        }
+
+        action::INSPECT_METADATA => {
+            // Same shape as Hash Document: the borrow ends with the
+            // statement, before the dialog opens.
+            let report = state.borrow_mut().inspect_metadata();
+            if let Some(report) = report {
+                show_info("Metadata", &report);
+            }
+            push = PushText::No;
+        }
+
         action::GO_TO_LINE => {
             // The bar owns the interaction from here; opening it is all the
             // menu row does, which is why one action id covers the feature.
@@ -588,7 +640,13 @@ pub fn handle_menu_action(
             }
         }
 
-        id if (action::DATA_VALIDATE..=action::DATA_COLUMN_TYPES).contains(&id) => {
+        // Two ranges rather than one, because the Data block at 70-79 had a
+        // single id left when YAML needed two. Both reach the same place; the
+        // arm that decides which library function a click meant is
+        // `run_data_action`, where the format is in scope.
+        id if (action::DATA_VALIDATE..=action::DATA_COLUMN_TYPES).contains(&id)
+            || (action::DATA_YAML_TO_JSON..=action::DATA_JSON_TO_YAML).contains(&id) =>
+        {
             state.borrow_mut().run_data_action(id);
         }
 

@@ -201,6 +201,10 @@ fn refresh(ui: &AppWindow, state: &mut state::AppState, push_text: state::PushTe
         state.security(),
         encrypted,
         state.privacy,
+        // Redaction needs something to redact. A prefix check rather than a
+        // scan: this runs on every refresh, and scanning the whole document
+        // there is the trap R011 spends a paragraph on.
+        state.active_has_content(),
     )));
 }
 
