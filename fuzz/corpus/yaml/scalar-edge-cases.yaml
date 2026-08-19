@@ -1,0 +1,9 @@
+a: .inf
+b: -.inf
+c: .nan
+d: 0o17
+e: 0x1F
+f: null
+g: ~
+h: 'y'
+i: "\u0000"

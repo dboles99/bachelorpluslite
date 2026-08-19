@@ -31,7 +31,7 @@ Status as of **2026-08-19**. Three words, meaning three different things:
 | 16 | Advanced security | **Started** | [11-security](project/tasks/11-security/) | `bp-secrets`, `bp-redaction`, `bp-audit`, `bp-integrity` |
 | 17 | Themes/personality/accessibility | **Started** | [12-themes-brand](project/tasks/12-themes-brand/) | `bp-theme` |
 | 18 | Windows/Linux platform integration | **Built, unwired** | [13-platform](project/tasks/13-platform/) | `bp-platform` |
-| 19 | Hardening, fuzzing and benchmarks | Not started | [14-hardening](project/tasks/14-hardening/) | — |
+| 19 | Hardening, fuzzing and benchmarks | **Started** | [14-hardening](project/tasks/14-hardening/) | `fuzz/` (standalone) |
 | 20 | Packaging, signing, release and upgrade testing | Not started | [14-hardening](project/tasks/14-hardening/) | — |
 
 ## Two numbering schemes, reconciled

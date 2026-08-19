@@ -1,0 +1,187 @@
+//! Input generators shared by the targets.
+//!
+//! Two kinds, because they find different things.
+//!
+//! **Unstructured** -- arbitrary bytes and arbitrary text. Cheap, and the
+//! only thing that reaches a parser's first hundred bytes of validation. It
+//! almost never gets past that, which is the whole reason a coverage-guided
+//! fuzzer exists and this is not one.
+//!
+//! **Token salad** -- strings assembled from a format's own punctuation.
+//! Without coverage feedback this is the substitute: rather than hoping
+//! random bytes stumble onto `? ` or `&anchor`, hand the generator the
+//! alphabet and let it arrange it. It reaches the interesting branches
+//! shallowly and often, and it is how the structured targets below spend
+//! most of their cases.
+
+use proptest::prelude::*;
+
+/// Arbitrary bytes, up to a few kilobytes.
+///
+/// Bounded deliberately. A megabyte of noise finds nothing a kilobyte of
+/// noise does not, and spends the run's time budget doing it.
+pub fn arbitrary_bytes() -> impl Strategy<Value = Vec<u8>> {
+    proptest::collection::vec(any::<u8>(), 0..4096)
+}
+
+/// Arbitrary text, including the awkward parts of Unicode.
+pub fn arbitrary_text() -> impl Strategy<Value = String> {
+    prop_oneof![
+        // Anything at all, newlines included.
+        r"(?s).{0,2000}".prop_map(String::from),
+        // Weighted towards characters a text parser has opinions about.
+        proptest::collection::vec(
+            prop_oneof![
+                Just('\n'),
+                Just('\r'),
+                Just('\t'),
+                Just(' '),
+                Just('\0'),
+                Just('"'),
+                Just('\''),
+                Just('\\'),
+                Just('\u{feff}'),
+                Just('\u{1F600}'),
+                any::<char>(),
+            ],
+            0..500,
+        )
+        .prop_map(|chars| chars.into_iter().collect()),
+    ]
+}
+
+/// Build a string by picking repeatedly from `tokens`.
+///
+/// The shared engine behind every salad below: a format is mostly its
+/// punctuation, so a generator handed the punctuation explores it far faster
+/// than one handed the alphabet.
+fn salad(tokens: &'static [&'static str], len: std::ops::Range<usize>) -> BoxedStrategy<String> {
+    proptest::collection::vec(proptest::sample::select(tokens), len)
+        .prop_map(|picked| picked.concat())
+        .boxed()
+}
+
+/// YAML punctuation: indicators, anchors, aliases, tags, block scalars.
+pub fn yaml_salad() -> BoxedStrategy<String> {
+    salad(
+        &[
+            "\n",
+            "  ",
+            "\t",
+            "- ",
+            ": ",
+            "?",
+            "[",
+            "]",
+            "{",
+            "}",
+            ",",
+            "&a",
+            "*a",
+            "&b",
+            "*b",
+            "---\n",
+            "...\n",
+            "!!str ",
+            "!!int ",
+            "!!map ",
+            "!custom ",
+            "|",
+            ">",
+            "|-",
+            ">-",
+            "\"",
+            "'",
+            "#c\n",
+            "%YAML 1.2\n",
+            "<<",
+            "x",
+            "1",
+            "null",
+            "~",
+            ".nan",
+            ".inf",
+            "y",
+            ": ",
+            "\u{feff}",
+        ],
+        0..200,
+    )
+}
+
+/// JSON punctuation, including the escapes that are syntactically legal and
+/// semantically impossible.
+pub fn json_salad() -> BoxedStrategy<String> {
+    salad(
+        &[
+            "{", "}", "[", "]", ",", ":", "\"", "\\", "\\u", "\\uD800", "\\uDC00", "\\n", "0", "1",
+            "-", "+", "e", "E", ".", "true", "false", "null", "NaN", "Infinity", " ", "\n", "a",
+            "\u{feff}",
+        ],
+        0..200,
+    )
+}
+
+/// TOML punctuation.
+pub fn toml_salad() -> BoxedStrategy<String> {
+    salad(
+        &[
+            "[",
+            "]",
+            "[[",
+            "]]",
+            "=",
+            ".",
+            ",",
+            "\"",
+            "'",
+            "\"\"\"",
+            "'''",
+            "\\",
+            "{",
+            "}",
+            "\n",
+            " ",
+            "#",
+            "a",
+            "0",
+            "1",
+            "-",
+            "+",
+            "e",
+            "true",
+            "false",
+            "1979-05-27",
+            "T07:32:00Z",
+            "0x",
+            "0o",
+            "0b",
+            "inf",
+            "nan",
+            "_",
+        ],
+        0..200,
+    )
+}
+
+/// Delimited-text punctuation: the quoting rules are where a CSV reader
+/// breaks, not the commas.
+pub fn csv_salad() -> BoxedStrategy<String> {
+    salad(
+        &[
+            ",", ";", "\t", "|", "\"", "\"\"", "\n", "\r\n", "\r", " ", "a", "1", "1.5", "-", "",
+            "true", "\u{feff}", "\0",
+        ],
+        0..300,
+    )
+}
+
+/// A `[`-nesting probe: `n` opens and `n` closes, in a chosen bracket.
+///
+/// Depth is the one dimension where the answer changes sharply at a
+/// documented number (ADR-0023's 128), so it is generated by hand rather than
+/// hoped for.
+#[must_use]
+pub fn nested(open: &str, close: &str, depth: usize) -> String {
+    format!("{}{}", open.repeat(depth), close.repeat(depth))
+}

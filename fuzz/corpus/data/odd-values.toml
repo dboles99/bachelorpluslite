@@ -1,0 +1,6 @@
+a = 1979-05-27T07:32:00-08:00
+b = inf
+c = nan
+d = 0x7FFFFFFFFFFFFFFF
+e = """multi
+line"""
