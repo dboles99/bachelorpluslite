@@ -97,8 +97,11 @@ proptest! {
     /// **A match's reported line is the line the buffer puts it on**, for
     /// documents whose line breaks are LF and CRLF.
     ///
-    /// Restricted to those two deliberately: the unrestricted version of this
-    /// property fails, and is below under `#[ignore]` with the reason.
+    /// Those two are now the whole of it. The restriction used to be a
+    /// concession -- the unrestricted property failed, and sat below under
+    /// `#[ignore]` -- and ADR-0029 made LF and CRLF the only line breaks this
+    /// product has, so the alphabet here is no longer narrower than the rule.
+    /// The test below covers the separators that are *not* breaks.
     #[test]
     fn a_matchs_line_number_agrees_with_the_buffer(
         parts in proptest::collection::vec(
