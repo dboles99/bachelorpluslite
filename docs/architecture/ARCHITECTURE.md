@@ -34,7 +34,7 @@ and this table carries the intent until then.
 | `bp-theme` | **live** | Palettes as data (ADR-0009). Green is the default. | 1, 17 |
 | `bp-config` | **live** | Settings precedence, config file, recent-files list, recovery from bad input. | 1 |
 | `bp-ui` | **live** | The Slint application shell (ADR-0015). Split into modules — see below. | 1 |
-| `bp-buffer` | **live** | Rope buffer, character indices, line/column maths. Plus the large-file engine (ADR-0027): detection, chunked reading, a sparse line index and line-aligned streaming windows. The engine is not reached by the open path yet. | 2, 4 |
+| `bp-buffer` | **live** | Rope buffer, character indices, line/column maths. Plus the large-file engine (ADR-0027): detection, chunked reading, a sparse line index and line-aligned streaming windows. The open path reads `SizeClass` and `Access` before it reads the file; `LargeFile` itself waits on a view that can show a document the rope does not hold. | 2, 4 |
 | `bp-editor` | **live** | Caret, selection, motion, transaction-based undo/redo, line operations, key-to-command mapping, document-to-screen geometry. The editor's storage — see below. | 2 |
 | `bp-history` | **live** | Crash-safe recovery journal and autosave checkpoints. | 3 |
 | `bp-formats` | **live** | Format detection and profiles (ADR-0008). | 5 |
@@ -62,27 +62,48 @@ and this table carries the intent until then.
 ```text
 bachelorpad ──> bp-config
             ├──> bp-theme
-            └──> bp-ui ──┬─> bp-core
-                         ├─> bp-files ──> bp-core, bp-naming, bp-platform
-                         ├─> bp-buffer   (the latency probe only)
-                         ├─> bp-clipboard
-                         ├─> bp-config
+            └──> bp-ui ──┬─> bp-audit      ──> bp-crypto, bp-security
+                         ├─> bp-buffer     (the latency probe, and the size classes)
+                         ├─> bp-clipboard  ──> bp-security
+                         ├─> bp-config     ──> bp-platform
+                         ├─> bp-core       ──> bp-security
+                         ├─> bp-crypto
                          ├─> bp-data
-                         ├─> bp-editor ──> bp-buffer
+                         ├─> bp-editor     ──> bp-buffer
+                         ├─> bp-files      ──> bp-core, bp-naming, bp-platform
                          ├─> bp-formats
-                         ├─> bp-history
+                         ├─> bp-history    ──> bp-crypto, bp-security
+                         ├─> bp-integrity  ──> bp-crypto
                          ├─> bp-naming
+                         ├─> bp-platform
+                         ├─> bp-redaction
                          ├─> bp-search
+                         ├─> bp-secrets
+                         ├─> bp-security
                          ├─> bp-semantic
                          ├─> bp-theme
                          └─> slint, rfd, arboard
 ```
 
-**Eleven crates depend on nothing else in the workspace**: `bp-core`,
-`bp-naming`, `bp-theme`, `bp-config`, `bp-buffer`, `bp-formats`, `bp-data`,
-`bp-search`, `bp-semantic`, `bp-storage` and `bp-clipboard`. That is what keeps them cheap
-to test and impossible to entangle with the UI toolkit — and it is why 542
-tests run without a window.
+Twenty of the twenty-three library crates are reachable from the shell. The
+three that are not — `bp-notebook`, `bp-research` and `bp-storage` — are the
+whole of the wiring backlog, and `project/WORK_QUEUE.md` says what each
+needs. This block is generated from the manifests rather than maintained by
+hand; regenerate it after adding an edge, because a dependency diagram that
+has drifted is worse than none.
+
+**Fourteen crates depend on nothing else in the workspace**: `bp-buffer`,
+`bp-crypto`, `bp-data`, `bp-formats`, `bp-naming`, `bp-notebook`,
+`bp-platform`, `bp-redaction`, `bp-research`, `bp-search`, `bp-secrets`,
+`bp-security`, `bp-semantic` and `bp-theme`. That is what keeps them cheap to
+test and impossible to entangle with the UI toolkit — and it is why all but
+230 of the workspace's 1,693 tests run without a window.
+
+`bp-security` is the one that acquired dependants rather than dependencies:
+`bp-core`, `bp-clipboard`, `bp-storage`, `bp-history` and `bp-audit` all read
+a policy from it (ADR-0020). A crate everything defers to and that defers to
+nothing is the right shape for that, and it is why the list above shrank from
+an earlier count of eleven without anything going wrong.
 
 Two deliberate non-dependencies:
 

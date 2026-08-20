@@ -16,7 +16,7 @@ Status as of **2026-08-20**. Three words, meaning three different things:
 | 1 | Foundation and workspace | **Done** | [01-foundation](project/tasks/01-foundation/) | `bp-core`, `bp-config`, `bp-theme`, `bp-ui` |
 | 2 | Core editor | **Started** | [02-core-editor](project/tasks/02-core-editor/) | `bp-buffer`, `bp-editor` |
 | 3 | File safety and recovery | **Done** | [03-file-safety](project/tasks/03-file-safety/) | `bp-files`, `bp-history` |
-| 4 | Large-file engine | **Built, unwired** | [04-large-files](project/tasks/04-large-files/) | `bp-buffer` |
+| 4 | Large-file engine | **Started** | [04-large-files](project/tasks/04-large-files/) | `bp-buffer` |
 | 5 | Format registry and parser framework | **Started** | [05-formats](project/tasks/05-formats/) | `bp-formats` |
 | 6 | Structured formats | **Started** | [05-formats](project/tasks/05-formats/) | `bp-data` |
 | 7 | Search engine | **Started** | [06-search](project/tasks/06-search/) | `bp-search` |
@@ -48,13 +48,13 @@ that points at them for no gain.
 
 ## Where the work actually is
 
-Phases 1 and 3 are complete. Phases 2, 5, 6, 7, 8, 11, 14, 15, 16, 17 and 18
-each have a tested slice reachable in the product — phase 18 joined them when
-File ▸ Set as Default Editor shipped. Phases 4, 9, 12 and 13 are built and
-have no way in, which an audit put a number on: `bp-research`, `bp-notebook`
-and `bp-storage` have zero reverse dependencies anywhere in the application,
-and with `bp-buffer`'s large-file engine that is over ten thousand lines and
-237 unit tests behind code no user can reach.
+Phases 1 and 3 are complete. Phases 2, 4, 5, 6, 7, 8, 11, 14, 15, 16, 17 and
+18 each have a tested slice reachable in the product — phase 18 joined them
+when File ▸ Set as Default Editor shipped, and phase 4 when the open path
+started classifying documents by size. Phases 9, 12 and 13 are built and have
+no way in: `bp-research`, `bp-notebook` and `bp-storage` have zero reverse
+dependencies anywhere in the application, which is nine and a half thousand
+lines and 237 unit tests behind code no user can reach.
 
 **The wiring backlog is real, and it shrank rather than grew.** Phase 6's
 YAML, phase 16's redaction and metadata inspector all have menu rows now, the
@@ -81,6 +81,20 @@ console -- and `bp-files` refuses such a name outright, which closes the
 route sanitising never covered, the name a user types into a Save dialog.
 Two defects and one decision remain, each pinned by an `#[ignore]`d test
 naming it. `DECISIONS.md` has the evidence.
+
+**Phase 4 is started, and "opening a 2 GB file still loads 2 GB" is no longer
+true.** The open path classifies from metadata before a byte is read: an
+ordinary document opens as it always did, a large one opens and edits with
+its size in the status bar, and a huge one is refused in
+`Access::ReadOnlyBySize`'s own words rather than loaded whole. What is still
+built and unreachable is `LargeFile` itself — the chunked reader — because
+showing a document that is not in the rope needs `display_lines` driving the
+editor surface's scroll anchor, which is a view rather than a menu row. The
+refusal says "not yet" for that reason.
+
+Two whole-file reads also came off the open path. `bp_crypto::is_bpadx` needs
+six bytes and was being handed the entire file, which `bp_files::load` then
+read again.
 
 **Phase 19's harnesses are inside the gate now, which they were not.**
 `fuzz/` declares its own `[workspace]`, so every `--workspace` command in
