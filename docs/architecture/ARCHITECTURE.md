@@ -87,8 +87,11 @@ bachelorpad ──> bp-config
 
 Twenty of the twenty-three library crates are reachable from the shell. The
 three that are not — `bp-notebook`, `bp-research` and `bp-storage` — are the
-whole of the wiring backlog, and `project/WORK_QUEUE.md` says what each
-needs. This block is generated from the manifests rather than maintained by
+whole of the backlog, and `project/WORK_QUEUE.md` says what each needs.
+**Calling it a wiring backlog is no longer accurate**: each of the three is a
+*mode* rather than a menu row, and the last item that could honestly be
+described as wiring — the viewer for a document the rope does not hold — turned
+out to be a feature too. This block is generated from the manifests rather than maintained by
 hand; regenerate it after adding an edge, because a dependency diagram that
 has drifted is worse than none.
 
@@ -97,7 +100,15 @@ has drifted is worse than none.
 `bp-platform`, `bp-redaction`, `bp-research`, `bp-search`, `bp-secrets`,
 `bp-security`, `bp-semantic` and `bp-theme`. That is what keeps them cheap to
 test and impossible to entangle with the UI toolkit — and it is why all but
-230 of the workspace's 1,693 tests run without a window.
+274 of the workspace's 1,754 tests run without a window.
+
+`bp-platform` is on that list for its *real* dependencies and takes
+`bp-formats` as a **dev**-dependency, deliberately and one-directionally: it
+lets a test assert that every extension the crate offers to register is one
+`bp-formats` can identify, so the product never claims a file type it cannot
+open. A real dependency would tie the registration table to the parser's
+shape, and the two answer different questions about the same extension — "how
+do I read this" against "what does the OS call it".
 
 `bp-security` is the one that acquired dependants rather than dependencies:
 `bp-core`, `bp-clipboard`, `bp-storage`, `bp-history` and `bp-audit` all read
@@ -117,18 +128,28 @@ Two deliberate non-dependencies:
 ## Inside `bp-ui`
 
 The shell was one 2,675-line file and the single-writer bottleneck for every
-piece of wiring work. It is now five, split along seams the file already had
+piece of wiring work. It is now nine, split along seams the file already had
 as comment banners:
 
-| Module | Owns |
-| --- | --- |
-| `state.rs` | `AppState`: documents, workspace, saving, reloading, format detection, status labels, find matches |
-| `editor_view.rs` | The custom surface: key translation, caret placement, what to draw, `TAB_WIDTH` |
-| `dispatch.rs` | The menu-action match, and the dialogs its arms share |
-| `menus.rs` | Menu contents and the action-id map |
-| `lib.rs` | `run_with`, `refresh`, and the Slint callback wiring |
+| Module | Lines | Owns |
+| --- | ---: | --- |
+| `state.rs` | 6,282 | `AppState`: documents, workspace, saving, reloading, format detection, status labels, find matches, the security operations |
+| `menus.rs` | 2,662 | Menu contents and the action-id map |
+| `lib.rs` | 1,209 | `run_with`, `refresh`, and the Slint callback wiring |
+| `editor_view.rs` | 946 | The custom surface: key translation, caret placement, what to draw, and the scroll that serves both a rope and a file |
+| `dispatch.rs` | 799 | The menu-action match, and the dialogs its arms share |
+| `default_editor.rs` | 754 | File ▸ Set as Default Editor: the report, the consent dialog, the artefacts (ADR-0012) |
+| `viewer.rs` | 322 | A document the rope does not hold: where the reader is looking, and the window handed to the surface (ADR-0030) |
+| `audit.rs` | 254 | Which file the security history is, and what a person reading it sees (ADR-0024) |
+| `passphrase.rs` | 141 | What the one-field passphrase bar is currently asking, as a state machine |
 
-`ui/app.slint` took the same treatment for the same reason, and is now seven
+**`state.rs` is the next thing that wants splitting**, and it is now more than
+twice the size the whole shell was when the first split happened. The seams
+are already there as comment banners; the reason it has not been done is that
+every wiring item touches it, so the split has to happen between items rather
+than during one.
+
+`ui/app.slint` took the same treatment for the same reason, and is now ten
 files rather than one 1,189-line one:
 
 | File | Owns |
@@ -140,6 +161,8 @@ files rather than one 1,189-line one:
 | `find_bar.slint` | Find and replace, including `focus-query` |
 | `results_panel.slint` | Cross-file search results |
 | `status_bar.slint` | Both status rows |
+| `goto_bar.slint` | Go to Line |
+| `passphrase_bar.slint` | The one-field bar every passphrase in this product is typed into — a document's, and a signing key's |
 | `app.slint` | The window's properties and callbacks, the shortcut bindings, the menu bar and its popups, both editor views, the tab strip, and the layout |
 
 Three things stayed in `app.slint` deliberately, and they are what a wiring
@@ -175,16 +198,32 @@ the change ADR-0018 made, and it is what unblocked phase 2.
 | 100 KB | 55.8 µs | 0.3 µs |
 | 1 MB | 563.7 µs | 0.3 µs |
 
-There are two views over it:
+There are two views over it, and **one more surface that is over no rope at
+all**:
 
-| | `TextInput` (default) | `EditorSurface` (`--editor-view`) |
-| --- | --- | --- |
-| Caret and selection | Slint's, unreadable | `bp-editor`'s |
-| Undo | Slint's | `bp-editor`'s transactions |
-| Status bar | line count | **Ln/Col** |
-| Word wrap | yes | not yet |
-| Input-method composition | yes | not yet |
-| Lines drawn | all of them | only the visible ones |
+| | `TextInput` (default) | `EditorSurface` (`--editor-view`) | `EditorSurface` as viewer |
+| --- | --- | --- | --- |
+| Storage | the rope | the rope | **a file, read in chunks** |
+| Caret and selection | Slint's, unreadable | `bp-editor`'s | none — a caret is a position in a buffer |
+| Undo | Slint's | `bp-editor`'s transactions | nothing to undo |
+| Status bar | line count | **Ln/Col** | **which lines are on screen** |
+| Word wrap | yes | yes | no |
+| Input-method composition | yes | **no, and cannot be** | not applicable — it accepts no text |
+| Lines drawn | all of them | only the visible ones | only the visible ones |
+
+The third column is not a third view. It is the same `EditorSurface`, handed
+different rows, which is the whole argument for reusing it: the gutter, the
+fonts, the click-to-row arithmetic and the wheel stay one implementation, so a
+defect fixed in one is fixed in all. What decides which surface draws is one
+function with a name — `AppState::uses_custom_surface` — recomputed per
+refresh, because ADR-0030 makes the answer depend on the active document
+rather than on the flag. An `if` in the open path and another in `refresh` is
+how two views come to disagree about which sizes they claim.
+
+**`--editor-view` therefore means something precise**: it selects the surface
+that *edits* a document the rope holds. It is not a switch between two
+products, and there is no build in which a huge file opens for one user and is
+refused for another.
 
 `TextInput` owns its own text, caret and undo stack and exposes the caret only
 through a property marked *"internal, undocumented, only exposed for tests"*,
@@ -201,6 +240,19 @@ The rule the boundary runs on: **`bp-editor` deals in rows and visual columns,
 never pixels.** The toolkit knows its own font, so it converts. One place for
 the two to disagree instead of two.
 
-Word wrap is the parity item with real depth: it makes a visual line differ
-from a document line, which every function in `bp_editor::view` currently
-assumes away.
+There is a second rule the tab defect taught, and it is the one a test in this
+repository cannot enforce: **the string handed to the toolkit is not the string
+the arithmetic indexes.** `bp_editor::view` computes columns as though a tab
+reaches the next stop, and Slint draws `\t` as a single glyph — so `text` stays
+raw for the arithmetic and `display_text` is what the surface gets. Anything
+else whose drawn width differs from its character count has the same shape.
+
+**Parity is settled and not in the custom view's favour.** Word wrap is done —
+a document line can occupy several visual rows, Up and Down move by row, and
+scrolling anchors to a line *and* a row within it. Input-method composition
+cannot be done at all on Slint 1.17.1: `FocusScope` returns
+`EventResult::Reject` for `UpdateComposition` and `CommitComposition` in both
+its handlers and exposes no callback for either, and `TextInput` is the only
+item in the toolkit that consumes them. Without it CJK entry does not work, so
+the default stays `TextInput` and the flag stays opt-in. Revisit on a Slint
+upgrade; do not spend an afternoon on it before checking that changed.

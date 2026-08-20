@@ -56,7 +56,7 @@ cargo run --release -- --editor-view   # with the custom editor view (ADR-0018)
 ./scripts/Measure-Startup.ps1  # startup and idle memory vs specs.md §22
 ```
 
-## Current state (2026-08-20)
+## Current state (2026-08-21)
 
 **24 crates, 1,754 tests, green on Windows and Linux.** The app opens, edits and
 saves atomically, and does rather more than that:
@@ -88,7 +88,148 @@ environment (`BACHELORPAD_*`), a TOML file
 defaults. Broken config warns and falls back; it never stops the editor
 starting.
 
+
 ### Known gaps
+
+Things that do not work, with the reason. Where the reason is "Slint
+1.17.1", it was checked in the toolkit's source rather than assumed — the
+citation is in `project/WORK_QUEUE.md`, and the point of it is that nobody
+should spend an afternoon on these before checking the version changed.
+
+- **Input-method composition does not work under `--editor-view`, and cannot
+  on this Slint.** `FocusScope` rejects `UpdateComposition` and
+  `CommitComposition` in both its handlers and exposes no callback for either;
+  `TextInput` is the only item in the toolkit that consumes them. Without it
+  CJK entry does not work at all, so the default stays `TextInput`. **This was
+  the second of two parity conditions, and it is now a blocker rather than a
+  task** -- see `project/WORK_QUEUE.md`.
+
+- **Drag and drop to open does not work, and cannot yet.** specs §4 wants it.
+  On Slint 1.17.1 the winit backend has no file-drop plumbing and
+  `DataTransfer` carries only plain text or an image, so there is no channel a
+  dropped file's path could arrive through. Blocked on Slint, not on effort.
+
+- **Five features are enabled only under `--editor-view`**: duplicate and move
+  line, date and time insertion, and go to line. All need the caret
+  `TextInput` does not expose. [MENU_MAP.md](docs/product/MENU_MAP.md) marks
+  which rows those are.
+
+- **Three crates are built and unreachable, and this list is counted rather
+  than remembered.** `bp-research`, `bp-notebook` and `bp-storage` have zero
+  reverse dependencies anywhere in the application: nothing in `bp-ui`, in
+  `apps/bachelorpad`, or in any other `bp-*` crate names them. `bp-notebook`
+  is reached only by the fuzz harness. That is 9,556 lines defended by 241
+  unit tests no user can reach, and it is still the largest thing standing
+  between this repository and a product.
+
+  | Crate | Lines | Tests | Reached by |
+  | --- | --- | --- | --- |
+  | `bp-research` | 5,208 | 161 | nothing |
+  | `bp-notebook` | 3,627 | 59 | the fuzz harness only |
+  | `bp-storage` | 721 | 21 | nothing, pending a design pass (ADR-0019) |
+
+  **`bp-buffer`'s large-file engine came off this list**, and it was the
+  largest thing on it. `SizeClass` and `Access` decide how every document is
+  opened; `LargeFile` — the chunked reader — now has the view it was waiting
+  for. `bp-audit` came off when Security ▸ Security History shipped, and
+  `bp-integrity`, `bp-platform` and `bp-redaction` when Verify Signature, Set
+  as Default Editor, redaction and the metadata inspector got rows.
+
+  What is left is genuinely three modes rather than three menus, which is why
+  it is what is left.
+
+  Two things also stopped happening on the open path: every open used to read
+  the whole file to hand six bytes to `bp_crypto::is_bpadx`, and `load` then
+  read it again. A 2 GB document cost 4 GB of I/O before anything reached the
+  screen.
+
+- **`bp-storage` is still not called by the application.** That is now a
+  product decision rather than a security one: ADR-0020 permits recording a
+  summary under Standard, and `record_document` honours the policy. What
+  remains is ADR-0019's judgement plus a design pass.
+
+- **A plaintext document under Private or Confidential gets no crash
+  recovery.** The journal for those profiles is sealed with the document's
+  own passphrase ([ADR-0022](docs/decisions/ADR-0022.md)), so a document
+  that is not encrypted has no key to use. The status bar says what fixes
+  it: encrypt the document.
+
+- **Recovery for an encrypted document is invisible until you open it.** Its
+  journal is filed under a digest of its path and can only be read once you
+  have unlocked the document, so nothing prompts at startup — deliberately.
+
+- **Used in anger twice, and it paid both times.** The first pass found a menu
+  bar where twelve of fourteen menus swallowed clicks, and Save As defaulting
+  to the process working directory -- which wrote real documents into a git
+  checkout. The second, on 2026-08-20, found a tab drawn as a single glyph
+  while every column in `bp-editor` was computed as though it reached the next
+  tab stop, so the caret on any tab-bearing line sat where the character was
+  not. Both are fixed.
+
+  **Both lived in the same seam, and it is the one a test in this repository
+  cannot see: what a toolkit does with the string it is handed.** 1,754 tests
+  will not find the third.
+
+  Still unclicked, in the order they now matter: **the wheel** and **a window
+  resize** -- both inherited by the huge-file viewer, which does nothing but
+  scroll, so a wheel going the wrong way there is not a papercut but the
+  feature being broken; **reading an enormous document**, which has been
+  rendered and measured but not read; **signing one**, which is new and has
+  never been clicked; drag-to-select; and **File ▸ Set as Default Editor**,
+  the one row that changes state outside this application.
+  [NEXT_SESSION.md](project/NEXT_SESSION.md) has the checklist and a four-line
+  recipe for a 192 MiB fixture.
+
+### Recently closed, and what each one cost to learn
+
+Kept rather than deleted, because every one of these went stale the same
+way — a fix landing without the record moving — and because the lesson in each
+is worth more than the fact.
+
+- **A 2 GB file opens, and costs 0.8 MiB.** The last piece of phase 4
+  ([ADR-0030](docs/decisions/ADR-0030.md)). A document past the huge threshold
+  is served from disk as you scroll: arrow keys, the page keys, Ctrl+Home and
+  the wheel move the window, the gutter numbers the *document* rather than the
+  screen, and the status bar says which lines are on screen. Measured rather
+  than asserted — a few lines of text peaked at 31.3 MiB and a 192 MiB log at
+  32.1 MiB.
+
+  It draws in the custom surface in **every** build, not only under
+  `--editor-view`. `TextInput` owns its own text and cannot be handed a window
+  of a file it does not have; the flag stays a statement about which surface
+  *edits* a document the rope holds, and the one reason it is opt-in —
+  input-method composition — has nothing to say about a surface that accepts
+  no text.
+
+  Save, Save As, Save a Copy and Reload grey with the reason. That is not
+  politeness: `text_of` such a document is the empty string, so a Ctrl+S that
+  merely did nothing special would write an empty file over two gigabytes and
+  report success. Four paths refuse by name, and a test asserts the file's size
+  is unchanged rather than trusting the return value.
+
+  **Two things are deliberately not built**, and each is a refusal with a
+  reason rather than a gap: Ctrl+End, and a total line count. Both need the
+  whole file indexed, which for these documents means reading two gigabytes to
+  answer one question while the window is frozen.
+
+- **Signing works, and the key is sealed rather than protected.**
+  [ADR-0031](docs/decisions/ADR-0031.md). ADR-0026 had measured a hole it
+  could not close: `0600` on Linux, nothing at all on Windows, where narrowing
+  a DACL needs Win32 and `unsafe` that `bp-platform` forbids — so
+  `is_confirmed_private()` honestly reported "unknown" on half the supported
+  platforms. Putting the key inside the envelope encrypted documents already
+  use protects the *contents* instead, identically on both platforms, and
+  designs nothing new.
+
+  **One ceremony, not one per signature.** The first signature creates the
+  key, because what was asked for was a signature; the second finds it and
+  asks only to unlock it. The row says which the click will do before you
+  click it.
+
+  It still greys, for two reasons that are not about key storage: a signature
+  is over the bytes **on disk**, so a document that has never been saved has
+  nothing to sign, and one with unsaved changes would get a valid signature
+  over the *previous* version — worse than a refusal, because it verifies.
 
 - **Somebody has now typed into the custom editor view, and it works.**
   `--editor-view` gives Ln/Col, our own undo, and a view that draws only the
@@ -105,26 +246,12 @@ starting.
   `VisualRow::display_text` close it -- the row keeps its characters for the
   arithmetic, and the toolkit is handed the appearance.
 
-- **Input-method composition does not work under `--editor-view`, and cannot
-  on this Slint.** `FocusScope` rejects `UpdateComposition` and
-  `CommitComposition` in both its handlers and exposes no callback for either;
-  `TextInput` is the only item in the toolkit that consumes them. Without it
-  CJK entry does not work at all, so the default stays `TextInput`. **This was
-  the second of two parity conditions, and it is now a blocker rather than a
-  task** -- see `project/WORK_QUEUE.md`.
 - **Word wrap now works under `--editor-view`.** A document line can occupy
   several visual rows: `bp_editor::wrap` decides where they break, the view
   maps rows to characters, Up and Down move by row rather than by line, and
   scrolling is anchored to a line *and* a row within it so a line taller than
   the window can be scrolled through.
-- **Drag and drop to open does not work, and cannot yet.** specs §4 wants it.
-  On Slint 1.17.1 the winit backend has no file-drop plumbing and
-  `DataTransfer` carries only plain text or an image, so there is no channel a
-  dropped file's path could arrive through. Blocked on Slint, not on effort.
-- **Five features are enabled only under `--editor-view`**: duplicate and move
-  line, date and time insertion, and go to line. All need the caret
-  `TextInput` does not expose. [MENU_MAP.md](docs/product/MENU_MAP.md) marks
-  which rows those are.
+
 - **The crates are tested where they meet, and that is where the defects
   are.** Eleven files of cross-crate tests join load/rope/atomic save, the
   `.bpadx` envelope over a real file, the security profile against all three
@@ -132,8 +259,9 @@ starting.
   the file, search against the buffer, journal recovery, the notebook through
   the file layer, the audit log, redaction, signing, and the filename grammar
   against the platform's own rules. Between them they have found seven
-  defects that no unit test did. **Five are fixed.** The most serious is the
-  newest: `bp-naming` asked whether a *whole* sanitised title was a Windows
+  defects that no unit test did. **All seven are fixed**, and there is no
+  `#[ignore]`d test left anywhere in the tree. The most serious was
+  `bp-naming`, which asked whether a *whole* sanitised title was a Windows
   device name, while Win32 asks only about the stem before the first dot --
   so `con.txt`, `aux.log` and `NUL.dat` passed untouched, and on Windows
   saving to one of those writes **the device**, reports success, and the
@@ -165,100 +293,6 @@ starting.
   `bp-buffer`'s own helpers. Find-in-files and the caret now agree on every
   document this product can save, and the status bar reports one line count
   rather than a different one per editor view.
-
-- **Signing works, and the key is sealed rather than protected.**
-  [ADR-0031](docs/decisions/ADR-0031.md). ADR-0026 had measured a hole it
-  could not close: `0600` on Linux, nothing at all on Windows, where narrowing
-  a DACL needs Win32 and `unsafe` that `bp-platform` forbids — so
-  `is_confirmed_private()` honestly reported "unknown" on half the supported
-  platforms. Putting the key inside the envelope encrypted documents already
-  use protects the *contents* instead, identically on both platforms, and
-  designs nothing new.
-
-  **One ceremony, not one per signature.** The first signature creates the
-  key, because what was asked for was a signature; the second finds it and
-  asks only to unlock it. The row says which the click will do before you
-  click it.
-
-  It still greys, for two reasons that are not about key storage: a signature
-  is over the bytes **on disk**, so a document that has never been saved has
-  nothing to sign, and one with unsaved changes would get a valid signature
-  over the *previous* version — worse than a refusal, because it verifies.
-
-- **A 2 GB file opens, and costs 0.8 MiB.** The last piece of phase 4
-  ([ADR-0030](docs/decisions/ADR-0030.md)). A document past the huge threshold
-  is served from disk as you scroll: arrow keys, the page keys, Ctrl+Home and
-  the wheel move the window, the gutter numbers the *document* rather than the
-  screen, and the status bar says which lines are on screen. Measured rather
-  than asserted — a few lines of text peaked at 31.3 MiB and a 192 MiB log at
-  32.1 MiB.
-
-  It draws in the custom surface in **every** build, not only under
-  `--editor-view`. `TextInput` owns its own text and cannot be handed a window
-  of a file it does not have; the flag stays a statement about which surface
-  *edits* a document the rope holds, and the one reason it is opt-in —
-  input-method composition — has nothing to say about a surface that accepts
-  no text.
-
-  Save, Save As, Save a Copy and Reload grey with the reason. That is not
-  politeness: `text_of` such a document is the empty string, so a Ctrl+S that
-  merely did nothing special would write an empty file over two gigabytes and
-  report success. Four paths refuse by name, and a test asserts the file's size
-  is unchanged rather than trusting the return value.
-
-  **Two things are deliberately not built**, and each is a refusal with a
-  reason rather than a gap: Ctrl+End, and a total line count. Both need the
-  whole file indexed, which for these documents means reading two gigabytes to
-  answer one question while the window is frozen.
-
-- **Three crates are built and unreachable, and this list is counted rather
-  than remembered.** `bp-research`, `bp-notebook` and `bp-storage` have zero
-  reverse dependencies anywhere in the application: nothing in `bp-ui`, in
-  `apps/bachelorpad`, or in any other `bp-*` crate names them. `bp-notebook`
-  is reached only by the fuzz harness. That is nine and a half thousand lines
-  defended by 237 unit tests no user can reach, and it is still the largest
-  thing standing between this repository and a product.
-
-  | Crate | Lines | Tests | Reached by |
-  | --- | --- | --- | --- |
-  | `bp-research` | 5,208 | 161 | nothing |
-  | `bp-notebook` | 3,514 | 55 | the fuzz harness only |
-  | `bp-storage` | 721 | 21 | nothing, pending a design pass (ADR-0019) |
-
-  **`bp-buffer`'s large-file engine came off this list**, and it was the
-  largest thing on it. `SizeClass` and `Access` decide how every document is
-  opened; `LargeFile` — the chunked reader — now has the view it was waiting
-  for. `bp-audit` came off when Security ▸ Security History shipped, and
-  `bp-integrity`, `bp-platform` and `bp-redaction` when Verify Signature, Set
-  as Default Editor, redaction and the metadata inspector got rows.
-
-  What is left is genuinely three modes rather than three menus, which is why
-  it is what is left.
-
-  Two things also stopped happening on the open path: every open used to read
-  the whole file to hand six bytes to `bp_crypto::is_bpadx`, and `load` then
-  read it again. A 2 GB document cost 4 GB of I/O before anything reached the
-  screen.
-
-- **Used in anger once, and it paid.** A person drove both editor views on
-  2026-08-20 and the pass found a defect 177 tests could not: a tab was drawn
-  as a single glyph while every column in `bp-editor` was computed as though
-  it reached the next tab stop, so the caret on any tab-bearing line sat
-  where the character was not. Fixed. What is still unclicked is the wheel,
-  drag-to-select, resize, and File ▸ Set as Default Editor -- the one row
-  that changes state outside this application.
-- **`bp-storage` is still not called by the application.** That is now a
-  product decision rather than a security one: ADR-0020 permits recording a
-  summary under Standard, and `record_document` honours the policy. What
-  remains is ADR-0019's judgement plus a design pass.
-- **A plaintext document under Private or Confidential gets no crash
-  recovery.** The journal for those profiles is sealed with the document's
-  own passphrase ([ADR-0022](docs/decisions/ADR-0022.md)), so a document
-  that is not encrypted has no key to use. The status bar says what fixes
-  it: encrypt the document.
-- **Recovery for an encrypted document is invisible until you open it.** Its
-  journal is filed under a digest of its path and can only be read once you
-  have unlocked the document, so nothing prompts at startup — deliberately.
 
 [ROADMAP.md](ROADMAP.md) has per-phase status;
 [MENU_MAP.md](docs/product/MENU_MAP.md) says which menu rows are real;

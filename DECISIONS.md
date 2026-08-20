@@ -38,19 +38,25 @@ Adding a decision means adding both.
 ` or `
 `; the rope drops `unicode_lines` | Accepted | [ADR-0029](docs/decisions/ADR-0029.md) |
 | BP-ADR-0030 | 2026-08-20 | A huge document opens in the custom surface, read-only, in every build | Accepted, shipped | [ADR-0030](docs/decisions/ADR-0030.md) |
-| BP-ADR-0031 | 2026-08-20 | A signing key lives in a sealed `.bpadx` key file, not a permission-protected one | Accepted | [ADR-0031](docs/decisions/ADR-0031.md) |
-| BP-ADR-0032 | 2026-08-20 | The application id is reverse-DNS, and is not the directory name | Accepted | [ADR-0032](docs/decisions/ADR-0032.md) |
+| BP-ADR-0031 | 2026-08-20 | A signing key lives in a sealed `.bpadx` key file, not a permission-protected one | Accepted, shipped | [ADR-0031](docs/decisions/ADR-0031.md) |
+| BP-ADR-0032 | 2026-08-20 | The application id is reverse-DNS, and is not the directory name | Accepted, shipped | [ADR-0032](docs/decisions/ADR-0032.md) |
 
 ## Decisions needed before the work they block
 
-- ~~**Where a signing key lives**~~ (phase 16). **Answered: ADR-0031.** The
-  key is stored *sealed*, in the `.bpadx` envelope ADR-0021 already ships,
-  under a passphrase the user chooses -- contents protected rather than
-  permissions. That closes the asymmetry ADR-0026 measured and could not fix:
-  `0600` on Linux and nothing on Windows, where narrowing a DACL needs Win32
-  and `unsafe`. The platform keyring stays specs.md section 15's third route
-  and becomes a second *source of the passphrase* rather than a second key
-  format. Sign Document is now blocked on the work rather than on a decision.
+- ~~**Where a signing key lives**~~ (phase 16). **Answered and built:
+  ADR-0031.** The key is stored *sealed*, in the `.bpadx` envelope ADR-0021
+  already ships, under a passphrase the user chooses -- contents protected
+  rather than permissions. That closes the asymmetry ADR-0026 measured and
+  could not fix: `0600` on Linux and nothing on Windows, where narrowing a
+  DACL needs Win32 and `unsafe`. The platform keyring stays specs.md section
+  15's third route and becomes a second *source of the passphrase* rather than
+  a second key format. Security ▸ Sign Document acts.
+
+  **It was the last row greyed for a missing decision rather than a missing
+  prerequisite**, and it is worth recording how long that took: three
+  sessions, with the reason in its own label the whole time. Nothing about the
+  work was hard once the question was answered. That is the argument
+  `project/DECISIONS_NEEDED.md` exists to make.
 - **What may leave the machine** (phase 8 layer three, phase 10). Generative
   providers and embeddings both imply sending document content somewhere.
   ADR-0006 keeps them optional; ADR-0011 governs what is permitted. Neither
@@ -191,8 +197,41 @@ Adding a decision means adding both.
   view reports a line count rather than Ln/Col, so there is no column readout
   to disagree with the glyphs. It becomes one the moment anything
   column-shaped is offered there.
-- **Most of the product has not been used.** 542 tests cover the pieces in
-  isolation. One manual pass found two defects no test caught: a menu bar
-  where twelve of fourteen menus swallowed clicks, and Save As defaulting to
-  the process working directory, which wrote real documents into a git
-  checkout. Integrated behaviour needs exercising, not more unit tests.
+- **Most of the product has still not been used, and the count keeps making
+  the same point.** 1,754 tests cover the pieces, and every manual pass so far
+  has found something none of them could. The first found a menu bar where
+  twelve of fourteen menus swallowed clicks, and Save As defaulting to the
+  process working directory — which wrote real documents into a git checkout.
+  The second found a tab drawn as one glyph while every column was computed as
+  though it reached the next stop, so the caret on any tab-bearing line sat
+  where the character was not, and the error grew with every tab further
+  along.
+
+  **Both defects lived in the same seam, and it is the seam a test in this
+  repository cannot see: what a toolkit does with what it is handed.** More
+  unit tests will not find the third one.
+
+  What is unchecked now is listed in `project/NEXT_SESSION.md`. The wheel and
+  the resize moved up that list when the huge-file viewer shipped, because
+  scrolling is the whole of what a viewer does.
+
+- **A signing key now exists on the machine of anyone who signs, and
+  `cargo test` nearly put one on the developer''s.** It did, once, during the
+  change that added the feature — a real Ed25519 private key in
+  `%LOCALAPPDATA%`, written by a test run before the guard landed. Deleted,
+  and the guard is `AppState`''s `signing_key` field.
+
+  **This is the third time this crate has needed that fix**, after the
+  security history (which wrote a live log into `%APPDATA%`) and the recovery
+  journal. The shape is always the same: a function that reads the real
+  profile directory, called from `AppState::new()` or from an operation any
+  test can trigger. The fix is a field rather than a global — and here a
+  `cfg(test)` redirect on the *function* would not have been enough, because
+  "does a key exist" and the signing that follows must agree on one path.
+
+  Worth a gate stage? Measured rather than assumed, and the answer is not
+  obvious: a check that no test writes outside the temp directory would want
+  to run the suite under a redirected `%LOCALAPPDATA%`, which is a stage that
+  passes for the wrong reason if the redirection fails. Recorded here instead,
+  because three occurrences is a pattern and the fourth will not announce
+  itself either.

@@ -2,7 +2,7 @@
 
 This is not an MVP roadmap. Each phase contributes to the full v1 target.
 
-Status as of **2026-08-20**. Three words, meaning three different things:
+Status as of **2026-08-21**. Three words, meaning three different things:
 
 - **Done** — the phase's work is finished.
 - **Started** — a real, tested slice exists *and is reachable from the
@@ -52,8 +52,8 @@ Phases 1, 3 and 4 are complete. Phases 2, 5, 6, 7, 8, 11, 14, 15, 16, 17 and
 18 each have a tested slice reachable in the product — phase 18 joined them
 when File ▸ Set as Default Editor shipped. Phases 9, 12 and 13 are built and
 have no way in: `bp-research`, `bp-notebook` and `bp-storage` have zero
-reverse dependencies anywhere in the application, which is nine and a half
-thousand lines and 237 unit tests behind code no user can reach.
+reverse dependencies anywhere in the application, which is 9,556 lines and
+241 unit tests behind code no user can reach.
 
 **The wiring backlog shrank to three modes.** Phase 6's YAML, phase 16's
 redaction and metadata inspector all have menu rows, the audit log's sealed
@@ -68,7 +68,7 @@ What is left is `bp-notebook`, `bp-research` and `bp-storage`, and none of the
 three is a menu row: each is a *mode*. That is why they are what is left, and
 it is why "wire it up" stopped being the right description of the work.
 
-**Cross-crate tests have found seven defects, and five are fixed.** Until the
+**Cross-crate tests found seven defects, and all seven are fixed.** Until the
 fourth session every test in the repository tested one crate. Eleven files of
 cross-crate tests found that `bp-search` and `bp-buffer` disagree about what a
 line is, that `bp-formats` identified a pretty-printed JSON array as JSON
@@ -82,8 +82,12 @@ the stem before the first dot, the way Win32 does, so `con.txt` becomes
 `con File.txt` rather than a save that reports success while writing to the
 console -- and `bp-files` refuses such a name outright, which closes the
 route sanitising never covered, the name a user types into a Save dialog.
-Two defects and one decision remain, each pinned by an `#[ignore]`d test
-naming it. `DECISIONS.md` has the evidence.
+The last of the seven was a decision rather than a defect and is now
+[ADR-0029](docs/decisions/ADR-0029.md): a line break in this product is `
+`
+or `
+` and nothing else. **There is no `#[ignore]`d test left anywhere in
+the tree.** `DECISIONS.md` has the evidence for each.
 
 **Phase 4 is done.** The open path classifies from metadata before a byte is
 read, and all three classes now have somewhere to go: an ordinary document
