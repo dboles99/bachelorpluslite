@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use bp_naming::SemanticName;
 use bp_platform::{
     Platform,
-    paths::{PathProblem, components, file_name_problems},
+    paths::{PathProblem, file_name, file_name_problems},
 };
 use tempfile::NamedTempFile;
 use thiserror::Error;
@@ -239,19 +239,20 @@ pub fn atomic_write(
 /// the write, which is a loud failure this function would only be duplicating.
 /// This one ends in silence.
 fn refuse_device_name(platform: Platform, path: &Path) -> Result<(), SaveError> {
-    // Deliberately not `Path::file_name`. `std::path` splits by the rules of
-    // the platform it was *compiled* for, so on the Linux leg it reads
-    // `C:\Users\me\con.txt` as one long file name, finds no device, and would
-    // leave the Windows rule untested by half of CI while appearing to pass.
-    // `bp_platform::paths::components` takes the platform as a parameter, so
-    // the split and the judgement are answering about the same platform.
+    // `bp_platform::paths::file_name` and deliberately not
+    // `Path::file_name`, which splits by the rules of the platform this
+    // binary was *compiled* for: on the Linux leg that reads
+    // `C:\Users\me\con.txt` as one long file name, finds no device, and
+    // leaves the Windows rule untested by half of CI while appearing to
+    // pass. It is the same function with the platform made explicit, so the
+    // split and the judgement answer about the same platform.
     //
     // Lossy rather than `to_str`, so a name Windows accepts but Rust cannot
     // represent as UTF-8 is still checked. Replacement characters can only be
     // added, never removed, so a lossy name that reads as a device is one
     // that was a device.
     let path_text = path.to_string_lossy();
-    let Some(name) = components(platform, &path_text).last() else {
+    let Some(name) = file_name(platform, &path_text) else {
         return Ok(());
     };
 

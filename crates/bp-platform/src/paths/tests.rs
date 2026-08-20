@@ -436,6 +436,68 @@ fn a_drive_letters_colon_is_not_reported_as_a_forbidden_character() {
     assert!(path_problems(Platform::Windows, r"\\server\share\notes.txt").is_empty());
 }
 
+// --- file_name, and the trap it exists for ---------------------------------
+
+#[test]
+fn the_file_name_is_the_last_component_on_each_platform() {
+    assert_eq!(
+        file_name(Platform::Windows, r"C:\Users\me\notes.txt"),
+        Some("notes.txt")
+    );
+    assert_eq!(
+        file_name(Platform::Windows, "C:/Users/me/notes.txt"),
+        Some("notes.txt")
+    );
+    assert_eq!(
+        file_name(Platform::Linux, "/home/me/notes.txt"),
+        Some("notes.txt")
+    );
+    assert_eq!(file_name(Platform::Windows, "notes.txt"), Some("notes.txt"));
+}
+
+#[test]
+fn a_backslash_path_is_one_name_on_linux_and_several_on_windows() {
+    // The whole reason this function exists. `std::path::Path::file_name`
+    // gives the Windows answer on a Windows build and the Linux answer on a
+    // Linux build -- so a rule that takes a `Platform` and then calls it is
+    // asking about the host whatever it was passed, and half of CI silently
+    // stops testing the other platform's rule.
+    let path = r"C:\Users\me\con.txt";
+    assert_eq!(file_name(Platform::Windows, path), Some("con.txt"));
+    assert_eq!(
+        file_name(Platform::Linux, path),
+        Some(r"C:\Users\me\con.txt")
+    );
+}
+
+#[test]
+fn a_trailing_separator_does_not_hide_the_name() {
+    assert_eq!(file_name(Platform::Linux, "/home/me/notes/"), Some("notes"));
+    assert_eq!(file_name(Platform::Windows, r"C:\docs\"), Some("docs"));
+}
+
+#[test]
+fn a_path_with_no_name_to_give_yields_nothing() {
+    // Matching `std::path::Path::file_name` exactly, so this is a drop-in
+    // replacement and not a second dialect somebody has to learn.
+    assert_eq!(file_name(Platform::Linux, "/"), None);
+    assert_eq!(file_name(Platform::Linux, ""), None);
+    assert_eq!(file_name(Platform::Linux, "."), None);
+    assert_eq!(file_name(Platform::Linux, ".."), None);
+    assert_eq!(file_name(Platform::Linux, "a/b/.."), None);
+    // A drive with nothing after it is a prefix, not a name.
+    assert_eq!(file_name(Platform::Windows, "C:"), None);
+}
+
+#[test]
+fn a_dotfile_is_a_name_even_though_a_bare_dot_is_not() {
+    assert_eq!(
+        file_name(Platform::Linux, "/home/me/.bashrc"),
+        Some(".bashrc")
+    );
+    assert_eq!(file_name(Platform::Linux, "..."), Some("..."));
+}
+
 // --- absoluteness and joining ----------------------------------------------
 
 #[test]

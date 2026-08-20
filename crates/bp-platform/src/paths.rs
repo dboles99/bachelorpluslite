@@ -583,6 +583,40 @@ pub fn join(platform: Platform, base: &str, parts: &[&str]) -> String {
     out
 }
 
+/// The final component of `path`, split the way `platform` splits.
+///
+/// The reading counterpart to [`join`], and it exists for a defect rather
+/// than for symmetry. [`std::path::Path::file_name`] splits by the rules of
+/// the platform the binary was **compiled** for, so a function that takes
+/// [`Platform`] as a parameter and then calls it is only asking about the
+/// host however it was called -- and on the Linux leg of CI
+/// `C:\Users\me\con.txt` is one long file name containing no device, so a
+/// Windows rule written that way passes by never being evaluated. That is
+/// exactly how a device-name check reached `main` here with the Windows leg
+/// green: the judgement took a platform and the split did not.
+///
+/// **If a function takes a [`Platform`], every path operation inside it must
+/// take the same one.**
+///
+/// The semantics match [`std::path::Path::file_name`] deliberately, so this
+/// is a drop-in replacement rather than a second dialect: a trailing
+/// separator is ignored, and a path whose last component is `.` or `..`
+/// yields `None`, because neither is a name.
+///
+/// ```
+/// use bp_platform::{Platform, paths::file_name};
+///
+/// // A backslash path is several components on Windows and one on Linux.
+/// let p = r"C:\Users\me\notes.txt";
+/// assert_eq!(file_name(Platform::Windows, p), Some("notes.txt"));
+/// assert_eq!(file_name(Platform::Linux, p), Some(r"C:\Users\me\notes.txt"));
+/// ```
+#[must_use]
+pub fn file_name(platform: Platform, path: &str) -> Option<&str> {
+    let last = components(platform, path).last()?;
+    (last != "." && last != "..").then_some(last)
+}
+
 // --- Windows path prefixes -------------------------------------------------
 
 /// Whether `path` already carries the `\\?\` extended-length prefix.
