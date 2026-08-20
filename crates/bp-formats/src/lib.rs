@@ -39,8 +39,16 @@ pub enum Profile {
 }
 
 impl Profile {
-    /// Whether the Data menu's operations apply.
-    pub const fn is_data(self) -> bool {
+    /// Whether this profile groups formats that hold *data* rather than prose,
+    /// source or a log.
+    ///
+    /// A statement about the class and nothing more. It deliberately does not
+    /// answer "may the Data menu act on this document" — that is
+    /// [`Format::has_data_operations`], and the two are different questions
+    /// because [`Format::Ini`] and [`Format::Xml`] are structured data that
+    /// nothing in this product can parse. Asking this one and enabling a menu
+    /// on the answer gives a menu whose every row fails.
+    pub const fn is_data_class(self) -> bool {
         matches!(self, Self::StructuredData | Self::TabularData)
     }
 }
@@ -72,6 +80,56 @@ pub enum Format {
 }
 
 impl Format {
+    /// Every format, so that a test or a diagnostic covers all of them
+    /// without a list that goes stale.
+    ///
+    /// The same device as `DirKind::ALL` and `Platform::ALL`, and it earns its
+    /// keep here for a specific reason: [`Self::has_data_operations`] is a
+    /// `match` that a new variant would silently fall out of, and a test
+    /// walking this array against the Data menu is what notices.
+    pub const ALL: &'static [Format] = &[
+        Format::PlainText,
+        Format::Markdown,
+        Format::Json,
+        Format::JsonLines,
+        Format::Yaml,
+        Format::Toml,
+        Format::Ini,
+        Format::Xml,
+        Format::Html,
+        Format::Css,
+        Format::Csv,
+        Format::Tsv,
+        Format::Rust,
+        Format::Python,
+        Format::PowerShell,
+        Format::Shell,
+        Format::Sql,
+        Format::JavaScript,
+        Format::TypeScript,
+        Format::Log,
+        Format::Notebook,
+    ];
+
+    /// Whether the Data menu has anything to offer for this format.
+    ///
+    /// **A question about this format, not about its profile**, and that is
+    /// the whole point of it existing. `Profile::StructuredData` holds six
+    /// formats and `bp-data` parses four of them: INI and XML are structured
+    /// data by any reasonable reading and there is no parser for either, so a
+    /// menu gated on the profile would offer Validate, Format and Minify on
+    /// an `.ini` file and fail on all three.
+    ///
+    /// Kept in step with `bp_ui::menus::data` by a test that walks
+    /// [`Self::ALL`] and compares the two, because the failure mode is a new
+    /// format added to one and not the other.
+    pub const fn has_data_operations(self) -> bool {
+        matches!(
+            self,
+            Self::Json | Self::JsonLines | Self::Yaml | Self::Toml | Self::Csv | Self::Tsv
+        )
+    }
+
     /// Short label for the status bar.
     pub const fn label(self) -> &'static str {
         match self {
@@ -678,8 +736,59 @@ mod tests {
         assert_eq!(Format::Csv.profile(), Profile::TabularData);
         assert_eq!(Format::Rust.profile(), Profile::SourceCode);
         assert_eq!(Format::Notebook.profile(), Profile::Notebook);
-        assert!(Format::Toml.profile().is_data());
-        assert!(!Format::Markdown.profile().is_data());
+        assert!(Format::Toml.profile().is_data_class());
+        assert!(!Format::Markdown.profile().is_data_class());
+    }
+
+    #[test]
+    fn every_variant_is_in_all() {
+        // `ALL` is a hand-written list, so the thing that could go wrong with
+        // it is a variant added to the enum and not to it. Nothing in Rust
+        // catches that, so this does -- by round-tripping each entry through
+        // the one `match` that has to name every variant.
+        assert_eq!(
+            Format::ALL.len(),
+            Format::ALL
+                .iter()
+                .map(|f| f.default_extension())
+                .collect::<std::collections::BTreeSet<_>>()
+                .len(),
+            "two entries in ALL share a default extension, so one is a duplicate"
+        );
+        for &format in Format::ALL {
+            assert_eq!(
+                Format::from_extension(format.default_extension()),
+                Some(format),
+                "{} does not come back from its own default extension",
+                format.label()
+            );
+        }
+    }
+
+    #[test]
+    fn a_format_with_data_operations_is_always_in_a_data_class() {
+        // One direction holds and the other deliberately does not, which is
+        // the entire reason both predicates exist. Nothing outside the data
+        // classes may claim data operations; INI and XML are inside one and
+        // have none.
+        for &format in Format::ALL {
+            if format.has_data_operations() {
+                assert!(
+                    format.profile().is_data_class(),
+                    "{} offers data operations from outside a data profile",
+                    format.label()
+                );
+            }
+        }
+        for format in [Format::Ini, Format::Xml] {
+            assert!(format.profile().is_data_class());
+            assert!(
+                !format.has_data_operations(),
+                "{} has no parser in bp-data; a menu gated on it fails on \
+                 every row",
+                format.label()
+            );
+        }
     }
 
     #[test]

@@ -287,21 +287,29 @@ pub fn config_path() -> Option<PathBuf> {
 /// and the second answer at the same time.
 #[must_use]
 pub fn config_path_in(platform: Platform, env: &EnvSnapshot) -> Option<PathBuf> {
-    beside_the_config_file(platform, env, FILE_NAME)
+    in_product_directory(platform, DirKind::Config, env, FILE_NAME)
 }
 
-/// A named file directly inside the product's configuration directory.
+/// A named file directly inside one of the product's four directories.
 ///
-/// Shared with [`recent`] so that "beside `config.toml`" is one piece of code
-/// rather than a promise two modules each keep separately.
+/// Shared with [`recent`] so that "which of the four, and how the path is
+/// assembled" is one piece of code rather than a promise two modules each
+/// keep separately. The *kind* is the caller's argument, because that is the
+/// part that differs and the part that matters: settings roam to every
+/// machine the user signs into, state does not.
 ///
 /// The join goes through [`bp_platform::paths::join`] rather than
 /// [`PathBuf::join`] because `PathBuf` uses the *host* separator: assembling
 /// the Windows answer on Linux would otherwise produce
 /// `C:\Users\me\AppData\Roaming\bachelorpad/config.toml`, which mostly works
 /// on Windows and is wrong in every assertion that compares the two legs.
-fn beside_the_config_file(platform: Platform, env: &EnvSnapshot, name: &str) -> Option<PathBuf> {
-    let directory = dirs::directory(platform, DirKind::Config, env)?;
+fn in_product_directory(
+    platform: Platform,
+    kind: DirKind,
+    env: &EnvSnapshot,
+    name: &str,
+) -> Option<PathBuf> {
+    let directory = dirs::directory(platform, kind, env)?;
     Some(PathBuf::from(bp_platform::paths::join(
         platform,
         directory.to_str()?,

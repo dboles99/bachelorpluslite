@@ -193,8 +193,8 @@ proptest! {
             "the extension did not decide the format"
         );
         prop_assert!(
-            format.profile().is_data(),
-            "a structured format whose profile does not offer the Data menu"
+            format.has_data_operations(),
+            "a format bp-data parses that the Data menu offers nothing for"
         );
         let accepted = bp_data_accepts(format, &text);
         prop_assert!(
@@ -295,32 +295,65 @@ fn an_empty_document_is_plain_text_and_offends_nobody() {
 /// The formats `bp-formats` groups as structured or tabular data but that
 /// `bp-data` cannot parse at all.
 ///
-/// Not a failure -- neither crate promises them -- but a trap with a name.
-/// `Profile::is_data` documents itself as "whether the Data menu's operations
-/// apply", and it answers yes for both of these. The first caller to use it
-/// to enable a menu gets a menu whose every item fails.
+/// Not a failure -- neither crate promises them -- but a trap that used to
+/// have no name. `Profile::is_data` documented itself as "whether the Data
+/// menu's operations apply" and answered yes for both of these, so the first
+/// caller to gate a menu on it would have got a menu whose every row failed.
+/// The predicate a caller wants is `Format::has_data_operations`, which is
+/// asked of the format rather than of its class; `Profile::is_data_class`
+/// keeps the class question and says it is not the other one.
+///
+/// This test is the pair of them held against `bp-data` itself, which is the
+/// only place the claim can actually be checked.
 #[test]
-fn formats_bp_data_cannot_parse_are_named_here() {
+fn the_two_data_questions_are_asked_of_bp_data_itself() {
+    // The two that are in a data class and have no parser. Named rather than
+    // derived, because `bp_data_accepts` cannot be asked: its final arm
+    // answers `Ok(())` for everything `bp-data` has no entry point for, which
+    // means "not judged" and not "parses". That arm *is* the evidence -- INI
+    // and XML reach it -- and the assertion has to be about the predicates.
     for format in [Format::Ini, Format::Xml] {
         assert!(
-            format.profile().is_data(),
+            format.profile().is_data_class(),
             "{} is no longer grouped as data; update this test",
             format.label()
         );
+        assert!(
+            !format.has_data_operations(),
+            "{} claims data operations, and bp-data has no entry point for it",
+            format.label()
+        );
     }
-    // And the ones that are grouped as data and *are* parseable, so that a
-    // format added to the group without a parser changes this list.
-    for format in [
-        Format::Json,
-        Format::JsonLines,
-        Format::Yaml,
-        Format::Toml,
-        Format::Csv,
-        Format::Tsv,
+
+    // And the other direction, which is the one that matters at runtime:
+    // every format claiming data operations really is parseable by `bp-data`.
+    for (format, text) in [
+        (Format::Json, "{\"a\": 1}"),
+        (Format::JsonLines, "{\"a\": 1}\n{\"a\": 2}\n"),
+        (Format::Yaml, "a: 1\n"),
+        (Format::Toml, "a = 1\n"),
+        (Format::Csv, "a,b\n1,2\n"),
+        (Format::Tsv, "a\tb\n1\t2\n"),
     ] {
         assert!(
-            format.profile().is_data(),
+            format.has_data_operations(),
             "{} left the group",
+            format.label()
+        );
+        assert_eq!(
+            bp_data_accepts(format, text),
+            Ok(()),
+            "{} offers data operations and bp-data refuses it",
+            format.label()
+        );
+    }
+
+    // Nothing outside the two data classes claims data operations, over the
+    // whole enum rather than over a list that goes stale.
+    for &format in Format::ALL {
+        assert!(
+            !format.has_data_operations() || format.profile().is_data_class(),
+            "{} offers data operations from outside a data profile",
             format.label()
         );
     }

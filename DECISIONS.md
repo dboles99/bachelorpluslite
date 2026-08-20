@@ -74,17 +74,47 @@ Adding a decision means adding both.
   signature. Recorded because the naive version is the one somebody will
   write next.
 
-- **The recent-files list roams on Windows, and it is full of absolute
-  paths.** `recent.toml` sits beside `config.toml` in the config directory,
-  which on Windows is `%APPDATA%` and therefore roams between machines --
-  and a recent list is machine-specific absolute paths, which is exactly what
-  `bp_platform::DirKind::roams` warns against. `bp-platform` names the
-  recent-files list as `DirKind::State` for this reason. It was not moved
-  when `bp-config` started delegating, deliberately: it is a product decision
-  with a user-visible effect rather than a deduplication, and `bp-ui`'s
-  `recovery_dir` derives its own path from `config_path`, so moving one
-  without the other would scatter the product's files. Both want doing
-  together, by something that owns both crates.
+- ~~**The recent-files list roams on Windows, and it is full of absolute
+  paths.**~~ **Fixed**, and all three files moved together, which is why it
+  waited for one change owning `bp-config` and `bp-ui`. `recent.toml`, the
+  recovery journal and the security history all hung off the config
+  directory, which on Windows is `%APPDATA%` and roams between machines --
+  and all three hold machine-specific absolute paths, which is exactly what
+  `bp_platform::DirKind::roams` warns against. All three now resolve through
+  `DirKind::State`.
+
+  Three things worth carrying forward. **A path derived by subtracting
+  another path's last component moves when that one does**: the security
+  history was `recovery_dir()` with `with_file_name`, so renaming the
+  recovery folder would have moved the history silently, and a history that
+  moves starts again at sequence one. It asks for the state directory
+  directly now. **The rule is separated from the edge that reads the
+  environment** -- `recovery_dir_under` and `audit_path_under` take the state
+  directory as an argument, the same split `config_path` and `config_path_in`
+  make, so both are assertable without a real profile. And **`cargo test` no
+  longer creates a recovery directory in the developer's own profile**;
+  `recovery_dir()` is `cfg(test)`-redirected to a unique temp path, which is
+  the fix the security history already took after it wrote a live history
+  into `%APPDATA%` once.
+
+  Nothing migrates the old locations. A recent list of ten paths rebuilds
+  itself on the first open; a recovery journal is by definition transient.
+  The files left behind in `%APPDATA%\bachelorpad\` are orphaned and can be
+  deleted.
+
+- ~~**`Profile::is_data` answers a question it cannot.**~~ **Fixed.** It
+  documented itself as "whether the Data menu's operations apply" and said
+  yes for `Ini` and `Xml`, which are structured data with no parser in
+  `bp-data` -- so the first caller to gate a menu on it would have got a menu
+  whose every row failed. The class question is `Profile::is_data_class` and
+  says outright that it is not the other one; the menu question is
+  `Format::has_data_operations`, asked of the *format*. `Format::ALL` came
+  with it, and a test walks it against `bp_ui::menus::data` so the predicate
+  and the menu are one truth rather than two that can drift.
+
+  Found by the cross-crate tests and latent for a session, which is the
+  argument for the whole tier: nothing was wrong today, and the row that
+  would have gone wrong had not been written yet.
 - **Neither `bp-platform-windows` nor `bp-platform-linux` was created**, and
   that is a decision rather than an omission. specs §20 and the crate map
   name them. Everything they would hold is either already a parameterised

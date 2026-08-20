@@ -2619,15 +2619,74 @@ pub(crate) fn documents_dir() -> Option<PathBuf> {
     }
 }
 
-/// Where recovery checkpoints live: beside the config file, in `recovery/`.
+/// The directory this machine's own state goes in.
+///
+/// One function so that the recovery journal and the security history cannot
+/// end up in two different places, and so that moving either moves both.
+/// Neither is configuration: both hold machine-specific absolute paths, and
+/// [`bp_platform::dirs::DirKind::roams`] says exactly what happens to those
+/// in `%APPDATA%` — they are copied to every machine the user signs into,
+/// where the paths in them point at nothing.
+///
+/// `None` when the environment does not say where the user's profile is.
+/// `bp-platform` refuses to guess one, and [`recovery_dir_under`] decides
+/// what to do about that rather than having a guess made for it here.
+pub(crate) fn state_dir() -> Option<PathBuf> {
+    bp_platform::dirs::host_directory(bp_platform::DirKind::State)
+}
+
+/// The folder inside the state directory that checkpoints go in.
+pub(crate) const RECOVERY_DIR_NAME: &str = "recovery";
+
+/// Where recovery checkpoints live, given a state directory.
+///
+/// The rule, separated from the edge that reads the environment, so that it
+/// is assertable without a real profile directory — the same split
+/// `bp_config::config_path` and `config_path_in` make, and for the same
+/// reason.
+///
+/// `PathBuf::join` is the right join here and the wrong one almost everywhere
+/// else in this workspace: there is no [`bp_platform::Platform`] parameter to
+/// be inconsistent with, because `state` has already been resolved for the
+/// host and this is running on it.
+///
+/// Without a state directory this is a *relative* path, which is a guess of
+/// the kind `bp-platform` refuses to make and is kept only because the
+/// alternative is dropping crash recovery entirely for an environment odd
+/// enough to have no profile at all. It is recorded in
+/// `project/WORK_QUEUE.md` rather than fixed here, because deciding what a
+/// journal with nowhere to live should do is a product answer.
+pub(crate) fn recovery_dir_under(state: Option<&Path>) -> PathBuf {
+    state.map_or_else(
+        || PathBuf::from(RECOVERY_DIR_NAME),
+        |dir| dir.join(RECOVERY_DIR_NAME),
+    )
+}
+
+/// Where recovery checkpoints live: in the state directory, in `recovery/`.
 ///
 /// The `.gitignore` already excludes `/recovery`, and this is deliberately a
 /// path the user can be told — it holds copies of their unsaved work.
+#[cfg(not(test))]
 pub(crate) fn recovery_dir() -> PathBuf {
-    bp_config::config_path().map_or_else(
-        || PathBuf::from("recovery"),
-        |p| p.with_file_name("recovery"),
-    )
+    recovery_dir_under(state_dir().as_deref())
+}
+
+/// The same, redirected and made unique under test.
+///
+/// Without this, `AppState::new()` builds its journal from the real state
+/// directory, so `cargo test` creates one in the developer's own
+/// `%LOCALAPPDATA%` — the same shape as the defect the security history had,
+/// and the same fix ([`crate::audit::audit_path`] carries the longer version
+/// of this note). A counter and the process id rather than a random name, so
+/// a failing run names a directory that can be looked at and two runs at once
+/// cannot collide.
+#[cfg(test)]
+pub(crate) fn recovery_dir() -> PathBuf {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let n = NEXT.fetch_add(1, Ordering::Relaxed);
+    std::env::temp_dir().join(format!("bpad-test-recovery-{}-{n}", std::process::id()))
 }
 
 /// What the status bar says when a document is too large for the ordinary
@@ -2748,6 +2807,96 @@ pub(crate) fn find_query(
 mod tests {
     use super::*;
     use time::macros::datetime;
+
+    // --- where this machine's own state goes ---------------------------
+
+    #[test]
+    fn the_journal_and_the_history_share_the_state_directory_and_not_a_name() {
+        // The rule, asserted against a fabricated state directory so it needs
+        // no real profile and both legs of CI check the same thing. They must
+        // be inside it -- neither is configuration, and the configuration
+        // directory roams on Windows while every path they hold is
+        // machine-specific -- and they must not be the same path.
+        let state = PathBuf::from("/state/bachelorpad");
+        let journal = recovery_dir_under(Some(&state));
+        let history = crate::audit::audit_path_under(Some(&state));
+
+        assert!(journal.starts_with(&state), "{}", journal.display());
+        assert!(history.starts_with(&state), "{}", history.display());
+        assert_ne!(journal, history);
+        assert_eq!(
+            journal.file_name().and_then(|n| n.to_str()),
+            Some(RECOVERY_DIR_NAME)
+        );
+        assert_ne!(
+            history.parent(),
+            Some(journal.as_path()),
+            "the history must not be inside the journal, where discarding \
+             every checkpoint would take it with them"
+        );
+    }
+
+    #[test]
+    fn neither_is_derived_from_the_others_last_component() {
+        // What this replaced: the history was `recovery_dir()` with its last
+        // component swapped. Renaming the recovery folder would have moved
+        // the security history with it, silently, and a history that moves is
+        // a history that starts again at sequence one.
+        let a = PathBuf::from("/state/one");
+        let b = PathBuf::from("/state/two");
+        assert_ne!(
+            crate::audit::audit_path_under(Some(&a)),
+            crate::audit::audit_path_under(Some(&b))
+        );
+        assert_eq!(
+            crate::audit::audit_path_under(Some(&a)).parent(),
+            Some(a.as_path()),
+            "the history sits directly in the state directory"
+        );
+    }
+
+    #[test]
+    fn the_state_directory_is_the_platforms_state_directory() {
+        // Guards the edge against being wired to the wrong `DirKind`. Reads
+        // the environment and computes a path; creates nothing.
+        assert_eq!(
+            state_dir(),
+            bp_platform::dirs::host_directory(bp_platform::DirKind::State)
+        );
+        if let Some(state) = state_dir() {
+            let config = bp_platform::dirs::host_directory(bp_platform::DirKind::Config)
+                .expect("a resolved state directory implies a resolved config one");
+            assert_ne!(
+                state, config,
+                "state and settings must not be the same directory"
+            );
+            assert!(
+                !bp_platform::DirKind::State.roams(bp_platform::Platform::HOST),
+                "the directory the journal now lives in roams, which is the \
+                 thing this move was for"
+            );
+        }
+    }
+
+    #[test]
+    fn a_test_journal_never_lands_in_the_users_own_state_directory() {
+        // The protection itself, pinned -- the same one `audit_path` carries.
+        // `AppState::new()` builds a `Journal` from `recovery_dir()`, so
+        // every test that constructs a state would otherwise create a
+        // recovery directory in the developer's `%LOCALAPPDATA%`.
+        let dir = recovery_dir();
+        assert!(
+            dir.starts_with(std::env::temp_dir()),
+            "the test journal must live in the temp directory, not {}",
+            dir.display()
+        );
+        assert_ne!(
+            dir,
+            recovery_dir(),
+            "two states in one process must not share a journal; parallel \
+             tests would each write checkpoints the others then read"
+        );
+    }
 
     #[test]
     fn clock_uses_twelve_hour_time() {

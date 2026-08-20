@@ -1,15 +1,34 @@
 //! The recently-opened list.
 //!
 //! State rather than configuration -- the user never edits it by hand -- so
-//! it lives in its own file beside `config.toml` and a corrupt or missing one
-//! is simply an empty list. Losing a convenience list is not worth a message,
-//! let alone a failure to start.
+//! it lives in its own file, in the *state* directory rather than beside
+//! `config.toml`, and a corrupt or missing one is simply an empty list.
+//! Losing a convenience list is not worth a message, let alone a failure to
+//! start.
+//!
+//! ## Why not beside `config.toml`
+//!
+//! It used to be, and that was wrong on Windows for a reason
+//! [`bp_platform::dirs::DirKind::roams`] states outright: the configuration
+//! directory is `%APPDATA%`, which is copied to every machine the user signs
+//! into, and **every entry in this file is a machine-specific absolute
+//! path**. Roaming it means a second machine offers a File menu of documents
+//! on drive letters it does not have, and pays for the copy at every
+//! sign-out. `DirKind::State` is the same directory on Linux under XDG's own
+//! rules (`$XDG_STATE_HOME`, "data that should persist between restarts but
+//! is not important enough for the data directory") and a local one on
+//! Windows, which is the whole point.
+//!
+//! Nothing migrates the old file. It is a convenience list of at most ten
+//! paths and it rebuilds itself the first time anything is opened, so
+//! carrying code forward to find it would cost more than it saves.
 //!
 //! Paths only. This file records *which* documents were opened, never
 //! anything about their contents (ADR-0011).
 
 use std::path::{Path, PathBuf};
 
+use bp_platform::dirs::DirKind;
 use serde::{Deserialize, Serialize};
 
 use crate::{EnvSnapshot, Platform};
@@ -68,7 +87,7 @@ impl Recent {
     }
 }
 
-/// Where the recent list is stored, beside the config file.
+/// Where the recent list is stored: in the product's state directory.
 ///
 /// The edge, like [`crate::config_path`]: it reads the environment once and
 /// hands it to [`recent_path_in`], which carries the rule.
@@ -79,12 +98,13 @@ pub fn recent_path() -> Option<PathBuf> {
 
 /// Where the recent list is stored, given a platform and an environment.
 ///
-/// Beside the config file by construction rather than by `with_file_name` on
-/// whatever `config_path` returned, so the two cannot drift apart, and so the
-/// promise is assertable on both platforms from either leg of CI.
+/// Asks [`bp_platform::dirs`] for [`DirKind::State`] by construction rather
+/// than deriving a path from whatever `config_path` returned, so the two
+/// cannot drift apart, and so the promise is assertable on both platforms
+/// from either leg of CI.
 #[must_use]
 pub fn recent_path_in(platform: Platform, env: &EnvSnapshot) -> Option<PathBuf> {
-    crate::beside_the_config_file(platform, env, FILE_NAME)
+    crate::in_product_directory(platform, DirKind::State, env, FILE_NAME)
 }
 
 /// Read the recent list, pruning entries that have gone away.
@@ -219,41 +239,105 @@ mod tests {
     }
 
     #[test]
-    fn the_list_sits_beside_the_config_file_on_every_platform() {
+    fn the_list_sits_where_the_platform_puts_per_machine_state() {
+        let env = crate::tests::whole_env();
+        assert_eq!(
+            crate::tests::text(recent_path_in(Platform::Windows, &env)),
+            r"C:\Users\me\AppData\Local\bachelorpad\state\recent.toml",
+            "the Windows answer must be spelt with backslashes on either leg"
+        );
+        assert_eq!(
+            crate::tests::text(recent_path_in(Platform::Linux, &env)),
+            "/home/me/.local/state/bachelorpad/recent.toml",
+            "the Linux answer must be spelt with slashes on either leg"
+        );
+    }
+
+    #[test]
+    fn the_list_is_never_put_somewhere_that_roams() {
+        // The defect this file used to have, stated as the rule that catches
+        // it rather than as the one path it produced. Every entry in this
+        // file is a machine-specific absolute path, so a directory that is
+        // copied to the user's other machines is the one place it must not
+        // be: the File menu there would offer documents on drive letters
+        // that machine does not have.
+        let env = crate::tests::whole_env();
+        for &platform in Platform::ALL {
+            let path = crate::tests::text(recent_path_in(platform, &env));
+            let state =
+                crate::tests::text(bp_platform::dirs::directory(platform, DirKind::State, &env));
+            assert!(
+                path.starts_with(&state),
+                "{platform:?}: {path:?} is not inside the state directory"
+            );
+            for kind in DirKind::ALL {
+                if *kind == DirKind::State {
+                    continue;
+                }
+                let elsewhere =
+                    crate::tests::text(bp_platform::dirs::directory(platform, *kind, &env));
+                assert!(
+                    !path.starts_with(&elsewhere),
+                    "{platform:?}: the recent list must not live in the {} directory",
+                    kind.token()
+                );
+            }
+            assert!(
+                !DirKind::State.roams(platform),
+                "{platform:?}: the directory this file now lives in roams, \
+                 which is the thing this move was for"
+            );
+        }
+    }
+
+    #[test]
+    fn the_list_and_the_settings_are_two_different_files() {
+        // Whichever directories they land in, one must never overwrite the
+        // other -- and the file name is the last thing standing between them
+        // if they are ever put back together.
         let env = crate::tests::whole_env();
         for &platform in Platform::ALL {
             let recent = crate::tests::text(recent_path_in(platform, &env));
             let config = crate::tests::text(crate::config_path_in(platform, &env));
-            let (recent_dir, recent_name) = split(platform, &recent);
-            let (config_dir, config_name) = split(platform, &config);
-
-            assert_eq!(
-                recent_dir, config_dir,
-                "{platform:?}: the two must share a directory"
-            );
-            assert_ne!(
-                recent_name, config_name,
-                "{platform:?}: state must not overwrite settings"
-            );
+            assert_ne!(recent, config, "{platform:?}: state overwrote settings");
+            let (_, recent_name) = split(platform, &recent);
+            let (_, config_name) = split(platform, &config);
+            assert_ne!(recent_name, config_name, "{platform:?}");
             assert_eq!(recent_name, FILE_NAME);
         }
     }
 
     #[test]
-    fn a_relative_xdg_config_home_does_not_move_the_list_either() {
-        // Same defect, same fix: the recent list must not end up beside the
-        // directory the editor happened to be launched from.
+    fn a_relative_xdg_state_home_does_not_move_the_list() {
+        // Same defect as the config file's, same fix: the recent list must
+        // not end up beside the directory the editor happened to be launched
+        // from.
         for unusable in crate::tests::UNUSABLE_XDG {
             let env = EnvSnapshot {
-                xdg_config_home: Some((*unusable).to_owned()),
+                xdg_state_home: Some((*unusable).to_owned()),
                 ..crate::tests::whole_env()
             };
             assert_eq!(
                 crate::tests::text(recent_path_in(Platform::Linux, &env)),
-                "/home/me/.config/bachelorpad/recent.toml",
+                "/home/me/.local/state/bachelorpad/recent.toml",
                 "{unusable:?} must be ignored"
             );
         }
+    }
+
+    #[test]
+    fn a_relative_xdg_config_home_no_longer_concerns_the_list_at_all() {
+        // It used to decide where this file went. It does not now, and
+        // saying so here is what stops the two being quietly rejoined.
+        let env = EnvSnapshot {
+            xdg_config_home: Some("/etc/xdg".to_owned()),
+            ..crate::tests::whole_env()
+        };
+        assert_eq!(
+            crate::tests::text(recent_path_in(Platform::Linux, &env)),
+            "/home/me/.local/state/bachelorpad/recent.toml",
+            "$XDG_CONFIG_HOME moved a file that is not configuration"
+        );
     }
 
     #[test]

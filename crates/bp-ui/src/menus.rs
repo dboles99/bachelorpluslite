@@ -2397,6 +2397,56 @@ mod tests {
     }
 
     #[test]
+    fn the_data_menu_and_bp_formats_agree_on_which_documents_have_one() {
+        // Two answers to one question, kept in step here because there is
+        // nowhere else they meet. `Format::has_data_operations` is what a
+        // caller outside this crate asks -- a keyboard shortcut, a toolbar, a
+        // future command palette -- and this `match` is what the menu itself
+        // does. A format added to one and not the other is a row that exists
+        // and a shortcut that says it does not, or the reverse.
+        //
+        // The trap this replaced was the same question asked of the
+        // *profile*: `Profile::StructuredData` covers INI and XML, neither of
+        // which `bp-data` can parse, so a menu gated on the profile failed on
+        // every row it offered.
+        for &format in Format::ALL {
+            let items = data(format);
+            let acts = items.iter().any(|i| i.action != action::NONE);
+            assert_eq!(
+                acts,
+                format.has_data_operations(),
+                "{}: the Data menu {} rows that do something, and \
+                 has_data_operations says {}",
+                format.label(),
+                if acts { "has" } else { "has no" },
+                format.has_data_operations()
+            );
+            assert!(
+                !items.is_empty(),
+                "{}: a menu with no rows at all reads as broken; a format \
+                 with nothing to offer says so instead",
+                format.label()
+            );
+        }
+    }
+
+    #[test]
+    fn a_format_without_data_operations_names_itself_in_the_refusal() {
+        // Offering an empty menu, or one that says only "not implemented",
+        // leaves the user guessing which of the two it is. INI is the case
+        // worth pinning: it is structured data, so the answer is genuinely
+        // surprising.
+        for format in [Format::Ini, Format::Xml, Format::PlainText] {
+            let items = data(format);
+            assert!(
+                items.iter().any(|i| i.label.contains(format.label())),
+                "{} documents get a Data menu that does not say so",
+                format.label()
+            );
+        }
+    }
+
+    #[test]
     fn only_csv_and_tsv_offer_the_csv_specific_data_rows() {
         let items = data(Format::Json);
         for id in [
