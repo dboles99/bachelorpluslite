@@ -1,0 +1,862 @@
+//! Tests for default-editor registration.
+//!
+//! Two rules shape this file. **No test installs anything anywhere but a
+//! `tempfile` directory** -- there is no code path that could reach the real
+//! `~/.local/share`, because [`install`] has no default root, but a test that
+//! wrote one would still be wrong. And **every test runs on both legs of CI**,
+//! including the Windows ones: [`plan`] takes the platform as an argument, so
+//! the `.reg` shape and the ADR-0012 guard are checked on machines with no
+//! registry, which is where they would otherwise never be checked at all.
+
+use super::*;
+use proptest::prelude::*;
+use std::collections::BTreeMap;
+use tempfile::tempdir;
+
+fn app() -> AppInfo {
+    AppInfo::bachelorpad("/usr/local/bin/bachelorpad")
+}
+
+fn windows_app() -> AppInfo {
+    AppInfo::bachelorpad(r"C:\Program Files\BachelorPad+\bachelorpad.exe")
+}
+
+fn everything() -> AssociationSelection {
+    AssociationSelection::preset(AssociationPreset::EverythingSupported)
+}
+
+/// The `key=value` pairs of a `.desktop` file, in order.
+fn desktop_keys(entry: &str) -> Vec<(&str, &str)> {
+    entry
+        .lines()
+        .filter(|line| !line.is_empty() && !line.starts_with('['))
+        .map(|line| {
+            line.split_once('=')
+                .unwrap_or_else(|| panic!("a .desktop line without an `=`: {line:?}"))
+        })
+        .collect()
+}
+
+// --- the file-type table ---------------------------------------------------
+
+/// Whether `bp-formats` must be able to identify this extension.
+///
+/// Every type except the product's own. `.bpadx` is an encrypted envelope
+/// (ADR-0021): `bp-crypto` opens it and *then* the plaintext inside is
+/// detected, so `bp_formats::Format` has no variant for it and should not --
+/// the question "what format is this" has no answer until it is decrypted.
+/// The exemption is by group rather than by extension so that a second
+/// product-owned type inherits it without anyone editing this test.
+fn must_be_parseable(file_type: &FileType) -> bool {
+    file_type.group != TypeGroup::Own
+}
+
+#[test]
+fn every_registerable_extension_is_one_bp_formats_can_identify() {
+    // The one agreement that must hold between the registration table and the
+    // parser: claiming a file type the editor cannot open is the failure the
+    // user experiences as a broken machine rather than a missing feature.
+    for file_type in FILE_TYPES.iter().filter(|t| must_be_parseable(t)) {
+        assert!(
+            bp_formats::Format::from_extension(file_type.extension).is_some(),
+            ".{} is offered for registration and bp-formats does not know it",
+            file_type.extension
+        );
+    }
+}
+
+#[test]
+fn extensions_are_unique_lowercase_and_undotted() {
+    let mut seen: Vec<&str> = FILE_TYPES.iter().map(|t| t.extension).collect();
+    let count = seen.len();
+    seen.sort_unstable();
+    seen.dedup();
+    assert_eq!(seen.len(), count, "an extension is listed twice");
+    for file_type in FILE_TYPES {
+        assert!(!file_type.extension.starts_with('.'), "{file_type:?}");
+        assert_eq!(
+            file_type.extension.to_ascii_lowercase(),
+            file_type.extension,
+            "{file_type:?}"
+        );
+        assert!(!file_type.description.is_empty(), "{file_type:?}");
+        assert!(file_type.mime.contains('/'), "{file_type:?}");
+    }
+}
+
+#[test]
+fn a_file_type_is_found_however_the_extension_is_spelled() {
+    for spelling in ["txt", ".txt", ".TXT", "  Txt "] {
+        assert_eq!(
+            file_type(spelling).map(|t| t.extension),
+            Some("txt"),
+            "{spelling}"
+        );
+    }
+    assert_eq!(file_type("docx"), None);
+    assert_eq!(file_type(""), None);
+    assert_eq!(file_type("."), None);
+}
+
+// --- presets ---------------------------------------------------------------
+
+#[test]
+fn the_escalating_presets_are_nested_in_the_order_they_are_offered() {
+    // The same property the security profiles earn: each step adds and never
+    // takes away, so a user moving down the list never loses an association
+    // they had. `Developer` is deliberately excluded -- see the next test.
+    let chain = [
+        AssociationPreset::NotepadReplacement,
+        AssociationPreset::TextAndNotes,
+        AssociationPreset::TextAndStructuredData,
+        AssociationPreset::EverythingSupported,
+    ];
+    for pair in chain.windows(2) {
+        let narrower = AssociationSelection::preset(pair[0]);
+        let wider = AssociationSelection::preset(pair[1]);
+        for extension in narrower.extensions() {
+            assert!(
+                wider.contains(extension),
+                "{} loses .{extension} relative to {}",
+                pair[1].label(),
+                pair[0].label()
+            );
+        }
+        assert!(
+            wider.len() > narrower.len(),
+            "{} adds nothing to {}",
+            pair[1].label(),
+            pair[0].label()
+        );
+    }
+}
+
+#[test]
+fn developer_is_not_on_the_escalating_chain_and_says_so_by_dropping_the_spreadsheets() {
+    let developer = AssociationSelection::preset(AssociationPreset::Developer);
+    let structured = AssociationSelection::preset(AssociationPreset::TextAndStructuredData);
+    assert!(developer.contains("rs") && !structured.contains("rs"));
+    assert!(structured.contains("csv") && !developer.contains("csv"));
+}
+
+#[test]
+fn everything_supported_is_the_whole_table_and_the_others_are_inside_it() {
+    let everything = everything();
+    assert_eq!(everything.len(), FILE_TYPES.len());
+    for &preset in AssociationPreset::ALL {
+        let selection = AssociationSelection::preset(preset);
+        assert!(!selection.is_empty(), "{} is empty", preset.label());
+        // Every preset opens plain text and the product's own format --
+        // whatever else the user chose, the product must open its own files.
+        assert!(selection.contains("txt"), "{}", preset.label());
+        assert!(selection.contains("bpadx"), "{}", preset.label());
+        for extension in selection.extensions() {
+            assert!(everything.contains(extension), "{extension}");
+        }
+    }
+}
+
+#[test]
+fn a_preset_round_trips_through_its_token_and_recognises_itself() {
+    for &preset in AssociationPreset::ALL {
+        assert_eq!(AssociationPreset::parse(preset.token()), Some(preset));
+        assert_eq!(
+            AssociationSelection::preset(preset).matching_preset(),
+            Some(preset),
+            "{}",
+            preset.label()
+        );
+    }
+    assert_eq!(AssociationPreset::parse("custom"), None);
+}
+
+#[test]
+fn a_custom_selection_drops_what_the_editor_cannot_open() {
+    let selection = AssociationSelection::custom(["txt", ".MD", "docx", "xlsx"]);
+    assert_eq!(
+        selection.extensions().collect::<Vec<_>>(),
+        vec!["md", "txt"]
+    );
+    assert_eq!(
+        unknown_extensions(&["txt", ".MD", "docx", "xlsx"]),
+        vec!["docx", "xlsx"]
+    );
+    // A custom selection that happens to equal a preset is reported as that
+    // preset rather than as "Custom".
+    assert_eq!(selection.matching_preset(), None);
+}
+
+#[test]
+fn the_mime_list_is_deduplicated() {
+    // Six extensions map to text/plain; a MimeType line that repeats it six
+    // times fails desktop-file-validate.
+    let mimes = everything().mime_types();
+    let mut sorted = mimes.clone();
+    sorted.sort_unstable();
+    sorted.dedup();
+    assert_eq!(sorted.len(), mimes.len());
+    assert!(mimes.contains(&"text/plain"));
+}
+
+// --- the .desktop entry ----------------------------------------------------
+
+#[test]
+fn the_desktop_entry_has_the_keys_a_desktop_environment_looks_for() {
+    let entry = desktop::desktop_entry(&app(), &everything());
+    assert!(entry.starts_with("[Desktop Entry]\n"));
+    let keys: Vec<&str> = desktop_keys(&entry).into_iter().map(|(k, _)| k).collect();
+    for required in ["Type", "Name", "Exec", "MimeType", "Icon", "Categories"] {
+        assert!(keys.contains(&required), "no {required} key in\n{entry}");
+    }
+    assert!(entry.contains("Exec=/usr/local/bin/bachelorpad %F"));
+    assert!(entry.contains("MimeType=application/x-bachelorpad-encrypted;"));
+    assert!(entry.contains(";text/plain;"), "{entry}");
+    assert!(entry.contains("Categories=Utility;TextEditor;\n"));
+}
+
+#[test]
+fn an_empty_selection_still_produces_an_entry_but_claims_nothing() {
+    let entry = desktop::desktop_entry(&app(), &AssociationSelection::default());
+    assert!(!entry.contains("MimeType"));
+    assert!(entry.contains("Exec="));
+}
+
+#[test]
+fn a_path_with_a_space_is_quoted_in_exec_and_not_in_tryexec() {
+    let mut app = app();
+    app.executable = "/opt/BachelorPad Plus/bachelorpad".to_owned();
+    let entry = desktop::desktop_entry(&app, &everything());
+    assert!(
+        entry.contains("Exec=\"/opt/BachelorPad Plus/bachelorpad\" %F"),
+        "{entry}"
+    );
+    // TryExec is a plain path, not an Exec value, so it is not quoted.
+    assert!(entry.contains("TryExec=/opt/BachelorPad Plus/bachelorpad"));
+}
+
+#[test]
+fn a_windows_style_path_survives_both_layers_of_escaping() {
+    // The classic defect: the Exec value is quoted by the Exec rules and then
+    // escaped again as a desktop string, so one backslash becomes four. A
+    // single-escaped path launches the wrong program.
+    let quoted = desktop::quote_exec_argument(r"C:\Program Files\bp.exe");
+    assert_eq!(quoted, "\"C:\\\\Program Files\\\\bp.exe\"");
+    assert_eq!(
+        desktop::escape_value(&quoted),
+        r#""C:\\\\Program Files\\\\bp.exe""#
+    );
+}
+
+#[test]
+fn the_mime_package_defines_only_the_products_own_types() {
+    let package = desktop::mime_package(&everything()).expect("bpadx is in every preset");
+    assert!(package.contains("application/x-bachelorpad-encrypted"));
+    assert!(package.contains("<glob pattern=\"*.bpadx\"/>"));
+    // Not a redefinition of the distribution's own types.
+    assert!(!package.contains("application/json"));
+    assert!(!package.contains("text/plain"));
+    // The three PowerShell extensions are one type with three globs, not
+    // three definitions of the same type.
+    assert_eq!(package.matches("text/x-powershell").count(), 1);
+    assert_eq!(package.matches("<glob pattern=\"*.ps").count(), 3);
+}
+
+// --- the Windows registry shape --------------------------------------------
+
+#[test]
+fn registration_offers_the_extension_and_never_takes_it() {
+    let values = windows::registry_values(&windows_app(), &everything());
+    // The additive value: our ProgID appears as a *value name* under
+    // OpenWithProgids.
+    assert!(values.iter().any(|v| {
+        v.key == r"HKCU\Software\Classes\.txt\OpenWithProgids"
+            && v.name == ValueName::Named("BachelorPadPlus.txt".to_owned())
+    }));
+    // ...and nothing writes the extension key's own default value, which is
+    // what taking the association looks like.
+    assert!(
+        !values
+            .iter()
+            .any(|v| v.key == r"HKCU\Software\Classes\.txt" && v.name == ValueName::Default),
+        "the extension's default value is the association itself"
+    );
+    // ...nor UserChoice, which is the user's own record and is hash-protected.
+    assert!(!values.iter().any(|v| v.key.contains("UserChoice")));
+}
+
+#[test]
+fn no_generated_key_is_one_this_crate_refuses_to_write() {
+    for &preset in AssociationPreset::ALL {
+        let selection = AssociationSelection::preset(preset);
+        let plan = plan(Platform::Windows, &windows_app(), &selection);
+        assert_eq!(
+            plan.registry_objections(),
+            vec![],
+            "{} generated a key the guard refuses",
+            preset.label()
+        );
+    }
+}
+
+#[test]
+fn the_guard_refuses_what_adr_0012_forbids() {
+    use windows::{KeyObjection, key_objection};
+    assert_eq!(
+        key_objection(r"HKLM\Software\Classes\BachelorPadPlus.txt"),
+        Some(KeyObjection::OutsideTheUserHive)
+    );
+    assert_eq!(
+        key_objection(r"HKCU\Software\Classes\txtfile\shell\open\command"),
+        Some(KeyObjection::AnotherApplication)
+    );
+    assert_eq!(
+        key_objection(r"HKCU\Software\Classes\Applications\notepad.exe"),
+        Some(KeyObjection::TouchesNotepad)
+    );
+    assert_eq!(
+        key_objection(r"HKCU\Software\Classes\.txt\UserChoice"),
+        Some(KeyObjection::SeizesTheAssociation)
+    );
+    assert_eq!(
+        key_objection(r"HKCU\Software\Classes\.txt"),
+        Some(KeyObjection::SeizesTheAssociation)
+    );
+    assert_eq!(
+        key_objection(r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run"),
+        Some(KeyObjection::AnotherApplication)
+    );
+    // ...and permits exactly what registration needs.
+    assert_eq!(
+        key_objection(r"HKCU\Software\Classes\.txt\OpenWithProgids"),
+        None
+    );
+    assert_eq!(
+        key_objection(r"HKCU\Software\Classes\BachelorPadPlus.md"),
+        None
+    );
+    assert_eq!(
+        key_objection(r"HKCU\Software\BachelorPad+\Capabilities"),
+        None
+    );
+    assert_eq!(key_objection(r"HKCU\Software\RegisteredApplications"), None);
+}
+
+#[test]
+fn the_guard_is_case_insensitive_like_the_registry() {
+    use windows::{KeyObjection, key_objection};
+    assert_eq!(
+        key_objection(r"hkcu\software\classes\.TXT\openwithprogids"),
+        None
+    );
+    assert_eq!(
+        key_objection(r"HKEY_CURRENT_USER\Software\Classes\NOTEPAD.exe"),
+        Some(KeyObjection::TouchesNotepad)
+    );
+}
+
+#[test]
+fn the_registry_script_is_something_regedit_would_accept() {
+    let plan = plan(Platform::Windows, &windows_app(), &everything());
+    let script = plan
+        .artefact(ArtefactKind::RegistryScript)
+        .expect("Windows plans carry a .reg script");
+    assert!(
+        script
+            .contents
+            .starts_with("Windows Registry Editor Version 5.00\r\n")
+    );
+    assert!(
+        script
+            .contents
+            .contains("[HKEY_CURRENT_USER\\Software\\Classes\\")
+    );
+    assert!(
+        !script.contents.contains("[HKCU\\"),
+        "the short hive name is not valid in a .reg file"
+    );
+    // Backslashes in the command doubled, quotes escaped.
+    assert!(
+        script
+            .contents
+            .contains(r#"@="\"C:\\Program Files\\BachelorPad+\\bachelorpad.exe\" \"%1\"""#),
+        "{}",
+        script.contents
+    );
+    // Every line ends CRLF.
+    assert!(!script.contents.replace("\r\n", "").contains('\n'));
+}
+
+// --- the plan --------------------------------------------------------------
+
+#[test]
+fn each_platform_gets_the_artefacts_it_has_a_use_for() {
+    let linux = plan(Platform::Linux, &app(), &everything());
+    assert!(linux.artefact(ArtefactKind::DesktopEntry).is_some());
+    assert!(linux.artefact(ArtefactKind::MimePackage).is_some());
+    assert!(linux.artefact(ArtefactKind::RegistryScript).is_none());
+    assert!(linux.registry_values.is_empty());
+    assert!(matches!(linux.handoff, Handoff::LinuxSetDefault { .. }));
+
+    let windows = plan(Platform::Windows, &windows_app(), &everything());
+    assert!(windows.artefact(ArtefactKind::RegistryScript).is_some());
+    assert!(windows.artefact(ArtefactKind::DesktopEntry).is_none());
+    assert!(!windows.registry_values.is_empty());
+    assert_eq!(
+        windows.handoff,
+        Handoff::WindowsDefaultApps {
+            uri: "ms-settings:defaultapps"
+        }
+    );
+}
+
+#[test]
+fn the_follow_up_commands_are_named_and_explained_never_run() {
+    let plan = plan(Platform::Linux, &app(), &everything());
+    let programs: Vec<&str> = plan.follow_up.iter().map(|f| f.program).collect();
+    assert_eq!(
+        programs,
+        vec!["update-desktop-database", "update-mime-database"]
+    );
+    for follow_up in &plan.follow_up {
+        assert!(follow_up.why.len() > 20, "{follow_up:?}");
+        assert!(!follow_up.command_line().is_empty());
+    }
+}
+
+#[test]
+fn the_handoff_names_the_command_that_would_set_the_default_and_stops_there() {
+    let plan = plan(
+        Platform::Linux,
+        &app(),
+        &AssociationSelection::custom(["txt"]),
+    );
+    let Handoff::LinuxSetDefault { program, args } = &plan.handoff else {
+        panic!("Linux hands off through xdg-mime");
+    };
+    assert_eq!(*program, "xdg-mime");
+    assert_eq!(args[0], "default");
+    assert_eq!(args[1], "bachelorpad.desktop");
+    assert!(args.contains(&"text/plain".to_owned()));
+    assert!(plan.handoff.describe().contains("xdg-mime"));
+}
+
+#[test]
+fn an_app_info_says_what_is_wrong_with_it_before_a_plan_is_built() {
+    let mut app = app();
+    app.executable = "bachelorpad".to_owned();
+    let problems = app.problems(Platform::Linux);
+    assert_eq!(problems.len(), 1, "{problems:?}");
+    assert!(problems[0].contains("relative"));
+    assert!(
+        AppInfo::bachelorpad("/usr/bin/bachelorpad")
+            .problems(Platform::Linux)
+            .is_empty()
+    );
+    // The same absolute-path question has a different answer per platform,
+    // which is the point of taking the platform.
+    assert!(
+        !AppInfo::bachelorpad("/usr/bin/bachelorpad")
+            .problems(Platform::Windows)
+            .is_empty()
+    );
+}
+
+// --- reading the current state ---------------------------------------------
+
+#[test]
+fn a_mimeapps_list_is_read_the_way_the_desktop_reads_it() {
+    let text = "\
+# a comment
+[Added Associations]
+text/plain=someone-else.desktop;
+
+[Default Applications]
+text/plain = bachelorpad.desktop;gedit.desktop;
+text/markdown=marker.desktop
+application/json=
+";
+    let report = state::report_from_mimeapps(text, &app(), &everything());
+    assert_eq!(report.state_of("txt"), Some(&AssociationState::Ours));
+    assert_eq!(
+        report.state_of("md"),
+        Some(&AssociationState::Other {
+            handler: "marker.desktop".to_owned()
+        })
+    );
+    // An empty value claims nothing, and `[Added Associations]` is not the
+    // default -- it only means "can open", which is a different question.
+    assert_eq!(report.state_of("json"), Some(&AssociationState::Unclaimed));
+    assert!(report.is_ours(".TXT"));
+    assert!(!report.is_ours("md"));
+}
+
+#[test]
+fn a_missing_or_empty_mimeapps_list_means_unclaimed_not_broken() {
+    let report = state::report_from_mimeapps("", &app(), &everything());
+    assert!(
+        report
+            .entries()
+            .iter()
+            .all(|e| e.state == AssociationState::Unclaimed)
+    );
+    assert_eq!(report.ours(), 0);
+}
+
+#[test]
+fn a_repeated_key_takes_the_first_like_the_desktop_entry_specification() {
+    let text = "[Default Applications]\ntext/plain=first.desktop\ntext/plain=second.desktop\n";
+    let defaults = state::default_applications(text);
+    assert_eq!(defaults["text/plain"], vec!["first.desktop".to_owned()]);
+}
+
+#[test]
+fn the_windows_state_is_read_from_prog_ids_supplied_by_the_caller() {
+    let mut prog_ids = BTreeMap::new();
+    prog_ids.insert(".txt".to_owned(), "BachelorPadPlus.txt".to_owned());
+    prog_ids.insert("MD".to_owned(), "Notepad++_file".to_owned());
+    let report = state::report_from_prog_ids(&prog_ids, &everything());
+    assert_eq!(report.state_of("txt"), Some(&AssociationState::Ours));
+    assert_eq!(
+        report.state_of("md"),
+        Some(&AssociationState::Other {
+            handler: "Notepad++_file".to_owned()
+        })
+    );
+    assert_eq!(report.state_of("json"), Some(&AssociationState::Unclaimed));
+}
+
+#[test]
+fn windows_reports_cannot_tell_rather_than_not_registered() {
+    // The distinction a user acts on: "unclaimed" invites them to fix
+    // something, "cannot tell" tells them the truth.
+    let report = association_report(Platform::Windows, None, &app(), &everything());
+    for entry in report.entries() {
+        let AssociationState::Unknown { reason } = &entry.state else {
+            panic!("{entry:?} claimed to know something Windows cannot tell us");
+        };
+        assert!(reason.contains("registry"), "{reason}");
+    }
+    assert!(report.summary().starts_with("Cannot tell"));
+}
+
+#[test]
+fn the_report_is_read_from_a_directory_the_caller_names() {
+    let dir = tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("mimeapps.list"),
+        "[Default Applications]\ntext/plain=bachelorpad.desktop;\n",
+    )
+    .unwrap();
+    let selection = AssociationSelection::custom(["txt", "md"]);
+    let report = association_report(Platform::Linux, Some(dir.path()), &app(), &selection);
+    assert!(report.is_ours("txt"));
+    assert!(!report.is_ours("md"));
+    assert_eq!(
+        report.summary(),
+        "BachelorPad+ opens 1 of the 2 selected file types."
+    );
+}
+
+#[test]
+fn a_directory_with_no_mimeapps_list_is_not_an_error() {
+    let dir = tempdir().unwrap();
+    let report = association_report(
+        Platform::Linux,
+        Some(dir.path()),
+        &app(),
+        &AssociationSelection::custom(["txt"]),
+    );
+    assert_eq!(report.state_of("txt"), Some(&AssociationState::Unclaimed));
+}
+
+// --- installing, the one thing that changes anything -----------------------
+
+#[test]
+fn nothing_is_written_without_consent() {
+    let dir = tempdir().unwrap();
+    let plan = plan(Platform::Linux, &app(), &everything());
+    assert_eq!(
+        install(&plan, dir.path(), Consent::Withheld),
+        Err(InstallRefusal::ConsentWithheld)
+    );
+    assert_eq!(
+        std::fs::read_dir(dir.path()).unwrap().count(),
+        0,
+        "a refused install wrote something"
+    );
+}
+
+#[test]
+fn consent_is_checked_before_anything_else_can_refuse_first() {
+    // Otherwise a refused install reports "nothing selected" and the fact that
+    // nobody agreed to it never reaches the log.
+    let dir = tempdir().unwrap();
+    let empty = plan(Platform::Linux, &app(), &AssociationSelection::default());
+    assert_eq!(
+        install(&empty, dir.path(), Consent::Withheld),
+        Err(InstallRefusal::ConsentWithheld)
+    );
+    assert_eq!(
+        install(&empty, dir.path(), Consent::Granted),
+        Err(InstallRefusal::NothingSelected)
+    );
+}
+
+#[test]
+fn a_consented_install_writes_exactly_the_plans_artefacts_under_the_given_root() {
+    let dir = tempdir().unwrap();
+    let plan = plan(Platform::Linux, &app(), &everything());
+    let installed = install(&plan, dir.path(), Consent::Granted).expect("Linux can install");
+
+    assert_eq!(installed.written.len(), plan.artefacts.len());
+    for path in &installed.written {
+        assert!(path.starts_with(dir.path()), "{path:?} escaped the root");
+        assert!(path.is_file());
+    }
+    let entry = std::fs::read_to_string(dir.path().join("applications/bachelorpad.desktop"))
+        .expect("the desktop entry landed where mimeapps.list will look for it");
+    assert_eq!(entry, plan.artefacts[0].contents);
+    assert!(dir.path().join("mime/packages/bachelorpad.xml").is_file());
+    assert_eq!(installed.follow_up, plan.follow_up);
+}
+
+#[test]
+fn installing_sets_no_default_and_the_report_still_says_so() {
+    // The line ADR-0012 draws: after a successful install the product is in
+    // Open With, and nothing about what opens `.txt` has changed.
+    let data = tempdir().unwrap();
+    let config = tempdir().unwrap();
+    let plan = plan(Platform::Linux, &app(), &everything());
+    install(&plan, data.path(), Consent::Granted).unwrap();
+
+    let report = association_report(Platform::Linux, Some(config.path()), &app(), &everything());
+    assert_eq!(report.ours(), 0, "installing took an association");
+}
+
+#[test]
+fn windows_refuses_to_install_and_says_the_same_thing_the_capability_says() {
+    let dir = tempdir().unwrap();
+    let plan = plan(Platform::Windows, &windows_app(), &everything());
+    let refusal = install(&plan, dir.path(), Consent::Granted).expect_err("Windows cannot install");
+    let InstallRefusal::NotSupported { platform, reason } = refusal else {
+        panic!("Windows refused for the wrong reason: {refusal:?}");
+    };
+    assert_eq!(platform, Platform::Windows);
+    assert_eq!(
+        Some(reason),
+        Capability::AssociationInstall
+            .availability(Platform::Windows)
+            .reason(),
+        "the refusal and the capability register must not drift apart"
+    );
+    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+}
+
+#[test]
+fn an_artefact_path_that_could_escape_the_root_is_refused_before_anything_is_written() {
+    let dir = tempdir().unwrap();
+    for bad in [
+        "../elsewhere/bachelorpad.desktop",
+        "/etc/bachelorpad.desktop",
+        r"C:\Windows\bachelorpad.desktop",
+        r"..\up.desktop",
+        "  ",
+    ] {
+        let mut plan = plan(Platform::Linux, &app(), &everything());
+        plan.artefacts[0].relative_path = bad.to_owned();
+        let refusal = install(&plan, dir.path(), Consent::Granted).expect_err(bad);
+        assert!(
+            matches!(refusal, InstallRefusal::UnsafeArtefactPath { .. }),
+            "{bad} produced {refusal:?}"
+        );
+        assert_eq!(
+            std::fs::read_dir(dir.path()).unwrap().count(),
+            0,
+            "{bad}: a bad path in one artefact wrote another"
+        );
+    }
+}
+
+#[test]
+fn install_root_is_the_shared_data_hierarchy_on_linux_and_nothing_on_windows() {
+    let env = EnvSnapshot {
+        home: Some("/home/me".into()),
+        ..EnvSnapshot::default()
+    };
+    assert_eq!(
+        install_root(Platform::Linux, &env),
+        Some(PathBuf::from("/home/me/.local/share"))
+    );
+    assert_eq!(
+        install_root(Platform::Windows, &EnvSnapshot::default()),
+        None
+    );
+}
+
+#[test]
+fn every_refusal_can_be_explained() {
+    let refusals = [
+        InstallRefusal::ConsentWithheld,
+        InstallRefusal::NothingSelected,
+        InstallRefusal::NotSupported {
+            platform: Platform::Windows,
+            reason: "There is no registry writer here.",
+        },
+        InstallRefusal::UnsafeArtefactPath {
+            relative_path: "../x".to_owned(),
+        },
+        InstallRefusal::Failed {
+            path: PathBuf::from("/x"),
+            message: "permission denied".to_owned(),
+        },
+    ];
+    for refusal in &refusals {
+        assert!(refusal.describe().len() > 20, "{refusal:?}");
+    }
+}
+
+// --- properties ------------------------------------------------------------
+
+fn any_selection() -> impl Strategy<Value = AssociationSelection> {
+    prop_oneof![
+        prop::sample::select(AssociationPreset::ALL).prop_map(AssociationSelection::preset),
+        prop::collection::vec(
+            prop::sample::select(FILE_TYPES.iter().map(|t| t.extension).collect::<Vec<_>>()),
+            0..8,
+        )
+        .prop_map(AssociationSelection::custom),
+    ]
+}
+
+/// Strings a hostile or merely careless caller might put in an `AppInfo`.
+fn awkward_text() -> impl Strategy<Value = String> {
+    prop::collection::vec(
+        prop_oneof![
+            prop::char::range('a', 'z'),
+            Just(' '),
+            Just('='),
+            Just(';'),
+            Just('\n'),
+            Just('\r'),
+            Just('\t'),
+            Just('\\'),
+            Just('"'),
+            Just('<'),
+            Just('&'),
+            Just('$'),
+        ],
+        0..40,
+    )
+    .prop_map(|chars| chars.into_iter().collect())
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(128))]
+
+    /// Whatever the shell puts in an `AppInfo`, the generated `.desktop` file
+    /// is still a sequence of `key=value` lines under one group header. A
+    /// display name containing a newline must not become an `Exec` line, which
+    /// is the injection this format invites: there is no quoting at the line
+    /// level, so a bad value produces a *valid* file that does something else.
+    #[test]
+    fn no_app_info_can_add_a_key_to_the_desktop_entry(
+        display_name in awkward_text(),
+        description in awkward_text(),
+        executable in awkward_text(),
+    ) {
+        let mut app = app();
+        app.display_name = display_name;
+        app.description = description;
+        app.executable = executable;
+        let entry = desktop::desktop_entry(&app, &everything());
+
+        let expected: Vec<&str> = vec![
+            "Type", "Version", "Name", "GenericName", "Comment", "Exec", "TryExec", "Icon",
+            "Terminal", "StartupNotify", "Categories", "Keywords", "MimeType",
+        ];
+        let keys: Vec<&str> = desktop_keys(&entry).into_iter().map(|(k, _)| k).collect();
+        prop_assert_eq!(keys, expected, "the entry grew or lost a key:\n{}", entry);
+        prop_assert_eq!(entry.matches("[Desktop Entry]").count(), 1);
+    }
+
+    /// Whatever the selection, every registry key a plan generates is one the
+    /// ADR-0012 guard permits. The guard is only worth having if the generator
+    /// cannot get around it, and this is the statement of that.
+    #[test]
+    fn no_selection_produces_a_key_the_guard_refuses(selection in any_selection()) {
+        let plan = plan(Platform::Windows, &windows_app(), &selection);
+        prop_assert_eq!(plan.registry_objections(), vec![]);
+        // ...and none of them so much as mentions Notepad.
+        for value in &plan.registry_values {
+            prop_assert!(!value.key.to_ascii_lowercase().contains("notepad"));
+            prop_assert!(!value.data.to_ascii_lowercase().contains("notepad"));
+        }
+    }
+
+    /// Whatever the selection, an install writes only inside the root it was
+    /// given, and writes one file per artefact.
+    #[test]
+    fn an_install_never_leaves_the_root_it_was_given(
+        selection in any_selection(),
+        prefix in prop::sample::select(vec![
+            "", "../", "..\\", "/", r"C:\", "./", "a/../../",
+        ]),
+    ) {
+        prop_assume!(!selection.is_empty());
+        let dir = tempdir().unwrap();
+        let mut plan = plan(Platform::Linux, &app(), &selection);
+        // A plan is a value, and values arrive from elsewhere. Whatever is
+        // stuck on the front of an artefact's path, an install either refuses
+        // outright or writes inside the root it was given -- never both, and
+        // never outside.
+        for artefact in &mut plan.artefacts {
+            artefact.relative_path = format!("{prefix}{}", artefact.relative_path);
+        }
+        match install(&plan, dir.path(), Consent::Granted) {
+            Err(refusal) => prop_assert!(
+                matches!(refusal, InstallRefusal::UnsafeArtefactPath { .. }),
+                "{:?}",
+                refusal,
+            ),
+            Ok(installed) => {
+                prop_assert_eq!(installed.written.len(), plan.artefacts.len());
+                for path in &installed.written {
+                    prop_assert!(path.starts_with(dir.path()), "{:?}", path);
+                    prop_assert!(!path.to_string_lossy().contains(".."), "{:?}", path);
+                }
+            }
+        }
+    }
+
+    /// A plan is deterministic. Two runs over the same inputs give
+    /// byte-identical artefacts, so a registration file does not appear in
+    /// every backup diff for having reordered itself.
+    #[test]
+    fn a_plan_is_the_same_plan_twice(
+        selection in any_selection(),
+        platform in prop::sample::select(Platform::ALL),
+    ) {
+        let first = plan(platform, &windows_app(), &selection);
+        let second = plan(platform, &windows_app(), &selection);
+        prop_assert_eq!(first, second);
+    }
+
+    /// Whatever is selected, the product claims no file type it cannot open.
+    /// Stated over selections rather than over the table, because `custom`
+    /// takes arbitrary strings and dropping the unknown ones is what keeps
+    /// this true.
+    #[test]
+    fn a_plan_never_claims_a_type_the_editor_cannot_open(
+        proposed in prop::collection::vec("[a-z]{1,6}", 0..10),
+    ) {
+        let refs: Vec<&str> = proposed.iter().map(String::as_str).collect();
+        let selection = AssociationSelection::custom(refs);
+        for file_type in selection.file_types().filter(|t| must_be_parseable(t)) {
+            prop_assert!(
+                bp_formats::Format::from_extension(file_type.extension).is_some(),
+                "{}",
+                file_type.extension,
+            );
+        }
+    }
+}

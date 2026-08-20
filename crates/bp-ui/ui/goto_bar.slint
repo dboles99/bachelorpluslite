@@ -1,0 +1,102 @@
+// The go-to-line bar.
+//
+// A bar rather than a dialog, and collapsed rather than conditional, for the
+// same two reasons as `find_bar.slint`: an element inside a Slint `if` is out
+// of scope for anything outside it, and Ctrl+G has to put the caret in the box
+// it has just opened. A modal dialog would also block the window, which is a
+// heavy answer to "which line?".
+//
+// It never validates the text. What counts as a line number, and what to say
+// when there is no such line, are `bp-editor`'s and the shell's decisions --
+// this only collects characters and reports what it was told.
+
+import { MenuLabel } from "menu.slint";
+import { Palette } from "types.slint";
+
+export component GotoBar inherits Rectangle {
+    in property <bool> open;
+    in-out property <string> line-text;
+    /// "there are only 42 lines", or empty.
+    in property <string> status;
+
+    callback submitted();
+    /// The × was clicked. The window owns what "closed" means, because it
+    /// owns both editors and decides where the caret goes next.
+    callback closed();
+
+    /// Put the caret in the box and select what is there, so Ctrl+G on an
+    /// open bar replaces the previous number rather than appending to it.
+    public function focus-input() {
+        input.focus();
+        input.select-all();
+    }
+
+    height: root.open ? 34px : 0px;
+    visible: root.open;
+    background: Palette.shell;
+
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        padding-top: 4px;
+        padding-bottom: 4px;
+        spacing: 8px;
+
+        Text {
+            text: "Go to line";
+            color: Palette.ink-dim;
+            font-size: 12px;
+            vertical-alignment: center;
+        }
+
+        Rectangle {
+            width: 90px;
+            background: Palette.panel;
+            border-color: Palette.edge;
+            border-width: 1px;
+            HorizontalLayout {
+                padding-left: 6px;
+                padding-right: 6px;
+                input := TextInput {
+                    text <=> root.line-text;
+                    color: Palette.ink;
+                    selection-background-color: Palette.accent;
+                    font-size: 13px;
+                    single-line: true;
+                    vertical-alignment: center;
+                    // `number` so the on-screen keyboards and input methods
+                    // that honour it offer digits. It is not validation --
+                    // the desktop backends do not enforce it, which is why
+                    // the shell still parses rather than trusting.
+                    input-type: number;
+                    accepted => {
+                        root.submitted();
+                    }
+                }
+            }
+        }
+
+        MenuLabel {
+            label: "Go";
+            clicked => {
+                root.submitted();
+            }
+        }
+
+        Text {
+            text: root.status;
+            color: Palette.ink-dim;
+            font-size: 12px;
+            vertical-alignment: center;
+        }
+
+        Rectangle { horizontal-stretch: 1; }
+
+        MenuLabel {
+            label: "×";
+            clicked => {
+                root.closed();
+            }
+        }
+    }
+}

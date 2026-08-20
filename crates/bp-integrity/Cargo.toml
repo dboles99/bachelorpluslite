@@ -4,4 +4,21 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
+bp-crypto = { path = "../bp-crypto" }
+thiserror.workspace = true
+# A real dependency, not just a test one: every artefact this crate writes --
+# signature sidecar, key file, manifest -- goes down the same atomic
+# create-flush-rename path, and that needs a temporary file in the target
+# directory.
+tempfile.workspace = true
+# A signing key is a secret this crate reads off a disk into memory, so the
+# buffer it lands in has to be wiped rather than merely dropped.
+zeroize.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+tempfile.workspace = true

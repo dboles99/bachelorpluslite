@@ -1,0 +1,133 @@
+// The menu primitives: a bar label, a row, and the popup that holds rows.
+//
+// `MenuLabel` is not only used by the menu bar. It is the shell's general
+// clickable-label shape, so the find bar's arrows and the panel close buttons
+// use it too -- one hover treatment everywhere rather than three that drift.
+
+import { MenuItem, Palette } from "types.slint";
+
+export component MenuLabel inherits Rectangle {
+    in property <string> label;
+    in property <bool> open;
+    callback clicked();
+    height: 26px;
+    width: txt.preferred-width + 22px;
+    background: root.open || ta.has-hover ? Palette.edge : transparent;
+
+    txt := Text {
+        text: root.label;
+        color: Palette.ink;
+        font-size: 13px;
+        vertical-alignment: center;
+        horizontal-alignment: center;
+    }
+
+    ta := TouchArea {
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+export component MenuRow inherits Rectangle {
+    in property <MenuItem> item;
+    callback chosen(int);
+    height: 28px;
+    background: root.item.enabled && ta.has-hover ? Palette.edge : Palette.panel;
+
+    HorizontalLayout {
+        padding-left: 14px;
+        padding-right: 14px;
+        spacing: 24px;
+
+        Text {
+            text: root.item.label;
+            // Greyed when inert, so "not implemented" is visible rather than
+            // discovered by clicking.
+            color: root.item.enabled ? Palette.ink : Palette.ink-dim;
+            font-size: 13px;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+        }
+
+        Text {
+            text: root.item.shortcut;
+            color: Palette.ink-dim;
+            font-size: 12px;
+            vertical-alignment: center;
+        }
+    }
+
+    ta := TouchArea {
+        clicked => {
+            if (root.item.enabled) {
+                root.chosen(root.item.action);
+            }
+        }
+    }
+}
+
+export component MenuPopup inherits PopupWindow {
+    in property <[MenuItem]> items;
+    in property <length> menu-width: 280px;
+    /// How tall this menu may grow before its rows start scrolling.
+    ///
+    /// Not cosmetic, and not a guess at a nice size. A menu's height here is
+    /// user data rather than a constant: the Edit menu is built from
+    /// clipboard history, one row per entry plus up to three for the
+    /// transformations it offers, so at `bp_clipboard::MAX_ENTRIES` it asks
+    /// for over a hundred rows. Binding straight to `content.preferred-height`
+    /// makes the rows past the window's bottom edge unreachable -- there is
+    /// nothing to drag and nothing to scroll -- and the rows that go first are
+    /// the ones at the bottom. Five copied clips were enough to put every line
+    /// operation out of reach, five of which have no keyboard shortcut.
+    ///
+    /// Named like `menu-width` for the same reason: `max-height` is a builtin
+    /// layout property and cannot be redeclared.
+    in property <length> menu-max-height: 400px;
+    callback chosen(int);
+
+    width: root.menu-width;
+    height: min(content.preferred-height, root.menu-max-height);
+
+    Rectangle {
+        background: Palette.panel;
+        border-color: Palette.edge;
+        border-width: 1px;
+
+        Flickable {
+            // Both viewport dimensions are set. Height is the point of the
+            // exercise, but width has to be pinned to the visible width or the
+            // viewport sizes itself to the content's preferred width instead
+            // -- and a recent-files hint is far wider than the menu. Every row
+            // would then be laid out over-wide, putting the shortcut column
+            // past the right edge, where a Flickable clips it. Before this was
+            // a Flickable that text simply overflowed the popup and drew
+            // outside it, so nothing was lost; now it would be.
+            viewport-width: self.width;
+            viewport-height: content.preferred-height;
+
+            content := VerticalLayout {
+                alignment: start;
+                padding: 4px;
+                for item in root.items: VerticalLayout {
+                    MenuRow {
+                        item: item;
+                        chosen(action) => {
+                            root.chosen(action);
+                        }
+                    }
+
+                    if item.separator-after: Rectangle {
+                        height: 5px;
+                        Rectangle {
+                            height: 1px;
+                            y: 2px;
+                            background: Palette.edge;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

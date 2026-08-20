@@ -1,0 +1,96 @@
+// The status bar (specs.md section 3).
+//
+// Two rows: what the document is, and where it is. The second row doubles as
+// the error line, because an error about the open document belongs next to the
+// document's path rather than in a dialog the user has to dismiss.
+
+import { Palette } from "types.slint";
+
+component StatusText inherits Text {
+    color: Palette.ink-dim;
+    font-size: 12px;
+    vertical-alignment: center;
+}
+
+export component StatusBar inherits Rectangle {
+    in property <string> save-state;
+    in property <bool> is-dirty;
+    in property <string> format-label;
+    in property <string> encoding-label;
+    in property <string> line-ending-label;
+    in property <string> cursor-label;
+    in property <string> theme-name;
+    /// The active document's security profile, or empty under the default.
+    ///
+    /// Shown only when it is not Standard: a permanent "Standard" would be
+    /// noise on every document, and the whole value of the readout is that
+    /// something *unusual* is in force.
+    in property <string> security-label;
+    in property <string> location;
+    in property <string> error-message;
+
+    callback cycle-theme();
+
+    height: 44px;
+    background: Palette.panel;
+
+    VerticalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        padding-top: 4px;
+        padding-bottom: 4px;
+        spacing: 2px;
+
+        HorizontalLayout {
+            spacing: 10px;
+            alignment: start;
+
+            Text {
+                text: root.save-state;
+                // Dirty is the state worth noticing, so it gets
+                // the accent; a clean save is unremarkable.
+                color: root.is-dirty ? Palette.accent : Palette.ink-dim;
+                font-size: 12px;
+                vertical-alignment: center;
+            }
+            StatusText { text: "│ " + root.format-label; }
+            StatusText { text: "│ " + root.encoding-label; }
+            StatusText { text: "│ " + root.line-ending-label; }
+            StatusText { text: "│ " + root.cursor-label; }
+            // In the accent, like the theme name and the dirty marker: it
+            // only appears when it has something to say, and when it does it
+            // is a statement about where this document's data may go.
+            if root.security-label != "": Text {
+                text: "│ " + root.security-label;
+                color: Palette.accent;
+                font-size: 12px;
+                vertical-alignment: center;
+            }
+
+            Rectangle {
+                width: theme-label.preferred-width + 16px;
+                background: theme-area.has-hover ? Palette.edge : transparent;
+                theme-label := Text {
+                    text: "│ " + root.theme-name;
+                    color: Palette.accent;
+                    font-size: 12px;
+                    vertical-alignment: center;
+                    horizontal-alignment: center;
+                }
+                theme-area := TouchArea {
+                    clicked => {
+                        root.cycle-theme();
+                    }
+                }
+            }
+        }
+
+        Text {
+            text: root.error-message == "" ? root.location : root.error-message;
+            color: root.error-message == "" ? Palette.ink-dim : Palette.accent;
+            font-size: 12px;
+            overflow: elide;
+            vertical-alignment: center;
+        }
+    }
+}

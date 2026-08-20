@@ -1,0 +1,118 @@
+// The passphrase bar.
+//
+// A bar rather than a dialog, for the same reasons as `find_bar.slint` and
+// `goto_bar.slint`: an element inside a Slint `if` is out of scope for
+// anything outside it, and whatever opens this has to be able to put the caret
+// in the box it has just opened.
+//
+// Slint has no password field and `rfd` -- which every other dialog in this
+// shell uses -- has no text input at all, so this is the only route to a
+// passphrase that does not add a dependency.
+//
+// **The text is masked and never leaves this component except through
+// `submitted`.** It is not bound two-way to the window: a passphrase sitting
+// in an `AppWindow` property is a passphrase in a struct that gets copied
+// around, logged by accident, and kept alive for the life of the window.
+
+import { MenuLabel } from "menu.slint";
+import { Palette } from "types.slint";
+
+export component PassphraseBar inherits Rectangle {
+    in property <bool> open;
+    /// What this is asking for -- unlocking an existing document, setting a
+    /// new passphrase, or confirming one just typed. The caller words it,
+    /// because only the caller knows which.
+    in property <string> prompt;
+    /// A failure, or a hint. Empty when there is nothing to say.
+    in property <string> status;
+    /// The label on the action, e.g. "Unlock" or "Encrypt".
+    in property <string> action-label: "Unlock";
+
+    /// The passphrase, sent once and then forgotten here.
+    callback submitted(string);
+    callback cancelled();
+
+    /// Put the caret in the box, empty.
+    ///
+    /// Always cleared rather than selected: unlike a find query, a previous
+    /// passphrase is never a useful starting point, and leaving one in a
+    /// masked box the user cannot read is how the wrong one gets submitted
+    /// three times.
+    public function focus-input() {
+        input.text = "";
+        input.focus();
+    }
+
+    /// Wipe the box. Called after every submit, so the passphrase does not
+    /// sit in a widget for the rest of the session.
+    public function clear() {
+        input.text = "";
+    }
+
+    height: root.open ? 34px : 0px;
+    visible: root.open;
+    background: Palette.shell;
+
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        padding-top: 4px;
+        padding-bottom: 4px;
+        spacing: 8px;
+
+        Text {
+            text: root.prompt;
+            color: Palette.ink-dim;
+            font-size: 12px;
+            vertical-alignment: center;
+        }
+
+        Rectangle {
+            width: 240px;
+            background: Palette.panel;
+            border-color: Palette.edge;
+            border-width: 1px;
+            HorizontalLayout {
+                padding-left: 6px;
+                padding-right: 6px;
+                input := TextInput {
+                    color: Palette.ink;
+                    selection-background-color: Palette.accent;
+                    font-size: 13px;
+                    single-line: true;
+                    vertical-alignment: center;
+                    // The whole reason this component exists.
+                    input-type: password;
+                    accepted => {
+                        root.submitted(self.text);
+                    }
+                }
+            }
+        }
+
+        MenuLabel {
+            label: root.action-label;
+            clicked => {
+                root.submitted(input.text);
+            }
+        }
+
+        Text {
+            text: root.status;
+            // In the accent: everything this bar has to say is either a
+            // failure or a warning, and neither should be easy to miss.
+            color: Palette.accent;
+            font-size: 12px;
+            vertical-alignment: center;
+        }
+
+        Rectangle { horizontal-stretch: 1; }
+
+        MenuLabel {
+            label: "×";
+            clicked => {
+                root.cancelled();
+            }
+        }
+    }
+}

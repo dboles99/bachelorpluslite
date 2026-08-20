@@ -1,4 +1,234 @@
-//! bp-platform crate for BachelorPad+.
+//! The platform seam ADR-0001 requires (specs.md section 20).
+//!
+//! ADR-0001 says portable behaviour lives in shared crates and OS behaviour is
+//! isolated behind an adapter. The failure mode that decision guards against
+//! is not "we called a Win32 function"; it is `cfg!(windows)` sprinkled
+//! through twenty files, where each site is a rule nobody wrote down and half
+//! of them are only ever compiled by half of CI.
+//!
+//! So this crate is built the other way round. **Almost everything here is a
+//! plain function that takes [`Platform`] as a parameter**, which means the
+//! Windows rules are executed by the Linux leg of CI and the Linux rules by
+//! the Windows leg. Only a handful of functions -- the ones that genuinely
+//! read the process environment or touch a disk -- are behind `cfg`, and each
+//! of them is a thin wrapper whose only job is to choose the parameter.
+//! [`Platform::HOST`] is the one place the compile target is consulted.
+//!
+//! ## What is here
+//!
+//! * [`paths`] -- the rules that actually differ. Reserved device names
+//!   (`CON`, `NUL`, `AUX`), the characters each platform forbids, trailing
+//!   dots and spaces, `MAX_PATH` and the `\\?\` escape hatch, and whether two
+//!   names are the same file. A path that is fine on Linux and illegal on
+//!   Windows is a defect this crate exists to catch before a save fails.
+//! * [`dirs`] -- where configuration, data, cache and state live, resolved
+//!   from an [`EnvSnapshot`](dirs::EnvSnapshot) that is passed in rather than
+//!   read, so `%APPDATA%` behaviour is testable on Linux and XDG behaviour on
+//!   Windows.
+//! * [`capabilities`] -- what this platform can and cannot do, so callers ask
+//!   instead of assuming. This is the register that keeps
+//!   `docs/architecture/PLATFORM_MATRIX.md` from being the only place the
+//!   answer exists.
+//! * [`editor`] -- default-editor registration under ADR-0012: which file
+//!   types we would register for, what the current association actually is,
+//!   and the artefacts registration needs (a `.desktop` entry and a MIME
+//!   package on Linux, an `HKCU\Software\Classes` shape on Windows).
+//!
+//! ## The line this crate draws
+//!
+//! **Reading state and generating artefacts is decision-free. Changing the
+//! user's machine is not.** Every function that answers a question or builds
+//! a file is pure or nearly so, always available, and needs no permission.
+//! The single function that writes anything into a location the desktop
+//! environment reads -- [`editor::install`] -- takes an explicit
+//! [`Consent`](editor::Consent) value and an explicit destination root, and
+//! refuses without both. It is the only item in this crate that can change
+//! what happens when the user double-clicks a file.
+//!
+//! ## What is deliberately not here
+//!
+//! **Credential storage.** specs.md asks for DPAPI on Windows and Secret
+//! Service on Linux, and `docs/architecture/PLATFORM_MATRIX.md` lists both.
+//! They are not implemented, because what would go in them is entangled with
+//! an open question a human has to answer: where the signing key of
+//! `bp-integrity` lives, and whether a platform credential store is the
+//! custodian or merely a wrapper around a key file. Implementing a keyring
+//! first would decide that by accident. They appear here as
+//! [`Capability::CredentialStore`](capabilities::Capability::CredentialStore)
+//! and [`Capability::BiometricUnlock`](capabilities::Capability::BiometricUnlock),
+//! reported as
+//! [`Availability::AwaitingDecision`](capabilities::Availability::AwaitingDecision)
+//! with the reason attached, so a caller gets an honest "not yet, and here is
+//! why" rather than a silent absence.
+//!
+//! **Anything that runs a program.** Registration on Linux is only complete
+//! once `update-desktop-database` and `update-mime-database` have run, and on
+//! Windows the user has to visit Default Apps. This crate names those steps
+//! ([`editor::FollowUp`], [`editor::Handoff`]) and executes none of them: a
+//! library that spawns processes on the user's behalf is a library that can
+//! be talked into spawning a different one.
+
+#![forbid(unsafe_code)]
+
+pub mod capabilities;
+pub mod dirs;
+pub mod editor;
+pub mod paths;
+
+pub use capabilities::{Availability, Capability};
+pub use dirs::{DirKind, EnvSnapshot};
+pub use paths::{PathProblem, path_problems};
 
 /// Crate identity used by workspace smoke tests and diagnostics.
 pub const CRATE_NAME: &str = "bp-platform";
+
+/// The directory name this product owns under every platform root it uses.
+///
+/// One constant rather than a literal per call site, because the string
+/// appears in a config path, a data path, a cache path and a registry key,
+/// and four spellings of it is four half-migrated installs.
+pub const APP_DIR: &str = "bachelorpad";
+
+/// One of the two operating systems ADR-0001 names, as a *value*.
+///
+/// The whole design of this crate rests on this being an argument rather than
+/// a compile-time fact. `cfg!(windows)` at a call site produces code that one
+/// leg of CI never runs; `Platform::Windows` passed to a function produces
+/// code both legs run, and a test that can assert the Windows answer while
+/// standing on Linux. The compile target is consulted exactly once, in
+/// [`Platform::HOST`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Platform {
+    /// Windows 10 and Windows 11. The two are the same platform for
+    /// everything in this crate; where they differ it is a *capability*
+    /// difference (Windows Hello) rather than a rule difference, and
+    /// [`capabilities`] carries that distinction instead of the enum.
+    Windows,
+    /// Linux. Desktop environment unknown -- which is itself a rule, since it
+    /// is why so many Linux capabilities here are conditional rather than
+    /// simply present.
+    Linux,
+}
+
+impl Platform {
+    /// Every platform, for exhaustive tests and for UI that offers a choice.
+    ///
+    /// A slice rather than a derived iterator so that a test can loop over it
+    /// in a `const` context and a new variant makes the loop cover it without
+    /// anyone remembering to add a case.
+    pub const ALL: &'static [Platform] = &[Platform::Windows, Platform::Linux];
+
+    /// The platform this binary was compiled for.
+    ///
+    /// The single `cfg` on which the rest of the crate's platform knowledge
+    /// depends. A target that is neither Windows nor Linux is reported as
+    /// Linux rather than refusing to compile: ADR-0001 names exactly two
+    /// targets, so anything else is unsupported, and of the two the
+    /// Unix-family answer is the one that will not silently produce a
+    /// backslash-separated path on a system that treats `\` as an ordinary
+    /// filename character.
+    #[cfg(windows)]
+    pub const HOST: Platform = Platform::Windows;
+
+    /// The platform this binary was compiled for. See the Windows arm for why
+    /// non-Windows collapses to Linux.
+    #[cfg(not(windows))]
+    pub const HOST: Platform = Platform::Linux;
+
+    /// A stable lowercase token, for config files, logs and diagnostics.
+    ///
+    /// Not `Display`, and not the `Debug` spelling: a value that ends up in a
+    /// file the user might edit needs a spelling that is promised not to
+    /// change, and `Debug` output is explicitly not promised.
+    #[must_use]
+    pub const fn token(self) -> &'static str {
+        match self {
+            Self::Windows => "windows",
+            Self::Linux => "linux",
+        }
+    }
+
+    /// The inverse of [`Self::token`], for reading back what was written.
+    ///
+    /// Case-insensitive and whitespace-tolerant because the value's usual
+    /// journey is through a hand-edited text file. Returns `None` rather than
+    /// falling back to [`Self::HOST`]: a caller that meant "the host" can say
+    /// so, and one that read `"macos"` out of a file needs to know it was not
+    /// understood.
+    #[must_use]
+    pub fn parse(token: &str) -> Option<Self> {
+        match token.trim().to_ascii_lowercase().as_str() {
+            "windows" | "win32" | "win" => Some(Self::Windows),
+            "linux" | "unix" => Some(Self::Linux),
+            _ => None,
+        }
+    }
+
+    /// The separator this platform's own APIs produce.
+    ///
+    /// Windows accepts `/` almost everywhere and Linux accepts only `/`, so
+    /// this is for *writing* a path a human will read, never for parsing one.
+    /// Parsing must accept both on Windows -- see [`paths::components`].
+    #[must_use]
+    pub const fn separator(self) -> char {
+        match self {
+            Self::Windows => '\\',
+            Self::Linux => '/',
+        }
+    }
+
+    /// Whether two file names differing only in case name different files.
+    ///
+    /// The single most expensive difference between the two targets for an
+    /// editor: on Linux `Notes.txt` and `notes.txt` are two documents, on
+    /// Windows they are one, and code that assumes either one corrupts data on
+    /// the other. See [`paths::same_file_name`] for the comparison itself, and
+    /// note that this is the *default* -- NTFS can be made case-sensitive per
+    /// directory and Linux can host a case-insensitive filesystem, so this
+    /// answers "what should I assume", not "what is true of this directory".
+    #[must_use]
+    pub const fn case_sensitive_file_names(self) -> bool {
+        match self {
+            Self::Windows => false,
+            Self::Linux => true,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn crate_name_is_the_package_name() {
+        assert_eq!(CRATE_NAME, env!("CARGO_PKG_NAME"));
+    }
+
+    #[test]
+    fn every_platform_round_trips_through_its_own_token() {
+        for &platform in Platform::ALL {
+            assert_eq!(
+                Platform::parse(platform.token()),
+                Some(platform),
+                "{platform:?} does not survive token -> parse"
+            );
+        }
+    }
+
+    #[test]
+    fn parse_tolerates_the_journey_through_a_text_file() {
+        assert_eq!(Platform::parse("  WINDOWS\n"), Some(Platform::Windows));
+        assert_eq!(Platform::parse("Linux"), Some(Platform::Linux));
+    }
+
+    #[test]
+    fn an_unsupported_target_is_not_guessed_at() {
+        assert_eq!(Platform::parse("macos"), None);
+        assert_eq!(Platform::parse(""), None);
+    }
+
+    #[test]
+    fn host_is_one_of_the_two_supported_platforms() {
+        assert!(Platform::ALL.contains(&Platform::HOST));
+    }
+}

@@ -1,0 +1,52 @@
+[package]
+name = "bp-integration-tests"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+# No library and no binary: this package exists only to hold tests that cross
+# crate boundaries. Every `bp-*` crate tests itself in isolation, which is what
+# makes each one's behaviour knowable -- and is exactly why nothing here was
+# ever exercised end to end. One manual pass found two defects no unit test
+# caught. This is where the seams get tested.
+[lib]
+path = "src/lib.rs"
+
+# Deliberately does **not** inherit `[workspace.lints]`. Those lints exist to
+# keep a panic out of library code, where it is a crash in somebody's editor
+# with their document in it. Every line in this package is a test or a fixture
+# for one, and `unwrap()` in a fixture is the assertion -- which is the same
+# thing `clippy.toml` says, in the one place where clippy's own heuristic for
+# "is this a test" cannot see it, because these are helper functions rather
+# than `#[test]` functions.
+
+[dependencies]
+
+[dev-dependencies]
+bp-audit = { path = "../../crates/bp-audit" }
+bp-buffer = { path = "../../crates/bp-buffer" }
+bp-clipboard = { path = "../../crates/bp-clipboard" }
+bp-config = { path = "../../crates/bp-config" }
+bp-core = { path = "../../crates/bp-core" }
+bp-crypto = { path = "../../crates/bp-crypto" }
+bp-data = { path = "../../crates/bp-data" }
+bp-editor = { path = "../../crates/bp-editor" }
+bp-files = { path = "../../crates/bp-files" }
+bp-formats = { path = "../../crates/bp-formats" }
+bp-history = { path = "../../crates/bp-history" }
+bp-integrity = { path = "../../crates/bp-integrity" }
+bp-naming = { path = "../../crates/bp-naming" }
+bp-notebook = { path = "../../crates/bp-notebook" }
+bp-platform = { path = "../../crates/bp-platform" }
+bp-redaction = { path = "../../crates/bp-redaction" }
+bp-search = { path = "../../crates/bp-search" }
+bp-secrets = { path = "../../crates/bp-secrets" }
+bp-security = { path = "../../crates/bp-security" }
+bp-semantic = { path = "../../crates/bp-semantic" }
+bp-storage = { path = "../../crates/bp-storage" }
+bp-theme = { path = "../../crates/bp-theme" }
+proptest.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+time.workspace = true

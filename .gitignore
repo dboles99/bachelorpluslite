@@ -1,4 +1,7 @@
 /target
+# Any standalone workspace (a spike, a fuzz target) has its own target
+# directory that the root-anchored rule above does not cover.
+**/target/
 **/*.rs.bk
 .env
 .env.*
@@ -18,3 +21,24 @@ Thumbs.db
 .vscode/*
 !.vscode/extensions.json
 !.vscode/settings.json
+# Per-run local CI records. Benchmark results under artifacts/benchmarks/ are
+# deliberately NOT ignored -- they are the evidence behind ADR-0015.
+artifacts/test-evidence/*.json
+
+# Documents saved into the checkout by accident. Save As used to default to
+# the process working directory, so testing the app from this directory wrote
+# real notes straight into the repo -- and one commit later they were pushed.
+# The dialogs now default to the document's folder or Documents; this is the
+# second line of defence. Root level only, so docs/ and notes/ are unaffected.
+/*.txt
+/*.md
+!/README.md
+!/DECISIONS.md
+!/PROJECT_MEMORY.md
+!/ROADMAP.md
+!/specs.md
+
+# Agent worktrees. A subagent working in isolation gets a git worktree here,
+# which is a repository inside this one -- `git add -A` sweeps it into a
+# commit as a stray gitlink if it is not ignored. It happened once.
+/.claude/worktrees/

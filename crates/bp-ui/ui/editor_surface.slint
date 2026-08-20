@@ -1,0 +1,232 @@
+// The custom editor surface.
+//
+// Slint's `TextInput` owns its own text, caret and undo stack, which is the
+// single fact blocking three separate things: the rope in `bp-buffer` cannot
+// be the storage, `bp-editor`'s undo cannot be the authority, and the status
+// bar cannot show Ln/Col. This component exists to own none of those either
+// -- it draws what Rust hands it and reports what the user did. Every
+// decision lives in `bp-editor`, which is tested without a window.
+//
+// Only the visible rows are ever built, so a 100,000-line document costs the
+// same to draw as a ten-line one.
+
+import { EditorRow, SelectionBox, Palette } from "types.slint";
+
+export component EditorSurface inherits Rectangle {
+    in property <[EditorRow]> rows;
+    in property <[SelectionBox]> selection;
+    /// Viewport row of the caret, or -1 when it is scrolled out of sight.
+    in property <int> caret-row: -1;
+    in property <int> caret-column;
+    in property <bool> show-gutter: true;
+    in property <length> font-size: 14px;
+    /// Derived, not a constant, because zoom moves `font-size` underneath it.
+    ///
+    /// A fixed 18px looks right at 14pt and nowhere else: zoom in and the
+    /// glyphs overlap the row above, zoom out and the text strands itself in
+    /// whitespace. Worse than either, `row-at` divides by this to turn a
+    /// click into a line, so a line height that does not match what is drawn
+    /// puts the caret on the wrong row -- silently, and further out the
+    /// further down the click is.
+    ///
+    /// 1.286 is 18/14, so the default size still lays out exactly as it did.
+    in property <length> line-height: root.font-size * 1.286;
+
+    /// text, control, shift, alt. Returns whether the editor claimed it --
+    /// anything it does not claim must bubble up, or Ctrl+S stops saving.
+    callback key(string, bool, bool, bool) -> bool;
+    /// row, visual column, extend-selection.
+    callback pressed(int, int, bool);
+    /// Second and third click at the same place: select the word, then the
+    /// line. Separate callbacks rather than a count on `pressed`, so Rust is
+    /// never asked to work out what a click meant -- it is told.
+    callback selected-word(int, int);
+    callback selected-line(int, int);
+    callback dragged(int, int);
+    /// Lines to scroll; positive is toward the end of the document.
+    callback scrolled(int);
+    /// How many rows now fit, and how many characters fit across.
+    ///
+    /// Both measured here because this component owns the font: the column
+    /// count is the drawable width divided by the advance it actually draws
+    /// with, and any other source would wrap in a different place than it
+    /// renders.
+    callback resized(int, int);
+
+    // The character advance is measured, not assumed. A hard-coded ratio
+    // drifts the caret one fraction of a pixel further from its character
+    // with every column, which is invisible until someone types a long line
+    // and then unusable. Twenty characters so the division dilutes rounding;
+    // the fallback only applies before the first layout pass, when
+    // `preferred-width` is still zero.
+    probe := Text {
+        text: "MMMMMMMMMMMMMMMMMMMM";
+        font-family: "Consolas";
+        font-size: root.font-size;
+        opacity: 0;
+    }
+    property <length> advance: probe.preferred-width > 0
+        ? probe.preferred-width / 20
+        : root.font-size * 0.6;
+
+    property <length> pad: 10px;
+    // Scaled for the same reason as `line-height`: `text-left` is built from
+    // this, and `column-at` subtracts `text-left` to turn a click into a
+    // column. A gutter too narrow for its numbers clips them; one that no
+    // longer matches where the text starts moves the caret sideways.
+    // 3.3 x 14pt is the 46px this was fixed at.
+    property <length> gutter-width: root.show-gutter ? max(46px, root.font-size * 3.3) : 0px;
+    property <length> text-left: root.pad + root.gutter-width;
+
+    property <int> fitting-rows: max(1, floor((self.height - 2 * root.pad) / root.line-height));
+    property <int> fitting-columns: max(1, floor((self.width - root.text-left - root.pad) / root.advance));
+    changed fitting-rows => {
+        root.resized(self.fitting-rows, self.fitting-columns);
+    }
+    // Width changes without height changing whenever the window is dragged
+    // by a side edge, and that is exactly when the wrap has to be recomputed.
+    changed fitting-columns => {
+        root.resized(self.fitting-rows, self.fitting-columns);
+    }
+
+    function row-at(y: length) -> int {
+        return max(0, floor((y - root.pad) / root.line-height));
+    }
+    // Rounded, not floored: clicking the right half of a character puts the
+    // caret after it, which is what every editor does and what makes
+    // click-to-place feel accurate rather than one character left.
+    function column-at(x: length) -> int {
+        return max(0, round((x - root.text-left) / root.advance));
+    }
+
+    // What a press means, given how many came before it.
+    function press(row: int, column: int, shift: bool) {
+        root.click-count = row == root.click-row ? root.click-count + 1 : 1;
+        root.click-row = row;
+        clicks.running = false;
+        clicks.running = true;
+
+        // Shift-click always extends, whatever the count. Building a
+        // selection by repeated shift-click is a real gesture, and reading
+        // the second of them as a word select would throw away the selection
+        // being built.
+        if (shift) {
+            root.click-count = 1;
+            root.pressed(row, column, true);
+        } else if (root.click-count == 2) {
+            root.selected-word(row, column);
+        } else if (root.click-count >= 3) {
+            root.selected-line(row, column);
+            // Cycle restarts: a fourth click places a caret again, rather
+            // than selecting a word off the back of the third.
+            root.click-count = 0;
+        } else {
+            root.pressed(row, column, false);
+        }
+    }
+
+    background: Palette.panel;
+    forward-focus: keys;
+
+    keys := FocusScope {
+        key-pressed(event) => {
+            if (root.key(event.text, event.modifiers.control, event.modifiers.shift, event.modifiers.alt)) {
+                return EventResult.accept;
+            }
+            return EventResult.reject;
+        }
+    }
+
+    // Selection first, so the text draws over it.
+    for box in root.selection: Rectangle {
+        x: root.text-left + box.start * root.advance;
+        y: root.pad + box.row * root.line-height;
+        width: (box.end - box.start) * root.advance;
+        height: root.line-height;
+        background: Palette.accent;
+    }
+
+    for row[i] in root.rows: Text {
+        x: root.text-left;
+        y: root.pad + i * root.line-height;
+        height: root.line-height;
+        text: row.text;
+        color: Palette.ink;
+        font-family: "Consolas";
+        font-size: root.font-size;
+        vertical-alignment: center;
+    }
+
+    if root.show-gutter: Rectangle {
+        for row[i] in root.rows: Text {
+            x: root.pad;
+            y: root.pad + i * root.line-height;
+            width: root.gutter-width - 10px;
+            height: root.line-height;
+            text: row.number;
+            color: Palette.ink-dim;
+            font-family: "Consolas";
+            font-size: root.font-size;
+            horizontal-alignment: right;
+            vertical-alignment: center;
+        }
+    }
+
+    // Hidden when the surface is not focused, so it is clear which of the
+    // find box and the document a keystroke would reach.
+    Rectangle {
+        visible: root.caret-row >= 0 && keys.has-focus;
+        x: root.text-left + root.caret-column * root.advance;
+        y: root.pad + root.caret-row * root.line-height;
+        width: 2px;
+        height: root.line-height;
+        background: Palette.ink;
+    }
+
+    // Click counting, for double- and triple-click selection.
+    //
+    // `TouchArea` offers `double-clicked` but nothing for a third click, and
+    // mixing the two would mean two different notions of "how recent" -- so
+    // both are counted here instead.
+    //
+    // The row is part of the test. Three quick clicks down a file are three
+    // separate clicks, not a request to select a line, and without this the
+    // caret would jump somewhere the user never pointed at.
+    property <int> click-count: 0;
+    property <int> click-row: -1;
+
+    // 500ms is the interval Windows defaults to for a double click. It resets
+    // rather than expires the gesture, so a slow second click places a caret,
+    // which is what it looks like it should do.
+    clicks := Timer {
+        interval: 500ms;
+        running: false;
+        triggered => {
+            root.click-count = 0;
+            self.running = false;
+        }
+    }
+
+    // Last, so it sits above the drawing and receives the pointer.
+    touch := TouchArea {
+        mouse-cursor: text;
+
+        pointer-event(event) => {
+            if (event.kind == PointerEventKind.down) {
+                keys.focus();
+                root.press(root.row-at(self.mouse-y), root.column-at(self.mouse-x), event.modifiers.shift);
+            }
+        }
+        moved => {
+            if (self.pressed) {
+                root.dragged(root.row-at(self.mouse-y), root.column-at(self.mouse-x));
+            }
+        }
+        scroll-event(event) => {
+            // A wheel notch is reported in pixels; a line is the unit the
+            // document is virtualised in.
+            root.scrolled(-round(event.delta-y / root.line-height));
+            return EventResult.accept;
+        }
+    }
+}

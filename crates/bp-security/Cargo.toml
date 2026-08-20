@@ -4,4 +4,14 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
+# A profile travels with the document, so it has to serialise. Nothing else
+# is needed: this crate decides policy and performs none of it -- the
+# encryption it can require lives in bp-crypto (phase 15).
+serde.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

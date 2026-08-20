@@ -1,18 +1,31 @@
+<#
+.SYNOPSIS
+    Deprecated. Use Invoke-LocalCI.ps1.
+
+.DESCRIPTION
+    This was the original repository smoke test. It has been superseded by
+    scripts/Invoke-LocalCI.ps1, which runs a strictly larger set of checks
+    (it adds clippy, the test suite, a locked dependency resolve, and opt-in
+    Linux and spike passes) and is what the git hooks invoke.
+
+    Kept as a shim so existing muscle memory and any external references keep
+    working. It forwards every argument through.
+#>
 [CmdletBinding()]
-param()
+param(
+    [Parameter(ValueFromRemainingArguments = $true)]
+    $Forwarded
+)
 
 $ErrorActionPreference = 'Stop'
-$Root = Split-Path -Parent $PSScriptRoot
-Push-Location $Root
-try {
-    Write-Host "BachelorPad+ repository smoke test" -ForegroundColor Cyan
-    rustc --version
-    cargo --version
-    cargo metadata --no-deps --format-version 1 | Out-Null
-    cargo fmt --all -- --check
-    cargo check --workspace
-    Write-Host "PASS" -ForegroundColor Green
+$target = Join-Path $PSScriptRoot 'Invoke-LocalCI.ps1'
+
+Write-Host 'Test-Repo.ps1 is deprecated; forwarding to Invoke-LocalCI.ps1' -ForegroundColor Yellow
+
+if ($Forwarded) {
+    & $target @Forwarded
 }
-finally {
-    Pop-Location
+else {
+    & $target
 }
+exit $LASTEXITCODE

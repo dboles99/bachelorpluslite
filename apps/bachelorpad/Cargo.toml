@@ -4,8 +4,13 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 anyhow.workspace = true
 tracing.workspace = true
-tracing-subscriber.workspace = true
-bp-core = { path = "../../crates/bp-core" }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+bp-config = { path = "../../crates/bp-config" }
+bp-theme = { path = "../../crates/bp-theme" }
+bp-ui = { path = "../../crates/bp-ui" }

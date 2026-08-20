@@ -1,0 +1,29 @@
+#!/bin/sh
+# BachelorPad+ pre-push gate.
+#
+# The full local CI pass, including the locked dependency resolve that the
+# pre-commit hook skips for speed.
+#
+# Escape hatch:
+#     BPAD_SKIP_CI=1 git push ...
+
+if [ -n "$BPAD_SKIP_CI" ]; then
+  echo "pre-push: skipped (BPAD_SKIP_CI set)"
+  exit 0
+fi
+
+ROOT="$(git rev-parse --show-toplevel)"
+SCRIPT="$ROOT/scripts/Invoke-LocalCI.ps1"
+
+if [ ! -f "$SCRIPT" ]; then
+  echo "pre-push: $SCRIPT is missing; cannot verify this push" >&2
+  exit 1
+fi
+
+if ! command -v pwsh >/dev/null 2>&1; then
+  echo "pre-push: pwsh not found on PATH; cannot run the local CI gate" >&2
+  echo "          install PowerShell 7, or set BPAD_SKIP_CI=1 to bypass" >&2
+  exit 1
+fi
+
+exec pwsh -NoProfile -File "$SCRIPT"

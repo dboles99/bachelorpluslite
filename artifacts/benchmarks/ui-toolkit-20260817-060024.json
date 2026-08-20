@@ -1,0 +1,29 @@
+{
+  "measured_at": "2026-08-17T06:00:24.7166478+07:00",
+  "host_os": "Microsoft Windows NT 10.0.19045.0",
+  "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+  "runs": 7,
+  "note": "Cold figures are first-launch upper bounds; a true cold start needs a reboot.",
+  "results": [
+    {
+      "Spike": "egui-shell",
+      "BinaryMB": 12.2,
+      "ColdWallMs": 1412.2,
+      "WarmMedianMs": 1156.4,
+      "WarmMinMs": 1149.0,
+      "ReadyMedianMs": 877.5,
+      "IdleWorkingMB": 153.9,
+      "IdlePrivateMB": 361.1
+    },
+    {
+      "Spike": "slint-shell",
+      "BinaryMB": 10.4,
+      "ColdWallMs": 953.3,
+      "WarmMedianMs": 588.4,
+      "WarmMinMs": 578.4,
+      "ReadyMedianMs": 442.6,
+      "IdleWorkingMB": 61.8,
+      "IdlePrivateMB": 68.6
+    }
+  ]
+}

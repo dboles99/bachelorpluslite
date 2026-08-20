@@ -1,0 +1,30 @@
+#!/bin/sh
+# BachelorPad+ pre-commit gate.
+#
+# Runs the quick local CI pass (format, clippy, tests). With no CI service
+# behind this repository, a commit is the last point at which anything gets
+# checked automatically, so the check lives here.
+#
+# Escape hatch, for a deliberate work-in-progress commit:
+#     BPAD_SKIP_CI=1 git commit ...
+
+if [ -n "$BPAD_SKIP_CI" ]; then
+  echo "pre-commit: skipped (BPAD_SKIP_CI set)"
+  exit 0
+fi
+
+ROOT="$(git rev-parse --show-toplevel)"
+SCRIPT="$ROOT/scripts/Invoke-LocalCI.ps1"
+
+if [ ! -f "$SCRIPT" ]; then
+  echo "pre-commit: $SCRIPT is missing; cannot verify this commit" >&2
+  exit 1
+fi
+
+if ! command -v pwsh >/dev/null 2>&1; then
+  echo "pre-commit: pwsh not found on PATH; cannot run the local CI gate" >&2
+  echo "            install PowerShell 7, or set BPAD_SKIP_CI=1 to bypass" >&2
+  exit 1
+fi
+
+exec pwsh -NoProfile -File "$SCRIPT" -Quick

@@ -4,4 +4,26 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
+# An audit trail is an artefact derived from the document (ADR-0011), so the
+# document's policy decides whether it may be written down and in what form.
+bp-security = { path = "../bp-security" }
+# Sealing an audit line is the `.bpadx` envelope (ADR-0021), composed and
+# never reimplemented. The `Sealer` trait stays: this crate still decides
+# *that* a line must be sealed, and only `passphrase.rs` performs it, so the
+# refusal path is exercised without a key or an Argon2id derivation.
+bp-crypto = { path = "../bp-crypto" }
+# The passphrase `PassphraseSealer` holds is the one piece of key-shaped
+# memory in this crate, and it is wiped on drop rather than by discipline.
+zeroize.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+time.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+tempfile.workspace = true

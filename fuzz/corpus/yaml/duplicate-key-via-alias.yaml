@@ -1,0 +1,4 @@
+x: &k name
+? *k
+: 1
+name: 2

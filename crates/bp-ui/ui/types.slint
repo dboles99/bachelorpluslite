@@ -1,0 +1,69 @@
+// Data shared between Rust and every part of the shell.
+//
+// These live in one file because they are the boundary: each struct here is
+// generated into Rust by `slint-build`, so a change to one is a change to an
+// API two languages agree on. Components import them; nothing here imports a
+// component.
+//
+// `Palette` is a global rather than a set of properties threaded down the
+// tree because ADR-0009 makes themes data -- Rust fills it from `bp-theme`
+// once, and every component reads the same instance. No file in `ui/` may
+// contain a colour literal; a hex code would be a theme a user could never
+// override.
+
+export struct TabInfo {
+    id: int,
+    label: string,
+    dirty: bool,
+    active: bool,
+}
+
+// One row in a menu. `action` is dispatched by number: ids below 100 are
+// handled in Rust, 100 and above are editor functions Slint owns (undo, cut,
+// paste and friends live on TextInput, not in our state).
+//
+// `enabled: false` renders the row greyed and inert. Menus for subsystems that
+// do not exist yet list their contents that way rather than being labels that
+// swallow a click -- a menu that does nothing when clicked reads as broken,
+// while a menu of greyed items reads as "not yet", which is the truth.
+export struct MenuItem {
+    label: string,
+    shortcut: string,
+    action: int,
+    enabled: bool,
+    separator-after: bool,
+}
+
+/// One row in the cross-file search results.
+export struct SearchHit {
+    label: string,
+    detail: string,
+    index: int,
+}
+
+/// One visible line of the document, as `EditorSurface` draws it.
+///
+/// The gutter number arrives already formatted: which lines are on screen is
+/// Rust's decision, and having Slint recompute it from an index would be a
+/// second implementation of the same arithmetic.
+export struct EditorRow {
+    number: string,
+    text: string,
+}
+
+/// One line's worth of selection highlight, in **visual** columns -- after
+/// tabs have expanded, which is the only measure that lines up with the text.
+export struct SelectionBox {
+    row: int,
+    start: int,
+    end: int,
+}
+
+export global Palette {
+    in property <color> shell;
+    in property <color> panel;
+    in property <color> edge;
+    in property <color> ink;
+    in property <color> ink-dim;
+    in property <color> accent;
+}

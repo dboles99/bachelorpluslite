@@ -1,0 +1,859 @@
+// BachelorPad+ application shell.
+//
+// This file owns the window: its properties, the callbacks Rust binds to, the
+// shortcut bindings, and the layout that puts the pieces in order. The pieces
+// themselves live beside it -- `menu.slint`, `editor_surface.slint`,
+// `tab.slint`, `find_bar.slint`, `results_panel.slint`, `status_bar.slint` --
+// so that adding a row to one of them is not an edit to the same file as
+// everything else.
+//
+// Three things stay here on purpose:
+//
+// - **The menu bar and its popups.** A `PopupWindow`'s position is relative to
+//   its parent element, and the popups are placed from their labels' `x`.
+//   Moving both into a component would change the coordinate parent, which is
+//   a visual change no test in this repository can catch.
+// - **Both editor views.** `dispatch`, `select-range` and `forward-focus` all
+//   name `editor` or `surface` directly, and a parent cannot name an element
+//   inside a child component.
+// - **The tab strip**, which is a `for` over `root.tabs` and three lines of
+//   layout.
+//
+// No colour literals anywhere in `ui/`: every colour comes from the `Palette`
+// global, which Rust fills from `bp-theme`. ADR-0009 requires themes to be
+// data, and a hex code here would be a theme a user could never override.
+
+import { Palette as SystemPalette } from "std-widgets.slint";
+import { MenuLabel, MenuPopup } from "menu.slint";
+import { EditorSurface } from "editor_surface.slint";
+import { FindBar } from "find_bar.slint";
+import { GotoBar } from "goto_bar.slint";
+import { PassphraseBar } from "passphrase_bar.slint";
+import { ResultsPanel } from "results_panel.slint";
+import { StatusBar } from "status_bar.slint";
+import { Tab } from "tab.slint";
+import { EditorRow, MenuItem, Palette, SearchHit, SelectionBox, TabInfo } from "types.slint";
+
+// Re-exported because `slint-build` generates Rust types only for what the
+// compiled entry file exports. `bp-ui` names all six.
+export { EditorRow, MenuItem, Palette, SearchHit, SelectionBox, TabInfo }
+
+export component AppWindow inherits Window {
+    title: "BachelorPad+";
+    preferred-width: 1000px;
+    preferred-height: 680px;
+    background: Palette.shell;
+
+    in-out property <string> doc-text;
+    in property <[TabInfo]> tabs;
+    in property <string> gutter;
+    in property <string> save-state;
+    in property <bool> is-dirty;
+    in property <string> location;
+    in property <string> format-label;
+    in property <string> encoding-label;
+    in property <string> line-ending-label;
+    in property <string> cursor-label;
+    in property <string> theme-name;
+    /// The active document's security profile, or empty under the default.
+    in property <string> security-profile;
+    in property <string> error-message;
+    /// What the desktop's appearance setting says, reported to Rust so
+    /// `bp_theme::ThemeId::for_system` can resolve it.
+    ///
+    /// Sourced from std-widgets' `Palette`, which is the only place Slint
+    /// exposes it. Two properties rather than one tri-state, because Slint
+    /// has no `Option`: `system-known` false means the platform would not
+    /// say, which is different from saying "light".
+    out property <bool> system-known: SystemPalette.color-scheme != ColorScheme.unknown;
+    out property <bool> system-dark: SystemPalette.color-scheme == ColorScheme.dark;
+
+    // View toggles, driven from the View menu.
+    in property <bool> show-gutter: true;
+    in property <bool> wrap-text: false;
+    /// Editor font size. One property for both views and the gutter, because
+    /// three sizes that agree by coincidence stop agreeing the first time one
+    /// of them is changed -- and the gutter drifting out of step with the
+    /// text it numbers is visible on every line.
+    ///
+    /// Rust sets it on every refresh from `bp-config`; the default here only
+    /// applies to the frames before the first one.
+    in property <length> font-size: 14px;
+
+    // Menu contents, built in Rust so that enabled state can depend on
+    // application state (Save All only when something is unsaved, and so on).
+    in property <[MenuItem]> file-items;
+    in property <[MenuItem]> edit-items;
+    in property <[MenuItem]> view-items;
+    in property <[MenuItem]> insert-items;
+    in property <[MenuItem]> format-items;
+    in property <[MenuItem]> data-items;
+    in property <[MenuItem]> note-items;
+    in property <[MenuItem]> notebook-items;
+    in property <[MenuItem]> organize-items;
+    in property <[MenuItem]> research-items;
+    in property <[MenuItem]> run-items;
+    in property <[MenuItem]> security-items;
+    in property <[MenuItem]> tools-items;
+    in property <[MenuItem]> help-items;
+    /// The tab strip's context menu. Not a menu-bar menu, but built the same
+    /// way and dispatched through the same ids.
+    in property <[MenuItem]> tab-items;
+
+    callback new-document();
+    callback open-document();
+    callback save-document();
+    callback save-as-document();
+    callback select-tab(int);
+    callback close-tab(int);
+    /// A tab was right-clicked. Sent before the menu opens, so the rows act
+    /// on that tab rather than on whichever happens to be active.
+    callback tab-context-target(int);
+    callback close-active-tab();
+    callback cycle-theme();
+    callback text-edited(string);
+    /// Menu actions below 100. Ids from 100 up never reach Rust.
+    callback menu-action(int);
+
+    // --- custom editor surface -----------------------------------------
+    // Opt-in until it reaches parity with the widget it replaces: word wrap
+    // and input-method composition both still belong to `TextInput`. The
+    // rope is the storage either way; only the drawing differs.
+    in property <bool> use-editor-view;
+    in property <[EditorRow]> editor-rows;
+    in property <[SelectionBox]> editor-selection;
+    in property <int> caret-row: -1;
+    in property <int> caret-column;
+
+    callback editor-key(string, bool, bool, bool) -> bool;
+    callback editor-pressed(int, int, bool);
+    /// Double- and triple-click. `EditorSurface` decides which a press was;
+    /// these only carry the answer, so the counting lives in one place rather
+    /// than being reconstructed from timestamps on the Rust side.
+    callback editor-selected-word(int, int);
+    callback editor-selected-line(int, int);
+    callback editor-dragged(int, int);
+    callback editor-scrolled(int);
+    callback editor-resized(int, int);
+
+    // --- find and replace ---------------------------------------------
+    in-out property <bool> find-open;
+    in-out property <string> find-query;
+    in-out property <string> replace-query;
+    /// The three search options, straight onto `bp_search::Query`'s fields.
+    ///
+    /// `in-out` because the bar is the only thing that flips them and Rust
+    /// only ever reads them -- on every search, rather than being told when
+    /// one changes, so that Find and Replace All cannot disagree about what
+    /// is switched on.
+    in-out property <bool> find-case-sensitive;
+    in-out property <bool> find-whole-word;
+    in-out property <bool> find-regex;
+    /// "3 of 12", "no matches", or a bad-pattern message.
+    in property <string> find-status;
+
+    callback find-changed();
+    callback find-next();
+    callback find-previous();
+    callback replace-all();
+
+    // Cross-file search results.
+    in property <[SearchHit]> search-hits;
+    // in-out: Rust opens it after a search, the close button shuts it.
+    in-out property <bool> results-open;
+    in property <string> results-summary;
+    callback search-folder();
+    callback open-hit(int);
+
+    // --- go to line -----------------------------------------------------
+    // in-out: the menu row and Ctrl+G open it, the × closes it.
+    in-out property <bool> goto-open;
+    in-out property <string> goto-line;
+    /// "there are only 42 lines", or empty once it worked.
+    in property <string> goto-status;
+    callback goto-submitted();
+
+    // --- passphrase -----------------------------------------------------
+    // The passphrase itself is *not* a property. A secret in an `AppWindow`
+    // property is a secret that gets copied around and outlives its use; it
+    // travels as a callback argument and nowhere else.
+    in-out property <bool> passphrase-open;
+    in property <string> passphrase-prompt;
+    in property <string> passphrase-status;
+    in property <string> passphrase-action;
+    callback passphrase-submitted(string);
+    callback passphrase-cancelled();
+
+    /// Select a range in the editor. Called from Rust once it has worked out
+    /// where the next match is -- `set-selection-offsets` is a function on
+    /// the widget, so only Slint can invoke it.
+    public function select-range(start: int, end: int) {
+        if (root.use-editor-view) {
+            // Rust has already moved its own caret; there is nothing here to
+            // tell. Just take the focus back from the find box.
+            surface.focus();
+            return;
+        }
+        editor.set-selection-offsets(start, end);
+        editor.focus();
+    }
+
+    /// Paste whatever the OS clipboard holds at the caret.
+    ///
+    /// Rust puts the chosen history entry on the clipboard first. Under
+    /// `TextInput` that is the only way to insert at the caret, because the
+    /// caret is not readable; under the custom surface it is a courtesy, and
+    /// the insertion has already happened.
+    public function paste-from-clipboard() {
+        if (root.use-editor-view) {
+            // We own the caret, so Rust inserted at it directly.
+            surface.focus();
+            return;
+        }
+        editor.focus();
+        editor.paste();
+    }
+
+    public function focus-find() {
+        root.find-open = true;
+        find-bar.focus-query();
+    }
+
+    public function focus-goto() {
+        root.goto-open = true;
+        goto-bar.focus-input();
+    }
+
+    public function focus-passphrase() {
+        root.passphrase-open = true;
+        passphrase-bar.focus-input();
+    }
+
+    /// Wipe the box without closing the bar -- a wrong passphrase gets
+    /// another try, starting empty.
+    public function clear-passphrase() {
+        passphrase-bar.clear();
+    }
+
+    /// Put the caret back in whichever editor is in use.
+    public function focus-editor() {
+        if (root.use-editor-view) {
+            surface.focus();
+        } else {
+            editor.focus();
+        }
+    }
+
+    // Typing goes to the editor unless the user clicks elsewhere.
+    forward-focus: editor;
+
+    // Editor-local menu actions.
+    //
+    // Under `TextInput` these call functions on the widget, because Slint
+    // owns its text, selection and undo stack and Rust cannot reach them.
+    // Under the custom surface the opposite is true -- we own all three -- so
+    // every row goes to Rust instead.
+    function dispatch(action: int) {
+        if (root.use-editor-view) {
+            root.menu-action(action);
+        } else if (action == 100) {
+            editor.undo();
+        } else if (action == 101) {
+            editor.redo();
+        } else if (action == 102) {
+            editor.cut();
+        } else if (action == 103) {
+            editor.copy();
+        } else if (action == 104) {
+            editor.paste();
+        } else if (action == 105) {
+            editor.select-all();
+        } else {
+            root.menu-action(action);
+        }
+        root.focus-editor();
+    }
+
+    // Shortcuts live in a FocusScope that *wraps* the content, because key
+    // bindings are matched during the capture phase -- from the Window down
+    // toward the focused element. A FocusScope beside the editor rather than
+    // around it would never be on that path, and the focused TextInput would
+    // swallow Ctrl+S before anything saw it.
+    FocusScope {
+        focus-on-click: false;
+        focus-on-tab-navigation: false;
+
+        KeyBinding {
+            keys: @keys(Control + "n");
+            activated => {
+                root.new-document();
+            }
+        }
+        KeyBinding {
+            keys: @keys(Control + "o");
+            activated => {
+                root.open-document();
+            }
+        }
+        KeyBinding {
+            keys: @keys(Control + "s");
+            activated => {
+                root.save-document();
+            }
+        }
+        KeyBinding {
+            keys: @keys(Control + Shift + "s");
+            activated => {
+                root.save-as-document();
+            }
+        }
+        KeyBinding {
+            keys: @keys(Control + "w");
+            activated => {
+                root.close-active-tab();
+            }
+        }
+        KeyBinding {
+            keys: @keys(Control + "f");
+            activated => {
+                root.focus-find();
+            }
+        }
+
+        // Duplicate Line / Move Line Up / Move Line Down (bp-ui/src/menus.rs
+        // ids 95-97). Routed through `dispatch` like a menu click, which is
+        // what it is -- the ids sit below 100, so they always reach Rust.
+        // `run_line_edit` is what makes Move Line Up/Down and Duplicate Line
+        // no-ops without the custom editor view, the same as the menu rows
+        // being disabled there; claiming Alt+Up/Down here rather than only
+        // when that view is active keeps this list state-free, like every
+        // other binding in it.
+        KeyBinding {
+            keys: @keys(Control + "d");
+            activated => {
+                root.dispatch(95);
+            }
+        }
+        KeyBinding {
+            keys: @keys(Alt + UpArrow);
+            activated => {
+                root.dispatch(96);
+            }
+        }
+        KeyBinding {
+            keys: @keys(Alt + DownArrow);
+            activated => {
+                root.dispatch(97);
+            }
+        }
+        // Zoom (bp-ui/src/menus.rs ids 32-34). Ctrl+= as well as Ctrl++,
+        // because + is the shifted key and every editor accepts the unshifted
+        // one -- requiring the shift would make zooming in a two-hand chord
+        // and zooming out a one-hand one.
+        KeyBinding {
+            keys: @keys(Control + "=");
+            activated => {
+                root.dispatch(32);
+            }
+        }
+        KeyBinding {
+            keys: @keys(Control + "+");
+            activated => {
+                root.dispatch(32);
+            }
+        }
+        KeyBinding {
+            keys: @keys(Control + "-");
+            activated => {
+                root.dispatch(33);
+            }
+        }
+        KeyBinding {
+            keys: @keys(Control + "0");
+            activated => {
+                root.dispatch(34);
+            }
+        }
+        KeyBinding {
+            keys: @keys(Control + "g");
+            activated => {
+                root.focus-goto();
+            }
+        }
+        KeyBinding {
+            keys: @keys(Escape);
+            activated => {
+                root.find-open = false;
+                root.goto-open = false;
+                // Escape abandons a passphrase entry. Anything half-typed is
+                // discarded with it -- see `passphrase-cancelled`.
+                if (root.passphrase-open) {
+                    root.passphrase-cancelled();
+                }
+                root.focus-editor();
+            }
+        }
+
+        VerticalLayout {
+            // --- menu bar -----------------------------------------------
+            Rectangle {
+                height: 28px;
+                background: Palette.panel;
+                HorizontalLayout {
+                    padding-left: 4px;
+                    alignment: start;
+
+                    file-label := MenuLabel {
+                        label: "File";
+                        clicked => {
+                            file-menu.show();
+                        }
+                    }
+                    edit-label := MenuLabel {
+                        label: "Edit";
+                        clicked => {
+                            edit-menu.show();
+                        }
+                    }
+                    view-label := MenuLabel {
+                        label: "View";
+                        clicked => {
+                            view-menu.show();
+                        }
+                    }
+                    insert-label := MenuLabel {
+                        label: "Insert";
+                        clicked => {
+                            insert-menu.show();
+                        }
+                    }
+                    format-label2 := MenuLabel {
+                        label: "Format";
+                        clicked => {
+                            format-menu.show();
+                        }
+                    }
+                    data-label := MenuLabel {
+                        label: "Data";
+                        clicked => {
+                            data-menu.show();
+                        }
+                    }
+                    note-label := MenuLabel {
+                        label: "Note";
+                        clicked => {
+                            note-menu.show();
+                        }
+                    }
+                    notebook-label := MenuLabel {
+                        label: "Notebook";
+                        clicked => {
+                            notebook-menu.show();
+                        }
+                    }
+                    organize-label := MenuLabel {
+                        label: "Organize";
+                        clicked => {
+                            organize-menu.show();
+                        }
+                    }
+                    research-label := MenuLabel {
+                        label: "Research";
+                        clicked => {
+                            research-menu.show();
+                        }
+                    }
+                    run-label := MenuLabel {
+                        label: "Run";
+                        clicked => {
+                            run-menu.show();
+                        }
+                    }
+                    security-label := MenuLabel {
+                        label: "Security";
+                        clicked => {
+                            security-menu.show();
+                        }
+                    }
+                    tools-label := MenuLabel {
+                        label: "Tools";
+                        clicked => {
+                            tools-menu.show();
+                        }
+                    }
+                    help-label := MenuLabel {
+                        label: "Help";
+                        clicked => {
+                            help-menu.show();
+                        }
+                    }
+                }
+            }
+
+            Rectangle { height: 1px; background: Palette.edge; }
+
+            // --- tab strip ----------------------------------------------
+            Rectangle {
+                height: 32px;
+                background: Palette.shell;
+                HorizontalLayout {
+                    padding-left: 6px;
+                    spacing: 2px;
+                    alignment: start;
+
+                    for tab[i] in root.tabs: Tab {
+                        label: tab.label;
+                        dirty: tab.dirty;
+                        active: tab.active;
+                        selected => {
+                            root.select-tab(tab.id);
+                        }
+                        closed => {
+                            root.close-tab(tab.id);
+                        }
+                        context-menu(offset) => {
+                            // Told which tab first, because the rows act on
+                            // the tab that was right-clicked rather than the
+                            // active one -- and clicking a row is a separate
+                            // event, by which time the pointer is elsewhere.
+                            root.tab-context-target(tab.id);
+                            root.tab-menu-x = offset + 6px;
+                            tab-menu.show();
+                        }
+                    }
+
+                    MenuLabel {
+                        label: "+";
+                        clicked => {
+                            root.new-document();
+                        }
+                    }
+                }
+            }
+
+            Rectangle { height: 1px; background: Palette.edge; }
+
+            // --- editor pane --------------------------------------------
+            Rectangle {
+                background: Palette.panel;
+                vertical-stretch: 1;
+
+                // Both exist rather than one being inside an `if`: an element
+                // in an `if` is out of scope for `dispatch` and
+                // `forward-focus`, which is the same constraint the find bar
+                // is collapsed rather than conditional for.
+                surface := EditorSurface {
+                    visible: root.use-editor-view;
+                    rows: root.editor-rows;
+                    selection: root.editor-selection;
+                    caret-row: root.caret-row;
+                    caret-column: root.caret-column;
+                    show-gutter: root.show-gutter;
+                    font-size: root.font-size;
+
+                    key(text, control, shift, alt) => {
+                        return root.editor-key(text, control, shift, alt);
+                    }
+                    pressed(row, column, extend) => {
+                        root.editor-pressed(row, column, extend);
+                    }
+                    selected-word(row, column) => {
+                        root.editor-selected-word(row, column);
+                    }
+                    selected-line(row, column) => {
+                        root.editor-selected-line(row, column);
+                    }
+                    dragged(row, column) => {
+                        root.editor-dragged(row, column);
+                    }
+                    scrolled(lines) => {
+                        root.editor-scrolled(lines);
+                    }
+                    resized(rows, columns) => {
+                        root.editor-resized(rows, columns);
+                    }
+                }
+
+                Flickable {
+                    visible: !root.use-editor-view;
+                    viewport-height: max(self.height, editor-row.preferred-height);
+
+                    editor-row := HorizontalLayout {
+                        padding: 10px;
+                        spacing: 10px;
+                        alignment: start;
+
+                        if root.show-gutter: Text {
+                            text: root.gutter;
+                            color: Palette.ink-dim;
+                            font-family: "Consolas";
+                            font-size: root.font-size;
+                            horizontal-alignment: right;
+                            // Widened with the text, or the line numbers clip
+                            // at the sizes where there are most of them.
+                            width: max(40px, root.font-size * 3);
+                        }
+
+                        editor := TextInput {
+                            text <=> root.doc-text;
+                            color: Palette.ink;
+                            selection-background-color: Palette.accent;
+                            font-family: "Consolas";
+                            font-size: root.font-size;
+                            single-line: false;
+                            wrap: root.wrap-text ? word-wrap : no-wrap;
+                            horizontal-stretch: 1;
+                            edited => {
+                                root.text-edited(self.text);
+                            }
+                        }
+                    }
+                }
+            }
+
+            find-bar := FindBar {
+                open: root.find-open;
+                find-query <=> root.find-query;
+                replace-query <=> root.replace-query;
+                case-sensitive <=> root.find-case-sensitive;
+                whole-word <=> root.find-whole-word;
+                regex <=> root.find-regex;
+                find-status: root.find-status;
+
+                find-changed => {
+                    root.find-changed();
+                }
+                find-next => {
+                    root.find-next();
+                }
+                find-previous => {
+                    root.find-previous();
+                }
+                replace-all => {
+                    root.replace-all();
+                }
+                search-folder => {
+                    root.search-folder();
+                }
+                closed => {
+                    root.find-open = false;
+                    root.focus-editor();
+                }
+            }
+
+            passphrase-bar := PassphraseBar {
+                open: root.passphrase-open;
+                prompt: root.passphrase-prompt;
+                status: root.passphrase-status;
+                action-label: root.passphrase-action;
+
+                submitted(entered) => {
+                    root.passphrase-submitted(entered);
+                }
+                cancelled => {
+                    root.passphrase-cancelled();
+                }
+            }
+
+            goto-bar := GotoBar {
+                open: root.goto-open;
+                line-text <=> root.goto-line;
+                status: root.goto-status;
+
+                submitted => {
+                    root.goto-submitted();
+                }
+                closed => {
+                    root.goto-open = false;
+                    root.focus-editor();
+                }
+            }
+
+            ResultsPanel {
+                open: root.results-open;
+                hits: root.search-hits;
+                summary: root.results-summary;
+
+                open-hit(index) => {
+                    root.open-hit(index);
+                }
+                closed => {
+                    root.results-open = false;
+                }
+            }
+
+            Rectangle { height: 1px; background: Palette.edge; }
+
+            StatusBar {
+                save-state: root.save-state;
+                is-dirty: root.is-dirty;
+                format-label: root.format-label;
+                encoding-label: root.encoding-label;
+                line-ending-label: root.line-ending-label;
+                cursor-label: root.cursor-label;
+                security-label: root.security-profile;
+                theme-name: root.theme-name;
+                location: root.location;
+                error-message: root.error-message;
+
+                cycle-theme => {
+                    root.cycle-theme();
+                }
+            }
+        }
+    }
+
+    // Popups sit outside the layout so they can position freely. `x` tracks
+    // the label plus the menu bar's 4px padding, which is the only horizontal
+    // offset between the label's layout parent and the window.
+    //
+    // `menu-max-height` has to follow the window rather than be a constant:
+    // the menus open 28px down, and the Edit menu's length is however much the
+    // user has copied. The 12px keeps the last row clear of the bottom edge so
+    // it reads as a menu that ends rather than one that is cut off, and the
+    // floor stops a very short window producing a menu with no rows in it.
+    property <length> menu-max-height: max(160px, root.height - 28px - 12px);
+
+    file-menu := MenuPopup {
+        x: file-label.x + 4px;
+        y: 28px;
+        menu-max-height: root.menu-max-height;
+        items: root.file-items;
+        chosen(a) => {
+            root.dispatch(a);
+        }
+    }
+    edit-menu := MenuPopup {
+        x: edit-label.x + 4px;
+        y: 28px;
+        menu-max-height: root.menu-max-height;
+        items: root.edit-items;
+        chosen(a) => {
+            root.dispatch(a);
+        }
+    }
+    view-menu := MenuPopup {
+        x: view-label.x + 4px;
+        y: 28px;
+        menu-max-height: root.menu-max-height;
+        items: root.view-items;
+        chosen(a) => {
+            root.dispatch(a);
+        }
+    }
+    insert-menu := MenuPopup {
+        x: insert-label.x + 4px;
+        y: 28px;
+        menu-max-height: root.menu-max-height;
+        items: root.insert-items;
+        chosen(a) => {
+            root.dispatch(a);
+        }
+    }
+    format-menu := MenuPopup {
+        x: format-label2.x + 4px;
+        y: 28px;
+        menu-max-height: root.menu-max-height;
+        items: root.format-items;
+        chosen(a) => {
+            root.dispatch(a);
+        }
+    }
+    data-menu := MenuPopup {
+        x: data-label.x + 4px;
+        y: 28px;
+        menu-max-height: root.menu-max-height;
+        items: root.data-items;
+        chosen(a) => {
+            root.dispatch(a);
+        }
+    }
+    note-menu := MenuPopup {
+        x: note-label.x + 4px;
+        y: 28px;
+        menu-max-height: root.menu-max-height;
+        items: root.note-items;
+        chosen(a) => {
+            root.dispatch(a);
+        }
+    }
+    notebook-menu := MenuPopup {
+        x: notebook-label.x + 4px;
+        y: 28px;
+        menu-max-height: root.menu-max-height;
+        items: root.notebook-items;
+        chosen(a) => {
+            root.dispatch(a);
+        }
+    }
+    organize-menu := MenuPopup {
+        x: organize-label.x + 4px;
+        y: 28px;
+        menu-max-height: root.menu-max-height;
+        items: root.organize-items;
+        chosen(a) => {
+            root.dispatch(a);
+        }
+    }
+    research-menu := MenuPopup {
+        x: research-label.x + 4px;
+        y: 28px;
+        menu-max-height: root.menu-max-height;
+        items: root.research-items;
+        chosen(a) => {
+            root.dispatch(a);
+        }
+    }
+    run-menu := MenuPopup {
+        x: run-label.x + 4px;
+        y: 28px;
+        menu-max-height: root.menu-max-height;
+        items: root.run-items;
+        chosen(a) => {
+            root.dispatch(a);
+        }
+    }
+    security-menu := MenuPopup {
+        x: security-label.x + 4px;
+        y: 28px;
+        menu-max-height: root.menu-max-height;
+        items: root.security-items;
+        chosen(a) => {
+            root.dispatch(a);
+        }
+    }
+    tools-menu := MenuPopup {
+        x: tools-label.x + 4px;
+        y: 28px;
+        menu-max-height: root.menu-max-height;
+        items: root.tools-items;
+        chosen(a) => {
+            root.dispatch(a);
+        }
+    }
+    // The tab strip's context menu. `x` is set from the tab that was clicked
+    // rather than bound to a label, and `y` clears the menu bar and the strip
+    // together (28 + 32).
+    // A `PopupWindow`'s own `x` cannot be assigned from outside it, so the
+    // position travels through a property the popup binds to instead.
+    property <length> tab-menu-x;
+
+    tab-menu := MenuPopup {
+        x: root.tab-menu-x;
+        y: 60px;
+        menu-max-height: root.menu-max-height;
+        items: root.tab-items;
+        chosen(a) => {
+            root.dispatch(a);
+        }
+    }
+    help-menu := MenuPopup {
+        x: help-label.x + 4px;
+        y: 28px;
+        menu-max-height: root.menu-max-height;
+        items: root.help-items;
+        chosen(a) => {
+            root.dispatch(a);
+        }
+    }
+}

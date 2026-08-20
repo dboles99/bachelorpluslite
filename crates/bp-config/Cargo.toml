@@ -1,0 +1,23 @@
+[package]
+name = "bp-config"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+toml.workspace = true
+# The single source of truth for where the product's files live. This crate
+# used to answer that question itself, with its own `cfg!(windows)` -- two
+# answers for one product, and the older one honoured a relative
+# `$XDG_CONFIG_HOME`, which the specification forbids precisely because it
+# scatters a user's settings beside whatever directory they launched from.
+# One-directional by construction: `bp-platform` has no dependencies of its
+# own, so there is no cycle to be had.
+bp-platform = { path = "../bp-platform" }
+
+[dev-dependencies]
+tempfile.workspace = true

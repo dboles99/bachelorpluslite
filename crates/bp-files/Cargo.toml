@@ -4,4 +4,22 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
+bp-core = { path = "../bp-core" }
+bp-naming = { path = "../bp-naming" }
+# The platform's rules about names, as data. `bp-naming` sanitises the names
+# *we* generate; this is for the ones the user types into a Save dialog, which
+# nothing had ever checked. `bp-platform` carries no third-party dependencies,
+# so this adds a path edge and nothing else to the tree.
+bp-platform = { path = "../bp-platform" }
+tempfile.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+time = { workspace = true, features = ["macros"] }
+# Already in the workspace and in nine other crates; nothing new enters the
+# tree. The load/encode inverse is a property, not three examples.
+proptest.workspace = true

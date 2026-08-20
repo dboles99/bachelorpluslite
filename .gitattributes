@@ -1,0 +1,27 @@
+# Normalise line endings to LF in the working tree on every platform.
+#
+# This is not cosmetic. `scripts/hooks/*` are `sh` scripts, and this machine
+# has core.autocrlf enabled: without this file they check out with CRLF, the
+# shebang becomes "#!/bin/sh\r", and the hook fails with
+# "bad interpreter: /bin/sh^M" -- on Linux always, and on Git Bash often.
+# BP-ADR-0016 depends on those hooks actually running.
+#
+# LF everywhere is also the right default for a Rust project targeting
+# Windows and Linux (BP-ADR-0001). PowerShell 7, rustc and cargo all handle
+# LF sources without complaint.
+* text=auto eol=lf
+
+# Never touched.
+*.png binary
+*.jpg binary
+*.ico binary
+*.pdf binary
+*.zip binary
+
+# The hostile-input corpus is bytes, not text, and several entries exist
+# precisely because of the bytes `text=auto eol=lf` would rewrite --
+# `crlf-no-final-newline.csv`, `blank-and-crlf.jsonl`, the UTF-16 fixtures,
+# the truncated and byte-flipped envelopes. Normalising them does not break a
+# test; it silently turns the fixture into a different, harmless input, which
+# is worse. Store them exactly as seeded.
+fuzz/corpus/** -text

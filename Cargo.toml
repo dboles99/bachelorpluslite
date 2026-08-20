@@ -1,35 +1,63 @@
 [workspace]
 resolver = "2"
+# Only crates with real content are members. The full intended crate map --
+# including the ~22 not yet created -- lives in
+# docs/architecture/ARCHITECTURE.md, which is where a plan belongs; an empty
+# crate is a compile unit and a merge surface, not a plan. Add a crate here
+# when there is something to put in it.
 members = [
     "apps/bachelorpad",
-    "crates/bp-core",
-    "crates/bp-editor",
-    "crates/bp-buffer",
-    "crates/bp-files",
-    "crates/bp-formats",
-    "crates/bp-search",
-    "crates/bp-semantic",
-    "crates/bp-naming",
-    "crates/bp-organize",
-    "crates/bp-storage",
-    "crates/bp-history",
-    "crates/bp-clipboard",
-    "crates/bp-notebook",
-    "crates/bp-execution",
-    "crates/bp-data",
-    "crates/bp-research",
-    "crates/bp-security",
-    "crates/bp-crypto",
-    "crates/bp-secrets",
-    "crates/bp-integrity",
-    "crates/bp-redaction",
     "crates/bp-audit",
-    "crates/bp-theme",
+    "crates/bp-buffer",
+    "crates/bp-clipboard",
+    "crates/bp-config",
+    "crates/bp-core",
+    "crates/bp-crypto",
+    "crates/bp-data",
+    "crates/bp-editor",
+    "crates/bp-formats",
+    "crates/bp-history",
+    "crates/bp-naming",
+    "crates/bp-integrity",
+    "crates/bp-notebook",
     "crates/bp-platform",
-    "crates/bp-platform-windows",
-    "crates/bp-platform-linux",
-    "crates/bp-ui"
+    "crates/bp-redaction",
+    "crates/bp-research",
+    "crates/bp-search",
+    "crates/bp-secrets",
+    "crates/bp-security",
+    "crates/bp-semantic",
+    "crates/bp-storage",
+    "crates/bp-files",
+    "crates/bp-theme",
+    "crates/bp-ui",
+    "tests/integration",
 ]
+
+# Lints every member opts into with `[lints] workspace = true`.
+#
+# **These four were already at zero before they were switched on.** An audit
+# of the fifth session counted the panic surface of production library code
+# across all 24 crates and found not one `unwrap()`, `panic!`, `todo!` or
+# `unimplemented!` -- every hit was a test module or a benchmark. That is a
+# discipline worth having and it was held by whoever was writing remembering
+# it, which is not a mechanism. This is the mechanism.
+#
+# `warn` rather than `deny` on purpose: the gate runs clippy with
+# `-D warnings`, so these fail the build there, while an editor and a local
+# `cargo clippy` show them as warnings and let work in progress compile.
+#
+# Not enabled, and each for a reason rather than an oversight:
+# `expect_used` (nine in library code, all carrying a message that says what
+# was assumed, which is what `expect` is for), `unreachable` (one), and
+# `indexing_slicing` (thirty-six, mostly over slices just measured). Turning
+# any of them on is a change to the code, not a change to the policy, and
+# wants its own pass.
+[workspace.lints.clippy]
+unwrap_used = "warn"
+panic = "warn"
+todo = "warn"
+unimplemented = "warn"
 
 [workspace.package]
 version = "0.1.0"
@@ -39,8 +67,42 @@ authors = ["BachelorPad+ contributors"]
 
 [workspace.dependencies]
 anyhow = "1"
+csv = "1"
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tracing = "0.1"
 tracing-subscriber = "0.3"
+# `local-offset` is needed because every timestamp we show the user (last
+# save, checkpoint, filename date) is a local wall-clock value, not UTC.
+time = { version = "0.3", features = ["local-offset"] }
+tempfile = "3"
+proptest = "1"
+toml = "1"
+
+# --- cryptography (ADR-0021) -------------------------------------------
+# All RustCrypto, all composed rather than reimplemented, which is the line
+# ADR-0011 draws. Pinned at the workspace so one version of each primitive is
+# in the tree -- two versions of an AEAD is two implementations to trust.
+argon2 = "0.5"
+chacha20poly1305 = "0.10"
+aes-gcm = "0.10"
+getrandom = "0.3"
+# Only for naming recovery-journal files by a stable digest of the document's
+# path (ADR-0022). Not used for key derivation -- that is Argon2id's job.
+sha2 = "0.10"
+# Ed25519 signatures (specs.md section 15). RustCrypto-adjacent, audited, and
+# the conventional choice; composed, never reimplemented (ADR-0011).
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+rand_core = { version = "0.6", features = ["getrandom"] }
+zeroize = { version = "1", features = ["zeroize_derive"] }
+
+# YAML (phase 6). `serde_yaml` is deprecated and `yaml-rust2` is superseded;
+# `saphyr` is the maintained successor and the only one of the three that is
+# YAML 1.2 compliant. `saphyr-parser` is its own event-level half, taken
+# directly because `bp-data` must measure a document's nesting depth *before*
+# a tree is built for it -- see `yaml_nesting_depth`. `default-features =
+# false` drops `encoding_rs`: every caller here hands us a `&str`, so the
+# encoding-sniffing half of `saphyr` is weight with no reader.
+saphyr = { version = "0.0.12", default-features = false }
+saphyr-parser = "0.0.12"

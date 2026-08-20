@@ -4,4 +4,74 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
+bp-buffer = { path = "../bp-buffer" }
+bp-clipboard = { path = "../bp-clipboard" }
+bp-config = { path = "../bp-config" }
+bp-core = { path = "../bp-core" }
+bp-data = { path = "../bp-data" }
+bp-editor = { path = "../bp-editor" }
+bp-formats = { path = "../bp-formats" }
+bp-history = { path = "../bp-history" }
+bp-search = { path = "../bp-search" }
+bp-crypto = { path = "../bp-crypto" }
+# Security ▸ Verify Signature (ADR-0026). It owns the `.sig` sidecar -- where
+# it lives beside the document, what is in it, and the five verdicts a user
+# has to be able to tell apart. `bp-crypto` stays because the shell still
+# hashes documents and still reads a public key in either spelling; the
+# signature half now goes through here, which re-exports `bp-crypto`'s types
+# unchanged, so both names refer to one `VerifyingKey`.
+bp-audit = { path = "../bp-audit" }
+bp-integrity = { path = "../bp-integrity" }
+# File ▸ Set as Default Editor (ADR-0012). Reports what opens a file type
+# today, plans a registration, and is the only crate here that may write into
+# a directory the desktop environment reads -- and only with an explicit
+# `Consent` and an explicit root.
+bp-platform = { path = "../bp-platform" }
+bp-security = { path = "../bp-security" }
+# Security ▸ Scan for Secrets. Pure, no dependencies of its own, and it
+# deliberately reports where a credential is without ever carrying it.
+bp-secrets = { path = "../bp-secrets" }
+# Security ▸ Redact and Inspect Metadata (ADR-0028). Pure, no dependencies of
+# its own, and it deliberately depends on no scanner -- the spans come from
+# here, which is the only place `bp-secrets` and `bp-redaction` are both
+# visible.
+bp-redaction = { path = "../bp-redaction" }
+bp-semantic = { path = "../bp-semantic" }
+bp-files = { path = "../bp-files" }
+bp-naming = { path = "../bp-naming" }
+bp-theme = { path = "../bp-theme" }
+arboard = "3"
+# Passphrases and decrypted document bytes are wiped rather than dropped.
+zeroize.workspace = true
+slint = "1.17"
+# Native file dialogs. xdg-portal rather than gtk3 on Linux, so the app does
+# not need a specific desktop environment installed just to open a file
+# (BP-ADR-0001). `pollster` supplies the executor the blocking API needs,
+# since the portal backend is async underneath.
+#
+# `common-controls-v6` is deliberately NOT enabled. It embeds a side-by-side
+# manifest dependency on ComCtl32 v6 for prettier task dialogs, and with it the
+# binary failed to start at all here -- STATUS_ENTRYPOINT_NOT_FOUND
+# (0xC0000139) before `main`. A nicer-looking dialog is not worth an
+# application that will not launch.
+rfd = { version = "0.17", default-features = false, features = [
+    "xdg-portal",
+    "pollster",
+] }
+thiserror.workspace = true
+time.workspace = true
+tracing.workspace = true
+
+[build-dependencies]
+slint-build = "1.17"
+
+[dev-dependencies]
+time = { workspace = true, features = ["macros"] }
+# Save Copy's guarantees are about what reaches the disk and what does not, so
+# testing them needs a real file. Already a workspace dependency (bp-files,
+# bp-history), and a dev-dependency here -- nothing new ships.
+tempfile.workspace = true
