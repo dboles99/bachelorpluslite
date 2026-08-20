@@ -133,34 +133,6 @@ needle"`
   Either `bp-search` adopts ropey's break set or `bp-buffer` builds its rope
   without `unicode_lines`; one line definition has to win, and that is an
   ADR. Found by the cross-crate tests, pinned as an ignored test naming it.
-- **`bp_formats::sniff` calls a pretty-printed JSON array "JSON Lines".**
-  `looks_like_json_lines` declares JSONL at two or more lines opening with
-  `{` or `[`, and its own comment claims a pretty-printed document has
-  exactly one such line — false for an array of objects, the commonest JSON
-  shape there is. `bp-data` then rejects the file. Reached whenever the
-  extension is missing or unrecognised. Unlike the item above this is a
-  plain defect with an obvious fix, not a decision.
-- **The encoding and line-ending encoder is in the shell, where nothing can
-  test it.** `bp-files` has no encoding-aware writer; the function turning a
-  document plus its `Encoding` and `LineEnding` into bytes is `pub(crate)`
-  in `bp-ui`. The crates are provably lossless through load, rope and atomic
-  save; the code that actually writes the file is out of reach of every
-  library test, and by inspection it normalises to `
-` and re-expands to
-  the declared ending, silently rewriting every minority line break in a
-  mixed-ending document. R013 says decisions live in `bp-*` crates and the
-  shell only connects them; this one escaped.
-- **YAML has no way in.** ADR-0023's parser, its three bounds and its
-  multi-document handling are all done and verified through the cross-crate
-  tests, and nothing in `bp-ui` calls any of `yaml_validate`, `yaml_format`,
-  `yaml_minify`, `yaml_to_json` or `json_to_yaml`. Pure wiring.
-- **`bp-audit`'s sealed destination has no implementor.** The crate takes a
-  `Sealer` trait so it need not depend on `bp-crypto`, and nothing in the
-  tree implements it, so `Destination::Sealed` currently always resolves to
-  `NotWritten(NoSealer)` — refusing loudly, which is the specified
-  behaviour, but refusing every time. The wiring is the shell's, the same
-  way `bp-storage` waits in ADR-0019.
-
 - **Time to first interaction is unmeasurable under the software renderer.**
   Slint exposes no rendering notifier there, so half of the ADR-0017 startup
   target has no measurement behind it. A hole, not a pass.
@@ -208,6 +180,13 @@ needle"`
   rows and applies equally to plain paste. Fixing it properly means freezing
   a snapshot of the history while a menu is open, which is a design question
   rather than a patch.
+- **The gate does not see `fuzz/`.** `Invoke-LocalCI.ps1` sweeps `spikes/`
+  for standalone workspaces, and this tree has no `spikes/` directory --
+  while `fuzz/` is exactly such a workspace, holding five hostile-input
+  harnesses that nothing formats, lints or runs. Run by hand they are green,
+  so this is not a hidden failure; it is that "every commit in this
+  repository has passed the gate" is not true of that code, and phase 19 is
+  *Started* on the strength of tests nothing runs.
 - **Most of the product has not been used.** 542 tests cover the pieces in
   isolation. One manual pass found two defects no test caught: a menu bar
   where twelve of fourteen menus swallowed clicks, and Save As defaulting to

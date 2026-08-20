@@ -58,7 +58,7 @@ cargo run --release -- --editor-view   # with the custom editor view (ADR-0018)
 
 ## Current state (2026-08-20)
 
-**24 crates, 1,633 tests, green on Windows and Linux.** The app opens, edits and
+**24 crates, 1,643 tests, green on Windows and Linux.** The app opens, edits and
 saves atomically, and does rather more than that:
 
 | Area | What works |
@@ -155,13 +155,29 @@ starting.
   interpreter; and `bp-files` never applies `\\?\`, so a filename at
   `SemanticName::to_filename`'s own documented maximum is unwritable in a
   deep enough directory, blamed on a read-only file.
-- **Five crates are built and unreachable.** `bp-buffer`'s large-file engine,
-  `bp-notebook`, `bp-research`, `bp-integrity` and `bp-platform` are each
-  tested and have no way in, so opening a 2 GB file still loads 2 GB.
-  `bp-redaction` and `bp-audit` came off this list -- redaction and the
-  metadata inspector have rows, and the audit log's sealed destination has an
-  implementor rather than refusing every time. It is still the largest thing
-  standing between this repository and a product.
+- **Four crates and one module are built and unreachable, and this list is
+  now counted rather than remembered.** `bp-research`, `bp-notebook`,
+  `bp-audit` and `bp-storage` have zero reverse dependencies anywhere in the
+  application: nothing in `bp-ui`, in `apps/bachelorpad`, or in any other
+  `bp-*` crate names them. `bp-audit` is reached only by the integration
+  tests and `bp-notebook` only by the fuzz harness. Add `bp-buffer`'s
+  large-file engine -- depended on, but `LargeFile` and `SizeClass` appear
+  nowhere outside their own crate, so opening a 2 GB file still loads 2 GB --
+  and it is over thirteen thousand lines defended by 281 unit tests that no
+  user can reach. It is still the largest thing standing between this
+  repository and a product.
+
+  | Crate | Lines | Tests | Reached by |
+  | --- | --- | --- | --- |
+  | `bp-research` | 5,208 | 161 | nothing |
+  | `bp-notebook` | 3,514 | 55 | the fuzz harness only |
+  | `bp-audit` | 2,630 | 44 | the integration tests only |
+  | `bp-buffer` ▸ `large.rs` | 1,198 | — | nothing |
+  | `bp-storage` | 721 | 21 | nothing, by decision (ADR-0019) |
+
+  `bp-integrity`, `bp-platform` and `bp-redaction` came off this list --
+  Verify Signature, Set as Default Editor, redaction and the metadata
+  inspector all have rows now.
 - **Still barely used in anger.** The tests cover the pieces and now the
   seams; a person driving the application has done so once, several sessions
   ago. The four rows added to the Security menu this session have never been

@@ -2,7 +2,7 @@
 
 This is not an MVP roadmap. Each phase contributes to the full v1 target.
 
-Status as of **2026-08-19**. Three words, meaning three different things:
+Status as of **2026-08-20**. Three words, meaning three different things:
 
 - **Done** — the phase's work is finished.
 - **Started** — a real, tested slice exists *and is reachable from the
@@ -30,7 +30,7 @@ Status as of **2026-08-19**. Three words, meaning three different things:
 | 15 | Encrypted `.bpadx` documents | **Started** | [11-security](project/tasks/11-security/) | `bp-crypto` |
 | 16 | Advanced security | **Started** | [11-security](project/tasks/11-security/) | `bp-secrets`, `bp-redaction`, `bp-audit`, `bp-integrity` |
 | 17 | Themes/personality/accessibility | **Started** | [12-themes-brand](project/tasks/12-themes-brand/) | `bp-theme` |
-| 18 | Windows/Linux platform integration | **Built, unwired** | [13-platform](project/tasks/13-platform/) | `bp-platform` |
+| 18 | Windows/Linux platform integration | **Started** | [13-platform](project/tasks/13-platform/) | `bp-platform` |
 | 19 | Hardening, fuzzing and benchmarks | **Started** | [14-hardening](project/tasks/14-hardening/) | `fuzz/` (standalone) |
 | 20 | Packaging, signing, release and upgrade testing | Not started | [14-hardening](project/tasks/14-hardening/) | — |
 
@@ -48,17 +48,21 @@ that points at them for no gain.
 
 ## Where the work actually is
 
-Phases 1 and 3 are complete. Phases 2, 5, 6, 7, 8, 11, 14, 15, 16 and 17 each
-have a tested slice reachable in the product. Phases 4, 9, 12, 13 and 18 are
-built and have no way in.
+Phases 1 and 3 are complete. Phases 2, 5, 6, 7, 8, 11, 14, 15, 16, 17 and 18
+each have a tested slice reachable in the product — phase 18 joined them when
+File ▸ Set as Default Editor shipped. Phases 4, 9, 12 and 13 are built and
+have no way in, which an audit put a number on: `bp-research`, `bp-notebook`,
+`bp-audit` and `bp-storage` have zero reverse dependencies anywhere in the
+application, and with `bp-buffer`'s large-file engine that is over thirteen
+thousand lines and 281 unit tests behind code no user can reach.
 
 **The wiring backlog is real, and it shrank rather than grew.** Phase 6's
-YAML, phase 16's redaction and metadata inspector all have menu rows now, and
-the audit log's sealed destination has an implementor instead of refusing
-every append. What is still built and unreachable is `bp-buffer`'s large-file
-engine, `bp-notebook`, `bp-research`, `bp-integrity` and `bp-platform` --
-so opening a 2 GB file still loads 2 GB, and none of the default-editor
-registration is offered anywhere.
+YAML, phase 16's redaction and metadata inspector all have menu rows now, the
+audit log's sealed destination has an implementor instead of refusing every
+append, and phases 16 and 18 gained Verify Signature and Set as Default
+Editor. What is still built and unreachable is `bp-buffer`'s large-file
+engine, `bp-notebook`, `bp-research`, `bp-audit` and `bp-storage` -- so
+opening a 2 GB file still loads 2 GB.
 
 **Cross-crate tests have found seven defects, and five are fixed.** Until the
 fourth session every test in the repository tested one crate. Eleven files of
