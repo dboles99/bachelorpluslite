@@ -388,7 +388,12 @@ pub(crate) fn decode_transform(
     Some((entry_index, transform))
 }
 
-pub fn file(any_dirty: bool, has_path: bool, recent: &[std::path::PathBuf]) -> Vec<MenuItem> {
+pub fn file(
+    any_dirty: bool,
+    has_path: bool,
+    served_from_disk: bool,
+    recent: &[std::path::PathBuf],
+) -> Vec<MenuItem> {
     let mut items = vec![
         row("New", "Ctrl+N", action::NEW),
         row_end("Open...", "Ctrl+O", action::OPEN),
@@ -418,22 +423,33 @@ pub fn file(any_dirty: bool, has_path: bool, recent: &[std::path::PathBuf]) -> V
         last.separator_after = true;
     }
 
+    // A document served from disk in chunks (ADR-0030) has no text to write
+    // and must not be re-read whole. `AppState` refuses all four by name, and
+    // this greys them so the refusal is not the first the user hears of it --
+    // `row_enabled(.., false)` and deliberately not `planned`, because these
+    // rows exist and cannot act right now, which is a different statement
+    // from "does not exist yet".
+    //
+    // Save All is not among them: it acts on whichever *other* tabs are
+    // dirty, and a viewer is never dirty, so it is already correct.
+    let writable = !served_from_disk;
     items.extend([
-        row("Save", "Ctrl+S", action::SAVE),
-        row("Save As...", "Ctrl+Shift+S", action::SAVE_AS),
+        row_enabled("Save", "Ctrl+S", action::SAVE, writable),
+        row_enabled("Save As...", "Ctrl+Shift+S", action::SAVE_AS, writable),
         MenuItem {
             enabled: any_dirty,
             ..row_end("Save All", "", action::SAVE_ALL)
         },
         MenuItem {
             // Reload means "discard my edits and re-read the file", which
-            // needs a file to re-read.
-            enabled: has_path,
+            // needs a file to re-read -- and, for a document that was
+            // deliberately never loaded, would load it.
+            enabled: has_path && writable,
             ..row_end("Reload from Disk", "", action::RELOAD)
         },
         MenuItem {
             separator_after: true,
-            ..row("Save a Copy...", "", action::SAVE_COPY)
+            ..row_enabled("Save a Copy...", "", action::SAVE_COPY, writable)
         },
         row_end("Close Tab", "Ctrl+W", action::CLOSE_TAB),
         // Live on both platforms, and it is not the same amount of work on
@@ -1389,7 +1405,7 @@ mod tests {
         // the row is what keeps it from being made out of sight -- and the
         // ellipsis is the house convention for a row that asks first, which
         // this one does, because registration writes files.
-        let row = file(false, true, &[])
+        let row = file(false, true, false, &[])
             .into_iter()
             .find(|i| i.action == action::SET_DEFAULT_EDITOR)
             .expect("a default-editor row");
@@ -1795,21 +1811,21 @@ mod tests {
 
     #[test]
     fn save_all_is_disabled_when_nothing_is_unsaved() {
-        let items = file(false, true, &[]);
+        let items = file(false, true, false, &[]);
         let save_all = items
             .iter()
             .find(|i| i.action == action::SAVE_ALL)
             .expect("Save All");
         assert!(!save_all.enabled);
 
-        let items = file(true, true, &[]);
+        let items = file(true, true, false, &[]);
         let save_all = items.iter().find(|i| i.action == action::SAVE_ALL).unwrap();
         assert!(save_all.enabled);
     }
 
     #[test]
     fn reload_needs_a_file_to_reload_from() {
-        let items = file(false, false, &[]);
+        let items = file(false, false, false, &[]);
         let reload = items
             .iter()
             .find(|i| i.action == action::RELOAD)
@@ -2039,7 +2055,7 @@ mod tests {
     #[test]
     fn every_working_row_has_an_action() {
         let mut all = Vec::new();
-        all.extend(file(true, true, &[]));
+        all.extend(file(true, true, false, &[]));
         // `true` so the caret-dependent rows are enabled here too -- the
         // stronger check, since a disabled row is exempt below regardless.
         all.extend(edit(&[], true));
@@ -2072,7 +2088,7 @@ mod tests {
             std::path::PathBuf::from("/notes/a/Report_17AUG2026.txt"),
             std::path::PathBuf::from("/notes/b/Report_17AUG2026.txt"),
         ];
-        let items = file(false, true, &recent);
+        let items = file(false, true, false, &recent);
 
         let rows: Vec<&MenuItem> = items
             .iter()
@@ -2091,7 +2107,7 @@ mod tests {
 
     #[test]
     fn no_recent_files_means_no_recent_rows() {
-        let items = file(false, true, &[]);
+        let items = file(false, true, false, &[]);
         assert!(
             items
                 .iter()
@@ -2106,7 +2122,7 @@ mod tests {
         let recent: Vec<std::path::PathBuf> = (0..bp_config::MAX_RECENT + 5)
             .map(|i| std::path::PathBuf::from(format!("/f{i}.txt")))
             .collect();
-        let items = file(false, true, &recent);
+        let items = file(false, true, false, &recent);
 
         // The recent rows, picked out by their labels rather than by the id
         // range under test -- a filter written from `RECENT_BASE` would agree
@@ -2145,7 +2161,12 @@ mod tests {
 
         let clips = [bp_clipboard::Entry::new("copied")];
         let mut rust_side = Vec::new();
-        rust_side.extend(file(true, true, &[std::path::PathBuf::from("/a.txt")]));
+        rust_side.extend(file(
+            true,
+            true,
+            false,
+            &[std::path::PathBuf::from("/a.txt")],
+        ));
         rust_side.extend(view(
             ThemeId::Green,
             false,
@@ -2394,6 +2415,64 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn a_document_served_from_disk_greys_every_row_that_would_write_or_reload_it() {
+        // ADR-0030. `AppState` refuses all four by name -- a save would write
+        // an empty file over two gigabytes, and a reload would load a
+        // document that was deliberately never loaded -- and these grey so
+        // the refusal is not the first the user hears of it.
+        //
+        // `row_enabled(.., false)` rather than `planned`: the rows exist and
+        // cannot act right now, which is a different statement from "does not
+        // exist yet", and the greying is the only thing on screen that
+        // explains why Ctrl+S stopped responding.
+        let served = file(false, true, true, &[]);
+        for id in [
+            action::SAVE,
+            action::SAVE_AS,
+            action::SAVE_COPY,
+            action::RELOAD,
+        ] {
+            let row = served
+                .iter()
+                .find(|i| i.action == id)
+                .unwrap_or_else(|| panic!("the File menu lost action {id}"));
+            assert!(
+                !row.enabled,
+                "'{}' would act on a document that is never held whole",
+                row.label
+            );
+        }
+
+        // And the same menu for an ordinary document, so this is a test of
+        // the flag rather than of the rows always being off.
+        let ordinary = file(false, true, false, &[]);
+        for id in [action::SAVE, action::SAVE_AS, action::SAVE_COPY] {
+            assert!(
+                ordinary
+                    .iter()
+                    .find(|i| i.action == id)
+                    .is_some_and(|row| row.enabled),
+                "action {id} is greyed for an ordinary document"
+            );
+        }
+    }
+
+    #[test]
+    fn save_all_is_not_greyed_by_the_active_document_being_a_viewer() {
+        // It acts on whichever *other* tabs are dirty. A viewer is never
+        // dirty, so it is already excluded -- and greying the row would stop
+        // somebody saving the note in the next tab because a log is in front.
+        let items = file(true, true, true, &[]);
+        assert!(
+            items
+                .iter()
+                .find(|i| i.action == action::SAVE_ALL)
+                .is_some_and(|row| row.enabled),
+            "Save All must still reach the other tabs"
+        );
     }
 
     #[test]

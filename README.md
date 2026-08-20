@@ -58,7 +58,7 @@ cargo run --release -- --editor-view   # with the custom editor view (ADR-0018)
 
 ## Current state (2026-08-20)
 
-**24 crates, 1,693 tests, green on Windows and Linux.** The app opens, edits and
+**24 crates, 1,734 tests, green on Windows and Linux.** The app opens, edits and
 saves atomically, and does rather more than that:
 
 | Area | What works |
@@ -66,7 +66,7 @@ saves atomically, and does rather more than that:
 | Editing | Tabs, four themes plus Follow System, zoom, indentation (tabs or soft tabs, 2/4/8), honest save state, atomic save, undo/cut/copy/paste, sort / deduplicate / reverse / trim lines, duplicate and move lines, go to line |
 | Storage | A rope buffer holds every document; whole-document operations are one undo step |
 | Safety | Unsaved-changes prompts, external-change detection, crash recovery journal — encrypted and recovered at unlock for encrypted documents ([ADR-0022](docs/decisions/ADR-0022.md)) |
-| Files | Open/Save/Save As/Save All/Save a Copy/Reload, recent files, tab context menu, command-line file opening. A document is classified by size before it is read (ADR-0027): ordinary opens as ever, large opens with the size in the status bar, huge is refused rather than loaded whole. UTF-8, UTF-8 with BOM and **UTF-16 LE/BE** all load and save; a truncated or malformed UTF-16 file is refused by name rather than repaired with replacement characters |
+| Files | Open/Save/Save As/Save All/Save a Copy/Reload, recent files, tab context menu, command-line file opening. A document is classified by size before it is read (ADR-0027): ordinary opens as ever, large opens with the size in the status bar, and a **huge one opens too** — read from disk as you scroll, in the custom surface whichever flag you started with (ADR-0030). A 192 MiB log costs 0.8 MiB more than a small note. UTF-8, UTF-8 with BOM and **UTF-16 LE/BE** all load and save; a truncated or malformed UTF-16 file is refused by name rather than repaired with replacement characters |
 | Search | Find and replace with case-sensitive, whole-word and regex toggles, changes shown before they are applied, recursive cross-file search |
 | Data | JSON / JSONL / TOML / **YAML** validate, format, minify, convert; RFC 4180 CSV/TSV shape report, conversion to JSON and JSON Lines, column types. YAML refuses deep nesting, alias bombs and duplicate keys in words that say what to do ([ADR-0023](docs/decisions/ADR-0023.md)) |
 | Semantic | Title, keywords, summary and outline extracted from the document; document statistics; date and time insertion |
@@ -166,42 +166,61 @@ starting.
   document this product can save, and the status bar reports one line count
   rather than a different one per editor view.
 
+- **A 2 GB file opens, and costs 0.8 MiB.** The last piece of phase 4
+  ([ADR-0030](docs/decisions/ADR-0030.md)). A document past the huge threshold
+  is served from disk as you scroll: arrow keys, the page keys, Ctrl+Home and
+  the wheel move the window, the gutter numbers the *document* rather than the
+  screen, and the status bar says which lines are on screen. Measured rather
+  than asserted — a few lines of text peaked at 31.3 MiB and a 192 MiB log at
+  32.1 MiB.
+
+  It draws in the custom surface in **every** build, not only under
+  `--editor-view`. `TextInput` owns its own text and cannot be handed a window
+  of a file it does not have; the flag stays a statement about which surface
+  *edits* a document the rope holds, and the one reason it is opt-in —
+  input-method composition — has nothing to say about a surface that accepts
+  no text.
+
+  Save, Save As, Save a Copy and Reload grey with the reason. That is not
+  politeness: `text_of` such a document is the empty string, so a Ctrl+S that
+  merely did nothing special would write an empty file over two gigabytes and
+  report success. Four paths refuse by name, and a test asserts the file's size
+  is unchanged rather than trusting the return value.
+
+  **Two things are deliberately not built**, and each is a refusal with a
+  reason rather than a gap: Ctrl+End, and a total line count. Both need the
+  whole file indexed, which for these documents means reading two gigabytes to
+  answer one question while the window is frozen.
+
 - **Three crates are built and unreachable, and this list is counted rather
   than remembered.** `bp-research`, `bp-notebook` and `bp-storage` have zero
   reverse dependencies anywhere in the application: nothing in `bp-ui`, in
   `apps/bachelorpad`, or in any other `bp-*` crate names them. `bp-notebook`
-  is reached only by the fuzz harness. `bp-audit` came off this list when
-  Security ▸ Security History shipped, and `bp-buffer`'s large-file *engine*
-  is half off it: `SizeClass` and `Access` decide how every document is
-  opened now, while `LargeFile` -- the chunked reader itself -- is still
-  waiting on a view. That is nine and a half thousand lines defended by 237
-  unit tests no user can reach, and it is still the largest thing standing
-  between this repository and a product.
+  is reached only by the fuzz harness. That is nine and a half thousand lines
+  defended by 237 unit tests no user can reach, and it is still the largest
+  thing standing between this repository and a product.
 
   | Crate | Lines | Tests | Reached by |
   | --- | --- | --- | --- |
   | `bp-research` | 5,208 | 161 | nothing |
   | `bp-notebook` | 3,514 | 55 | the fuzz harness only |
-  | `bp-storage` | 721 | 21 | nothing, by decision (ADR-0019) |
-  | `bp-buffer` ▸ `large.rs` | 1,198 | — | `SizeClass` and `Access` yes, `LargeFile` no |
+  | `bp-storage` | 721 | 21 | nothing, pending a design pass (ADR-0019) |
 
-  **Opening a 2 GB file no longer loads 2 GB.** The open path classifies from
-  metadata before a byte is read: an ordinary document opens as it always
-  did, a large one opens and edits with `Large file (9.4 MiB)` in the status
-  bar, and a huge one is refused in `Access::ReadOnlyBySize`'s own words,
-  which name the size and distinguish themselves from a file that is
-  read-only on disk. The refusal says the chunked reader is built and *not
-  yet* connected to a view, because saying "cannot" where the truth is "not
-  yet" is how a limitation becomes folklore.
+  **`bp-buffer`'s large-file engine came off this list**, and it was the
+  largest thing on it. `SizeClass` and `Access` decide how every document is
+  opened; `LargeFile` — the chunked reader — now has the view it was waiting
+  for. `bp-audit` came off when Security ▸ Security History shipped, and
+  `bp-integrity`, `bp-platform` and `bp-redaction` when Verify Signature, Set
+  as Default Editor, redaction and the metadata inspector got rows.
 
-  Two things also stopped happening on that path: every open used to read the
-  whole file to hand six bytes to `bp_crypto::is_bpadx`, and `load` then read
-  it again. A 2 GB document cost 4 GB of I/O before anything reached the
+  What is left is genuinely three modes rather than three menus, which is why
+  it is what is left.
+
+  Two things also stopped happening on the open path: every open used to read
+  the whole file to hand six bytes to `bp_crypto::is_bpadx`, and `load` then
+  read it again. A 2 GB document cost 4 GB of I/O before anything reached the
   screen.
 
-  `bp-integrity`, `bp-platform` and `bp-redaction` came off this list --
-  Verify Signature, Set as Default Editor, redaction and the metadata
-  inspector all have rows now.
 - **Used in anger once, and it paid.** A person drove both editor views on
   2026-08-20 and the pass found a defect 177 tests could not: a tab was drawn
   as a single glyph while every column in `bp-editor` was computed as though

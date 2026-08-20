@@ -182,6 +182,20 @@ pub struct AppState {
     /// Cross-file search results, indexed by the row the user clicks.
     pub(crate) file_hits: Vec<bp_search::FileHit>,
     pub(crate) clips: bp_clipboard::History,
+    /// How many rows the viewer actually drew last time.
+    ///
+    /// Not `visible_rows`: at the end of a file, and at any of
+    /// `display_lines`' three caps, a screenful is short. The status bar says
+    /// which lines are on screen, so it has to be told what was drawn rather
+    /// than what was asked for.
+    pub(crate) drawn_rows: usize,
+    /// Documents served from disk in chunks rather than held in a rope.
+    ///
+    /// A document is in exactly one of `editors` and `viewers`, never both
+    /// and never neither, and that is the whole of the distinction: anything
+    /// reaching for `active_editor()` on one of these gets `None` and does
+    /// nothing. See `crate::viewer` and ADR-0030.
+    pub(crate) viewers: HashMap<DocumentId, crate::viewer::HugeView>,
 }
 
 impl AppState {
@@ -228,6 +242,8 @@ impl AppState {
             tab_context: None,
             file_hits: Vec::new(),
             clips: bp_clipboard::History::new(),
+            drawn_rows: 0,
+            viewers: HashMap::new(),
         }
     }
 
@@ -679,6 +695,11 @@ impl AppState {
         let Some(id) = self.workspace.active_id() else {
             return;
         };
+        // `load` slurps. Reloading a document that was deliberately never
+        // loaded would undo the whole of ADR-0027 with one menu row.
+        if self.refuse_on_viewer(id, "Reloading") {
+            return;
+        }
         let Some(path) = self
             .workspace
             .get(id)
@@ -824,8 +845,8 @@ impl AppState {
         // was is asking after the damage is done: ADR-0027 measured that a
         // document past `HUGE_FILE_BYTES` must not reach a rope at all, and
         // the only place that can be honoured is here, in front.
-        if let Some(refusal) = self.refuse_if_too_large(&path) {
-            self.error = Some(refusal);
+        if self.is_too_large_to_load(&path) {
+            self.open_viewer(path);
             return;
         }
 
@@ -847,12 +868,100 @@ impl AppState {
         }
     }
 
+    /// Open a document too large for a rope, served from disk in chunks.
+    ///
+    /// It gets a tab and a `HugeView` and **no `Editor`**, which is what makes
+    /// every editing path a no-op rather than an edit to an empty document
+    /// that looks real. ADR-0030 has the rest: it draws in the custom surface
+    /// whether or not `--editor-view` was passed, because `TextInput` owns its
+    /// own text and cannot be handed a window of a file it does not have.
+    fn open_viewer(&mut self, path: PathBuf) {
+        let view = match crate::viewer::HugeView::open(&path) {
+            Ok(view) => view,
+            // The error already names the file and what is wrong with it,
+            // which is what the status bar wants. A file that cannot be
+            // opened is not a file that is too large.
+            Err(e) => {
+                self.error = Some(e.to_string());
+                return;
+            }
+        };
+        let bytes = view.len_bytes();
+        let message = view.access().message();
+
+        let id = self.workspace.open_path(path.clone(), now());
+        self.sizes.insert(id, bytes);
+        self.viewers.insert(id, view);
+        self.mark_in_step(id, &path);
+        // Said once, on open, rather than left for the reader to infer from a
+        // caret that never appears. It is `Access`'s own sentence: it names
+        // the size and distinguishes itself from a file that is read-only on
+        // disk, which is a different problem with a different way out.
+        self.error = Some(message);
+    }
+
+    /// Whether `id` is served from disk rather than held in a rope.
+    pub(crate) fn is_viewer(&self, id: DocumentId) -> bool {
+        self.viewers.contains_key(&id)
+    }
+
+    /// The active document's viewer, if it has one.
+    pub(crate) fn active_viewer_mut(&mut self) -> Option<&mut crate::viewer::HugeView> {
+        self.workspace
+            .active_id()
+            .and_then(|id| self.viewers.get_mut(&id))
+    }
+
+    /// Whether the active document is served from disk.
+    pub(crate) fn active_is_viewer(&self) -> bool {
+        self.workspace
+            .active_id()
+            .is_some_and(|id| self.is_viewer(id))
+    }
+
+    /// **Which surface draws the active document.** The one function that
+    /// decides, so the two views cannot come to disagree about which sizes
+    /// they claim.
+    ///
+    /// ADR-0030: a document the rope does not hold is drawn by
+    /// `EditorSurface` in every build, because it is the only surface that
+    /// can be handed a window of a file. `--editor-view` decides the rest.
+    pub(crate) fn uses_custom_surface(&self) -> bool {
+        self.editor_view || self.active_is_viewer()
+    }
+
+    /// Refuse an operation a document served from disk cannot support.
+    ///
+    /// `true` means refused, and `error` says so. **Every caller of this is a
+    /// path where doing nothing would not be harmless**: `text_of` a viewer is
+    /// the empty string, so a save that merely no-oped would write an empty
+    /// file over two gigabytes, and a reload would slurp the whole document
+    /// into memory — which is the one thing ADR-0027 exists to prevent.
+    ///
+    /// Named for the reason rather than for the size, because the user asked
+    /// to save and the answer is about what this document is.
+    fn refuse_on_viewer(&mut self, id: DocumentId, what: &str) -> bool {
+        if !self.is_viewer(id) {
+            return false;
+        }
+        self.error = Some(format!(
+            "{what} is not available for a document this large: it is read \
+             from disk as you scroll and is never held whole."
+        ));
+        true
+    }
+
     /// Outcome of a save attempt, so callers can tell the three cases apart.
     ///
     /// A close-on-quit flow must not treat "needs a path" or "the disk
     /// refused" as success and then discard the buffer.
     pub(crate) fn save_document(&mut self, id: DocumentId, path: Option<PathBuf>) -> SaveResult {
         self.error = None;
+        // Before anything reads the document. `text_of` a viewer is the empty
+        // string, so without this a Ctrl+S writes nothing over everything.
+        if self.refuse_on_viewer(id, "Saving") {
+            return SaveResult::Failed;
+        }
         let Some(doc) = self.workspace.get(id) else {
             return SaveResult::Saved;
         };
@@ -931,6 +1040,12 @@ impl AppState {
     /// real save would make the copy a different file from the original.
     pub(crate) fn save_copy(&mut self, id: DocumentId, target: &Path) -> SaveResult {
         self.error = None;
+        // Not destructive to the original, and refused anyway: an empty file
+        // presented as a copy of a 2 GB document is a worse outcome than a
+        // refusal, because it looks like it worked.
+        if self.refuse_on_viewer(id, "Saving a copy") {
+            return SaveResult::Failed;
+        }
         let Some(doc) = self.workspace.get(id) else {
             return SaveResult::Saved;
         };
@@ -997,6 +1112,17 @@ impl AppState {
         let Some(doc) = self.workspace.active() else {
             return Err("there is no document to read".to_owned());
         };
+        // Hashing, signing and verifying all come through here. For a
+        // document served from disk the answer would be a digest of the empty
+        // string presented as a digest of two gigabytes -- which is worse
+        // than no answer, because a signature over it would verify.
+        if self.active_is_viewer() {
+            return Err(
+                "this document is read from disk as you scroll and is never held whole, \
+                 so its bytes cannot be hashed or signed here"
+                    .to_owned(),
+            );
+        }
         Ok(encode(
             &self.active_text(),
             doc.encoding(),
@@ -1324,27 +1450,20 @@ impl AppState {
         format!("{} ({})", class.label(), human_bytes(bytes))
     }
 
-    /// Refuse a document the ordinary path must not load, with the reason.
+    /// Whether this file must not reach a rope, judged from its metadata.
     ///
-    /// `None` means go ahead. `Some(message)` is a refusal already worded for
-    /// the status bar.
+    /// **The size class comes from `bp-buffer`.** ADR-0027 measured the
+    /// thresholds and `SizeClass::must_stream` is the question they answer;
+    /// asking it here, before `load`, is the only place the answer can change
+    /// what happens, because `load` slurps.
     ///
-    /// **The size class comes from `bp-buffer`, and the message it carries.**
-    /// `Access::ReadOnlyBySize` exists precisely so a refusal can say *how*
-    /// large and distinguish itself from a file that is read-only on disk --
-    /// which is a different problem with a different way out, and telling
-    /// someone "read-only" without saying which leaves them clicking at
-    /// permissions that were never at fault.
-    ///
-    /// A file whose metadata cannot be read is *not* refused here. It is
+    /// A file whose metadata cannot be read is *not* diverted here. It is
     /// about to be opened, and `load` reports what is wrong with it far
     /// better than a guess from a failed `stat` would.
-    fn refuse_if_too_large(&self, path: &Path) -> Option<String> {
-        let bytes = std::fs::metadata(path).ok()?.len();
-        if !bp_buffer::SizeClass::of(bytes).must_stream() {
-            return None;
-        }
-        Some(huge_refusal(bytes))
+    fn is_too_large_to_load(&self, path: &Path) -> bool {
+        std::fs::metadata(path)
+            .map(|meta| bp_buffer::SizeClass::of(meta.len()).must_stream())
+            .unwrap_or(false)
     }
 
     /// Say something only if nothing more important is already being said.
@@ -1839,6 +1958,10 @@ impl AppState {
         self.error = None;
         if self.workspace.close(id).is_some() {
             self.editors.remove(&id);
+            // An open file handle and a line index, held for a tab that is
+            // gone. Closing thirty huge documents in a session would
+            // otherwise keep thirty handles open.
+            self.viewers.remove(&id);
             // Holding a passphrase for the session is a deliberate trade;
             // holding it past the document's life is just a leak.
             self.forget_passphrase(id);
@@ -1875,6 +1998,14 @@ impl AppState {
     /// caret is reachable only through a property marked internal and
     /// undocumented, so the honest answer there is the thing we do know.
     pub(crate) fn cursor_label(&self) -> String {
+        // A viewer has no caret -- there is no rope for a position to be in --
+        // so it reports where in the document the screen is instead. Asked
+        // before the editor views, because it is neither of them.
+        if let Some(id) = self.workspace.active_id()
+            && let Some(view) = self.viewers.get(&id)
+        {
+            return crate::viewer::viewer_label(view.top(), self.drawn_rows);
+        }
         let lines = self.gutter_lines;
         if !self.editor_view {
             return format!("{lines} lines");
@@ -2687,25 +2818,6 @@ pub(crate) fn recovery_dir() -> PathBuf {
     static NEXT: AtomicU64 = AtomicU64::new(0);
     let n = NEXT.fetch_add(1, Ordering::Relaxed);
     std::env::temp_dir().join(format!("bpad-test-recovery-{}-{n}", std::process::id()))
-}
-
-/// What the status bar says when a document is too large for the ordinary
-/// path.
-///
-/// A free function so its test can assert the *product's* sentence instead of
-/// a copy of it. A test carrying its own duplicate of a message goes on
-/// passing while the message drifts, which makes it a test of the test.
-///
-/// The second half is the honest half. ADR-0027 says such a document is
-/// served from disk in chunks and opened read-only; that reader is built and
-/// not connected to a view. Saying "cannot" where the truth is "not yet" is
-/// how a limitation becomes folklore.
-fn huge_refusal(bytes: u64) -> String {
-    format!(
-        "{} -- reading it in chunks is built and not yet connected to a view, \
-         so it is not opened rather than loaded whole",
-        bp_buffer::Access::ReadOnlyBySize { bytes }.message()
-    )
 }
 
 /// A byte count in the unit a person would use.
@@ -3626,30 +3738,239 @@ mod tests {
         );
     }
 
-    #[test]
-    fn the_refusal_for_a_huge_document_names_the_size_and_calls_it_not_yet() {
-        // Not opened, and *not* loaded -- ADR-0027 says a document past
-        // HUGE_FILE_BYTES must not reach a rope, and the only place that can
-        // be honoured is in front of `load`.
-        //
-        // The message is checked for the two things it must not do: blame
-        // permissions (a different problem with a different way out), and say
-        // "cannot" where the truth is "not yet".
-        let bytes = bp_buffer::HUGE_FILE_BYTES + 1;
+    /// A file past `HUGE_FILE_BYTES` whose first lines are real text.
+    ///
+    /// Written short and then extended with `set_len`, which is what makes
+    /// this affordable: both NTFS and ext4 record the length without writing
+    /// the bytes, so the fixture costs a few hundred bytes of I/O rather than
+    /// 192 MiB of it. The tail is NULs, which nothing here reads.
+    fn a_huge_file(dir: &std::path::Path) -> PathBuf {
+        let path = dir.join("enormous.log");
+        let mut text = String::new();
+        for n in 1..=200 {
+            let _ = writeln!(text, "line {n}");
+        }
+        std::fs::write(&path, &text).expect("the fixture's real lines");
+
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .expect("the fixture reopens");
+        file.set_len(bp_buffer::HUGE_FILE_BYTES + 1)
+            .expect("the fixture is extended");
         assert!(
-            bp_buffer::SizeClass::of(bytes).must_stream(),
+            bp_buffer::SizeClass::of(bp_buffer::HUGE_FILE_BYTES + 1).must_stream(),
             "this fixture is not actually huge"
         );
-        // The product's own sentence rather than a copy of it.
-        let message = huge_refusal(bytes);
+        path
+    }
+
+    #[test]
+    fn a_huge_document_opens_rather_than_being_refused() {
+        // What ADR-0030 changed. It used to be turned away at the door with a
+        // message saying the chunked reader was built and not yet connected
+        // to a view; it is connected now, so the document opens, gets a tab,
+        // and is drawn from disk.
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = a_huge_file(dir.path());
+
+        let mut state = AppState::new();
+        state.open(path);
+
+        let id = state.workspace.active_id().expect("a tab was opened");
+        assert!(state.is_viewer(id), "a huge document is served from disk");
         assert!(
-            message.contains("not yet"),
-            "a limitation stated as permanent becomes folklore: {message}"
+            !state.editors.contains_key(&id),
+            "a viewer must have no editor: that is what makes every editing \
+             path a no-op rather than an edit to an empty document"
         );
         assert!(
-            !message.contains("permission") && !message.contains("read-only file"),
-            "the size is the reason; permissions were never at fault: {message}"
+            state.size_label().starts_with("Huge file ("),
+            "got {:?}",
+            state.size_label()
         );
+    }
+
+    #[test]
+    fn the_notice_is_access_s_own_sentence_and_blames_the_size() {
+        // Not this module's wording. `Access::ReadOnlyBySize` exists so a
+        // refusal can say *how* large and distinguish itself from a file that
+        // is read-only on disk -- a different problem with a different way
+        // out, and telling someone "read-only" without saying which leaves
+        // them clicking at permissions that were never at fault.
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = a_huge_file(dir.path());
+
+        let mut state = AppState::new();
+        state.open(path);
+
+        let notice = state.error.clone().expect("opening one says what it is");
+        assert_eq!(
+            notice,
+            bp_buffer::Access::ReadOnlyBySize {
+                bytes: bp_buffer::HUGE_FILE_BYTES + 1
+            }
+            .message()
+        );
+        assert!(
+            !notice.contains("not yet"),
+            "the viewer exists now; saying otherwise is how a limitation \
+             becomes folklore in the other direction: {notice}"
+        );
+        assert!(
+            !notice.contains("permission"),
+            "the size is the reason: {notice}"
+        );
+    }
+
+    #[test]
+    fn saving_a_document_served_from_disk_writes_nothing_at_all() {
+        // **The guard that matters.** `text_of` a viewer is the empty string,
+        // so a save that merely did nothing special would encode nothing and
+        // atomically write it over the document -- a Ctrl+S that destroys two
+        // gigabytes and reports success. The assertion is on the file, not on
+        // the return value.
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = a_huge_file(dir.path());
+        let before = std::fs::metadata(&path).expect("metadata").len();
+
+        let mut state = AppState::new();
+        state.open(path.clone());
+        let id = state.workspace.active_id().expect("a tab was opened");
+
+        assert_eq!(state.save_document(id, None), SaveResult::Failed);
+        assert_eq!(
+            std::fs::metadata(&path).expect("metadata").len(),
+            before,
+            "the document was written over"
+        );
+        assert_eq!(
+            state.save_copy(id, &dir.path().join("copy.log")),
+            SaveResult::Failed,
+            "an empty file presented as a copy is worse than a refusal"
+        );
+        assert!(
+            !dir.path().join("copy.log").exists(),
+            "and it must not be created either"
+        );
+
+        let notice = state.error.clone().unwrap_or_default();
+        assert!(
+            notice.contains("read from disk"),
+            "the refusal has to say why: {notice}"
+        );
+    }
+
+    #[test]
+    fn reloading_a_document_served_from_disk_refuses() {
+        // `load` slurps. Reloading a document that was deliberately never
+        // loaded would undo the whole of ADR-0027 with one menu row -- and it
+        // would do it by allocating two gigabytes, which is the failure mode
+        // hardest to recover from.
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = a_huge_file(dir.path());
+
+        let mut state = AppState::new();
+        state.open(path);
+        let id = state.workspace.active_id().expect("a tab was opened");
+
+        state.reload();
+        assert!(state.is_viewer(id), "still served from disk");
+        assert!(
+            !state.editors.contains_key(&id),
+            "reload put the document in a rope"
+        );
+    }
+
+    #[test]
+    fn the_bytes_of_a_document_served_from_disk_are_refused_rather_than_empty() {
+        // Hashing, signing and verifying all come through `active_bytes`. A
+        // digest of the empty string presented as a digest of two gigabytes
+        // is worse than no answer, because a signature over it verifies.
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = a_huge_file(dir.path());
+
+        let mut state = AppState::new();
+        state.open(path);
+
+        let refusal = state.active_bytes().expect_err("must not answer");
+        assert!(refusal.contains("never held whole"), "got {refusal}");
+    }
+
+    #[test]
+    fn a_huge_document_draws_in_the_custom_surface_whichever_flag_was_passed() {
+        // ADR-0030, and the reason there is one function rather than an `if`
+        // in two places: `TextInput` owns its own text and cannot be handed a
+        // window of a file, so there is no build in which this document opens
+        // for one user and is refused for another.
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = a_huge_file(dir.path());
+
+        for flag in [false, true] {
+            let mut state = AppState::new();
+            state.editor_view = flag;
+            state.open(path.clone());
+            assert!(
+                state.uses_custom_surface(),
+                "--editor-view={flag} left a huge document in a TextInput"
+            );
+        }
+    }
+
+    #[test]
+    fn an_ordinary_document_still_follows_the_flag() {
+        // The other half of the same function. ADR-0030 changed what a *huge*
+        // document does and nothing else; a flag that started claiming every
+        // document would have retired `TextInput` by accident, and with it
+        // input-method composition.
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("small.txt");
+        std::fs::write(&path, "a few lines\nof text\n").expect("write");
+
+        for flag in [false, true] {
+            let mut state = AppState::new();
+            state.editor_view = flag;
+            state.open(path.clone());
+            assert_eq!(state.uses_custom_surface(), flag);
+        }
+    }
+
+    #[test]
+    fn closing_a_viewer_lets_go_of_the_file() {
+        // An open handle and a line index per tab. Thirty huge documents
+        // opened and closed in a session would otherwise be thirty handles.
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = a_huge_file(dir.path());
+
+        let mut state = AppState::new();
+        state.open(path);
+        let id = state.workspace.active_id().expect("a tab was opened");
+        assert!(state.is_viewer(id));
+
+        state.close(id);
+        assert!(!state.viewers.contains_key(&id));
+    }
+
+    #[test]
+    fn the_readout_says_which_lines_are_on_screen() {
+        // A viewer has no caret, because a caret is a position in a rope and
+        // the rope is a disk. What it has instead is a viewport, and saying
+        // where that is answers the question a reader of a huge log has.
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = a_huge_file(dir.path());
+
+        let mut state = AppState::new();
+        state.open(path);
+        state.drawn_rows = 30;
+
+        assert_eq!(state.cursor_label(), "Ln 1-30");
+        assert!(
+            state
+                .active_viewer_mut()
+                .expect("the active document is a viewer")
+                .scroll_by(100, 30)
+        );
+        assert_eq!(state.cursor_label(), "Ln 101-130");
     }
 
     #[test]

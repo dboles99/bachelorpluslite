@@ -37,7 +37,7 @@ Adding a decision means adding both.
 | BP-ADR-0029 | 2026-08-20 | A line break is `
 ` or `
 `; the rope drops `unicode_lines` | Accepted | [ADR-0029](docs/decisions/ADR-0029.md) |
-| BP-ADR-0030 | 2026-08-20 | A huge document opens in the custom surface, read-only, in every build | Accepted | [ADR-0030](docs/decisions/ADR-0030.md) |
+| BP-ADR-0030 | 2026-08-20 | A huge document opens in the custom surface, read-only, in every build | Accepted, shipped | [ADR-0030](docs/decisions/ADR-0030.md) |
 | BP-ADR-0031 | 2026-08-20 | A signing key lives in a sealed `.bpadx` key file, not a permission-protected one | Accepted | [ADR-0031](docs/decisions/ADR-0031.md) |
 | BP-ADR-0032 | 2026-08-20 | The application id is reverse-DNS, and is not the directory name | Accepted | [ADR-0032](docs/decisions/ADR-0032.md) |
 

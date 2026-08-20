@@ -68,6 +68,7 @@ mod dispatch;
 mod editor_view;
 mod passphrase;
 mod state;
+mod viewer;
 
 /// Crate identity used by workspace smoke tests and diagnostics.
 pub const CRATE_NAME: &str = "bp-ui";
@@ -110,7 +111,15 @@ fn refresh(ui: &AppWindow, state: &mut state::AppState, push_text: state::PushTe
     if push_text == state::PushText::Yes {
         ui.set_doc_text(state.active_text().as_str().into());
     }
-    if state.editor_view {
+    // **The one place the surface is chosen**, and it is chosen per refresh
+    // rather than once at startup, because it depends on the *active
+    // document*: ADR-0030 puts a document the rope does not hold in the
+    // custom surface whether or not `--editor-view` was passed. Switching
+    // tabs between a huge log and an ordinary note switches surface with
+    // them.
+    let custom = state.uses_custom_surface();
+    ui.set_use_editor_view(custom);
+    if custom {
         editor_view::push_editor_view(ui, state);
     }
     if state.sync_gutter() {
@@ -191,6 +200,7 @@ fn refresh(ui: &AppWindow, state: &mut state::AppState, push_text: state::PushTe
     ui.set_file_items(model(menus::file(
         any_dirty,
         has_path,
+        state.active_is_viewer(),
         state.recent.paths(),
     )));
     ui.set_view_items(model(menus::view(
@@ -416,6 +426,10 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
 
     initial.editor_view = options.editor_view;
     let state = Rc::new(RefCell::new(initial));
+    // The starting value only. `refresh` owns this property from here on and
+    // recomputes it per document, because ADR-0030 makes the answer depend on
+    // what is in the active tab rather than on the flag alone. It runs before
+    // the window is shown, so the first frame is already right.
     ui.set_use_editor_view(options.editor_view);
 
     let mut reported = false;
@@ -698,28 +712,15 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
             let Some(ui) = weak.upgrade() else { return };
             let mut s = cell.borrow_mut();
 
-            // By visual rows, not document lines. With wrapping on the two
-            // differ, and a wheel that moved whole lines would skip past
-            // everything the reader can see inside a long one.
-            //
-            // `step_row` is bounded at both ends of the document, so the view
-            // cannot scroll into empty space.
-            s.sync_wrap();
-            let anchor = s.anchor;
-            let layout = s.layout();
-            if let Some(editor) = s.active_editor() {
-                s.anchor = bp_editor::view::step_row(
-                    editor.buffer(),
-                    anchor,
-                    isize::try_from(lines).unwrap_or(0),
-                    layout,
-                );
-            }
+            editor_view::scroll_by_rows(&mut s, lines);
 
             // Drawn where it now is rather than through `refresh`: scrolling
             // away from the caret is exactly what the user asked for, and
-            // revealing it again would snap the wheel straight back.
-            editor_view::draw_editor_view(&ui, &s);
+            // revealing it again would snap the wheel straight back. For a
+            // viewer there is no caret to snap back to, and the same call is
+            // still the right one -- it redraws the window the scroll just
+            // moved to.
+            editor_view::draw_editor_view(&ui, &mut s);
         });
     }
 
