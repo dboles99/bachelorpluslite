@@ -34,6 +34,9 @@ Adding a decision means adding both.
 | BP-ADR-0026 | 2026-08-19 | A `.sig` sidecar appends to the whole file name and records the signer's key; Windows enforces no key-file permission | Accepted | [ADR-0026](docs/decisions/ADR-0026.md) |
 | BP-ADR-0027 | 2026-08-19 | Large-file thresholds are measured; the line index is sparse; memory mapping is declined with reasons | Accepted | [ADR-0027](docs/decisions/ADR-0027.md) |
 | BP-ADR-0028 | 2026-08-19 | Redaction merges overlapping and adjacent spans, resolves every offset against the original, and states what verification cannot prove | Accepted | [ADR-0028](docs/decisions/ADR-0028.md) |
+| BP-ADR-0029 | 2026-08-20 | A line break is `
+` or `
+`; the rope drops `unicode_lines` | Accepted | [ADR-0029](docs/decisions/ADR-0029.md) |
 
 ## Decisions needed before the work they block
 
@@ -90,24 +93,6 @@ Adding a decision means adding both.
   argues against two crates whose contents each CI leg never compiles.
   Revisit when something genuinely platform-specific has to be linked.
 
-- **`bp-search` and `bp-buffer` do not agree what a line is, and this is
-  now a decision rather than a bug report.** `bp_search::Offsets` counts
-  `'
-'`. `bp_buffer::Buffer` is a `ropey::Rope` built with ropey's default
-  features, which include `unicode_lines`, so ropey also breaks on a bare
-  `
-`, ``, ``, U+0085, U+2028 and U+2029. For `"one
-two
-needle"`
-  search reports line 1 and the buffer reports line 3, so a find-in-files
-  result scrolls the editor to the wrong line in any file carrying a bare CR.
-  The same split exists inside `bp-buffer` — the free `line_count` counts
-  newlines, `Buffer::len_lines` asks the rope — and `bp-ui` uses one for the
-  `TextInput` status bar and the other for the `EditorSurface` one, so the
-  same document reports two line counts depending on which view draws.
-  Either `bp-search` adopts ropey's break set or `bp-buffer` builds its rope
-  without `unicode_lines`; one line definition has to win, and that is an
-  ADR. Found by the cross-crate tests, pinned as an ignored test naming it.
 - **Time to first interaction is unmeasurable under the software renderer.**
   Slint exposes no rendering notifier there, so half of the ADR-0017 startup
   target has no measurement behind it. A hole, not a pass.

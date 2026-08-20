@@ -270,33 +270,36 @@ fn searching_an_empty_document_finds_nothing_rather_than_everything() {
     );
 }
 
-// --- a disagreement between the crates, left failing ---------------------
+// --- the crates agree what a line is (ADR-0029) --------------------------
 
-/// **DEFECT.** `bp-search` and `bp-buffer` do not agree on what a line is.
+/// **ADR-0029, as a test.** `bp-search` and `bp-buffer` agree what a line is.
 ///
-/// `bp_search::Offsets` counts line starts by looking for `'\n'` and nothing
-/// else. `bp_buffer::Buffer` is a `ropey::Rope` built with ropey's default
-/// features, which include `unicode_lines`: ropey treats a bare `\r`, `\x0B`,
-/// `\x0C`, U+0085, U+2028 and U+2029 as line breaks too.
+/// They did not. `bp_search::Offsets` counts line starts by looking for
+/// `'\n'` and nothing else, while `bp_buffer::Buffer` was a `ropey::Rope`
+/// built with ropey's *default* features -- which include `unicode_lines`,
+/// so the rope also broke on a bare `\r`, `\x0B`, `\x0C`, U+0085, U+2028 and
+/// U+2029.
 ///
-/// So for a document containing any of those, a find reports one line number
-/// and the editor's caret reports another. The user sees a result panel that
-/// scrolls to the wrong line, and "go to line 12" from a search result lands
-/// somewhere else. A bare `\r` is not exotic: it is what a file written on a
-/// classic Mac, or by a program that emitted a progress bar, contains.
+/// For a document containing any of those, a find reported one line number
+/// and the caret reported another: a results panel that scrolled to the wrong
+/// line, and "go to line 12" landing somewhere else. A bare `\r` is not
+/// exotic -- it is what a file written on a classic Mac, or by a program that
+/// emitted a progress bar, contains.
 ///
-/// The same split exists *inside* `bp-buffer`, between its two public answers
-/// to "how many lines": the free `line_count` counts `'\n'`, and
-/// `Buffer::len_lines` asks the rope. `bp-ui`'s status bar uses the first for
-/// one editor view and the second for the other, so the same document reports
-/// two different line counts depending on which view is showing it.
+/// The same split ran *inside* `bp-buffer`, between its two public answers to
+/// "how many lines": the free `line_count` counts `'\n'`, and
+/// `Buffer::len_lines` asks the rope. `bp-ui`'s status bar uses the first
+/// under one editor view and the second under the other, so one document
+/// reported two line counts depending on which view was showing it. That half
+/// is held by `bp-buffer`'s own `tests/one_definition_of_a_line.rs`.
 ///
-/// Fixing it is a decision, not a patch -- either `bp-search` adopts ropey's
-/// line-break set, or `bp-buffer` builds its rope without `unicode_lines` --
-/// so this is left named rather than papered over. Run with
-/// `cargo test -p bp-integration-tests -- --ignored` to see it.
+/// ADR-0029 settled it in the rope's direction rather than the search's: the
+/// rope drops `unicode_lines`, so a break is `\n` or `\r\n` and nothing else
+/// -- which is what `bp-core`, `bp-files`, `bp-search` and `bp-buffer`'s own
+/// helpers all already said. The wider set was never chosen; it was a default
+/// inherited from writing `ropey = "1"`. So each document below is now **one**
+/// line to both crates, and the property is that they say so together.
 #[test]
-#[ignore = "known defect: bp-search counts only \\n as a line break, bp-buffer's rope counts every Unicode line break"]
 fn search_and_the_buffer_agree_on_lines_containing_any_line_break() {
     for (text, breaks) in [
         ("one\rtwo\rneedle", "a bare carriage return"),

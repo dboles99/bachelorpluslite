@@ -58,7 +58,7 @@ cargo run --release -- --editor-view   # with the custom editor view (ADR-0018)
 
 ## Current state (2026-08-20)
 
-**24 crates, 1,673 tests, green on Windows and Linux.** The app opens, edits and
+**24 crates, 1,686 tests, green on Windows and Linux.** The app opens, edits and
 saves atomically, and does rather more than that:
 
 | Area | What works |
@@ -153,17 +153,18 @@ starting.
   so `con.txt` stays an ordinary file on Linux and both CI legs execute both
   rule sets.
 
-  **One test remains `#[ignore]`d in the whole tree, and it names a decision
-  rather than a defect.** `bp-search` counts only the newline while
-  `bp-buffer`'s rope also breaks on a bare carriage return and four other
-  separators, so find-in-files can scroll to the wrong line in any file
-  carrying one. One line definition has to win, and that is D6. The other six
-  are closed: the newest were `bp-files` applying the extended-length prefix,
-  so a filename at `SemanticName::to_filename`'s own documented maximum is
-  writable however deep the directory sits, and `bp-notebook` no longer
-  handing a cell the kernel's language when the cell named one we cannot
-  map -- which had made a cell tagged `brainfuck` import as Python, become
-  executable, and say nothing about it ([ADR-0025](docs/decisions/ADR-0025.md)).
+  **There is no `#[ignore]`d test left anywhere in the tree.** All seven are
+  closed. The last was a decision rather than a defect and is now
+  [ADR-0029](docs/decisions/ADR-0029.md): a line break in this product is
+  `
+` or `
+` and nothing else, so `bp-buffer` builds its rope without
+  ropey's `unicode_lines` -- a break set that was never chosen, only
+  inherited from writing `ropey = "1"`, and that disagreed with
+  `bp-core::LineEnding`, `bp-files::encode`, `bp-search` and two of
+  `bp-buffer`'s own helpers. Find-in-files and the caret now agree on every
+  document this product can save, and the status bar reports one line count
+  rather than a different one per editor view.
 
 - **Three crates and one module are built and unreachable, and this list is
   now counted rather than remembered.** `bp-research`, `bp-notebook` and

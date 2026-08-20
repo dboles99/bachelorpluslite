@@ -764,6 +764,7 @@ dependencies = [
 name = "bp-buffer"
 version = "0.1.0"
 dependencies = [
+ "proptest",
  "ropey",
  "tempfile",
  "thiserror 2.0.20",
