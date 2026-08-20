@@ -66,6 +66,22 @@ pub enum IntegrityError {
     /// caused this one and can choose a different path.
     #[error("{reason}: {path}")]
     UnusablePath { path: String, reason: &'static str },
+
+    /// A sealed key file could not be opened: the wrong passphrase, or a file
+    /// that is damaged.
+    ///
+    /// **Deliberately does not say which**, and that is `bp-crypto`'s
+    /// decision showing through rather than vagueness here: an authenticated
+    /// envelope cannot distinguish a wrong key from altered bytes, because
+    /// the tag check fails identically for both. A message that guessed would
+    /// be wrong half the time, and the half it got wrong is the half where
+    /// somebody retypes a correct passphrase for ten minutes.
+    #[error("cannot unlock {}: {source}", .path.display())]
+    SealedKey {
+        path: PathBuf,
+        #[source]
+        source: bp_crypto::CryptoError,
+    },
 }
 
 impl IntegrityError {

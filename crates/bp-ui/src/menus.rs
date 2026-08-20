@@ -670,6 +670,8 @@ pub fn security(
     privacy: bp_security::Privacy,
     has_content: bool,
     has_path: bool,
+    can_sign: bool,
+    has_key: bool,
 ) -> Vec<MenuItem> {
     // What is actually in force, which is the document's profile *and* the
     // session override. Showing the unclamped policy would tell the user their
@@ -760,17 +762,45 @@ pub fn security(
         // digest you are about to read down a telephone is useless unless you
         // already know which of the two the other end took.
         row("Hash Document (SHA-256)", "", action::HASH_DOCUMENT),
-        // Greyed with a reason, deliberately not `planned`. `bp_crypto`'s
-        // signing half exists and is tested; what does not exist is anywhere
-        // to keep a signing key, and inventing a key store on the way to a
-        // menu row would be a worse answer than the row saying so. The reason
-        // is in the label because the greying is the only thing on screen.
-        row_enabled(
-            "Sign Document — no signing key yet",
-            "",
-            action::SIGN_DOCUMENT,
-            false,
-        ),
+        // Live since ADR-0031 answered where a signing key lives: sealed in
+        // a `.bpadx` envelope under a passphrase, which is the same envelope
+        // encrypted documents use and needs nothing new designed, reviewed or
+        // fuzzed. It was greyed with the reason on the row for three sessions
+        // before that, which is the shape a blocked-on-a-decision row should
+        // take -- `row_enabled(.., false)` and not `planned`.
+        //
+        // Greyed now for the two reasons a signature cannot be made rather
+        // than for the absence of a key store, and each says which: signing
+        // is over the bytes **on disk** (ADR-0026), so a document that has
+        // never been saved has nothing to sign, and one with unsaved changes
+        // would get a valid signature over the previous version -- which is
+        // worse than a refusal, because it verifies.
+        //
+        // The hint names the key, not the document. Whether one exists yet is
+        // what decides which question the passphrase bar asks, and saying so
+        // before the click is what stops "Sign" being followed by an
+        // unexplained ceremony.
+        MenuItem {
+            separator_after: false,
+            ..row_enabled(
+                match (has_path, can_sign) {
+                    (false, _) => "Sign Document — this document has never been saved",
+                    (true, false) => "Sign Document — save it first",
+                    (true, true) => "Sign Document...",
+                },
+                if has_path && can_sign {
+                    if has_key {
+                        "unlocks your signing key"
+                    } else {
+                        "creates a signing key"
+                    }
+                } else {
+                    ""
+                },
+                action::SIGN_DOCUMENT,
+                has_path && can_sign,
+            )
+        },
         // Live even though signing is not: verifying needs the other party's
         // signature and, to say more than "intact", their public key. It is
         // the half of the feature that needs nothing stored.
@@ -1171,6 +1201,8 @@ mod tests {
             bp_security::Privacy::Off,
             true,
             true,
+            true,
+            false,
         );
         // The profile toggles are the leading rows, by construction. Taking
         // them positionally rather than by id range is what lets the range
@@ -1207,6 +1239,8 @@ mod tests {
                 bp_security::Privacy::Off,
                 true,
                 true,
+                true,
+                false,
             );
             let ticked: Vec<&str> = items
                 .iter()
@@ -1229,6 +1263,8 @@ mod tests {
             bp_security::Privacy::Off,
             true,
             true,
+            true,
+            false,
         );
         assert!(
             !items.iter().any(|i| i.label.starts_with('✓')),
@@ -1246,6 +1282,8 @@ mod tests {
             bp_security::Privacy::Off,
             true,
             true,
+            true,
+            false,
         );
         assert!(
             standard
@@ -1264,6 +1302,8 @@ mod tests {
             bp_security::Privacy::Off,
             true,
             true,
+            true,
+            false,
         );
         assert!(
             maximum
@@ -1287,6 +1327,8 @@ mod tests {
             bp_security::Privacy::Off,
             true,
             true,
+            true,
+            false,
         );
         let row = items
             .iter()
@@ -1308,6 +1350,8 @@ mod tests {
             bp_security::Privacy::Off,
             true,
             true,
+            true,
+            false,
         )
     }
 
@@ -1429,6 +1473,8 @@ mod tests {
             bp_security::Security::default(),
             false,
             bp_security::Privacy::Off,
+            true,
+            false,
             true,
             false,
         );
@@ -1582,6 +1628,8 @@ mod tests {
             bp_security::Privacy::Off,
             false,
             true,
+            true,
+            false,
         );
         let row = items
             .iter()
@@ -1621,6 +1669,8 @@ mod tests {
                 bp_security::Privacy::Off,
                 has_content,
                 true,
+                true,
+                false,
             );
             let row = items
                 .iter()
@@ -1729,29 +1779,88 @@ mod tests {
         );
     }
 
-    #[test]
-    fn signing_is_greyed_with_a_reason_rather_than_listed_as_not_existing() {
-        // `planned` means "this does not exist yet"; `bp_crypto::sign_document`
-        // does exist and is tested. What is missing is somewhere to keep a
-        // key, which is a different sentence -- and it has to be on the row,
-        // because the greying is all the user gets.
-        let items = security_menu();
-        let row = items
-            .iter()
-            .find(|i| i.action == action::SIGN_DOCUMENT)
-            .expect("a signing row");
+    /// The Security menu for a document in a given state, for the signing
+    /// rows.
+    fn signing_row(has_path: bool, can_sign: bool, has_key: bool) -> MenuItem {
+        security(
+            bp_security::Security::default(),
+            false,
+            bp_security::Privacy::Off,
+            true,
+            has_path,
+            can_sign,
+            has_key,
+        )
+        .into_iter()
+        .find(|i| i.action == action::SIGN_DOCUMENT)
+        .expect("a signing row")
+    }
 
-        assert!(!row.enabled, "there is nowhere to keep a signing key yet");
-        assert_ne!(
-            row.action,
-            action::NONE,
-            "a real capability with a missing prerequisite is not a planned row"
-        );
+    #[test]
+    fn signing_is_live_now_that_a_key_has_somewhere_to_live() {
+        // This row was greyed for three sessions with "no signing key yet" on
+        // it, because `bp_crypto::sign_document` existed and there was
+        // nowhere to keep a key. ADR-0031 answered that -- sealed in the
+        // `.bpadx` envelope encrypted documents already use -- so the row
+        // acts.
+        let row = signing_row(true, true, false);
+        assert!(row.enabled, "got '{}'", row.label);
         assert!(
-            row.label.contains("key"),
-            "the row must say why it is greyed; got '{}'",
+            !row.label.contains("no signing key"),
+            "the reason it was greyed for is gone; got '{}'",
             row.label
         );
+    }
+
+    #[test]
+    fn signing_greys_for_the_two_reasons_a_signature_cannot_be_made() {
+        // Neither is about a key store any more. A signature is over the
+        // bytes **on disk** (ADR-0026), so a document that has never been
+        // saved has nothing to sign -- and one with unsaved changes would get
+        // a valid signature over the *previous* version, which is worse than
+        // a refusal because it verifies.
+        //
+        // The two say different things, because the way out of each is
+        // different: one is Save As, the other is Ctrl+S.
+        let never_saved = signing_row(false, true, true);
+        let unsaved_changes = signing_row(true, false, true);
+
+        for row in [&never_saved, &unsaved_changes] {
+            assert!(!row.enabled, "got '{}'", row.label);
+            assert_ne!(
+                row.action,
+                action::NONE,
+                "a real capability with a missing prerequisite is not a planned row"
+            );
+        }
+        assert_ne!(
+            never_saved.label, unsaved_changes.label,
+            "two different problems must not read as one"
+        );
+        assert!(never_saved.label.contains("never been saved"));
+        assert!(unsaved_changes.label.contains("save it first"));
+    }
+
+    #[test]
+    fn the_signing_row_says_which_question_the_click_will_ask() {
+        // A click is followed by a passphrase bar, and *which* one depends on
+        // whether a key exists. Saying so before the click is what stops
+        // "Sign" being followed by an unexplained ceremony -- and creating a
+        // signing key is a thing somebody may want to know is about to happen.
+        let first_time = signing_row(true, true, false);
+        let afterwards = signing_row(true, true, true);
+
+        assert!(
+            first_time.shortcut.contains("creates"),
+            "got '{}'",
+            first_time.shortcut
+        );
+        assert!(
+            afterwards.shortcut.contains("unlocks"),
+            "got '{}'",
+            afterwards.shortcut
+        );
+        assert_ne!(first_time.shortcut, afterwards.shortcut);
     }
 
     #[test]
@@ -2188,6 +2297,8 @@ mod tests {
             bp_security::Privacy::Off,
             true,
             true,
+            true,
+            false,
         ));
 
         for item in rust_side.iter().filter(|i| i.enabled) {

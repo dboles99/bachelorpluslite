@@ -53,7 +53,8 @@ pub mod sidecar;
 
 pub use error::IntegrityError;
 pub use keys::{
-    KeyFileProtection, key_file_protection, read_signing_key, read_verifying_key,
+    KeyFileProtection, SEALED_KEY_EXTENSION, is_sealed_key_file, key_file_protection,
+    read_sealed_signing_key, read_signing_key, read_verifying_key, write_sealed_signing_key,
     write_signing_key, write_verifying_key,
 };
 pub use manifest::{

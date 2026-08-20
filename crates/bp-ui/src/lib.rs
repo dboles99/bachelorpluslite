@@ -242,6 +242,14 @@ fn refresh(ui: &AppWindow, state: &mut state::AppState, push_text: state::PushTe
         // by name. Already computed above for Reload, which needs the same
         // fact for the same underlying reason.
         has_path,
+        // Signing is over the bytes on disk (ADR-0026), so a document with
+        // unsaved changes would be signed as it *was*. The row says so rather
+        // than the click doing it -- and it asks the **same** predicate
+        // `begin_signing` refuses on, because a row that greys on one rule and
+        // an action that refuses on another is how a user learns to distrust
+        // the greying.
+        !state.active_differs_from_disk(),
+        state.has_signing_key(),
     )));
 }
 

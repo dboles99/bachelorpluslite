@@ -457,14 +457,16 @@ pub fn handle_menu_action(
         }
 
         action::SIGN_DOCUMENT => {
-            // The row is greyed, so this is only reachable by a keyboard
-            // route that does not exist yet -- but a silent no-op would be a
-            // bug report nobody could describe, the same reasoning as the
-            // stamp arm above.
-            state.borrow_mut().error = Some(
-                "signing needs a signing key, and there is nowhere to keep one yet".to_owned(),
-            );
             push = PushText::No;
+            // Asks the right question and stops. Whether the passphrase bar
+            // says "new signing key passphrase" or "signing key passphrase"
+            // depends on whether a key exists, and `begin_signing` is what
+            // decides -- the whole flow lives there and in
+            // `answer_passphrase`, so a passphrase is typed in exactly one
+            // place in this product.
+            if state.borrow_mut().begin_signing() {
+                ui.invoke_focus_passphrase();
+            }
         }
 
         action::VERIFY_SIGNATURE => {

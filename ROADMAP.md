@@ -134,6 +134,12 @@ either, and `TextInput` is the only item in the toolkit that consumes them.
 Without it CJK entry does not work, so `--editor-view` stays opt-in and the
 default stays `TextInput`. `project/WORK_QUEUE.md` records the evidence.
 
+**Signing shipped, and with it the last row that was greyed for a missing
+decision rather than a missing prerequisite.** ADR-0031 puts the Ed25519
+signing key inside the `.bpadx` envelope, sealed under a passphrase, which
+closes the Windows/Linux asymmetry ADR-0026 measured and could not fix. Sign
+Document acts; Verify Signature already did.
+
 **Security profiles (phase 14) are wired.** ADR-0020 defines what each of
 Standard, Private, Confidential and Maximum permits across seven axes, and the
 named profiles are checked to be monotonic — each at least as restrictive as

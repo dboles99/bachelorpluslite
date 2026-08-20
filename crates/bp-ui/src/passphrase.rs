@@ -2,13 +2,16 @@
 //! answer.
 //!
 //! A small state machine rather than a flag, because the same one-field bar
-//! serves three questions and answering the wrong one is expensive: unlocking
+//! serves six questions and answering the wrong one is expensive: unlocking
 //! with a typo costs a retry, while *setting* one with a typo costs the
 //! document, permanently and with no way to notice until it is too late.
 //!
 //! That is the whole reason [`Ask::Confirm`] exists. Encrypting asks twice and
 //! compares, using one field and two submits rather than two fields, which
-//! keeps the bar a bar.
+//! keeps the bar a bar. [`Ask::ConfirmKey`] is the same device for a signing
+//! key, where the stakes are the same shape and larger: a mistyped key
+//! passphrase does not cost one document, it costs the identity every
+//! document signed with that key was signed under (ADR-0031).
 
 use std::path::PathBuf;
 
@@ -34,6 +37,27 @@ pub(crate) enum Ask {
         target: PathBuf,
         first: Zeroizing<String>,
     },
+    /// Signing, and there is no key yet: the first of two entries for a new
+    /// one.
+    ///
+    /// The document to sign travels with the question, because creating a key
+    /// is something the user is doing *in order to* sign this document -- and
+    /// finishing the ceremony only to be asked which document would be the
+    /// product forgetting what it was in the middle of.
+    SetKey { id: DocumentId },
+    /// The second entry for a new signing key, compared against the first.
+    ///
+    /// The same shape as [`Self::Confirm`] and for a sharper reason. A
+    /// mistyped document passphrase costs that document; a mistyped key
+    /// passphrase costs the key, and with it the ability to ever sign
+    /// anything else as the same signer. Everything already signed still
+    /// verifies, which is what makes the loss quiet.
+    ConfirmKey {
+        id: DocumentId,
+        first: Zeroizing<String>,
+    },
+    /// Signing, and the key exists: unlock it.
+    UnlockKey { id: DocumentId },
 }
 
 impl Ask {
@@ -46,6 +70,15 @@ impl Ask {
             // that the first entry was accepted, and a user who thinks the
             // first did not register types something else the second time.
             Self::Confirm { .. } => "Confirm passphrase",
+            // Every key prompt says *key*. The bar is one field in one place,
+            // so the only thing separating "the passphrase that opens this
+            // document" from "the passphrase that unlocks your signing
+            // identity" is these words -- and a user who types the document's
+            // one here has told this product a document passphrase it had no
+            // reason to be told.
+            Self::SetKey { .. } => "New signing key passphrase",
+            Self::ConfirmKey { .. } => "Confirm key passphrase",
+            Self::UnlockKey { .. } => "Signing key passphrase",
         }
     }
 
@@ -54,6 +87,11 @@ impl Ask {
             Self::Unlock(_) => "Unlock",
             Self::Set { .. } => "Next",
             Self::Confirm { .. } => "Encrypt",
+            Self::SetKey { .. } => "Next",
+            // Both end in a signature, and the button says so rather than
+            // saying "Unlock" or "Create": what the user asked for was to
+            // sign a document, and the key is machinery on the way there.
+            Self::ConfirmKey { .. } | Self::UnlockKey { .. } => "Sign",
         }
     }
 }

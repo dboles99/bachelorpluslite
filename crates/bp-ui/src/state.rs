@@ -39,6 +39,18 @@ pub(crate) enum SaveResult {
     Failed,
 }
 
+/// Whether a signing key had to be made on the way to a signature.
+///
+/// A two-variant enum rather than a `bool`, because the call sites read
+/// `Created::Yes` instead of `true` -- and the message it decides is the one
+/// place a user learns that a key now exists on this machine, which is not a
+/// thing to communicate by a positional boolean.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Created {
+    Yes,
+    No,
+}
+
 /// What a Note-menu action decided to do.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum NoteOutcome {
@@ -182,6 +194,19 @@ pub struct AppState {
     /// Cross-file search results, indexed by the row the user clicks.
     pub(crate) file_hits: Vec<bp_search::FileHit>,
     pub(crate) clips: bp_clipboard::History,
+    /// Where this machine's signing key is, if the environment says where
+    /// the user's profile is.
+    ///
+    /// **A field and not a function**, which is the third time this shape has
+    /// been needed in this crate and the second time it was learned the hard
+    /// way. A function reading the real profile directory means `cargo test`
+    /// writes there -- the security history did it once, and
+    /// `AppState::new()` built its recovery journal from the real path until
+    /// this session. The difference here is that a `cfg(test)` redirect on
+    /// the *function* would not have been enough: `has_signing_key` and the
+    /// signing that follows it must agree on one path, and a function
+    /// returning a fresh unique path per call would have them disagree.
+    pub(crate) signing_key: Option<PathBuf>,
     /// How many rows the viewer actually drew last time.
     ///
     /// Not `visible_rows`: at the end of a file, and at any of
@@ -242,6 +267,7 @@ impl AppState {
             tab_context: None,
             file_hits: Vec::new(),
             clips: bp_clipboard::History::new(),
+            signing_key: default_signing_key_path(),
             drawn_rows: 0,
             viewers: HashMap::new(),
         }
@@ -1136,7 +1162,7 @@ impl AppState {
     /// `is_dirty` at the call site: "there is no file on disk" and "the file
     /// on disk is older than this" are the same fact as far as a digest or a
     /// signature over these bytes is concerned.
-    fn active_differs_from_disk(&self) -> bool {
+    pub(crate) fn active_differs_from_disk(&self) -> bool {
         self.workspace
             .active()
             .is_some_and(|doc| doc.is_dirty() || doc.path().is_none())
@@ -1323,6 +1349,157 @@ impl AppState {
     /// `SignedByAnotherKey`; a failure is a failure whatever key is offered,
     /// because `verify_file` tests the signature against the sidecar's own
     /// key before it compares that key with anybody's expectation.
+    /// Where this session keeps its signing key.
+    pub(crate) fn signing_key_path(&self) -> Option<PathBuf> {
+        self.signing_key.clone()
+    }
+
+    /// Whether a signing key already exists on this machine.
+    ///
+    /// Six bytes read, not a file. The answer decides which of two questions
+    /// the passphrase bar asks, and they are genuinely different: "unlock
+    /// your key" and "choose a passphrase for a new key" have different
+    /// consequences for a typo.
+    pub(crate) fn has_signing_key(&self) -> bool {
+        self.signing_key_path()
+            .is_some_and(|path| bp_integrity::is_sealed_key_file(&path))
+    }
+
+    /// Begin Security ▸ Sign Document.
+    ///
+    /// Asks the right question and stops. Everything after this happens in
+    /// [`Self::answer_passphrase`], because the passphrase bar is the only
+    /// place a passphrase is typed and routing it anywhere else would be a
+    /// second place for one to live.
+    ///
+    /// The refusals come first and are checked in the order that puts the
+    /// most useful sentence in front of the user: a document with no path
+    /// cannot be signed at all, and a document with unsaved changes would be
+    /// signed as it is *on disk*, which is not what the person clicking
+    /// means.
+    pub(crate) fn begin_signing(&mut self) -> bool {
+        self.error = None;
+        let Some(id) = self.workspace.active_id() else {
+            return false;
+        };
+        if self.refuse_on_viewer(id, "Signing") {
+            return false;
+        }
+        if self.workspace.active().and_then(Document::path).is_none() {
+            self.error = Some(
+                "cannot sign — this document has never been saved, and a signature is over \
+                 the bytes on disk"
+                    .to_owned(),
+            );
+            return false;
+        }
+        // `bp_integrity::sign_file` signs **what is on the disk**, because
+        // that is what a recipient will check. Signing now would produce a
+        // valid signature over the previous version, which is worse than a
+        // refusal: it verifies.
+        if self.active_differs_from_disk() {
+            self.error = Some(
+                "cannot sign — this document has unsaved changes, and a signature is over \
+                 the bytes on disk; save it first"
+                    .to_owned(),
+            );
+            return false;
+        }
+
+        self.passphrase_status.clear();
+        self.ask = Some(if self.has_signing_key() {
+            crate::passphrase::Ask::UnlockKey { id }
+        } else {
+            crate::passphrase::Ask::SetKey { id }
+        });
+        true
+    }
+
+    /// Make a signing key, seal it under `passphrase`, and sign with it.
+    ///
+    /// One step rather than two, because a key created and then not used is a
+    /// ceremony the user did not ask for. What they asked for was a signature.
+    fn create_key_and_sign(&mut self, id: DocumentId, passphrase: &str) -> bool {
+        let Some(path) = self.signing_key_path() else {
+            self.error = Some(
+                "cannot sign — this environment does not say where the user's profile is, \
+                 so there is nowhere to keep a key"
+                    .to_owned(),
+            );
+            return false;
+        };
+        let key = match bp_integrity::SigningKey::generate() {
+            Ok(key) => key,
+            Err(e) => {
+                self.error = Some(format!("cannot sign — {e}"));
+                return false;
+            }
+        };
+        if let Some(parent) = path.parent()
+            && let Err(e) = std::fs::create_dir_all(parent)
+        {
+            self.error = Some(format!("cannot sign — {e}"));
+            return false;
+        }
+        if let Err(e) = bp_integrity::write_sealed_signing_key(&path, &key, passphrase) {
+            self.error = Some(format!("cannot sign — {e}"));
+            return false;
+        }
+        self.sign_with(id, &key, Created::Yes)
+    }
+
+    /// Unlock the stored key and sign with it.
+    fn sign_with_stored_key(&mut self, id: DocumentId, passphrase: &str) -> bool {
+        let Some(path) = self.signing_key_path() else {
+            return false;
+        };
+        match bp_integrity::read_sealed_signing_key(&path, passphrase) {
+            Ok(key) => self.sign_with(id, &key, Created::No),
+            Err(e) => {
+                // Deliberately `bp-integrity`'s sentence and not a guess: an
+                // authenticated envelope cannot tell a wrong passphrase from
+                // a damaged file, so a message that picked one would be wrong
+                // half the time.
+                self.error = Some(format!("cannot sign — {e}"));
+                false
+            }
+        }
+    }
+
+    /// Write the sidecar, record the event, and say what happened.
+    fn sign_with(&mut self, id: DocumentId, key: &bp_integrity::SigningKey, made: Created) -> bool {
+        let Some(path) = self.workspace.get(id).and_then(Document::path) else {
+            return false;
+        };
+        let path = path.to_path_buf();
+
+        match bp_integrity::sign_file(&path, key) {
+            Ok(sidecar) => {
+                self.record_security_event(bp_audit::Event::SignatureMade);
+                // The public key is on the message because a signature nobody
+                // has the key for is a signature nobody can check, and the
+                // moment somebody has just made one is the moment they need
+                // to send it. It is public by construction -- ADR-0026 puts
+                // it in the sidecar in clear for the same reason.
+                let fingerprint = key.verifying_key().to_hex();
+                self.error = Some(format!(
+                    "{}signed — {} · your public key is {}",
+                    match made {
+                        Created::Yes => "signing key created and ",
+                        Created::No => "",
+                    },
+                    sidecar.display(),
+                    fingerprint
+                ));
+                true
+            }
+            Err(e) => {
+                self.error = Some(format!("cannot sign — {e}"));
+                false
+            }
+        }
+    }
+
     pub(crate) fn verify_signature(&mut self, expect: &bp_integrity::Expectation) -> bool {
         let Some(path) = self
             .workspace
@@ -1707,6 +1884,33 @@ impl AppState {
                 }
                 self.encrypt(id, &target, &first)
             }
+
+            Ask::SetKey { id } => {
+                if entered.is_empty() {
+                    self.passphrase_status = "a passphrase is required".to_owned();
+                    self.ask = Some(Ask::SetKey { id });
+                    return true;
+                }
+                self.passphrase_status.clear();
+                self.ask = Some(Ask::ConfirmKey {
+                    id,
+                    first: zeroize::Zeroizing::new(entered.to_owned()),
+                });
+                true
+            }
+            Ask::ConfirmKey { id, first } => {
+                if first.as_str() != entered {
+                    // The same recovery as a document''s, and it matters more
+                    // here: a key sealed under a passphrase the user did not
+                    // mean to type is a key they cannot open, and nothing
+                    // says so until the next time they try to sign.
+                    self.passphrase_status = "those did not match -- start again".to_owned();
+                    self.ask = Some(Ask::SetKey { id });
+                    return true;
+                }
+                self.create_key_and_sign(id, &first)
+            }
+            Ask::UnlockKey { id } => self.sign_with_stored_key(id, entered),
         }
     }
 
@@ -2748,6 +2952,59 @@ pub(crate) fn documents_dir() -> Option<PathBuf> {
         let docs = home.join("Documents");
         Some(if docs.is_dir() { docs } else { home })
     }
+}
+
+/// Where this machine's signing key goes.
+///
+/// **`DirKind::Data`, and not `State`** (ADR-0031, amended when it came to be
+/// built). `bp-platform` calls `Data` "things the product made and would
+/// rather not remake", which is exactly what a signing key is: everything
+/// already signed with it verifies forever, and nothing new can ever join
+/// those documents once it is gone. `State` is defined by the opposite —
+/// window geometry, the recent list, logs, things whose loss is noticeable
+/// and survivable.
+///
+/// The ADR said `State` in passing, beside the work that moved three other
+/// files there, and that was the sentence carrying the habit rather than the
+/// reasoning. The decision it records — that the key is protected by an
+/// envelope rather than by file permissions — is what makes this a question
+/// about *durability* rather than about secrecy, and durability answers
+/// `Data`.
+///
+/// `None` when the environment does not say where the user's profile is.
+/// `bp-platform` refuses to guess one, and the signing path says so rather
+/// than putting a key beside whatever file the user happened to open.
+#[cfg(not(test))]
+fn default_signing_key_path() -> Option<PathBuf> {
+    Some(
+        bp_platform::dirs::host_directory(bp_platform::DirKind::Data)?
+            .join(format!("signing.{}", bp_integrity::SEALED_KEY_EXTENSION)),
+    )
+}
+
+/// The same, redirected and made unique under test.
+///
+/// Third time this crate has needed it. Without it, any test that reaches the
+/// signing flow writes **a real Ed25519 private key** into the developer's own
+/// `%LOCALAPPDATA%` — worse than the live security history that prompted the
+/// first of these, because a key is the one file in this product that is
+/// supposed to be secret.
+///
+/// Unique per `AppState` rather than per call, which is why it is a field:
+/// `has_signing_key` decides which question the passphrase bar asks and the
+/// signing that follows has to open the file that answer was about. A
+/// `cfg(test)` redirect on the *function* — the shape the audit path uses —
+/// would have them disagree.
+#[cfg(test)]
+fn default_signing_key_path() -> Option<PathBuf> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let n = NEXT.fetch_add(1, Ordering::Relaxed);
+    Some(std::env::temp_dir().join(format!(
+        "bpad-test-signing-{}-{n}.{}",
+        std::process::id(),
+        bp_integrity::SEALED_KEY_EXTENSION
+    )))
 }
 
 /// The directory this machine's own state goes in.
@@ -4032,6 +4289,227 @@ mod tests {
         let path = dir.path().join("notes.txt");
         std::fs::write(&path, "BPAD is not BPADX\0 and this is prose").expect("write");
         assert!(!bp_crypto::is_bpadx(&read_header(&path).expect("header")));
+    }
+
+    // --- signing (ADR-0031) -----------------------------------------------
+
+    /// A state with one saved, clean document, and the path it was saved to.
+    ///
+    /// The signing key lives in a unique temp file per state, so none of
+    /// these touches the developer's own profile -- see
+    /// `default_signing_key_path`.
+    fn a_saved_document() -> (tempfile::TempDir, AppState, PathBuf) {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("report.txt");
+        std::fs::write(&path, "a document worth signing\n").expect("write");
+
+        let mut state = AppState::new();
+        state.open(path.clone());
+        assert!(
+            !state.active_differs_from_disk(),
+            "the fixture is not clean"
+        );
+        (dir, state, path)
+    }
+
+    #[test]
+    fn a_test_signing_key_never_lands_in_the_users_own_profile() {
+        // The protection itself, pinned, and the third time this crate has
+        // needed one. A real Ed25519 private key written into `%LOCALAPPDATA%`
+        // by `cargo test` is worse than the live security history that
+        // prompted the first: a key is the one file here that is supposed to
+        // be secret.
+        let state = AppState::new();
+        let path = state.signing_key_path().expect("a test path is always set");
+        assert!(
+            path.starts_with(std::env::temp_dir()),
+            "the test key must live in the temp directory, not {}",
+            path.display()
+        );
+        assert_ne!(
+            path,
+            AppState::new()
+                .signing_key_path()
+                .expect("a test path is always set"),
+            "two states in one process must not share a key file"
+        );
+    }
+
+    #[test]
+    fn signing_creates_a_key_the_first_time_and_reuses_it_after() {
+        // One ceremony, not one per signature. The first signature makes a
+        // key because the user asked to sign, not because they asked for a
+        // key; the second finds it and asks only to unlock it.
+        let (dir, mut state, path) = a_saved_document();
+
+        assert!(state.begin_signing());
+        assert_eq!(
+            state.ask,
+            Some(crate::passphrase::Ask::SetKey {
+                id: state.workspace.active_id().expect("a tab")
+            }),
+            "with no key yet, the bar must ask for a new one"
+        );
+        state.answer_passphrase("correct horse battery staple");
+        assert!(state.answer_passphrase("correct horse battery staple"));
+
+        let key_path = state.signing_key_path().expect("a key path");
+        assert!(key_path.is_file(), "no key was written");
+        assert!(state.has_signing_key());
+
+        let sidecar = bp_integrity::sidecar_path(&path).expect("a sidecar path");
+        assert!(sidecar.is_file(), "no signature was written");
+
+        // And again. One entry this time, because the key exists.
+        let _ = dir;
+        assert!(state.begin_signing());
+        assert_eq!(
+            state.ask,
+            Some(crate::passphrase::Ask::UnlockKey {
+                id: state.workspace.active_id().expect("a tab")
+            }),
+            "with a key present, the bar must ask to unlock it"
+        );
+        assert!(state.answer_passphrase("correct horse battery staple"));
+    }
+
+    #[test]
+    fn a_signature_this_product_makes_is_one_it_verifies() {
+        // The seam that matters, and it crosses three crates: the key store
+        // seals and unseals, `sign_file` writes the sidecar, and the row a
+        // user clicks to check it reads that same sidecar back. Each half is
+        // tested alone; this is the only place they meet.
+        let (_dir, mut state, _path) = a_saved_document();
+
+        assert!(state.begin_signing());
+        state.answer_passphrase("hunter2");
+        assert!(state.answer_passphrase("hunter2"));
+
+        assert!(
+            state.verify_signature(&bp_integrity::Expectation::AnySigner),
+            "the product refused its own signature: {:?}",
+            state.error
+        );
+    }
+
+    #[test]
+    fn the_public_key_is_on_the_message_because_nobody_can_check_without_it() {
+        // A signature nobody has the key for is a signature nobody can check,
+        // and the moment somebody has just made one is the moment they need
+        // to send it. It is public by construction -- ADR-0026 puts it in the
+        // sidecar in clear for the same reason.
+        let (_dir, mut state, _path) = a_saved_document();
+
+        assert!(state.begin_signing());
+        state.answer_passphrase("hunter2");
+        assert!(state.answer_passphrase("hunter2"));
+
+        let message = state.error.clone().unwrap_or_default();
+        assert!(
+            message.contains("public key"),
+            "the message must carry the key: {message}"
+        );
+        assert!(
+            message.contains("signing key created"),
+            "the user has to be told a key now exists on this machine: {message}"
+        );
+    }
+
+    #[test]
+    fn the_wrong_key_passphrase_refuses_without_saying_which_thing_was_wrong() {
+        // `bp-crypto`'s decision, carried through unchanged: an authenticated
+        // envelope cannot distinguish a wrong passphrase from a damaged file,
+        // so a message that picked one would be wrong half the time.
+        let (_dir, mut state, path) = a_saved_document();
+
+        assert!(state.begin_signing());
+        state.answer_passphrase("hunter2");
+        assert!(state.answer_passphrase("hunter2"));
+        let sidecar = bp_integrity::sidecar_path(&path).expect("a sidecar path");
+        std::fs::remove_file(&sidecar).expect("clear the first signature");
+
+        assert!(state.begin_signing());
+        assert!(!state.answer_passphrase("hunter3"));
+        assert!(
+            !sidecar.exists(),
+            "a refused unlock must not have signed anything"
+        );
+        let message = state.error.clone().unwrap_or_default();
+        assert!(message.starts_with("cannot sign"), "got {message}");
+    }
+
+    #[test]
+    fn two_entries_that_do_not_match_start_again_rather_than_sealing() {
+        // A key sealed under a passphrase the user did not mean to type is a
+        // key they cannot open, and nothing says so until the next time they
+        // try to sign. The recovery is the same as a document's and the
+        // stakes are larger.
+        let (_dir, mut state, _path) = a_saved_document();
+        let id = state.workspace.active_id().expect("a tab");
+
+        assert!(state.begin_signing());
+        state.answer_passphrase("first");
+        assert!(state.answer_passphrase("second"));
+
+        assert_eq!(
+            state.ask,
+            Some(crate::passphrase::Ask::SetKey { id }),
+            "a mismatch must return to the first question, not the second"
+        );
+        assert!(state.passphrase_status.contains("did not match"));
+        assert!(!state.has_signing_key(), "a key was written anyway");
+    }
+
+    #[test]
+    fn a_document_with_unsaved_changes_is_refused_rather_than_signed_as_it_was() {
+        // **The refusal that matters.** `sign_file` signs what is on the
+        // disk, because that is what a recipient checks. Signing here would
+        // produce a valid signature over the *previous* version -- worse than
+        // a refusal, because it verifies.
+        let (_dir, mut state, path) = a_saved_document();
+        state.edit("edited but not saved\n".to_owned());
+
+        assert!(!state.begin_signing());
+        assert!(state.ask.is_none(), "it must not even ask");
+        assert!(
+            !bp_integrity::sidecar_path(&path)
+                .expect("a sidecar path")
+                .exists()
+        );
+        let message = state.error.clone().unwrap_or_default();
+        assert!(message.contains("unsaved changes"), "got {message}");
+        assert!(message.contains("save it first"), "got {message}");
+    }
+
+    #[test]
+    fn a_document_that_has_never_been_saved_says_so_and_not_something_else() {
+        // A different problem from the one above with a different way out --
+        // Save As rather than Ctrl+S -- so it gets its own sentence.
+        let mut state = AppState::new();
+        state.edit("never saved\n".to_owned());
+
+        assert!(!state.begin_signing());
+        let message = state.error.clone().unwrap_or_default();
+        assert!(message.contains("never been saved"), "got {message}");
+    }
+
+    #[test]
+    fn signing_reaches_the_security_history() {
+        // ADR-0024: the five capabilities that write into the history are
+        // five because each one is a thing somebody may need to prove
+        // happened. Making a signature is the clearest of them.
+        let (_dir, mut state, _path) = a_saved_document();
+        assert!(state.begin_signing());
+        state.answer_passphrase("hunter2");
+        assert!(state.answer_passphrase("hunter2"));
+
+        let history = state
+            .security_history()
+            .expect("the history must be readable");
+        assert!(
+            history.contains(&bp_audit::Event::SignatureMade.describe().to_string()),
+            "signing left no trace: {history}"
+        );
     }
 
     // --- the security history ---------------------------------------------

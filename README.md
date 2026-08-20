@@ -58,7 +58,7 @@ cargo run --release -- --editor-view   # with the custom editor view (ADR-0018)
 
 ## Current state (2026-08-20)
 
-**24 crates, 1,734 tests, green on Windows and Linux.** The app opens, edits and
+**24 crates, 1,754 tests, green on Windows and Linux.** The app opens, edits and
 saves atomically, and does rather more than that:
 
 | Area | What works |
@@ -74,7 +74,7 @@ saves atomically, and does rather more than that:
 | Metadata | A SQLite store with migrations — built and tested, not yet wired in ([ADR-0019](docs/decisions/ADR-0019.md)) |
 | Encryption | `.bpadx` documents — Security ▸ Encrypt Document, unlock on open, and saves stay encrypted. Argon2id, XChaCha20-Poly1305 or AES-256-GCM, chunked with position authenticated ([ADR-0021](docs/decisions/ADR-0021.md)) |
 | Security | Per-document profiles (Standard / Private / Confidential / Maximum) governing the recovery journal, clipboard history and metadata store ([ADR-0020](docs/decisions/ADR-0020.md)) |
-| Security (phase 16) | Privacy Mode, a session override that can only tighten; Scan for Secrets, which reports where a credential is and never what it is; Redact Found Secrets, as an undoable edit with a consent step; Inspect Metadata; Hash Document; Verify Signature; Security History, which every row above it writes into (ADR-0024). Signing is greyed with the reason on the row — there is nowhere to keep a key yet |
+| Security (phase 16) | Privacy Mode, a session override that can only tighten; Scan for Secrets, which reports where a credential is and never what it is; Redact Found Secrets, as an undoable edit with a consent step; Inspect Metadata; Hash Document; Verify Signature; Sign Document, whose key is sealed in a `.bpadx` envelope under a passphrase rather than protected by file permissions Windows cannot narrow ([ADR-0031](docs/decisions/ADR-0031.md)); Security History, which every row above it writes into (ADR-0024) |
 
 Startup, with the software renderer ([ADR-0017](docs/decisions/ADR-0017.md)):
 **35.7 ms to window, 21.9 MB idle**, against targets of 150 ms and 50 MB.
@@ -165,6 +165,25 @@ starting.
   `bp-buffer`'s own helpers. Find-in-files and the caret now agree on every
   document this product can save, and the status bar reports one line count
   rather than a different one per editor view.
+
+- **Signing works, and the key is sealed rather than protected.**
+  [ADR-0031](docs/decisions/ADR-0031.md). ADR-0026 had measured a hole it
+  could not close: `0600` on Linux, nothing at all on Windows, where narrowing
+  a DACL needs Win32 and `unsafe` that `bp-platform` forbids — so
+  `is_confirmed_private()` honestly reported "unknown" on half the supported
+  platforms. Putting the key inside the envelope encrypted documents already
+  use protects the *contents* instead, identically on both platforms, and
+  designs nothing new.
+
+  **One ceremony, not one per signature.** The first signature creates the
+  key, because what was asked for was a signature; the second finds it and
+  asks only to unlock it. The row says which the click will do before you
+  click it.
+
+  It still greys, for two reasons that are not about key storage: a signature
+  is over the bytes **on disk**, so a document that has never been saved has
+  nothing to sign, and one with unsaved changes would get a valid signature
+  over the *previous* version — worse than a refusal, because it verifies.
 
 - **A 2 GB file opens, and costs 0.8 MiB.** The last piece of phase 4
   ([ADR-0030](docs/decisions/ADR-0030.md)). A document past the huge threshold

@@ -404,3 +404,186 @@ proptest! {
         prop_assert_eq!(read_verifying_key(&path).unwrap(), verifying);
     }
 }
+
+// --- the sealed key file (ADR-0031) ----------------------------------------
+//
+// A cheap KDF is not available here: `SealOptions` carries the OWASP baseline
+// and `bp-crypto` keeps `derive` private, so each of these pays one real
+// Argon2id derivation per seal and per open. That is ~45 ms, which is why
+// there are a handful of these rather than a property test over generated
+// passphrases.
+
+const PASSPHRASE: &str = "correct horse battery staple";
+
+#[test]
+fn a_sealed_key_round_trips_and_signs_identically() {
+    // The same guarantee the plain key file has to make, through an envelope:
+    // a key stored today loads tomorrow and produces the same signatures, not
+    // merely a valid key.
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("signing.bpadx");
+    let original = key();
+
+    write_sealed_signing_key(&path, &original, PASSPHRASE).unwrap();
+    let reloaded = read_sealed_signing_key(&path, PASSPHRASE).unwrap();
+
+    assert_eq!(
+        sign_document(&original, DOCUMENT).to_bytes(),
+        sign_document(&reloaded, DOCUMENT).to_bytes(),
+        "the reloaded key is a different key"
+    );
+}
+
+#[test]
+fn the_seed_is_not_in_the_file() {
+    // The whole point, and the one assertion that would catch the envelope
+    // being bypassed by a well-meaning "simplification". Checked against the
+    // actual bytes rather than against the format, because a format that
+    // happened to store the seed in a header would satisfy any structural
+    // test.
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("signing.bpadx");
+    let original = key();
+
+    write_sealed_signing_key(&path, &original, PASSPHRASE).unwrap();
+    let on_disk = fs::read(&path).unwrap();
+    let seed = original.to_bytes();
+
+    assert!(
+        !on_disk.windows(SIGNING_KEY_LEN).any(|w| w == seed.as_ref()),
+        "the raw seed is sitting in the sealed file"
+    );
+    assert!(
+        on_disk.len() > SIGNING_KEY_LEN,
+        "a sealed file is the seed plus a header and a tag"
+    );
+}
+
+#[test]
+fn the_wrong_passphrase_is_refused_and_does_not_say_it_was_the_passphrase() {
+    // `bp-crypto`'s decision showing through, and it is the right one: an
+    // authenticated envelope cannot distinguish a wrong key from altered
+    // bytes, because the tag check fails identically for both. A message that
+    // guessed would be wrong half the time, and the half it got wrong is the
+    // half where somebody retypes a correct passphrase for ten minutes.
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("signing.bpadx");
+    write_sealed_signing_key(&path, &key(), PASSPHRASE).unwrap();
+
+    let error = read_sealed_signing_key(&path, "wrong horse").expect_err("must refuse");
+    assert!(matches!(error, IntegrityError::SealedKey { .. }));
+
+    let message = error.to_string();
+    assert!(
+        message.contains("signing.bpadx"),
+        "the message must name the file: {message}"
+    );
+}
+
+#[test]
+fn a_damaged_sealed_key_is_refused() {
+    // Same refusal as the wrong passphrase, deliberately. What must not
+    // happen is a key coming back at all.
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("signing.bpadx");
+    write_sealed_signing_key(&path, &key(), PASSPHRASE).unwrap();
+
+    let mut bytes = fs::read(&path).unwrap();
+    let last = bytes.len() - 1;
+    bytes[last] ^= 0x01;
+    fs::write(&path, &bytes).unwrap();
+
+    assert!(matches!(
+        read_sealed_signing_key(&path, PASSPHRASE),
+        Err(IntegrityError::SealedKey { .. })
+    ));
+}
+
+#[test]
+fn an_encrypted_document_is_not_accepted_as_a_key() {
+    // `bp-crypto` seals anything, so the envelope opening proves nothing
+    // about what came out. A key read from the wrong length signs perfectly
+    // well and matches nothing anyone has verified against -- and the failure
+    // surfaces only at the recipient, which is the worst place for it.
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("notes.bpadx");
+    let sealed = bp_crypto::seal(
+        b"these are notes, not a key",
+        PASSPHRASE,
+        bp_crypto::SealOptions::default(),
+    )
+    .unwrap();
+    fs::write(&path, &sealed).unwrap();
+
+    let error = read_sealed_signing_key(&path, PASSPHRASE).expect_err("must refuse");
+    assert!(
+        matches!(error, IntegrityError::NotAKeyFile { .. }),
+        "the envelope opened, so this is not a SealedKey failure: {error}"
+    );
+}
+
+#[test]
+fn a_sealed_key_is_recognised_without_reading_it() {
+    // Six bytes, not a file. Used to tell "there is no key yet, offer to make
+    // one" from "there is a key, ask for its passphrase" -- different
+    // questions with different first words.
+    let dir = tempdir().unwrap();
+    let sealed = dir.path().join("signing.bpadx");
+    let plain = dir.path().join("plain.key");
+    let missing = dir.path().join("nothing.bpadx");
+
+    write_sealed_signing_key(&sealed, &key(), PASSPHRASE).unwrap();
+    write_signing_key(&plain, &key()).unwrap();
+
+    assert!(is_sealed_key_file(&sealed));
+    assert!(
+        !is_sealed_key_file(&plain),
+        "a raw seed file has no magic and must not be taken for a sealed one"
+    );
+    assert!(!is_sealed_key_file(&missing), "a missing file is not a key");
+}
+
+#[test]
+fn a_file_shorter_than_the_magic_is_not_a_sealed_key() {
+    // The short-read trap, the same one the document open path has: `read`
+    // may return fewer bytes than asked for without being at the end, so this
+    // uses `read_exact` -- and a file genuinely shorter than the magic must
+    // answer `false` rather than fail.
+    let dir = tempdir().unwrap();
+    for (name, contents) in [("empty", ""), ("tiny", "BP")] {
+        let path = dir.path().join(name);
+        fs::write(&path, contents).unwrap();
+        assert!(!is_sealed_key_file(&path), "{name}");
+    }
+}
+
+#[test]
+fn an_empty_passphrase_is_refused_rather_than_sealing_with_nothing() {
+    // `bp-crypto` refuses it, and this asserts the refusal reaches the
+    // caller. A key file "sealed" under an empty passphrase is a key file in
+    // clear with extra steps.
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("signing.bpadx");
+
+    assert!(matches!(
+        write_sealed_signing_key(&path, &key(), ""),
+        Err(IntegrityError::SealedKey { .. })
+    ));
+    assert!(
+        !path.exists(),
+        "a refused seal must not leave a file behind"
+    );
+}
+
+#[test]
+fn the_file_mode_is_still_narrowed_where_the_platform_allows_it() {
+    // Two locks are not worse than one. The envelope is what makes this safe
+    // on Windows, where nothing can be narrowed; on Linux the mode is still
+    // set, because a key file that is also unreadable by other local users is
+    // strictly better than one that is merely unreadable.
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("signing.bpadx");
+
+    let reported = write_sealed_signing_key(&path, &key(), PASSPHRASE).unwrap();
+    assert_eq!(reported, key_file_protection(&path).unwrap());
+}
