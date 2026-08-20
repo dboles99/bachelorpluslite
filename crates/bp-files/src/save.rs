@@ -5,6 +5,10 @@ use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 
 use bp_naming::SemanticName;
+use bp_platform::{
+    Platform,
+    paths::{PathProblem, components, file_name_problems},
+};
 use tempfile::NamedTempFile;
 use thiserror::Error;
 
@@ -19,6 +23,17 @@ const VERIFY_CHUNK: usize = 64 * 1024;
 /// is not one.
 #[derive(Debug, Error)]
 pub enum SaveError {
+    #[error(
+        "cannot save to {} -- {reserved} is a Windows device rather than a file, so writing          there would send the document to the device and leave nothing on disk; choose          another name",
+        .path.display()
+    )]
+    ReservedDeviceName {
+        path: PathBuf,
+        /// The canonical spelling from `bp-platform`, so the message names
+        /// the device without echoing the user's casing back at them.
+        reserved: &'static str,
+    },
+
     #[error("cannot work out which directory to save {} into", .path.display())]
     NoParentDirectory { path: PathBuf },
 
@@ -121,6 +136,8 @@ pub fn atomic_write(
     contents: &[u8],
     options: SaveOptions,
 ) -> Result<SaveOutcome, SaveError> {
+    refuse_device_name(Platform::HOST, path)?;
+
     let parent = parent_dir(path)?;
     let replaced_existing = path.exists();
 
@@ -194,6 +211,60 @@ pub fn atomic_write(
         verified,
         replaced_existing,
     })
+}
+
+/// Refuse a path whose file name is one of Win32's device names.
+///
+/// This is the only failure in this module that is checked rather than
+/// attempted, and the reason is that attempting it does not fail. Opening
+/// `con.txt`, `aux.log` or `NUL.dat` on Windows *succeeds* -- it opens the
+/// device -- so the write returns `Ok`, the read-back verification reads the
+/// console back, and the status bar says the document is safe while nothing
+/// was ever written to disk. Every other error here is the filesystem saying
+/// no; this one is the filesystem saying yes to the wrong thing.
+///
+/// `bp-naming` cannot cover it. It sanitises the names *this program*
+/// generates, and the name reaching here may equally have been typed into a
+/// Save dialog, which no crate had ever checked.
+///
+/// The platform is a parameter rather than a `cfg`, so both CI legs execute
+/// both rule sets: the Windows rule is not one that only a Windows run can
+/// test. `bp-platform` owns both the device list and the fact that it is a
+/// Windows rule -- `file_name_problems` reports `ReservedName` on no other
+/// platform, which is why `Platform::Linux` needs no arm here.
+///
+/// Only `ReservedName` is refused, and not the rest of what
+/// `file_name_problems` can report. The others -- a forbidden character, a
+/// trailing dot, an over-long component -- all end in the filesystem refusing
+/// the write, which is a loud failure this function would only be duplicating.
+/// This one ends in silence.
+fn refuse_device_name(platform: Platform, path: &Path) -> Result<(), SaveError> {
+    // Deliberately not `Path::file_name`. `std::path` splits by the rules of
+    // the platform it was *compiled* for, so on the Linux leg it reads
+    // `C:\Users\me\con.txt` as one long file name, finds no device, and would
+    // leave the Windows rule untested by half of CI while appearing to pass.
+    // `bp_platform::paths::components` takes the platform as a parameter, so
+    // the split and the judgement are answering about the same platform.
+    //
+    // Lossy rather than `to_str`, so a name Windows accepts but Rust cannot
+    // represent as UTF-8 is still checked. Replacement characters can only be
+    // added, never removed, so a lossy name that reads as a device is one
+    // that was a device.
+    let path_text = path.to_string_lossy();
+    let Some(name) = components(platform, &path_text).last() else {
+        return Ok(());
+    };
+
+    match file_name_problems(platform, name)
+        .into_iter()
+        .find(|p| matches!(p, PathProblem::ReservedName { .. }))
+    {
+        Some(PathProblem::ReservedName { reserved, .. }) => Err(SaveError::ReservedDeviceName {
+            path: path.to_owned(),
+            reserved,
+        }),
+        _ => Ok(()),
+    }
 }
 
 /// Pick the directory to create the temporary file in.
@@ -454,5 +525,142 @@ mod tests {
             parent_dir(Path::new("foo.txt")).unwrap(),
             PathBuf::from(".")
         );
+    }
+
+    // --- device names ----------------------------------------------------
+
+    /// The device a refusal names, or `None` if the path is allowed.
+    fn refusal(platform: Platform, path: &str) -> Option<&'static str> {
+        match refuse_device_name(platform, Path::new(path)) {
+            Ok(()) => None,
+            Err(SaveError::ReservedDeviceName { reserved, .. }) => Some(reserved),
+            Err(other) => panic!("wrong refusal for {path:?}: {other}"),
+        }
+    }
+
+    #[test]
+    fn windows_device_names_are_refused_whatever_follows_them() {
+        // The stem is what Win32 looks at, so an extension saves none of
+        // these -- which is exactly why attempting the write is no test.
+        for path in [
+            "con",
+            "CON.txt",
+            "con.tar.gz",
+            "aux.log",
+            "NUL.dat",
+            "lpt1.bak",
+            "prn.2026",
+            "CONIN$.notes",
+            "conout$",
+        ] {
+            assert!(
+                refusal(Platform::Windows, path).is_some(),
+                "{path:?} was allowed on Windows"
+            );
+        }
+    }
+
+    #[test]
+    fn a_device_name_is_refused_wherever_in_the_tree_it_sits() {
+        // A device is a device in every directory, so the check is on the
+        // last component and not on how the user got to it.
+        //
+        // **The backslash path is the one that matters**, and it failed on the
+        // Linux leg first. `std::path` splits by the rules of the platform it
+        // was compiled for, so a Linux build reads the whole Windows path as
+        // one file name and finds no device -- the Windows rule silently
+        // untested by half of CI. The split has to take the platform the same
+        // way the judgement does.
+        for path in [
+            r"C:\Users\someone\Documents\con.txt",
+            "C:/Users/someone/Documents/con.txt",
+            "/home/someone/notes/aux.log",
+            "./nul",
+        ] {
+            assert!(
+                refusal(Platform::Windows, path).is_some(),
+                "{path:?} was allowed on Windows"
+            );
+        }
+    }
+
+    #[test]
+    fn a_backslash_path_is_one_component_on_linux_and_several_on_windows() {
+        // The asymmetry `bp_platform::paths::components` documents, asserted
+        // here because this function is where getting it wrong is expensive.
+        // On Linux a backslash is an ordinary filename character, so this
+        // whole string is one name -- and one name that is not a device.
+        let windows_path = r"C:\Users\someone\con.txt";
+        assert_eq!(refusal(Platform::Windows, windows_path), Some("CON"));
+        assert_eq!(refusal(Platform::Linux, windows_path), None);
+    }
+
+    #[test]
+    fn the_refusal_names_the_device_in_its_canonical_spelling() {
+        // The message says CON, not the user's `con.txt`, so it reads as a
+        // statement about the system rather than about their typing.
+        assert_eq!(refusal(Platform::Windows, "con.txt"), Some("CON"));
+        assert_eq!(refusal(Platform::Windows, "LpT1.bak"), Some("LPT1"));
+    }
+
+    #[test]
+    fn ordinary_names_are_allowed_on_both_platforms() {
+        // An over-eager fix is as bad as no fix: every one of these is a file.
+        for path in [
+            "CONTENTS.md",
+            "console.log",
+            "printer.cfg",
+            "Report_16AUG2026.txt",
+            "AUXILIARY",
+        ] {
+            for &platform in Platform::ALL {
+                assert_eq!(
+                    refusal(platform, path),
+                    None,
+                    "{path:?} was refused on {}",
+                    platform.token()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn linux_has_no_device_names_and_may_save_all_of_them() {
+        // `con.txt` is an ordinary file on Linux, and refusing it there would
+        // be this fix doing harm. The platform is a parameter for that reason
+        // as much as for running the Windows rule on the Linux leg.
+        for path in ["con", "CON.txt", "aux.log", "NUL.dat", "lpt1.bak"] {
+            assert_eq!(refusal(Platform::Linux, path), None, "{path:?}");
+        }
+    }
+
+    #[test]
+    fn a_path_with_no_file_name_is_not_refused_here() {
+        // Nothing to judge. It fails later, on its own terms.
+        assert_eq!(refusal(Platform::Windows, ".."), None);
+        assert_eq!(refusal(Platform::Windows, "/"), None);
+    }
+
+    #[test]
+    fn atomic_write_refuses_or_allows_a_device_name_as_the_host_requires() {
+        // The seam between the rule and its caller, asserted without a `cfg`:
+        // each leg checks its own answer and both run the same test.
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("con.txt");
+        let result = atomic_write(&path, b"body", SaveOptions::default());
+
+        match Platform::HOST {
+            Platform::Windows => {
+                let Err(SaveError::ReservedDeviceName { reserved, .. }) = result else {
+                    panic!("Windows must refuse a device name, got {result:?}");
+                };
+                assert_eq!(reserved, "CON");
+                assert!(!path.exists(), "nothing may be created for a refused name");
+            }
+            Platform::Linux => {
+                result.expect("con.txt is an ordinary file on Linux");
+                assert_eq!(std::fs::read(&path).unwrap(), b"body");
+            }
+        }
     }
 }

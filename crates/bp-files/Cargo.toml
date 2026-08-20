@@ -7,6 +7,11 @@ license.workspace = true
 [dependencies]
 bp-core = { path = "../bp-core" }
 bp-naming = { path = "../bp-naming" }
+# The platform's rules about names, as data. `bp-naming` sanitises the names
+# *we* generate; this is for the ones the user types into a Save dialog, which
+# nothing had ever checked. `bp-platform` carries no third-party dependencies,
+# so this adds a path edge and nothing else to the tree.
+bp-platform = { path = "../bp-platform" }
 tempfile.workspace = true
 thiserror.workspace = true
 

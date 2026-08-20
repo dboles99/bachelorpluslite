@@ -72,8 +72,10 @@ prefix -- and, worst of the seven, that `bp-naming` would generate a filename
 Windows treats as a device. That last one is now fixed: the sanitiser tests
 the stem before the first dot, the way Win32 does, so `con.txt` becomes
 `con File.txt` rather than a save that reports success while writing to the
-console. Two defects and one decision remain, each pinned by an `#[ignore]`d
-test naming it. `DECISIONS.md` has the evidence.
+console -- and `bp-files` refuses such a name outright, which closes the
+route sanitising never covered, the name a user types into a Save dialog.
+Two defects and one decision remain, each pinned by an `#[ignore]`d test
+naming it. `DECISIONS.md` has the evidence.
 
 **The item that gated three sessions is no longer gating.** The rope is the
 editor's storage, `bp-editor` owns caret, motion, undo and the line

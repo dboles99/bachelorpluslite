@@ -134,6 +134,17 @@ starting.
   `bp-platform`'s stem by stem in both directions so the two lists cannot
   drift apart quietly.
 
+  **The other half of that hole was a name nobody sanitised.** `bp-naming`
+  defends the name the product *suggests*; the one a user types over the top
+  of it in a Save dialog had never been checked by anything. `bp-files`
+  depends on `bp-platform` now and `atomic_write` refuses a device name
+  outright -- the only refusal in that module that is checked rather than
+  attempted, because attempting it does not fail: the open succeeds, the
+  read-back verifies against the console, and the status bar reports a
+  document that is nowhere. The platform is a parameter rather than a `cfg`,
+  so `con.txt` stays an ordinary file on Linux and both CI legs execute both
+  rule sets.
+
   **Three tests remain `#[ignore]`d and each names a real defect**:
   `bp-search` counts only the newline while `bp-buffer`'s rope also breaks on
   a bare carriage return and four other separators, so find-in-files can

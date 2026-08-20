@@ -148,6 +148,7 @@ version = "0.1.0"
 dependencies = [
  "bp-core",
  "bp-naming",
+ "bp-platform",
  "tempfile",
  "thiserror",
 ]
@@ -186,6 +187,10 @@ dependencies = [
  "serde_json",
  "thiserror",
 ]
+
+[[package]]
+name = "bp-platform"
+version = "0.1.0"
 
 [[package]]
 name = "bp-security"

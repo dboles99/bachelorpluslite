@@ -1,12 +1,17 @@
 //! Seam: `bp-naming` generates, `bp-platform` judges, `bp-files` writes.
 //!
-//! Three crates, one chain, and nothing joins them. `bp-naming` turns a
-//! semantic title into a filename and applies "the union of Windows and Linux
-//! restrictions ... on both platforms" -- its own words. `bp-platform` holds
-//! the authoritative rules for each platform as *data*, so the Windows rules
-//! are executed by the Linux leg of CI and the other way round. `bp-files` is
-//! what actually has to write the name, and it depends on `bp-naming` but not
-//! on `bp-platform` at all.
+//! Three crates and one chain. `bp-naming` turns a semantic title into a
+//! filename and applies "the union of Windows and Linux restrictions ... on
+//! both platforms" -- its own words. `bp-platform` holds the authoritative
+//! rules for each platform as *data*, so the Windows rules are executed by the
+//! Linux leg of CI and the other way round. `bp-files` is what actually has to
+//! write the name.
+//!
+//! `bp-files` reaches `bp-platform` now, which it did not when this file was
+//! written: a name the user *types* into a Save dialog never passed through
+//! `bp-naming` at all, so sanitising could not defend it, and `atomic_write`
+//! refuses a device name rather than writing to the device. Both halves of
+//! that defence are asserted below, because either alone leaves a way in.
 //!
 //! The property worth having is one sentence:
 //!
@@ -296,6 +301,57 @@ proptest! {
     }
 }
 
+// --- the other half: a name nobody sanitised -------------------------------
+
+#[test]
+fn a_device_name_the_user_typed_is_refused_by_the_writer() {
+    // `bp-naming` defends the names this program *suggests*. Nothing defends
+    // the one the user types over the top of the suggestion, and that is the
+    // same destructive failure by a different route: on Windows the open
+    // succeeds, the write returns Ok, the read-back verifies against the
+    // console, and the document is nowhere.
+    //
+    // The assertion is conditioned on the host because the rule is: `con.txt`
+    // is an ordinary file on Linux and refusing it there would be the fix
+    // doing harm. Both legs run this test and each checks its own answer.
+    let dir = tempdir().expect("temp dir");
+
+    for &device in WINDOWS_RESERVED_NAMES {
+        let path = dir.path().join(format!("{device}.txt"));
+        let result = atomic_write(&path, b"body", SaveOptions::default());
+
+        match Platform::HOST {
+            Platform::Windows => assert!(
+                result.is_err(),
+                "bp-files wrote to {device}.txt, which is the {device} device",
+            ),
+            Platform::Linux => {
+                result.unwrap_or_else(|e| panic!("{device}.txt is a file on Linux: {e}"));
+            }
+        }
+    }
+}
+
+#[test]
+fn the_writer_and_the_sanitiser_agree_about_what_a_device_is() {
+    // Two defences, one rule. If they ever disagree it is the *writer* that
+    // has to be right, because it is the last thing standing between a
+    // document and the console -- so a name the sanitiser hands over must be
+    // one the writer accepts, and this is the direction that would break the
+    // product rather than merely leave a hole.
+    let dir = tempdir().expect("temp dir");
+
+    for &device in WINDOWS_RESERVED_NAMES {
+        for title in [device.to_owned(), format!("{device}.txt")] {
+            let name = SemanticName::new(&title, a_date(), "txt").to_filename();
+            let path = dir.path().join(&name);
+            atomic_write(&path, b"body", SaveOptions::default()).unwrap_or_else(|e| {
+                panic!("bp-naming produced {name:?} from {title:?} and bp-files refuses it: {e}")
+            });
+        }
+    }
+}
+
 // --- what was defect one --------------------------------------------------
 
 proptest! {
@@ -349,16 +405,18 @@ proptest! {
 // --- defect two: MAX_PATH -------------------------------------------------
 
 #[test]
-#[ignore = "DEFECT: bp-files never applies the \\\\?\\ extended-length prefix, and does \
-            not depend on bp-platform at all, so a filename at bp-naming's own documented \
-            maximum (255 bytes) is unwritable on Windows inside any directory whose path \
-            takes the total past MAX_PATH -- which the system temp directory alone \
-            already does. The name is legal by every rule bp-platform states; it is the \
-            PATH that is too long, and bp-platform already provides both the diagnosis \
-            (paths::needs_extended_length_prefix) and the fix (paths::to_extended_length) \
-            that bp-files does not call. Worse than the refusal is the message: \
-            SaveError says the file 'may be read-only, or open in another program', which \
-            sends the user to look at the wrong thing. Left red rather than weakened."]
+#[ignore = "DEFECT: bp-files never applies the \\\\?\\ extended-length prefix, so a \
+            filename at bp-naming's own documented maximum (255 bytes) is unwritable on \
+            Windows inside any directory whose path takes the total past MAX_PATH -- which \
+            the system temp directory alone already does. The name is legal by every rule \
+            bp-platform states; it is the PATH that is too long, and bp-platform already \
+            provides both the diagnosis (paths::needs_extended_length_prefix) and the fix \
+            (paths::to_extended_length) that bp-files does not call. bp-files DOES depend \
+            on bp-platform now -- it asks that crate whether a name is a device before \
+            writing -- so the edge this fix needs already exists and only the call is \
+            missing. Worse than the refusal is the message: SaveError says the file 'may be \
+            read-only, or open in another program', which sends the user to look at the \
+            wrong thing. Left red rather than weakened."]
 fn a_name_bp_naming_will_generate_can_be_unwritable_on_windows() {
     // 255 bytes is not an unreasonable name a fuzzer dreamt up: it is exactly
     // what `SemanticName::to_filename` promises to produce for a long title,

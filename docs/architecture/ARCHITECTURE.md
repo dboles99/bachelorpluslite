@@ -63,7 +63,7 @@ and this table carries the intent until then.
 bachelorpad ──> bp-config
             ├──> bp-theme
             └──> bp-ui ──┬─> bp-core
-                         ├─> bp-files ──> bp-core, bp-naming
+                         ├─> bp-files ──> bp-core, bp-naming, bp-platform
                          ├─> bp-buffer   (the latency probe only)
                          ├─> bp-clipboard
                          ├─> bp-config
