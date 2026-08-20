@@ -180,13 +180,6 @@ needle"`
   rows and applies equally to plain paste. Fixing it properly means freezing
   a snapshot of the history while a menu is open, which is a design question
   rather than a patch.
-- **The gate does not see `fuzz/`.** `Invoke-LocalCI.ps1` sweeps `spikes/`
-  for standalone workspaces, and this tree has no `spikes/` directory --
-  while `fuzz/` is exactly such a workspace, holding five hostile-input
-  harnesses that nothing formats, lints or runs. Run by hand they are green,
-  so this is not a hidden failure; it is that "every commit in this
-  repository has passed the gate" is not true of that code, and phase 19 is
-  *Started* on the strength of tests nothing runs.
 - **Most of the product has not been used.** 542 tests cover the pieces in
   isolation. One manual pass found two defects no test caught: a menu bar
   where twelve of fourteen menus swallowed clicks, and Save As defaulting to

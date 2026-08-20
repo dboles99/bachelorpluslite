@@ -207,6 +207,46 @@ try {
         $global:LASTEXITCODE = 0
     }
 
+    # --- fuzz ----------------------------------------------------------
+    # `fuzz/` declares its own `[workspace]`, so every `--workspace` command
+    # above walks straight past it. Nothing formatted it, linted it or ran it
+    # until this stage existed -- five harnesses feeding hostile input to
+    # shipped crates, outside the gate that validates everything else, while
+    # ROADMAP called phase 19 *Started* on the strength of them.
+    #
+    # Deliberately **not** behind -IncludeSpikes. A spike is a prototype the
+    # product does not depend on; these are tests of `bp-crypto`, `bp-data`,
+    # `bp-files`, `bp-formats` and `bp-notebook` against input designed to
+    # break them, which is the one thing a gate is most for.
+    #
+    # It costs about two and a half minutes, which is most of why it belongs
+    # in the full run and not in -Quick. Where a single harness is too
+    # expensive to gate on, the answer is the one `fuzz/tests/envelope.rs`
+    # already used: `#[ignore]` that test with the reason on it, and leave the
+    # rest running.
+    $fuzzRoot = Join-Path $Root 'fuzz'
+    $hasFuzz = Test-Path (Join-Path $fuzzRoot 'Cargo.toml')
+
+    if (-not $hasFuzz) {
+        Skip-Stage 'fuzz' 'no fuzz workspace found'
+    }
+    elseif ($Quick) {
+        Skip-Stage 'fuzz' 'quick mode -- pre-push runs it'
+    }
+    else {
+        Invoke-Stage 'fuzz' {
+            Push-Location $fuzzRoot
+            try {
+                cargo fmt --all -- --check
+                if ($LASTEXITCODE -ne 0) { throw "fuzz workspace is not formatted" }
+                cargo clippy --all-targets -- -D warnings
+                if ($LASTEXITCODE -ne 0) { throw "clippy rejected the fuzz workspace" }
+                cargo test
+            }
+            finally { Pop-Location }
+        }
+    }
+
     # --- spikes --------------------------------------------------------
     $spikes = Get-ChildItem -Path (Join-Path $Root 'spikes') -Directory -ErrorAction SilentlyContinue |
         ForEach-Object { Get-ChildItem -Path $_.FullName -Directory } |
@@ -276,6 +316,26 @@ try {
                    "cargo clippy --workspace --all-targets -- -D warnings && " +
                    "cargo test --workspace"
             Invoke-Stage "linux (wsl: $Distro)" { wsl -d $Distro -- bash -c $cmd }
+
+            # The fuzz workspace on the Linux leg too, and for the reason the
+            # leg exists at all: one-leg testing hides defects, and this
+            # repository has been caught by that twice -- `PathBuf::join`
+            # standing in for `bp_platform::paths::join` (4390593), and a
+            # device-name rule whose *judgement* took a platform while its
+            # *split* used `std::path`. `fuzz/tests/files.rs` drives
+            # `bp-files`, which is where the second one lived.
+            #
+            # A separate CARGO_TARGET_DIR: two workspaces sharing one target
+            # directory evict each other's artefacts, so sharing it would turn
+            # every run into a cold build of whichever went second.
+            if ($hasFuzz) {
+                $fuzzCmd = $prelude +
+                           "export CARGO_TARGET_DIR=`$HOME/.cache/bachelorpadplus-fuzz-target; " +
+                           "cd '$wslRoot/fuzz' && cargo fmt --all -- --check && " +
+                           "cargo clippy --all-targets -- -D warnings && " +
+                           "cargo test"
+                Invoke-Stage "linux fuzz (wsl: $Distro)" { wsl -d $Distro -- bash -c $fuzzCmd }
+            }
         }
     }
 

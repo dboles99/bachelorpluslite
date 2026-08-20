@@ -40,3 +40,15 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test
         run: cargo test --workspace
+      # `fuzz/` declares its own `[workspace]`, so every `--workspace` step
+      # above walks past it. It holds the hostile-input harnesses for
+      # bp-crypto, bp-data, bp-files, bp-formats and bp-notebook.
+      - name: Format (fuzz)
+        working-directory: fuzz
+        run: cargo fmt --all -- --check
+      - name: Clippy (fuzz)
+        working-directory: fuzz
+        run: cargo clippy --all-targets -- -D warnings
+      - name: Test (fuzz)
+        working-directory: fuzz
+        run: cargo test

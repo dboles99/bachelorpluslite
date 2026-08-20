@@ -31,7 +31,7 @@ Status as of **2026-08-20**. Three words, meaning three different things:
 | 16 | Advanced security | **Started** | [11-security](project/tasks/11-security/) | `bp-secrets`, `bp-redaction`, `bp-audit`, `bp-integrity` |
 | 17 | Themes/personality/accessibility | **Started** | [12-themes-brand](project/tasks/12-themes-brand/) | `bp-theme` |
 | 18 | Windows/Linux platform integration | **Started** | [13-platform](project/tasks/13-platform/) | `bp-platform` |
-| 19 | Hardening, fuzzing and benchmarks | **Started** | [14-hardening](project/tasks/14-hardening/) | `fuzz/` (standalone) |
+| 19 | Hardening, fuzzing and benchmarks | **Started** | [14-hardening](project/tasks/14-hardening/) | `fuzz/` (standalone, and now gated) |
 | 20 | Packaging, signing, release and upgrade testing | Not started | [14-hardening](project/tasks/14-hardening/) | — |
 
 ## Two numbering schemes, reconciled
@@ -80,6 +80,16 @@ console -- and `bp-files` refuses such a name outright, which closes the
 route sanitising never covered, the name a user types into a Save dialog.
 Two defects and one decision remain, each pinned by an `#[ignore]`d test
 naming it. `DECISIONS.md` has the evidence.
+
+**Phase 19's harnesses are inside the gate now, which they were not.**
+`fuzz/` declares its own `[workspace]`, so every `--workspace` command in
+`Invoke-LocalCI.ps1` walked straight past it: five harnesses feeding hostile
+input to `bp-crypto`, `bp-data`, `bp-files`, `bp-formats` and `bp-notebook`,
+formatted, linted and run by nobody, while this table called the phase
+*Started* on the strength of them. Two stages now run them, on both legs,
+and they are green -- 42 tests, one `#[ignore]`d for cost with the reason on
+it. The gate is about two and a half minutes per leg longer, which is what
+that assurance costs.
 
 **The item that gated three sessions is no longer gating.** The rope is the
 editor's storage, `bp-editor` owns caret, motion, undo and the line

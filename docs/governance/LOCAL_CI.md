@@ -31,8 +31,10 @@ Re-run it after pulling a change to `scripts/hooks/`.
 | test | `cargo test --workspace` |
 | launch | Runs `bachelorpad --self-check` and asserts it starts |
 | log hygiene | Fails on any `tracing::` call that may carry document content or secrets |
+| fuzz | fmt, clippy and test over the standalone workspace in `fuzz/` |
 | spikes | fmt and clippy over each standalone workspace in `spikes/` |
 | linux (wsl) | fmt, clippy and test inside WSL |
+| linux fuzz (wsl) | The same for `fuzz/`, inside WSL |
 
 Every stage runs even after one fails, so a single run reports everything
 rather than making you fix problems one at a time. The exit code is non-zero
@@ -52,9 +54,33 @@ on a hit. It is crude and will need widening as more crates land, but it fails
 closed and runs on every commit — which a review convention does not. Log
 *about* a document (path, size), never what it contains.
 
-`-Quick` skips the locked dependency resolve, which is the slowest part of a
-cold run and cannot regress from an edit that does not touch a manifest.
-`pre-push` runs the full gate.
+The `fuzz` stage exists because `fuzz/` declares its own `[workspace]` table,
+so every `--workspace` command in every other stage walks straight past it.
+Five harnesses feeding hostile input to `bp-crypto`, `bp-data`, `bp-files`,
+`bp-formats` and `bp-notebook` sat outside the gate that validates everything
+else, formatted, linted and run by nobody, while ROADMAP called phase 19
+*Started* on the strength of them. It is deliberately **not** behind
+`-IncludeSpikes`: a spike is a prototype the product does not depend on, and
+these are tests of shipped crates against input designed to break them.
+
+It runs on both legs, for the reason the Linux leg exists at all. One-leg
+testing hides defects and this repository has been caught by that twice --
+`PathBuf::join` standing in for `bp_platform::paths::join`, and a device-name
+rule whose judgement took a platform parameter while its split used
+`std::path`. `fuzz/tests/files.rs` drives `bp-files`, where the second one
+lived. The Linux run uses its own `CARGO_TARGET_DIR`, because two workspaces
+sharing one target directory evict each other's artefacts and every run
+becomes a cold build of whichever went second.
+
+It costs about two and a half minutes per leg, which is most of why it is in
+the full run and not in `-Quick`. Where one harness is too expensive to gate
+on, the answer is the one `fuzz/tests/envelope.rs` already used: `#[ignore]`
+that test with the reason on it and leave the rest running.
+
+`-Quick` skips the locked dependency resolve and the fuzz workspace. The
+first is the slowest part of a cold run and cannot regress from an edit that
+does not touch a manifest; the second is simply slow, and `pre-push` runs the
+full gate before anything leaves the machine.
 
 ## What runs when
 
