@@ -37,27 +37,33 @@ Adding a decision means adding both.
 | BP-ADR-0029 | 2026-08-20 | A line break is `
 ` or `
 `; the rope drops `unicode_lines` | Accepted | [ADR-0029](docs/decisions/ADR-0029.md) |
+| BP-ADR-0030 | 2026-08-20 | A huge document opens in the custom surface, read-only, in every build | Accepted | [ADR-0030](docs/decisions/ADR-0030.md) |
+| BP-ADR-0031 | 2026-08-20 | A signing key lives in a sealed `.bpadx` key file, not a permission-protected one | Accepted | [ADR-0031](docs/decisions/ADR-0031.md) |
+| BP-ADR-0032 | 2026-08-20 | The application id is reverse-DNS, and is not the directory name | Accepted | [ADR-0032](docs/decisions/ADR-0032.md) |
 
 ## Decisions needed before the work they block
 
-- **Where a signing key lives** (phase 16). `bp-crypto` signs and verifies,
-  and both are tested; Verify Signature is reachable and Sign Document is
-  greyed, because an Ed25519 signing key has to be kept somewhere and this
-  product has no key store, no platform-keyring integration (Windows DPAPI,
-  Linux Secret Service -- phase 18) and no decision on file permissions for a
-  key sitting on disk. specs.md section 15 asks for all three. The row states
-  the gap rather than a key appearing in the config directory because a menu
-  row needed one.
+- ~~**Where a signing key lives**~~ (phase 16). **Answered: ADR-0031.** The
+  key is stored *sealed*, in the `.bpadx` envelope ADR-0021 already ships,
+  under a passphrase the user chooses -- contents protected rather than
+  permissions. That closes the asymmetry ADR-0026 measured and could not fix:
+  `0600` on Linux and nothing on Windows, where narrowing a DACL needs Win32
+  and `unsafe`. The platform keyring stays specs.md section 15's third route
+  and becomes a second *source of the passphrase* rather than a second key
+  format. Sign Document is now blocked on the work rather than on a decision.
 - **What may leave the machine** (phase 8 layer three, phase 10). Generative
   providers and embeddings both imply sending document content somewhere.
   ADR-0006 keeps them optional; ADR-0011 governs what is permitted. Neither
   says which providers are acceptable.
-- **Whether `bp-storage` may record extracted titles before phase 14 exists**
-  (phase 9). ADR-0019 currently says no, and that is why the crate is built
-  and unreachable. Everything phase 9 wants -- related notes, duplicate
-  detection -- needs something recorded about each document, so this decision
-  gates the phase rather than merely delaying it. Reversing it is allowed;
-  doing so by accident is not.
+- **What `bp-storage` records, and what the user sees for it** (phase 9).
+  Narrowed twice and no longer a yes/no. ADR-0020 settled the security half --
+  `record_document` honours the policy, dropping the title under `PathOnly`
+  and recording nothing under `Disabled` -- and the product half is answered:
+  it is wired **after** a design pass, not before. ADR-0019 stands exactly as
+  written. What is still open is the design, which is a question about the
+  product rather than about the crate: a related-notes panel, duplicate
+  detection, or something else. Recording something before deciding what it is
+  for is how a metadata store becomes a liability.
 - **specs.md section 22's warm-start target** (75 ms) is still unverified —
   the software renderer's time to first interaction cannot be measured, so
   half of ADR-0017's target has no number behind it.
