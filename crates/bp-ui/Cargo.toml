@@ -24,6 +24,7 @@ bp-crypto = { path = "../bp-crypto" }
 # hashes documents and still reads a public key in either spelling; the
 # signature half now goes through here, which re-exports `bp-crypto`'s types
 # unchanged, so both names refer to one `VerifyingKey`.
+bp-audit = { path = "../bp-audit" }
 bp-integrity = { path = "../bp-integrity" }
 # File ▸ Set as Default Editor (ADR-0012). Reports what opens a file type
 # today, plans a registration, and is the only crate here that may write into

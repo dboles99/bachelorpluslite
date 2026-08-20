@@ -139,6 +139,12 @@ pub struct AppState {
     /// from the box it is about.
     pub(crate) goto_status: String,
     pub(crate) journal: bp_history::Journal,
+    /// Where the security history is appended and read back.
+    ///
+    /// A field rather than a call to `audit::audit_path()` at each use, so a
+    /// test gets its own file. It is not configurable from outside: the
+    /// production value is set once, here, and nothing changes it.
+    pub(crate) audit_path: PathBuf,
     /// The tab the context menu was opened on.
     ///
     /// Held rather than passed with the click, because opening the menu and
@@ -207,6 +213,7 @@ impl AppState {
             find_status: String::new(),
             goto_status: String::new(),
             journal: bp_history::Journal::new(recovery_dir()),
+            audit_path: crate::audit::audit_path(),
             passphrases: HashMap::new(),
             privacy: bp_security::Privacy::default(),
             ask: None,
@@ -999,6 +1006,13 @@ impl AppState {
     pub(crate) fn scan_for_secrets(&mut self) -> Vec<bp_secrets::Finding> {
         let findings = bp_secrets::scan(&self.active_text());
         self.error = Some(secret_scan_summary(&findings));
+        // The count only. Where the findings are is in the document the user
+        // is looking at; putting the offsets in a file beside it would make
+        // the history a map to the credentials -- which is the one thing
+        // `bp-secrets` is built never to hold.
+        self.record_security_event(bp_audit::Event::SecretScanFinished {
+            findings: u32::try_from(findings.len()).unwrap_or(u32::MAX),
+        });
         findings
     }
 
@@ -1091,8 +1105,17 @@ impl AppState {
             });
 
         let written = redacted.applied.len();
+        let bytes_removed = plan.original.len().saturating_sub(redacted.text.len());
         self.edit(redacted.text);
         self.error = Some(plan.outcome(written, survivors.as_deref()));
+        // How much went, never what. The removed text is the text somebody
+        // chose to destroy, which makes it the most sensitive thing this
+        // product ever handles -- `Event::RedactionApplied` carries a count
+        // and a byte total for that reason and this passes it nothing else.
+        self.record_security_event(bp_audit::Event::RedactionApplied {
+            spans: u32::try_from(written).unwrap_or(u32::MAX),
+            bytes_removed: bytes_removed as u64,
+        });
         true
     }
 
@@ -1184,6 +1207,10 @@ impl AppState {
         };
 
         let verified = verification.is_verified();
+        // The flag rather than only the fact of a check: `Event` makes the
+        // outcome part of the event for a reason, because a recorded
+        // verification that omitted its answer reads as reassurance.
+        self.record_security_event(bp_audit::Event::SignatureVerified { valid: verified });
         // `explain` rather than a second set of sentences here. Every verdict
         // words itself in `bp-integrity`, beside the logic that produces it,
         // so the status bar and any other surface say the same thing about
@@ -1255,6 +1282,106 @@ impl AppState {
         true
     }
 
+    /// Say something only if nothing more important is already being said.
+    ///
+    /// Every caller of `record_security_event` has just finished an operation
+    /// that put its own result in the status bar, and that result is what the
+    /// user asked for. A notice about the *history* of the operation must not
+    /// take the place of the operation's own answer -- "3 possible
+    /// credentials" is the thing somebody clicked for, and losing it to a
+    /// line about sealing would be the log making the product worse.
+    fn note_quietly(&mut self, message: String) {
+        if self.error.is_none() {
+            self.error = Some(message);
+        }
+    }
+
+    /// Write `event` to the security history, if the profile permits it.
+    ///
+    /// Never fails the operation it describes. A security capability that
+    /// stopped working because its *log* could not be written would be a
+    /// worse product than one whose log has a gap -- so a refusal or an I/O
+    /// error becomes a status-bar line and the capability carries on. The
+    /// one refusal worth a notice is `NoSealer`, which tells the user how to
+    /// fix it (encrypt the document); `ProfileForbidsIt` is the profile
+    /// doing its job and says nothing.
+    ///
+    /// The policy passed is the one *in force* -- `self.policy()` already
+    /// resolves Privacy Mode -- because a caller that passes the document's
+    /// own profile is a caller Privacy Mode does not reach.
+    pub(crate) fn record_security_event(&mut self, event: bp_audit::Event) {
+        let policy = self.policy();
+        // Opened per event rather than held. `AuditLog::open` reads and
+        // checks the existing file, which is what makes its sequence
+        // trustworthy; a handle kept across a session would be a sequence
+        // that stopped agreeing with the file the moment anything else
+        // appended to it. Security events are rare enough to afford it.
+        let sealer = self
+            .workspace
+            .active_id()
+            .and_then(|id| self.passphrases.get(&id))
+            .and_then(|p| bp_audit::PassphraseSealer::new(p).ok());
+
+        let mut log = match bp_audit::AuditLog::open(
+            self.audit_path.clone(),
+            sealer.as_ref().map(|s| s as &dyn bp_audit::Sealer),
+        ) {
+            Ok(log) => log,
+            Err(e) => {
+                self.note_quietly(format!("security history unavailable -- {e}"));
+                return;
+            }
+        };
+
+        let document = self
+            .workspace
+            .active_id()
+            .map(|id| bp_audit::DocumentId::new(id.get()));
+
+        match log.append(
+            now(),
+            document,
+            event,
+            policy,
+            sealer.as_ref().map(|s| s as &dyn bp_audit::Sealer),
+        ) {
+            Ok(bp_audit::Appended::Persisted(_)) => {}
+            Ok(bp_audit::Appended::NotWritten(reason)) => {
+                if let Some(notice) = reason.notice() {
+                    self.note_quietly(notice.to_owned());
+                }
+            }
+            Err(e) => self.note_quietly(format!("security history not written -- {e}")),
+        }
+    }
+
+    /// The security history, as a report to show.
+    ///
+    /// Returns `None` when it cannot be read, having put the reason in the
+    /// status bar -- a sealed history with no passphrase to hand is the
+    /// common case, and it is a real answer rather than a failure.
+    pub(crate) fn security_history(&mut self) -> Option<String> {
+        let sealer = self
+            .workspace
+            .active_id()
+            .and_then(|id| self.passphrases.get(&id))
+            .and_then(|p| bp_audit::PassphraseSealer::new(p).ok());
+
+        match bp_audit::AuditLog::open(
+            self.audit_path.clone(),
+            sealer.as_ref().map(|s| s as &dyn bp_audit::Sealer),
+        ) {
+            Ok(log) => {
+                self.error = Some(format!("{} security events", log.records().len()));
+                Some(crate::audit::history_report(&log))
+            }
+            Err(e) => {
+                self.error = Some(format!("cannot read the security history -- {e}"));
+                None
+            }
+        }
+    }
+
     /// The active document's security policy.
     ///
     /// Falls back to the default when there is no active document, so callers
@@ -1296,6 +1423,16 @@ impl AppState {
         if self.clips.enforce(policy.clipboard) {
             self.error = Some("clipboard history cleared to match this profile".to_owned());
         }
+
+        // Recorded against the *new* profile, which is the one that decides
+        // whether it may be kept. Recording a tightening under the old, looser
+        // profile would write the line the user just asked to stop writing;
+        // recording a loosening under the old, stricter one would lose the
+        // single most interesting event a history can hold.
+        self.record_security_event(bp_audit::Event::SecurityProfileChanged {
+            from: bp_audit::ProfileLabel::of(&previous),
+            to: bp_audit::ProfileLabel::of(&security),
+        });
 
         // The journal for *this* document only. A refused checkpoint deletes
         // its file, so asking for one now is what turns the profile change
@@ -1503,8 +1640,15 @@ impl AppState {
         if !privacy.is_on() {
             // Turning it off restores each document's own profile. Nothing to
             // clean up -- the clamp only ever removed permissions.
+            //
+            // Recorded after the field changes, so the policy deciding whether
+            // this line may be kept is the one now in force. Leaving Privacy
+            // Mode is the event that re-enables everything it was switched on
+            // to stop, which is exactly why it is worth a line.
+            self.record_security_event(bp_audit::Event::PrivacyModeLeft);
             return;
         }
+        self.record_security_event(bp_audit::Event::PrivacyModeEntered);
 
         let cleared = self.clips.enforce(self.policy().clipboard);
         // Every document, not only the active one: the mode is session-wide,
@@ -3156,6 +3300,121 @@ mod tests {
         let (others, has_path) = state.tab_context_shape();
         assert_eq!(others, 1, "one other tab is open");
         assert!(!has_path, "an untitled document has no path to copy");
+    }
+
+    // --- the security history ---------------------------------------------
+
+    #[test]
+    fn a_security_operation_reaches_the_history() {
+        // The wiring, end to end and without a window: an operation happens,
+        // and the report the menu row shows can see it. Everything about
+        // *what* a history is belongs to `bp-audit`; what this asserts is
+        // that the shell actually calls it. Standard is the default profile
+        // and the one that keeps a plaintext history.
+        let mut state = AppState::new();
+        let before = state.security_history().unwrap_or_default();
+
+        state.edit(
+            "nothing secret here
+"
+            .to_owned(),
+        );
+        state.scan_for_secrets();
+
+        let after = state
+            .security_history()
+            .expect("the history must be readable");
+        // Not a length comparison: an empty history is a paragraph explaining
+        // itself and a one-event history is a single line, so the report gets
+        // *shorter* when the first thing is recorded.
+        assert_ne!(after, before, "the scan recorded nothing");
+        assert!(
+            after.contains(&bp_audit::Event::SecretScanFinished { findings: 0 }.describe()),
+            "the history does not mention the scan:
+{after}"
+        );
+    }
+
+    #[test]
+    fn loosening_a_profile_is_recorded_and_names_both_ends() {
+        // The direction is the interesting part, and this is the direction
+        // that matters: a move down to Standard re-enables everything the
+        // profile was switched on to stop, which is exactly the event a
+        // history exists to hold. It is recorded because the *new* profile
+        // permits a history -- see the sibling test for the other direction.
+        let mut state = AppState::new();
+        state.set_security(bp_security::Security::Named(
+            bp_security::Profile::Confidential,
+        ));
+        state.set_security(bp_security::Security::Named(bp_security::Profile::Standard));
+
+        let report = state.security_history().expect("readable");
+        let expected = bp_audit::Event::SecurityProfileChanged {
+            from: bp_audit::ProfileLabel::Confidential,
+            to: bp_audit::ProfileLabel::Standard,
+        };
+        assert!(
+            report.contains(&expected.describe()),
+            "the history does not name both ends of the change:
+{report}"
+        );
+    }
+
+    #[test]
+    fn tightening_into_a_profile_that_forbids_a_history_writes_nothing() {
+        // The event is recorded against the profile being *moved into*, which
+        // is the one that decides whether it may be kept. Recording a
+        // tightening under the old, looser profile would write the very line
+        // the user just asked to stop writing. `Destination::for_policy`
+        // resolves Confidential to `SessionOnly`, so this is that decision
+        // reaching the shell rather than a gap in the wiring.
+        let mut state = AppState::new();
+        let before = state.security_history().unwrap_or_default();
+        state.set_security(bp_security::Security::Named(
+            bp_security::Profile::Confidential,
+        ));
+
+        let after = state.security_history().expect("readable");
+        assert_eq!(
+            after, before,
+            "a profile that forbids a history had one written for it"
+        );
+    }
+
+    #[test]
+    fn privacy_mode_records_nothing_because_it_clamps_the_policy_first() {
+        // Switching Privacy Mode on is itself governed by the policy Privacy
+        // Mode puts in force, which forbids writing anything down. That is
+        // the mode doing what it was switched on for, and it is worth pinning
+        // so nobody later "fixes" it into a line on disk.
+        let mut state = AppState::new();
+        let before = state.security_history().unwrap_or_default();
+        state.set_privacy(bp_security::Privacy::On);
+
+        let after = state.security_history().expect("readable");
+        assert_eq!(
+            after, before,
+            "Privacy Mode wrote a line to disk about being switched on"
+        );
+    }
+
+    #[test]
+    fn a_history_notice_never_displaces_the_answer_the_user_asked_for() {
+        // "3 possible credentials" is what somebody clicked Scan for. A line
+        // about the *history* of that scan taking its place would be the log
+        // making the product worse, which is what `note_quietly` exists for.
+        let mut state = AppState::new();
+        state.edit(
+            "nothing secret here
+"
+            .to_owned(),
+        );
+        state.scan_for_secrets();
+        let message = state.error.clone().expect("the scan says what it found");
+        assert!(
+            !message.contains("security history"),
+            "the audit notice displaced the scan result: {message}"
+        );
     }
 
     // --- security profiles ------------------------------------------------

@@ -51,18 +51,19 @@ that points at them for no gain.
 Phases 1 and 3 are complete. Phases 2, 5, 6, 7, 8, 11, 14, 15, 16, 17 and 18
 each have a tested slice reachable in the product — phase 18 joined them when
 File ▸ Set as Default Editor shipped. Phases 4, 9, 12 and 13 are built and
-have no way in, which an audit put a number on: `bp-research`, `bp-notebook`,
-`bp-audit` and `bp-storage` have zero reverse dependencies anywhere in the
-application, and with `bp-buffer`'s large-file engine that is over thirteen
-thousand lines and 281 unit tests behind code no user can reach.
+have no way in, which an audit put a number on: `bp-research`, `bp-notebook`
+and `bp-storage` have zero reverse dependencies anywhere in the application,
+and with `bp-buffer`'s large-file engine that is over ten thousand lines and
+237 unit tests behind code no user can reach.
 
 **The wiring backlog is real, and it shrank rather than grew.** Phase 6's
 YAML, phase 16's redaction and metadata inspector all have menu rows now, the
 audit log's sealed destination has an implementor instead of refusing every
 append, and phases 16 and 18 gained Verify Signature and Set as Default
 Editor. What is still built and unreachable is `bp-buffer`'s large-file
-engine, `bp-notebook`, `bp-research`, `bp-audit` and `bp-storage` -- so
-opening a 2 GB file still loads 2 GB.
+engine, `bp-notebook`, `bp-research` and `bp-storage` -- so opening a 2 GB
+file still loads 2 GB. `bp-audit` came off that list when Security ▸ Security
+History shipped: five capabilities write into it and one row reads it back.
 
 **Cross-crate tests have found seven defects, and five are fixed.** Until the
 fourth session every test in the repository tested one crate. Eleven files of

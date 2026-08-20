@@ -104,7 +104,7 @@ pub mod action {
     /// Above 100 for the same reason `CLIP_BASE` is: Slint's `dispatch`
     /// routes exactly `UNDO..=SELECT_ALL` to the widget and everything else
     /// to Rust, so a block only has to avoid that window rather than sit
-    /// below it. 206-209 are free.
+    /// below it. 207-209 are free.
     pub const SCAN_SECRETS: i32 = 200;
     pub const HASH_DOCUMENT: i32 = 201;
     pub const SIGN_DOCUMENT: i32 = 202;
@@ -117,6 +117,12 @@ pub mod action {
     pub const REDACT_SECRETS: i32 = 204;
     /// Report what identifying metadata the document carries (ADR-0028).
     pub const INSPECT_METADATA: i32 = 205;
+    /// The security history (ADR-0024). In this block rather than one of its
+    /// own, because it is the same family: every other row here *produces* a
+    /// line in it, and a history filed away from the operations it records is
+    /// the split this block's comment argues against, seen from the reading
+    /// end. 207-209 are free.
+    pub const SECURITY_HISTORY: i32 = 206;
 
     /// The YAML conversions (ADR-0023), in a block of their own rather than
     /// in the Data block at 70-79.
@@ -137,7 +143,7 @@ pub mod action {
     /// File ▸ Set as Default Editor (ADR-0012), opening a block of its own at
     /// 220-229 for platform integration. 221-229 are free.
     ///
-    /// Not one of the four ids left at 206-209, and not one of the eight at
+    /// Not one of the three ids left at 207-209, and not one of the eight at
     /// 212-219: those are the Security operations' block and the Data
     /// conversions', and a File action sitting inside either is how a block
     /// stops meaning anything -- which is the whole argument `SCAN_SECRETS`'
@@ -771,7 +777,12 @@ pub fn security(
                 has_path,
             )
         },
-        planned("Lock Document, audit history"),
+        // The reading end of every row above it (ADR-0024). Not gated on
+        // anything: an empty history is a real answer, and the one time
+        // somebody most wants to look is when they think something should be
+        // there and are not sure it is.
+        row("Security History...", "", action::SECURITY_HISTORY),
+        planned("Lock Document"),
         arrives("phase 16"),
     ]);
     items
@@ -1342,6 +1353,7 @@ mod tests {
             action::VERIFY_SIGNATURE,
             action::REDACT_SECRETS,
             action::INSPECT_METADATA,
+            action::SECURITY_HISTORY,
         ] {
             for (name, window) in range_dispatch_windows() {
                 assert!(
@@ -1627,6 +1639,7 @@ mod tests {
             action::VERIFY_SIGNATURE,
             action::REDACT_SECRETS,
             action::INSPECT_METADATA,
+            action::SECURITY_HISTORY,
         ];
         for id in ids {
             assert!((200..210).contains(&id), "id {id} is outside the block");
@@ -1636,6 +1649,38 @@ mod tests {
         sorted.windows(2).for_each(|pair| {
             assert_ne!(pair[0], pair[1], "two security rows share an id");
         });
+    }
+
+    #[test]
+    fn the_security_menu_no_longer_calls_the_history_planned() {
+        // The same trap as the redaction row above: a planned label and a
+        // live row for the same thing reads as the feature being in two
+        // states at once. `Lock Document` is still planned and must stay.
+        let items = security_menu();
+        assert!(
+            !items
+                .iter()
+                .any(|i| i.action == action::NONE && i.label.contains("audit history")),
+            "the security history is live; it must not also be listed as planned"
+        );
+        assert!(
+            items
+                .iter()
+                .any(|i| i.action == action::NONE && i.label.contains("Lock Document")),
+            "Lock Document is still planned and must still say so"
+        );
+    }
+
+    #[test]
+    fn the_history_is_offered_whatever_the_document_is() {
+        // An empty history is an answer, and the moment somebody most wants
+        // to look is when they expected an event and are not sure it is
+        // there. Gating this row would hide exactly that case.
+        let row = security_menu()
+            .into_iter()
+            .find(|i| i.action == action::SECURITY_HISTORY)
+            .expect("no row for the security history");
+        assert!(row.enabled, "'{}' should be usable", row.label);
     }
 
     #[test]

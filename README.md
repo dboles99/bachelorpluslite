@@ -58,7 +58,7 @@ cargo run --release -- --editor-view   # with the custom editor view (ADR-0018)
 
 ## Current state (2026-08-20)
 
-**24 crates, 1,643 tests, green on Windows and Linux.** The app opens, edits and
+**24 crates, 1,649 tests, green on Windows and Linux.** The app opens, edits and
 saves atomically, and does rather more than that:
 
 | Area | What works |
@@ -74,7 +74,7 @@ saves atomically, and does rather more than that:
 | Metadata | A SQLite store with migrations — built and tested, not yet wired in ([ADR-0019](docs/decisions/ADR-0019.md)) |
 | Encryption | `.bpadx` documents — Security ▸ Encrypt Document, unlock on open, and saves stay encrypted. Argon2id, XChaCha20-Poly1305 or AES-256-GCM, chunked with position authenticated ([ADR-0021](docs/decisions/ADR-0021.md)) |
 | Security | Per-document profiles (Standard / Private / Confidential / Maximum) governing the recovery journal, clipboard history and metadata store ([ADR-0020](docs/decisions/ADR-0020.md)) |
-| Security (phase 16) | Privacy Mode, a session override that can only tighten; Scan for Secrets, which reports where a credential is and never what it is; Redact Found Secrets, as an undoable edit with a consent step; Inspect Metadata; Hash Document; Verify Signature. Signing is greyed with the reason on the row — there is nowhere to keep a key yet |
+| Security (phase 16) | Privacy Mode, a session override that can only tighten; Scan for Secrets, which reports where a credential is and never what it is; Redact Found Secrets, as an undoable edit with a consent step; Inspect Metadata; Hash Document; Verify Signature; Security History, which every row above it writes into (ADR-0024). Signing is greyed with the reason on the row — there is nowhere to keep a key yet |
 
 Startup, with the software renderer ([ADR-0017](docs/decisions/ADR-0017.md)):
 **35.7 ms to window, 21.9 MB idle**, against targets of 150 ms and 50 MB.
@@ -155,23 +155,22 @@ starting.
   interpreter; and `bp-files` never applies `\\?\`, so a filename at
   `SemanticName::to_filename`'s own documented maximum is unwritable in a
   deep enough directory, blamed on a read-only file.
-- **Four crates and one module are built and unreachable, and this list is
-  now counted rather than remembered.** `bp-research`, `bp-notebook`,
-  `bp-audit` and `bp-storage` have zero reverse dependencies anywhere in the
-  application: nothing in `bp-ui`, in `apps/bachelorpad`, or in any other
-  `bp-*` crate names them. `bp-audit` is reached only by the integration
-  tests and `bp-notebook` only by the fuzz harness. Add `bp-buffer`'s
+- **Three crates and one module are built and unreachable, and this list is
+  now counted rather than remembered.** `bp-research`, `bp-notebook` and
+  `bp-storage` have zero reverse dependencies anywhere in the application:
+  nothing in `bp-ui`, in `apps/bachelorpad`, or in any other `bp-*` crate
+  names them. `bp-notebook` is reached only by the fuzz harness. `bp-audit`
+  came off this list when Security ▸ Security History shipped. Add `bp-buffer`'s
   large-file engine -- depended on, but `LargeFile` and `SizeClass` appear
   nowhere outside their own crate, so opening a 2 GB file still loads 2 GB --
-  and it is over thirteen thousand lines defended by 281 unit tests that no
-  user can reach. It is still the largest thing standing between this
+  and it is over ten thousand lines defended by 237 unit tests that no user
+  can reach. It is still the largest thing standing between this
   repository and a product.
 
   | Crate | Lines | Tests | Reached by |
   | --- | --- | --- | --- |
   | `bp-research` | 5,208 | 161 | nothing |
   | `bp-notebook` | 3,514 | 55 | the fuzz harness only |
-  | `bp-audit` | 2,630 | 44 | the integration tests only |
   | `bp-buffer` ▸ `large.rs` | 1,198 | — | nothing |
   | `bp-storage` | 721 | 21 | nothing, by decision (ADR-0019) |
 

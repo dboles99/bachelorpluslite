@@ -1001,6 +1001,7 @@ name = "bp-ui"
 version = "0.1.0"
 dependencies = [
  "arboard",
+ "bp-audit",
  "bp-buffer",
  "bp-clipboard",
  "bp-config",

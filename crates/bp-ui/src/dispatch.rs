@@ -580,6 +580,17 @@ pub fn handle_menu_action(
             }
         }
 
+        action::SECURITY_HISTORY => {
+            // Same shape as Inspect Metadata: the borrow ends with the
+            // statement, before the dialog opens. `rfd` pumps events, and a
+            // re-entrant callback on a live `borrow_mut()` panics.
+            let report = state.borrow_mut().security_history();
+            if let Some(report) = report {
+                show_info("Security History", &report);
+            }
+            push = PushText::No;
+        }
+
         action::INSPECT_METADATA => {
             // Same shape as Hash Document: the borrow ends with the
             // statement, before the dialog opens.

@@ -62,6 +62,7 @@ pub use generated::*;
 
 mod menus;
 
+mod audit;
 mod default_editor;
 mod dispatch;
 mod editor_view;
