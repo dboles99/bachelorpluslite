@@ -160,12 +160,17 @@ needle"`
   ships and ADR-0022 seals the journal with the document's own passphrase.
   The remaining hole is narrower, and is the next item: a *plaintext*
   document under those profiles has no key, so it gets no journal at all.
-- **The custom editor view has never been typed into.** Its rules are covered
-  by 147 tests in `bp-editor`; the widget has been verified to exactly one
-  standard, that it renders a frame with a real file open without panicking.
-  Whether keys arrive, whether the caret lands under the pointer and which
-  way the wheel scrolls are all open. `project/NEXT_SESSION.md` has the
-  checklist.
+- **The custom editor view has now been typed into, and most of it works.**
+  A person drove both views on 2026-08-20. Keys arrive, Ctrl+S saves, the
+  recovery journal fires on its own, the Security menu reaches its own bottom
+  row, and **the caret tracks the pointer**: a click on a line reported that
+  line, and a click at the end of `line 30` reported `Ln 30, Col 8`, which is
+  exactly its length plus one. Ln/Col -- the whole payoff of the view -- is
+  live in the status bar.
+  
+  What that pass found was **tabs**, and it is fixed: see below. Still
+  unchecked are the wheel direction, drag-to-select and behaviour on resize.
+  `project/NEXT_SESSION.md` has what is left.
 
   This used to carry "nothing depends on the answers yet". **That is no
   longer true.** Duplicate Line and Move Line Up/Down are enabled only under
@@ -180,6 +185,16 @@ needle"`
   rows and applies equally to plain paste. Fixing it properly means freezing
   a snapshot of the history while a menu is open, which is a design question
   rather than a patch.
+- **The status bar says "Never saved" about a file that was opened from
+  disk.** ADR-0005 means "no save has happened in this session", and that is
+  what the field holds; what it *reads* as is "this file has never been
+  saved", which is false for every document loaded from a path. Found by
+  looking at it. A wording change, not a behaviour one.
+- **Under `TextInput` a tab is still drawn as one glyph**, because Slint owns
+  that rendering and we do not. It has no visible consequence today: that
+  view reports a line count rather than Ln/Col, so there is no column readout
+  to disagree with the glyphs. It becomes one the moment anything
+  column-shaped is offered there.
 - **Most of the product has not been used.** 542 tests cover the pieces in
   isolation. One manual pass found two defects no test caught: a menu bar
   where twelve of fourteen menus swallowed clicks, and Save As defaulting to

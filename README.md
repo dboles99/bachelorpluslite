@@ -90,13 +90,21 @@ starting.
 
 ### Known gaps
 
-- **Nobody has typed into the custom editor view.** `--editor-view` gives
-  Ln/Col, our own undo, and a view that draws only the lines on screen. Its
-  rules are covered by 147 tests in `bp-editor`; the widget has been shown to
-  render a frame with a real file open and exit cleanly, and nothing beyond
-  that. Whether the caret lands under the pointer is not a thing a test can
-  say. Duplicate Line and Move Line Up/Down are enabled only there, so they
-  inherit the answer. See [ADR-0018](docs/decisions/ADR-0018.md).
+- **Somebody has now typed into the custom editor view, and it works.**
+  `--editor-view` gives Ln/Col, our own undo, and a view that draws only the
+  lines on screen. A person drove it on 2026-08-20: keys arrive, Ctrl+S saves
+  (checked by reading the file back off the disk), and **the caret tracks the
+  pointer** -- a click at the end of `line 30` reported `Ln 30, Col 8`,
+  exactly its length plus one. The wheel direction, drag-to-select and
+  resize behaviour are still unchecked. See [ADR-0018](docs/decisions/ADR-0018.md).
+
+  **That pass found a defect 177 tests could not**, and it is fixed: a tab
+  was drawn as a single glyph while every column in `bp-editor` was computed
+  as though it reached the next tab stop, so the caret on any tab-bearing
+  line sat where the character was not. `view::expand_tabs` and
+  `VisualRow::display_text` close it -- the row keeps its characters for the
+  arithmetic, and the toolkit is handed the appearance.
+
 - **Input-method composition does not work under `--editor-view`, and cannot
   on this Slint.** `FocusScope` rejects `UpdateComposition` and
   `CommitComposition` in both its handlers and exposes no callback for either;

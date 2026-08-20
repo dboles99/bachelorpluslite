@@ -157,7 +157,10 @@ pub(crate) fn draw_editor_view(ui: &AppWindow, state: &AppState) {
             } else {
                 format!("{}", row.line + 1).into()
             },
-            text: row.text.as_str().into(),
+            // Expanded here rather than drawn raw: the surface positions
+            // the caret at `column x advance`, and a tab painted as one glyph
+            // puts every caret on the line somewhere the character is not.
+            text: row.display_text(layout.tab_width).into(),
         })
         .collect();
     ui.set_editor_rows(Rc::new(slint::VecModel::from(visible)).into());
