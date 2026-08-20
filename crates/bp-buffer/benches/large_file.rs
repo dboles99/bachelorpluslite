@@ -1,3 +1,10 @@
+// A benchmark is scaffolding, and `clippy.toml`'s `allow-unwrap-in-tests`
+// does not reach it: that setting recognises `#[test]` functions and
+// `#[cfg(test)]` blocks, and a bench target is neither. The intent is the
+// same one -- a fixture that cannot be built has nothing to measure, so the
+// `unwrap()` is the assertion.
+#![allow(clippy::unwrap_used, clippy::panic)]
+
 //! The measurement behind `LARGE_FILE_BYTES` and `HUGE_FILE_BYTES`, and the
 //! evidence that the chunked path costs what it claims to.
 //!

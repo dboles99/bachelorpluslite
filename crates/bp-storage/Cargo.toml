@@ -4,6 +4,9 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 # A document's extracted title is a summary of what the user wrote, so the
 # document's profile decides whether it may be recorded (ADR-0019, ADR-0020).

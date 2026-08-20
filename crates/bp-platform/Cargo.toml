@@ -11,6 +11,9 @@ license.workspace = true
 # definition sits closest to the user's machine; `winreg` in particular would
 # let this crate write to the registry, which ADR-0012 makes a decision rather
 # than a capability. Adding one is ADR material.
+[lints]
+workspace = true
+
 [dependencies]
 
 [dev-dependencies]

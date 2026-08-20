@@ -4,6 +4,9 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 # 1.x rather than 2.0.0-beta. The buffer is the one component where a
 # mid-flight API break would ripple through everything above it, and

@@ -1,3 +1,9 @@
+// The strategy helpers below are not `#[test]` functions, so
+// `clippy.toml`'s `allow-unwrap-in-tests` does not cover them -- but a
+// `Date` the generator was just told to build is a fixture, and a fixture
+// that cannot be built has no property to check.
+#![allow(clippy::unwrap_used)]
+
 //! Property tests for the filename grammar.
 //!
 //! The unit tests in the crate pin down specific cases from specs.md. These

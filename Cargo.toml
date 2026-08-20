@@ -34,6 +34,31 @@ members = [
     "tests/integration",
 ]
 
+# Lints every member opts into with `[lints] workspace = true`.
+#
+# **These four were already at zero before they were switched on.** An audit
+# of the fifth session counted the panic surface of production library code
+# across all 24 crates and found not one `unwrap()`, `panic!`, `todo!` or
+# `unimplemented!` -- every hit was a test module or a benchmark. That is a
+# discipline worth having and it was held by whoever was writing remembering
+# it, which is not a mechanism. This is the mechanism.
+#
+# `warn` rather than `deny` on purpose: the gate runs clippy with
+# `-D warnings`, so these fail the build there, while an editor and a local
+# `cargo clippy` show them as warnings and let work in progress compile.
+#
+# Not enabled, and each for a reason rather than an oversight:
+# `expect_used` (nine in library code, all carrying a message that says what
+# was assumed, which is what `expect` is for), `unreachable` (one), and
+# `indexing_slicing` (thirty-six, mostly over slices just measured). Turning
+# any of them on is a change to the code, not a change to the policy, and
+# wants its own pass.
+[workspace.lints.clippy]
+unwrap_used = "warn"
+panic = "warn"
+todo = "warn"
+unimplemented = "warn"
+
 [workspace.package]
 version = "0.1.0"
 edition = "2024"

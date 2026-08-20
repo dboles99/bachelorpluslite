@@ -4,6 +4,9 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 bp-crypto = { path = "../bp-crypto" }
 thiserror.workspace = true

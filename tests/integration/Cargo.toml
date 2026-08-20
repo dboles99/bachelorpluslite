@@ -13,6 +13,14 @@ publish = false
 [lib]
 path = "src/lib.rs"
 
+# Deliberately does **not** inherit `[workspace.lints]`. Those lints exist to
+# keep a panic out of library code, where it is a crash in somebody's editor
+# with their document in it. Every line in this package is a test or a fixture
+# for one, and `unwrap()` in a fixture is the assertion -- which is the same
+# thing `clippy.toml` says, in the one place where clippy's own heuristic for
+# "is this a test" cannot see it, because these are helper functions rather
+# than `#[test]` functions.
+
 [dependencies]
 
 [dev-dependencies]

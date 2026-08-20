@@ -4,6 +4,9 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 # A security profile is a property of a document (ADR-0011, ADR-0020), so it
 # lives on `Document` and travels with it.

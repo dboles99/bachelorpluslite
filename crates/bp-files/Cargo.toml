@@ -4,6 +4,9 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 bp-core = { path = "../bp-core" }
 bp-naming = { path = "../bp-naming" }

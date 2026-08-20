@@ -1,0 +1,12 @@
+# Clippy's own configuration. The lints themselves are in the workspace
+# `Cargo.toml` under `[workspace.lints.clippy]`; this file only says where
+# they do *not* apply.
+#
+# Test code is allowed to panic, and should. A test that handles an error it
+# never expects is a test with an untested branch in it, and `.unwrap()` in a
+# fixture is the assertion. The rule these settings carve out of exists for
+# library code, where a panic is a crash in somebody's editor with their
+# document in it.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true

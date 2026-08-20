@@ -4,6 +4,9 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 # An audit trail is an artefact derived from the document (ADR-0011), so the
 # document's policy decides whether it may be written down and in what form.

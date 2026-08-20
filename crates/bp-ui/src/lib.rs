@@ -39,7 +39,26 @@ use std::rc::Rc;
 use bp_core::{Document, DocumentId};
 use bp_theme::{Palette as ThemePalette, ThemeId};
 
-slint::include_modules!();
+// Behind a module so the workspace lints do not judge it. Slint's generator
+// emits some four hundred `unwrap()`s and `panic!`s against an item tree it
+// has just built itself, none of which is a defect and none of which has a
+// source file anybody could fix. Left at the crate root it would drown the
+// lint that exists to keep *hand-written* code from panicking in somebody's
+// editor with their document in it.
+//
+// The same accommodation as the `deny(unsafe_code)` above rather than
+// `forbid`: narrow, aimed at the generator, and it leaves the rule standing
+// everywhere else in this crate.
+mod generated {
+    #![allow(
+        clippy::unwrap_used,
+        clippy::panic,
+        clippy::todo,
+        clippy::unimplemented
+    )]
+    slint::include_modules!();
+}
+pub use generated::*;
 
 mod menus;
 

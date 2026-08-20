@@ -54,6 +54,17 @@ on a hit. It is crude and will need widening as more crates land, but it fails
 closed and runs on every commit — which a review convention does not. Log
 *about* a document (path, size), never what it contains.
 
+The `clippy` stage carries more than clippy's defaults.
+`[workspace.lints.clippy]` in the root `Cargo.toml` sets `unwrap_used`,
+`panic`, `todo` and `unimplemented` to `warn`, which `-D warnings` turns into
+build failures here while leaving them as warnings in an editor. All four were
+already at zero in production library code when they were switched on -- the
+discipline existed and was held by whoever was writing remembering it, which
+is not a mechanism. `clippy.toml` exempts test code, because `unwrap()` in a
+fixture is the assertion; where clippy's own "is this a test" heuristic cannot
+tell (a bench target, a helper that is not a `#[test]` function), the file
+carries a local allow with its reason.
+
 The `fuzz` stage exists because `fuzz/` declares its own `[workspace]` table,
 so every `--workspace` command in every other stage walks straight past it.
 Five harnesses feeding hostile input to `bp-crypto`, `bp-data`, `bp-files`,
