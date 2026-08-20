@@ -58,7 +58,7 @@ cargo run --release -- --editor-view   # with the custom editor view (ADR-0018)
 
 ## Current state (2026-08-20)
 
-**24 crates, 1,649 tests, green on Windows and Linux.** The app opens, edits and
+**24 crates, 1,673 tests, green on Windows and Linux.** The app opens, edits and
 saves atomically, and does rather more than that:
 
 | Area | What works |
@@ -153,16 +153,17 @@ starting.
   so `con.txt` stays an ordinary file on Linux and both CI legs execute both
   rule sets.
 
-  **Three tests remain `#[ignore]`d and each names a real defect**:
+  **Two tests remain `#[ignore]`d.** One is a decision rather than a defect:
   `bp-search` counts only the newline while `bp-buffer`'s rope also breaks on
   a bare carriage return and four other separators, so find-in-files can
   scroll to the wrong line in any file carrying one -- one line definition
-  has to win, and that is a decision rather than a patch; `bp-notebook`
-  cannot tell a cell that said nothing about its language from one that named
-  a language it cannot map, and runs the second through the kernel's
-  interpreter; and `bp-files` never applies `\\?\`, so a filename at
-  `SemanticName::to_filename`'s own documented maximum is unwritable in a
-  deep enough directory, blamed on a read-only file.
+  has to win, and that is D6. The other is a defect and is next:
+  `bp-notebook` cannot tell a cell that said nothing about its language from
+  one that named a language it cannot map, and runs the second through the
+  kernel's interpreter. The third is closed -- `bp-files` applies the
+  extended-length prefix now, so a filename at `SemanticName::to_filename`'s
+  own documented maximum is writable however deep the directory sits.
+
 - **Three crates and one module are built and unreachable, and this list is
   now counted rather than remembered.** `bp-research`, `bp-notebook` and
   `bp-storage` have zero reverse dependencies anywhere in the application:

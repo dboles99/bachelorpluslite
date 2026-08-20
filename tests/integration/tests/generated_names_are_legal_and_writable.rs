@@ -402,25 +402,20 @@ proptest! {
     }
 }
 
-// --- defect two: MAX_PATH -------------------------------------------------
+// --- what was defect two --------------------------------------------------
 
 #[test]
-#[ignore = "DEFECT: bp-files never applies the \\\\?\\ extended-length prefix, so a \
-            filename at bp-naming's own documented maximum (255 bytes) is unwritable on \
-            Windows inside any directory whose path takes the total past MAX_PATH -- which \
-            the system temp directory alone already does. The name is legal by every rule \
-            bp-platform states; it is the PATH that is too long, and bp-platform already \
-            provides both the diagnosis (paths::needs_extended_length_prefix) and the fix \
-            (paths::to_extended_length) that bp-files does not call. bp-files DOES depend \
-            on bp-platform now -- it asks that crate whether a name is a device before \
-            writing -- so the edge this fix needs already exists and only the call is \
-            missing. Worse than the refusal is the message: SaveError says the file 'may be \
-            read-only, or open in another program', which sends the user to look at the \
-            wrong thing. Left red rather than weakened."]
-fn a_name_bp_naming_will_generate_can_be_unwritable_on_windows() {
-    // 255 bytes is not an unreasonable name a fuzzer dreamt up: it is exactly
-    // what `SemanticName::to_filename` promises to produce for a long title,
-    // and long titles are what a semantic filename scheme is *for*.
+fn a_name_bp_naming_will_generate_is_writable_however_deep_the_directory() {
+    // 255 bytes is not a name a fuzzer dreamt up: it is exactly what
+    // `SemanticName::to_filename` promises for a long title, and long titles
+    // are what a semantic filename scheme is *for*. It used to be unwritable
+    // on Windows inside any directory whose path took the total past
+    // MAX_PATH -- which the system temp directory alone already does -- and
+    // the refusal blamed a read-only file, sending the user to look at the
+    // wrong thing. `bp-files` applies `\\?\` now.
+    //
+    // The assertions split by platform because the *machinery* does. The
+    // outcome does not, and it is the last line: the file is written.
     let name = SemanticName::new(&"a".repeat(400), a_date(), "txt").to_filename();
     name_is_legal(&name);
 
@@ -428,31 +423,32 @@ fn a_name_bp_naming_will_generate_can_be_unwritable_on_windows() {
     let path = dir.path().join(&name);
     let full = path.to_string_lossy().into_owned();
 
-    // bp-platform saw this coming, on the path rather than the name.
-    let path_problems = bp_platform::paths::path_problems(Platform::Windows, &full);
-    assert!(
-        path_problems
-            .iter()
-            .any(|p| matches!(p, PathProblem::PathTooLong { .. })),
-        "this test no longer reproduces: the temp path is short enough that \
-         MAX_PATH is not reached ({} characters)",
-        full.chars().count(),
-    );
-    assert!(
-        bp_platform::paths::needs_extended_length_prefix(&full),
-        "bp-platform does not think this path needs the escape hatch"
-    );
-    assert!(
-        bp_platform::paths::to_extended_length(&full).is_some(),
-        "bp-platform cannot even express the fix for this path"
-    );
+    if Platform::HOST == Platform::Windows {
+        // Still the shape that used to fail: if a future temp directory were
+        // short enough that MAX_PATH is not reached, this test would pass
+        // without exercising anything, so it says so instead.
+        assert!(
+            bp_platform::paths::path_problems(Platform::Windows, &full)
+                .iter()
+                .any(|p| matches!(p, PathProblem::PathTooLong { .. })),
+            "this test no longer reproduces: the temp path is short enough that \
+             MAX_PATH is not reached ({} characters)",
+            full.chars().count(),
+        );
+        assert!(
+            bp_platform::paths::needs_extended_length_prefix(&full),
+            "bp-platform does not think this path needs the escape hatch"
+        );
+    }
 
-    // And bp-files, which has never heard of any of that, refuses.
     atomic_write(&path, b"body\n", SaveOptions::default()).unwrap_or_else(|e| {
         panic!(
-            "bp-files could not write a name bp-naming generated and bp-platform \
-             calls legal; bp-platform's own to_extended_length would have made it \
-             writable. The error blames the wrong thing: {e}"
+            "bp-files could not write a name bp-naming generated and bp-platform calls legal: {e}"
         )
     });
+    assert_eq!(
+        std::fs::read(&path).expect("read back what was written"),
+        b"body\n",
+        "the bytes did not land at the path that was asked for"
+    );
 }

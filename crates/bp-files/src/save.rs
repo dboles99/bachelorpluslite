@@ -1,5 +1,6 @@
 //! Atomic save.
 
+use std::borrow::Cow;
 use std::fs::File;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
@@ -7,7 +8,10 @@ use std::path::{Path, PathBuf};
 use bp_naming::SemanticName;
 use bp_platform::{
     Platform,
-    paths::{PathProblem, file_name, file_name_problems},
+    paths::{
+        PathProblem, file_name, file_name_problems, needs_extended_length_prefix,
+        to_extended_length,
+    },
 };
 use tempfile::NamedTempFile;
 use thiserror::Error;
@@ -24,7 +28,9 @@ const VERIFY_CHUNK: usize = 64 * 1024;
 #[derive(Debug, Error)]
 pub enum SaveError {
     #[error(
-        "cannot save to {} -- {reserved} is a Windows device rather than a file, so writing          there would send the document to the device and leave nothing on disk; choose          another name",
+        "cannot save to {} -- {reserved} is a Windows device rather than a file, so writing \
+         there would send the document to the device and leave nothing on disk; choose \
+         another name",
         .path.display()
     )]
     ReservedDeviceName {
@@ -62,7 +68,8 @@ pub enum SaveError {
     AlreadyExists { path: PathBuf },
 
     #[error(
-        "cannot replace {} -- it may be read-only, or open in another program: {source}",
+        "cannot replace {} -- it may be read-only, open in another program, or in a \
+         directory that no longer exists: {source}",
         .path.display()
     )]
     Replace {
@@ -138,8 +145,13 @@ pub fn atomic_write(
 ) -> Result<SaveOutcome, SaveError> {
     refuse_device_name(Platform::HOST, path)?;
 
-    let parent = parent_dir(path)?;
-    let replaced_existing = path.exists();
+    // Everything below writes through `target`; `path` stays the caller's own
+    // and is what every error names.
+    let target = writable_path(Platform::HOST, path);
+    let target = target.as_ref();
+
+    let parent = parent_dir(target)?;
+    let replaced_existing = target.exists();
 
     // Same directory as the target, so the later rename is a true atomic
     // rename rather than a cross-filesystem copy.
@@ -167,17 +179,17 @@ pub fn atomic_write(
             source,
         })?;
 
-    preserve_permissions(path, &temp);
+    preserve_permissions(target, &temp);
 
     // The atomic step. Everything before this touched only the temp file, so
     // any earlier failure leaves the user's file exactly as it was.
     let _persisted = match options.overwrite {
-        Overwrite::Replace => temp.persist(path).map_err(|e| SaveError::Replace {
+        Overwrite::Replace => temp.persist(target).map_err(|e| SaveError::Replace {
             path: path.to_owned(),
             source: e.error,
         })?,
         Overwrite::FailIfExists => {
-            temp.persist_noclobber(path)
+            temp.persist_noclobber(target)
                 .map_err(|e| match e.error.kind() {
                     io::ErrorKind::AlreadyExists => SaveError::AlreadyExists {
                         path: path.to_owned(),
@@ -193,7 +205,7 @@ pub fn atomic_write(
     sync_directory(&parent);
 
     let verified = if options.verify {
-        if !verify_contents(path, contents).map_err(|source| SaveError::Verify {
+        if !verify_contents(target, contents).map_err(|source| SaveError::Verify {
             path: path.to_owned(),
             source,
         })? {
@@ -213,7 +225,74 @@ pub fn atomic_write(
     })
 }
 
-/// Refuse a path whose file name is one of Win32's device names.
+/// The path to actually hand the filesystem.
+///
+/// On Windows a path past `MAX_PATH` fails every call made against it with
+/// `os error 3` unless it carries the `\\?\` prefix -- and this module then
+/// reported that as [`SaveError::Replace`], which blames a read-only file or
+/// another program and sends the user to look at the wrong thing entirely.
+/// The name was never the problem: `SemanticName::to_filename` promises
+/// names of up to 255 bytes and they are legal by every rule `bp-platform`
+/// states. It is the *path* that is too long, and long titles are what a
+/// semantic filename scheme is for.
+///
+/// Applied only where it is needed. The prefix means "pass this to the object
+/// manager verbatim", which costs every normalisation Win32 usually does --
+/// `..` stops meaning a parent, a forward slash stops being a separator --
+/// so a path that fits without it is left exactly as the caller wrote it.
+///
+/// The original path is what any error carries. A user who typed one path and
+/// is shown another, with four punctuation marks bolted to the front, has been
+/// told about a machine rather than about their file.
+fn writable_path(platform: Platform, path: &Path) -> Cow<'_, Path> {
+    if platform != Platform::Windows {
+        return Cow::Borrowed(path);
+    }
+    let text = path.to_string_lossy().into_owned();
+    if !needs_extended_length_prefix(&text) {
+        return Cow::Borrowed(path);
+    }
+
+    // The conversion refuses a relative path, because the working directory is
+    // not applied to an extended-length one -- so a relative path has to be
+    // made absolute first, and *that* is where the platform parameter earns
+    // its keep. `std::path::absolute` resolves against the host's working
+    // directory and by the host's rules, so calling it unconditionally would
+    // make this function answer about the host however it was called: on the
+    // Linux leg `C:\docs\...` is a *relative* path, and the Windows rule would
+    // be tested by prepending a Linux working directory to it.
+    //
+    // **This is the third time that trap has been sprung in this repository**
+    // -- `PathBuf::join` standing in for `paths::join` (4390593), a device
+    // name split with `Path::file_name` (d3c2040), and now this. The rule is
+    // in `project/NEXT_SESSION.md`: a function taking a `Platform` must not
+    // let `std::path` answer for it.
+    //
+    // So a path already absolute *for that platform* needs no working
+    // directory and is converted directly; a relative one is resolved only
+    // when the platform asked about is the one running.
+    let absolute = if bp_platform::paths::is_absolute(platform, &text) {
+        text.clone()
+    } else if platform == Platform::HOST {
+        // On Windows this also resolves `.` and `..` lexically, which the
+        // object manager would not -- so a path carrying one is rescued here
+        // rather than refused.
+        std::path::absolute(path)
+            .map_or_else(|_| text.clone(), |p| p.to_string_lossy().into_owned())
+    } else {
+        return Cow::Borrowed(path);
+    };
+
+    // Falls back to the path as given if it cannot be rewritten at all. That
+    // leaves the operating system to say what is wrong with it, which is
+    // better than this function inventing a diagnosis: the shapes that reach
+    // here and cannot be converted are malformed rather than long, and a
+    // "path too long" error would be a confident answer to the wrong question.
+    to_extended_length(&absolute)
+        .map_or(Cow::Borrowed(path), |long| Cow::Owned(PathBuf::from(long)))
+}
+
+/// Refuse a path whose file name is one of Win32's device names./// Refuse a path whose file name is one of Win32's device names.
 ///
 /// This is the only failure in this module that is checked rather than
 /// attempted, and the reason is that attempting it does not fail. Opening
@@ -640,6 +719,150 @@ mod tests {
         // Nothing to judge. It fails later, on its own terms.
         assert_eq!(refusal(Platform::Windows, ".."), None);
         assert_eq!(refusal(Platform::Windows, "/"), None);
+    }
+
+    #[test]
+    fn no_error_message_carries_a_run_of_spaces() {
+        // A wrapped message in this module is one string joined by `\` line
+        // continuations, and a continuation lost in an edit leaves the next
+        // line's indentation *inside* the sentence -- ten spaces in the middle
+        // of something the user reads. Two of these shipped that way, because
+        // every test that looked at a message used `contains` on a fragment
+        // and a fragment does not span the join.
+        //
+        // Built by hand rather than reflected over, because `thiserror`'s
+        // formatting is what produces the final string and only a real value
+        // goes through it.
+        let path = PathBuf::from("notes.txt");
+        let io_error = || io::Error::new(io::ErrorKind::PermissionDenied, "denied");
+        let messages = [
+            SaveError::ReservedDeviceName {
+                path: path.clone(),
+                reserved: "CON",
+            }
+            .to_string(),
+            SaveError::NoParentDirectory { path: path.clone() }.to_string(),
+            SaveError::TempCreate {
+                path: path.clone(),
+                source: io_error(),
+            }
+            .to_string(),
+            SaveError::Write {
+                path: path.clone(),
+                source: io_error(),
+            }
+            .to_string(),
+            SaveError::Flush {
+                path: path.clone(),
+                source: io_error(),
+            }
+            .to_string(),
+            SaveError::AlreadyExists { path: path.clone() }.to_string(),
+            SaveError::Replace {
+                path: path.clone(),
+                source: io_error(),
+            }
+            .to_string(),
+            SaveError::Verify {
+                path: path.clone(),
+                source: io_error(),
+            }
+            .to_string(),
+            SaveError::VerificationFailed { path }.to_string(),
+        ];
+
+        for message in messages {
+            assert!(
+                !message.contains("  "),
+                "a run of spaces in a message the user reads: {message:?}"
+            );
+        }
+    }
+
+    // --- long paths --------------------------------------------------------
+
+    #[test]
+    fn a_short_path_is_handed_to_the_filesystem_exactly_as_written() {
+        // The prefix costs every normalisation Win32 usually does -- `..`
+        // stops meaning a parent, a forward slash stops being a separator --
+        // so a path that fits without it must come through untouched.
+        let short = Path::new(r"C:\docs\notes.txt");
+        for platform in [Platform::Windows, Platform::Linux] {
+            assert_eq!(
+                writable_path(platform, short),
+                Cow::Borrowed(short),
+                "a short path was rewritten on {}",
+                platform.token()
+            );
+        }
+    }
+
+    #[test]
+    fn a_windows_path_past_the_limit_gains_the_prefix() {
+        let long = format!(r"C:\docs\{}\notes.txt", "d".repeat(300));
+        let rewritten = writable_path(Platform::Windows, Path::new(&long));
+        let text = rewritten.to_string_lossy();
+        assert!(
+            text.starts_with(r"\\?\"),
+            "a path past MAX_PATH must gain the escape hatch: {text}"
+        );
+        assert!(
+            text.ends_with("notes.txt"),
+            "the rewrite must not lose the name: {text}"
+        );
+    }
+
+    #[test]
+    fn a_windows_path_is_judged_by_windows_rules_on_either_leg() {
+        // The trap this function was written into before it was written out
+        // of: `std::path::absolute` resolves by the *host's* rules, so on the
+        // Linux leg `C:\docs\...` is a relative path and the Windows rule
+        // would have been tested against a Linux working directory. A path
+        // already absolute for the platform asked about needs no working
+        // directory at all, which is what makes this answer the same on both
+        // legs -- and the Linux leg is where it first came out wrong.
+        let long = format!(r"C:\docs\{}\notes.txt", "d".repeat(300));
+        let text = writable_path(Platform::Windows, Path::new(&long))
+            .to_string_lossy()
+            .into_owned();
+        assert!(
+            text.starts_with(r"\\?\C:\docs\"),
+            "Windows and Linux must agree here, and this is not the agreed answer: {text}"
+        );
+    }
+
+    #[test]
+    fn linux_never_gains_the_prefix_however_long_the_path() {
+        // There is no such limit there, and an extended-length path on Linux
+        // is a directory literally called `?`. The platform is a parameter
+        // here for the same reason it is everywhere else in this module.
+        let long = format!("/home/me/{}/notes.txt", "d".repeat(300));
+        assert_eq!(
+            writable_path(Platform::Linux, Path::new(&long)),
+            Cow::Borrowed(Path::new(&long))
+        );
+    }
+
+    #[test]
+    fn a_long_absolute_path_containing_a_parent_component_is_left_alone() {
+        // The documented limit of this rewrite, pinned so it is a decision
+        // rather than a surprise. An extended-length path may not contain
+        // `..`, because the object manager does not resolve one -- and this
+        // function will not resolve it either, because doing so lexically is
+        // a rule about a *platform*, and borrowing the host's resolver for it
+        // is exactly the mistake the parameter exists to prevent.
+        //
+        // So the path goes over unchanged and the system says what is wrong
+        // with it. A save into a directory both past MAX_PATH *and* reached
+        // through `..` therefore still fails -- a corner of a corner, and a
+        // lexical normaliser in `bp-platform` is what would close it.
+        let long = format!(r"C:\docs\sub\..\{}\notes.txt", "d".repeat(300));
+        let path = Path::new(&long);
+        assert_eq!(
+            writable_path(Platform::Windows, path),
+            Cow::Borrowed(path),
+            "a path that cannot be expressed must be passed through, not guessed at"
+        );
     }
 
     #[test]

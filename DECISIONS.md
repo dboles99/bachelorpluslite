@@ -61,18 +61,6 @@ Adding a decision means adding both.
 
 ## Open items
 
-- **`bp-files` never applies the `\\?\` extended-length prefix**, so a name
-  `bp-naming` is willing to generate can be unwritable. A filename at
-  `SemanticName::to_filename`'s own documented 255-byte maximum fails inside
-  any directory whose path pushes the total past 259 -- the system temp
-  directory alone does it. `bp-platform` has both the diagnosis
-  (`paths::needs_extended_length_prefix`, `path_problems`) and the fix
-  (`paths::to_extended_length`). `bp-files` depends on `bp-platform` now --
-  it asks the same crate whether a name the user typed is a device -- so what
-  was two problems is one: the edge exists and the call does not.
-  The error compounds it: `SaveError` blames a read-only file or another
-  program for what is `os error 3`, sending the user to look at the wrong
-  thing.
 - **`bp-notebook` silently runs unidentified code through the wrong
   interpreter, and ADR-0025 says the opposite.** `ipynb.rs::infer_kind`
   computes `stated.or(notebook_language)`, which conflates "the cell said
