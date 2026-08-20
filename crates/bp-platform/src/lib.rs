@@ -87,7 +87,35 @@ pub const CRATE_NAME: &str = "bp-platform";
 /// One constant rather than a literal per call site, because the string
 /// appears in a config path, a data path, a cache path and a registry key,
 /// and four spellings of it is four half-migrated installs.
+///
+/// **Not [`APP_ID`], and the two must not be re-fused** (ADR-0032). This one
+/// is a folder a person reads in a file manager and types in a terminal;
+/// that one is a machine identifier that has to be globally unique and must
+/// never change. They were the same string once, by accident, which meant a
+/// future decision about either would silently have moved the other -- and
+/// moving this one moves the user's settings, their recent list and their
+/// recovery journal.
 pub const APP_DIR: &str = "bachelorpad";
+
+/// This product's identity to the operating system.
+///
+/// Reverse-DNS, per ADR-0032, because it names the `.desktop` file, every
+/// association in every `mimeapps.list` on the machine, the AppStream
+/// metadata, and the `HKCU\Software\Classes` ProgId prefix on Windows. A bare
+/// name lives in a flat namespace shared with every other application
+/// installed, which is what the convention exists to avoid.
+///
+/// `io.github.dboles99` rather than a `com.` domain because it is a namespace
+/// this project demonstrably controls; it is the standard form for a project
+/// without its own domain. The last segment is the application's name in its
+/// own capitalisation, minus the `+`, which is not a character a `.desktop`
+/// file name or a ProgId carries portably.
+///
+/// **This value has a compatibility promise attached.** Changing it after
+/// anyone installs orphans every association they have made -- silently, by
+/// the old id simply ceasing to be anything. See [`APP_DIR`] for what it is
+/// deliberately not.
+pub const APP_ID: &str = "io.github.dboles99.BachelorPadPlus";
 
 /// One of the two operating systems ADR-0001 names, as a *value*.
 ///
@@ -230,5 +258,70 @@ mod tests {
     #[test]
     fn host_is_one_of_the_two_supported_platforms() {
         assert!(Platform::ALL.contains(&Platform::HOST));
+    }
+
+    // --- the two identities, which are deliberately not one -------------
+
+    #[test]
+    fn the_application_id_is_reverse_dns_and_is_not_the_directory_name() {
+        // The *form* rather than the string, per ADR-0032, so registering a
+        // domain later is a one-line edit and re-fusing the two constants is
+        // not. What must not happen is the two silently becoming one again:
+        // moving APP_DIR moves the user's settings, their recent list and
+        // their recovery journal, and moving APP_ID orphans every file
+        // association they have made.
+        assert_ne!(
+            APP_ID, APP_DIR,
+            "the machine identifier and the folder name are different \
+             questions with opposite constraints"
+        );
+        let segments: Vec<&str> = APP_ID.split('.').collect();
+        assert!(
+            segments.len() >= 3,
+            "{APP_ID} is not reverse-DNS; it needs at least a domain and a name"
+        );
+        assert!(
+            segments.iter().all(|s| !s.is_empty()),
+            "{APP_ID} has an empty segment, so it has a leading, trailing or \
+             doubled dot"
+        );
+    }
+
+    #[test]
+    fn the_application_id_survives_being_a_file_name_on_both_platforms() {
+        // It becomes `<id>.desktop`, `<id>.xml` and `<id>-file-types.reg`, so
+        // this is not a stylistic check. `AppInfo::problems` enforces it at
+        // runtime; this fails at the constant instead, which is where anyone
+        // changing it will be looking.
+        assert!(
+            paths::is_portable_file_name(APP_ID),
+            "{APP_ID} cannot be used as a file name on both platforms"
+        );
+        for &platform in Platform::ALL {
+            for suffix in [".desktop", ".xml", "-file-types.reg"] {
+                let name = format!("{APP_ID}{suffix}");
+                assert!(
+                    paths::file_name_problems(platform, &name).is_empty(),
+                    "{name} is not a legal file name on {platform:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_directory_name_stays_something_a_person_can_type() {
+        // The other half of ADR-0032, and the reason APP_DIR did not simply
+        // follow APP_ID: this string is a folder a user reads in a file
+        // manager and types in a terminal. A leading dot would additionally
+        // make it a hidden directory on Linux.
+        assert!(
+            !APP_DIR.contains('.'),
+            "{APP_DIR} reads as a hidden directory"
+        );
+        assert!(
+            APP_DIR.chars().all(|c| c.is_ascii_lowercase()),
+            "{APP_DIR} is not a plain lowercase folder name"
+        );
+        assert!(paths::is_portable_file_name(APP_DIR));
     }
 }

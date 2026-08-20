@@ -483,10 +483,14 @@ mod tests {
             body.contains("/home/tester/.local/share"),
             "the destination has to be on screen; got:\n{body}"
         );
-        assert!(
-            body.contains("applications/bachelorpad.desktop"),
-            "and so do the files; got:\n{body}"
+        // Derived rather than spelt, so that ADR-0032's application id can
+        // change without this quietly becoming a test that the dialog names
+        // *a* file.
+        let entry = format!(
+            "applications/{}",
+            bp_platform::editor::desktop::desktop_file_name(&app_for(Platform::Linux))
         );
+        assert!(body.contains(&entry), "and so do the files; got:\n{body}");
     }
 
     #[test]
@@ -613,7 +617,9 @@ mod tests {
         assert!(
             dir.path()
                 .join("applications")
-                .join("bachelorpad.desktop")
+                .join(bp_platform::editor::desktop::desktop_file_name(&app_for(
+                    Platform::Linux
+                )))
                 .is_file(),
             "the desktop entry belongs under the given root"
         );

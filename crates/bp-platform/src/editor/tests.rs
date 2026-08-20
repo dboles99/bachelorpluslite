@@ -435,7 +435,7 @@ fn the_handoff_names_the_command_that_would_set_the_default_and_stops_there() {
     };
     assert_eq!(*program, "xdg-mime");
     assert_eq!(args[0], "default");
-    assert_eq!(args[1], "bachelorpad.desktop");
+    assert_eq!(args[1], desktop::desktop_file_name(&app()));
     assert!(args.contains(&"text/plain".to_owned()));
     assert!(plan.handoff.describe().contains("xdg-mime"));
 }
@@ -465,17 +465,23 @@ fn an_app_info_says_what_is_wrong_with_it_before_a_plan_is_built() {
 
 #[test]
 fn a_mimeapps_list_is_read_the_way_the_desktop_reads_it() {
-    let text = "\
+    // The entry naming *us* is derived rather than spelt, so the
+    // application id changing (ADR-0032) does not quietly turn this into a
+    // test that we are not the default.
+    let ours = desktop::desktop_file_name(&app());
+    let text = format!(
+        "\
 # a comment
 [Added Associations]
 text/plain=someone-else.desktop;
 
 [Default Applications]
-text/plain = bachelorpad.desktop;gedit.desktop;
+text/plain = {ours};gedit.desktop;
 text/markdown=marker.desktop
 application/json=
-";
-    let report = state::report_from_mimeapps(text, &app(), &everything());
+"
+    );
+    let report = state::report_from_mimeapps(&text, &app(), &everything());
     assert_eq!(report.state_of("txt"), Some(&AssociationState::Ours));
     assert_eq!(
         report.state_of("md"),
@@ -544,7 +550,10 @@ fn the_report_is_read_from_a_directory_the_caller_names() {
     let dir = tempdir().unwrap();
     std::fs::write(
         dir.path().join("mimeapps.list"),
-        "[Default Applications]\ntext/plain=bachelorpad.desktop;\n",
+        format!(
+            "[Default Applications]\ntext/plain={};\n",
+            desktop::desktop_file_name(&app())
+        ),
     )
     .unwrap();
     let selection = AssociationSelection::custom(["txt", "md"]);
@@ -613,10 +622,19 @@ fn a_consented_install_writes_exactly_the_plans_artefacts_under_the_given_root()
         assert!(path.starts_with(dir.path()), "{path:?} escaped the root");
         assert!(path.is_file());
     }
-    let entry = std::fs::read_to_string(dir.path().join("applications/bachelorpad.desktop"))
-        .expect("the desktop entry landed where mimeapps.list will look for it");
+    let entry = std::fs::read_to_string(
+        dir.path()
+            .join("applications")
+            .join(desktop::desktop_file_name(&app())),
+    )
+    .expect("the desktop entry landed where mimeapps.list will look for it");
     assert_eq!(entry, plan.artefacts[0].contents);
-    assert!(dir.path().join("mime/packages/bachelorpad.xml").is_file());
+    assert!(
+        dir.path()
+            .join("mime/packages")
+            .join(desktop::mime_package_file_name(&app()))
+            .is_file()
+    );
     assert_eq!(installed.follow_up, plan.follow_up);
 }
 
