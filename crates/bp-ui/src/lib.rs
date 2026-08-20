@@ -156,6 +156,8 @@ fn refresh(ui: &AppWindow, state: &mut state::AppState, push_text: state::PushTe
     // Privacy Mode outranks the profile name here: it is the session-wide
     // fact, and it is the thing somebody switches on precisely because they
     // want to be able to see that it is on.
+    ui.set_size_label(state.size_label().into());
+
     ui.set_security_profile(
         if state.privacy.is_on() {
             "Privacy Mode".to_owned()

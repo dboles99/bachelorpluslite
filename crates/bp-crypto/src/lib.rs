@@ -453,10 +453,25 @@ pub fn stable_name(bytes: &[u8]) -> String {
     digest.iter().take(16).map(|b| format!("{b:02x}")).collect()
 }
 
+/// How many bytes [`is_bpadx`] needs to reach its answer.
+///
+/// Exposed so a caller can read a *header* rather than a file. [`is_bpadx`]
+/// is cheap, and says so — but a caller that reaches for `std::fs::read` to
+/// obtain its argument has made it the most expensive call in the program,
+/// and one did: opening a document read the whole of it to look at six bytes,
+/// and then `bp_files::load` read the whole of it again. On a 2 GB file that
+/// is 4 GB of I/O before anything is on screen.
+pub const MAGIC_LEN: usize = MAGIC.len();
+
 /// Whether `bytes` begins with the `.bpadx` magic.
 ///
 /// Cheap enough to call on every file open, so the shell can route a document
-/// to the passphrase prompt instead of showing the user its ciphertext.
+/// to the passphrase prompt instead of showing the user its ciphertext. Read
+/// [`MAGIC_LEN`] bytes to call it; do not read the file.
+///
+/// A short slice is not encrypted rather than unknown: a file with fewer than
+/// [`MAGIC_LEN`] bytes cannot carry the magic, so `false` is the whole truth
+/// about it.
 #[must_use]
 pub fn is_bpadx(bytes: &[u8]) -> bool {
     bytes.starts_with(MAGIC)

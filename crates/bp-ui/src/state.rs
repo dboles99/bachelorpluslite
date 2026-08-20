@@ -145,6 +145,12 @@ pub struct AppState {
     /// test gets its own file. It is not configurable from outside: the
     /// production value is set once, here, and nothing changes it.
     pub(crate) audit_path: PathBuf,
+    /// Size on disk of each open document, as `load` reported it.
+    ///
+    /// Kept so the status bar can say "Large file" without asking the
+    /// filesystem on every refresh, and so the size class is the one the
+    /// document was *opened* at rather than whatever the file is now.
+    pub(crate) sizes: HashMap<DocumentId, u64>,
     /// The tab the context menu was opened on.
     ///
     /// Held rather than passed with the click, because opening the menu and
@@ -214,6 +220,7 @@ impl AppState {
             goto_status: String::new(),
             journal: bp_history::Journal::new(recovery_dir()),
             audit_path: crate::audit::audit_path(),
+            sizes: HashMap::new(),
             passphrases: HashMap::new(),
             privacy: bp_security::Privacy::default(),
             ask: None,
@@ -811,6 +818,17 @@ impl AppState {
 
     pub(crate) fn open(&mut self, path: PathBuf) {
         self.error = None;
+
+        // Classified from the *metadata*, before a byte of the document is
+        // read. `load` slurps the whole file, so asking it how big the file
+        // was is asking after the damage is done: ADR-0027 measured that a
+        // document past `HUGE_FILE_BYTES` must not reach a rope at all, and
+        // the only place that can be honoured is here, in front.
+        if let Some(refusal) = self.refuse_if_too_large(&path) {
+            self.error = Some(refusal);
+            return;
+        }
+
         let path2 = path.clone();
         match load(&path) {
             Ok(file) => {
@@ -820,6 +838,7 @@ impl AppState {
                     doc.set_line_ending(file.line_ending);
                 }
                 self.editors.insert(id, bp_editor::Editor::new(&file.text));
+                self.sizes.insert(id, file.bytes_on_disk);
                 self.mark_in_step(id, &path2);
             }
             // The error types already render a message naming the file and
@@ -1282,6 +1301,52 @@ impl AppState {
         true
     }
 
+    /// What the status bar says about the active document's size.
+    ///
+    /// Empty for an ordinary document. `SizeClass::label` makes the argument:
+    /// "a status bar that labels the ordinary case teaches people to ignore
+    /// it", and it returns `""` for `Normal` for exactly that reason.
+    ///
+    /// The size is spelled out beside the class because "Large file" alone
+    /// invites the question this readout exists to answer -- how large, and
+    /// therefore how much of a pause to expect.
+    pub(crate) fn size_label(&self) -> String {
+        let Some(id) = self.workspace.active_id() else {
+            return String::new();
+        };
+        let Some(&bytes) = self.sizes.get(&id) else {
+            return String::new();
+        };
+        let class = bp_buffer::SizeClass::of(bytes);
+        if !class.is_large() {
+            return String::new();
+        }
+        format!("{} ({})", class.label(), human_bytes(bytes))
+    }
+
+    /// Refuse a document the ordinary path must not load, with the reason.
+    ///
+    /// `None` means go ahead. `Some(message)` is a refusal already worded for
+    /// the status bar.
+    ///
+    /// **The size class comes from `bp-buffer`, and the message it carries.**
+    /// `Access::ReadOnlyBySize` exists precisely so a refusal can say *how*
+    /// large and distinguish itself from a file that is read-only on disk --
+    /// which is a different problem with a different way out, and telling
+    /// someone "read-only" without saying which leaves them clicking at
+    /// permissions that were never at fault.
+    ///
+    /// A file whose metadata cannot be read is *not* refused here. It is
+    /// about to be opened, and `load` reports what is wrong with it far
+    /// better than a guess from a failed `stat` would.
+    fn refuse_if_too_large(&self, path: &Path) -> Option<String> {
+        let bytes = std::fs::metadata(path).ok()?.len();
+        if !bp_buffer::SizeClass::of(bytes).must_stream() {
+            return None;
+        }
+        Some(huge_refusal(bytes))
+    }
+
     /// Say something only if nothing more important is already being said.
     ///
     /// Every caller of `record_security_event` has just finished an operation
@@ -1468,7 +1533,7 @@ impl AppState {
     /// nobody can read is worse than no tab: it looks like an empty document,
     /// and saving it would write emptiness over the real one.
     pub(crate) fn open_maybe_encrypted(&mut self, path: PathBuf) -> bool {
-        match std::fs::read(&path) {
+        match read_header(&path) {
             Ok(bytes) if bp_crypto::is_bpadx(&bytes) => {
                 self.ask = Some(crate::passphrase::Ask::Unlock(path));
                 self.passphrase_status.clear();
@@ -2565,6 +2630,73 @@ pub(crate) fn recovery_dir() -> PathBuf {
     )
 }
 
+/// What the status bar says when a document is too large for the ordinary
+/// path.
+///
+/// A free function so its test can assert the *product's* sentence instead of
+/// a copy of it. A test carrying its own duplicate of a message goes on
+/// passing while the message drifts, which makes it a test of the test.
+///
+/// The second half is the honest half. ADR-0027 says such a document is
+/// served from disk in chunks and opened read-only; that reader is built and
+/// not connected to a view. Saying "cannot" where the truth is "not yet" is
+/// how a limitation becomes folklore.
+fn huge_refusal(bytes: u64) -> String {
+    format!(
+        "{} -- reading it in chunks is built and not yet connected to a view, \
+         so it is not opened rather than loaded whole",
+        bp_buffer::Access::ReadOnlyBySize { bytes }.message()
+    )
+}
+
+/// A byte count in the unit a person would use.
+///
+/// One decimal place and binary units, matching what `bp-buffer`'s own
+/// thresholds are stated in -- 8 MiB and 192 MiB -- so a status bar reading
+/// "9.4 MB" against a threshold documented as 8 MiB would invite arithmetic
+/// that does not work out.
+fn human_bytes(bytes: u64) -> String {
+    const KIB: f64 = 1024.0;
+    let bytes = bytes as f64;
+    if bytes >= KIB * KIB * KIB {
+        format!("{:.1} GiB", bytes / (KIB * KIB * KIB))
+    } else if bytes >= KIB * KIB {
+        format!("{:.1} MiB", bytes / (KIB * KIB))
+    } else if bytes >= KIB {
+        format!("{:.1} KiB", bytes / KIB)
+    } else {
+        format!("{bytes:.0} bytes")
+    }
+}
+
+/// The first few bytes of `path`, for deciding whether it is a `.bpadx`.
+///
+/// **A header, not a file.** This existed as `std::fs::read(&path)`, which
+/// answered a six-byte question by holding the whole document in memory --
+/// and then `bp_files::load` read it a second time. On a 2 GB file that was
+/// 4 GB of I/O and 2 GB resident before anything reached the screen, on the
+/// path taken by *every* open.
+///
+/// A short file is not an error. Fewer than `MAGIC_LEN` bytes cannot be the
+/// magic, and `is_bpadx` says so about whatever it is given.
+fn read_header(path: &Path) -> std::io::Result<Vec<u8>> {
+    use std::io::Read as _;
+
+    let mut header = vec![0_u8; bp_crypto::MAGIC_LEN];
+    let mut file = std::fs::File::open(path)?;
+    // Not `read` -- one call may return fewer bytes than asked for without
+    // being at the end, and a short read would report an encrypted document
+    // as plaintext and show the user its ciphertext.
+    let read = match file.read_exact(&mut header) {
+        Ok(()) => bp_crypto::MAGIC_LEN,
+        // A file shorter than the magic is a real file and a valid answer.
+        Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => 0,
+        Err(e) => return Err(e),
+    };
+    header.truncate(read);
+    Ok(header)
+}
+
 /// A document's path, if it has one.
 ///
 /// A free function so `set_security` can read it without holding a borrow of
@@ -3300,6 +3432,136 @@ mod tests {
         let (others, has_path) = state.tab_context_shape();
         assert_eq!(others, 1, "one other tab is open");
         assert!(!has_path, "an untitled document has no path to copy");
+    }
+
+    // --- size decides how a document is opened -----------------------------
+
+    #[test]
+    fn an_ordinary_document_carries_no_size_label() {
+        // The argument `SizeClass::label` makes: a status bar that labels the
+        // ordinary case teaches people to ignore it.
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("small.txt");
+        std::fs::write(&path, "a few lines\nof text\n").expect("write");
+
+        let mut state = AppState::new();
+        state.open(path);
+        assert!(state.error.is_none(), "{:?}", state.error);
+        assert_eq!(state.size_label(), "");
+    }
+
+    #[test]
+    fn a_large_document_says_so_and_says_how_large() {
+        // Past LARGE_FILE_BYTES it still opens and still edits -- the label
+        // exists to explain a pause, not to take anything away. "Large file"
+        // alone would invite the question the readout is here to answer.
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("big.txt");
+        let line = "x".repeat(79);
+        let bytes = bp_buffer::LARGE_FILE_BYTES + 1024;
+        let mut text = String::with_capacity(bytes as usize + 128);
+        while (text.len() as u64) < bytes {
+            text.push_str(&line);
+            text.push('\n');
+        }
+        std::fs::write(&path, &text).expect("write");
+
+        let mut state = AppState::new();
+        state.open(path);
+        assert!(state.error.is_none(), "{:?}", state.error);
+        let label = state.size_label();
+        assert!(label.starts_with("Large file ("), "got {label:?}");
+        assert!(
+            label.contains("MiB"),
+            "the size belongs on the label: {label:?}"
+        );
+    }
+
+    #[test]
+    fn the_refusal_for_a_huge_document_names_the_size_and_calls_it_not_yet() {
+        // Not opened, and *not* loaded -- ADR-0027 says a document past
+        // HUGE_FILE_BYTES must not reach a rope, and the only place that can
+        // be honoured is in front of `load`.
+        //
+        // The message is checked for the two things it must not do: blame
+        // permissions (a different problem with a different way out), and say
+        // "cannot" where the truth is "not yet".
+        let bytes = bp_buffer::HUGE_FILE_BYTES + 1;
+        assert!(
+            bp_buffer::SizeClass::of(bytes).must_stream(),
+            "this fixture is not actually huge"
+        );
+        // The product's own sentence rather than a copy of it.
+        let message = huge_refusal(bytes);
+        assert!(
+            message.contains("not yet"),
+            "a limitation stated as permanent becomes folklore: {message}"
+        );
+        assert!(
+            !message.contains("permission") && !message.contains("read-only file"),
+            "the size is the reason; permissions were never at fault: {message}"
+        );
+    }
+
+    #[test]
+    fn a_byte_count_reads_the_way_a_person_would_say_it() {
+        assert_eq!(human_bytes(512), "512 bytes");
+        assert_eq!(human_bytes(2048), "2.0 KiB");
+        assert_eq!(human_bytes(9 * 1024 * 1024), "9.0 MiB");
+        assert_eq!(human_bytes(3 * 1024 * 1024 * 1024), "3.0 GiB");
+    }
+
+    // --- opening reads a header, not a file --------------------------------
+
+    #[test]
+    fn an_encrypted_document_is_recognised_from_its_header_alone() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("secret.bpadx");
+        let sealed = bp_crypto::seal(
+            b"a document\n",
+            "correct horse",
+            bp_crypto::SealOptions::default(),
+        )
+        .expect("seal");
+        std::fs::write(&path, &sealed).expect("write");
+
+        let header = read_header(&path).expect("header");
+        assert_eq!(
+            header.len(),
+            bp_crypto::MAGIC_LEN,
+            "a header is read, not a file"
+        );
+        assert!(
+            bp_crypto::is_bpadx(&header),
+            "the magic must be recognisable from the header alone, or the user \
+             is shown their own ciphertext"
+        );
+    }
+
+    #[test]
+    fn a_file_shorter_than_the_magic_is_plaintext_and_not_an_error() {
+        // The short-read trap. `read` may return fewer bytes than asked for
+        // without being at the end, so this uses `read_exact` -- and a file
+        // genuinely shorter than the magic must still open, as the ordinary
+        // small text file it is.
+        let dir = tempfile::tempdir().expect("temp dir");
+        for (name, contents) in [("empty.txt", ""), ("tiny.txt", "hi")] {
+            let path = dir.path().join(name);
+            std::fs::write(&path, contents).expect("write");
+            let header = read_header(&path).expect("a short file is not an error");
+            assert!(
+                !bp_crypto::is_bpadx(&header),
+                "{name} is not encrypted and must not be treated as though it were"
+            );
+        }
+    }
+
+    #[test]
+    fn a_plaintext_document_that_starts_like_text_is_not_taken_for_a_bpadx() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("notes.txt");
+        std::fs::write(&path, "BPAD is not BPADX\0 and this is prose").expect("write");
+        assert!(!bp_crypto::is_bpadx(&read_header(&path).expect("header")));
     }
 
     // --- the security history ---------------------------------------------
