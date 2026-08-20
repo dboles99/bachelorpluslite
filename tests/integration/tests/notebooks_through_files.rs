@@ -397,24 +397,7 @@ fn importing_a_notebook_from_disk_produces_nothing_runnable_without_a_gesture() 
 }
 
 #[test]
-#[ignore = "DEFECT: bp-notebook silently replaces a cell language it cannot name with the \
-            notebook's kernel language, and offers the cell to a runner. ipynb.rs \
-            infer_kind computes `stated.or(notebook_language)`, which conflates two \
-            different facts: a cell that said NOTHING about its language (falling back to \
-            the kernel is right) and a cell that said something we could not map \
-            (falling back is a guess). No ImportWarning distinguishes them, so a cell \
-            another tool tagged as, say, brainfuck is imported as Python and becomes \
-            runnable, with the user told nothing. ADR-0025 states the opposite outcome in \
-            as many words -- 'a code cell in a language we cannot name ... becomes \
-            CellKind::Raw and an ImportWarning::UnknownCodeLanguage says so ... Raw is \
-            the kind that is carried verbatim and never run' -- and that only holds for \
-            notebooks with no kernelspec, which almost no real .ipynb is. \
-            CellKind::from_language_name's own doc gives the reason it matters: guessing \
-            wrong 'means offering to run someone's text through the wrong interpreter'. \
-            Fix belongs in ipynb.rs infer_kind: an unmappable explicit language tag \
-            should warn and fall to Raw rather than fall through to the kernel. Left red \
-            rather than weakened."]
-fn an_unnameable_language_is_silently_replaced_by_the_notebooks_kernel() {
+fn an_unnameable_language_is_never_replaced_by_the_notebooks_kernel() {
     // The control first: with no kernelspec, the documented behaviour holds
     // exactly. This is what makes the failure below a disagreement about the
     // kernelspec fallback rather than a claim that the warning never fires.

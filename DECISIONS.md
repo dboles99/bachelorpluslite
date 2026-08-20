@@ -61,19 +61,6 @@ Adding a decision means adding both.
 
 ## Open items
 
-- **`bp-notebook` silently runs unidentified code through the wrong
-  interpreter, and ADR-0025 says the opposite.** `ipynb.rs::infer_kind`
-  computes `stated.or(notebook_language)`, which conflates "the cell said
-  nothing about its language", where falling back to the kernelspec is right,
-  with "the cell named a language we cannot map", where it is a guess. No
-  warning distinguishes them. A cell another tool tagged
-  `vscode.languageId: "brainfuck"` imports as Python and appears in
-  `request_run_all` with the user told nothing. ADR-0025 states that such a
-  cell "becomes `CellKind::Raw` and an `ImportWarning::UnknownCodeLanguage`
-  says so" -- and that holds only for notebooks carrying no kernelspec, which
-  almost no real `.ipynb` is. `CellKind::from_language_name`'s own doc gives
-  the stakes: guessing wrong means offering to run someone's text through the
-  wrong interpreter.
 - **"A flipped bit anywhere in a `.sig` never verifies" is false, correctly.**
   `Sidecar::parse` tolerates trailing whitespace so a signature survives being
   mailed and pasted, so flipping bit 0 of the closing newline yields a

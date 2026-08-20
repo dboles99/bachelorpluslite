@@ -682,6 +682,28 @@ fn infer_kind(
         "markdown" => CellKind::Markdown,
         "raw" => CellKind::Raw,
         "code" => {
+            // A cell can answer the language question in two different ways,
+            // and this used to collapse them with `.and_then(...).or(kernel)`.
+            //
+            // **Saying nothing** is a cell with no language tag at all, and
+            // the notebook's kernelspec is exactly the right answer for it --
+            // that is what a kernelspec is for.
+            //
+            // **Saying something we cannot map** is not the same fact. The
+            // cell named a language; we simply do not know it. Substituting
+            // the kernel's language there is a guess about somebody else's
+            // code, and `CellKind::from_language_name` measures the cost of
+            // guessing wrong in the right unit: it means offering to run
+            // someone's text through the wrong interpreter. A cell another
+            // tool tagged `brainfuck` was imported as Python, became
+            // runnable, and said nothing about it.
+            //
+            // ADR-0025 states the outcome plainly -- "a `code` cell in a
+            // language we cannot name" becomes `Raw` with
+            // `ImportWarning::UnknownCodeLanguage`, "Raw and not plain text,
+            // because Raw is the kind carried verbatim and never run". That
+            // held only for a notebook carrying no kernelspec, which almost
+            // no real `.ipynb` is.
             let stated = metadata
                 .get("vscode")
                 .and_then(|v| v.get("languageId"))
@@ -691,8 +713,18 @@ fn infer_kind(
                         .and_then(|p| p.get("kernelName"))
                 })
                 .and_then(Value::as_str)
-                .and_then(CellKind::from_language_name);
-            match stated.or(notebook_language).filter(|k| k.is_executable()) {
+                .map(str::trim)
+                // A tag that is present but blank has not named anything, so
+                // it is the first case rather than the second: malformed
+                // metadata should not cost a cell its kernel.
+                .filter(|name| !name.is_empty());
+
+            let resolved = match stated {
+                Some(name) => CellKind::from_language_name(name),
+                None => notebook_language,
+            };
+
+            match resolved.filter(|k| k.is_executable()) {
                 Some(kind) => kind,
                 None => {
                     warnings.push(ImportWarning::UnknownCodeLanguage { cell_index: index });
@@ -988,6 +1020,87 @@ mod tests {
         assert!(import.notebook().metadata().contains_key("kernelspec"));
         let exported = export_ipynb(import.notebook());
         assert!(exported["metadata"]["kernelspec"].is_object());
+    }
+
+    /// A notebook whose kernel is Python, holding one code cell with
+    /// `metadata.vscode.languageId` set to `tag`.
+    ///
+    /// The kernelspec is the part that matters: without one, the two cases
+    /// this pair of tests separates happen to agree, which is how the defect
+    /// survived. Almost no real `.ipynb` lacks a kernelspec.
+    fn python_kernel_with_cell_tagged(tag: &str) -> Import {
+        import_str(&format!(
+            r##"{{ "nbformat": 4,
+                  "metadata": {{ "kernelspec": {{ "name": "python3", "language": "python" }} }},
+                  "cells": [ {{ "cell_type": "code",
+                                "metadata": {{ "vscode": {{ "languageId": "{tag}" }} }},
+                                "source": "print(1)" }} ] }}"##
+        ))
+    }
+
+    #[test]
+    fn a_language_the_cell_named_and_we_cannot_map_never_becomes_the_kernels() {
+        // The defect, pinned. A cell tagged with a language we do not know
+        // was taking the notebook's kernel language instead -- so text
+        // somebody wrote in one language was imported as Python, became
+        // runnable, and the user was told nothing. Falling back is right for
+        // a cell that said *nothing*; it is a guess for a cell that spoke.
+        let import = python_kernel_with_cell_tagged("brainfuck");
+        assert_eq!(
+            import.warnings(),
+            [ImportWarning::UnknownCodeLanguage { cell_index: 0 }],
+            "an unmappable language must be reported, not quietly replaced"
+        );
+        let cell = &import.notebook().cells()[0];
+        assert_eq!(
+            cell.kind(),
+            CellKind::Raw,
+            "ADR-0025: Raw is the kind carried verbatim and never run"
+        );
+        assert!(
+            !cell.kind().is_executable(),
+            "a cell we could not identify must not be offered to a runner"
+        );
+    }
+
+    #[test]
+    fn a_cell_that_said_nothing_still_takes_the_kernels_language() {
+        // The other half, and the reason the fix is a split rather than a
+        // deletion: a kernelspec exists precisely to answer for cells that do
+        // not answer for themselves.
+        let import = import_str(
+            r##"{ "nbformat": 4,
+                  "metadata": { "kernelspec": { "name": "python3", "language": "python" } },
+                  "cells": [ { "cell_type": "code", "metadata": {}, "source": "print(1)" } ] }"##,
+        );
+        assert!(
+            import.warnings().is_empty(),
+            "a cell with no tag at all is not a cell we failed to identify"
+        );
+        assert_eq!(import.notebook().cells()[0].kind(), CellKind::Python);
+    }
+
+    #[test]
+    fn a_language_tag_that_is_blank_counts_as_having_said_nothing() {
+        // Malformed metadata rather than a language we cannot name, so it
+        // falls to the kernel. Whitespace is trimmed for the same reason.
+        for tag in ["", " "] {
+            let import = python_kernel_with_cell_tagged(tag);
+            assert!(
+                import.warnings().is_empty(),
+                "a blank tag names nothing and must not cost the cell its kernel: {tag:?}"
+            );
+            assert_eq!(import.notebook().cells()[0].kind(), CellKind::Python);
+        }
+    }
+
+    #[test]
+    fn a_language_the_cell_named_and_we_can_map_beats_the_kernel() {
+        // Unchanged by the fix, and worth pinning beside it: the cell's own
+        // tag is still the first answer when we understand it.
+        let import = python_kernel_with_cell_tagged("rust");
+        assert!(import.warnings().is_empty());
+        assert_eq!(import.notebook().cells()[0].kind(), CellKind::Rust);
     }
 
     #[test]
