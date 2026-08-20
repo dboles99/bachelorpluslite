@@ -187,6 +187,23 @@ Adding a decision means adding both.
   rows and applies equally to plain paste. Fixing it properly means freezing
   a snapshot of the history while a menu is open, which is a design question
   rather than a patch.
+- **A file just over the huge threshold reads as past itself.**
+  `Access::ReadOnlyBySize`'s message renders both the file's size and the limit
+  through `format_bytes`, which rounds to whole MiB above 1 MiB -- so a
+  192 MiB + 1 byte document produces *"Read-only: 192 MiB is past the 192 MiB
+  editing limit."* Every word of that is true and the sentence looks
+  self-contradictory. Only files within rounding distance of the threshold are
+  affected, which is why nothing caught it: the tests assert the message names
+  the size and blames neither permissions nor a missing viewer, and it does all
+  three.
+
+  Found while writing a manual-pass checklist, which is a second argument for
+  writing one. Fixing it means either a decimal place at MiB (`192.0 MiB` past
+  `192.0 MiB` -- no better), or the exact byte count in parentheses, or
+  rounding the *limit* down and the *size* up so the two can never print equal.
+  The third is the only one that reads correctly at every size, and it is a
+  change to `bp-buffer`'s formatter rather than to the message.
+
 - **The status bar says "Never saved" about a file that was opened from
   disk.** ADR-0005 means "no save has happened in this session", and that is
   what the field holds; what it *reads* as is "this file has never been
