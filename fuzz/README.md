@@ -323,11 +323,21 @@ Confirmed by driving that extension's own bundled server directly, capped at a
 | `corpus/yaml/billion-laughs.yaml` (570 bytes) | exit 134 after 12.3 s |
 | a four-line Kubernetes Pod manifest | survived 45 s, no crash |
 
-`.vscode/settings.json` now narrows that matcher to `**/k8s/**/*.yaml`, which
-this repository has none of, so the server never opens the file. The setting is
-checked in deliberately: `.gitignore` excludes `.vscode/*` but the file is
-tracked, and anyone who clones this repository with that extension installed
-meets the same crash loop.
+**Narrowing that matcher does not fix it, and this repository briefly claimed
+it did.** Setting `cloudcode.yaml.yamlFileMatcher` to a glob this tree has no
+files for reaches the server — it lands in
+`SettingsRegistry.instance.yamlFilePattern` — but a window opened with the
+setting in place still aborted four times in four minutes. The pattern governs
+which files are matched against schemas, not which are parsed, and the log says
+`Server initialization failed`: it dies during startup, before the setting
+spares it anything. There is no checked-in setting that prevents this.
+
+What works is not installing the extension, or disabling it for this
+workspace — it is a GCP, Kubernetes and Skaffold extension, and the only match
+for any of those words in this tree is this paragraph. VS Code keeps
+per-workspace extension enablement in its own state rather than in `.vscode/`,
+so that cannot be committed for everyone; it is one action per clone, from the
+Extensions view.
 
 Two things generalise beyond one extension. **Any tool that walks the tree
 looking for YAML is a candidate** — the `.claude/worktrees/` copies multiply

@@ -1,5 +1,4 @@
 {
   "rust-analyzer.check.command": "clippy",
-  "editor.formatOnSave": true,
-  "cloudcode.yaml.yamlFileMatcher": "**/k8s/**/*.yaml"
+  "editor.formatOnSave": true
 }
