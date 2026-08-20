@@ -128,26 +128,64 @@ Two deliberate non-dependencies:
 ## Inside `bp-ui`
 
 The shell was one 2,675-line file and the single-writer bottleneck for every
-piece of wiring work. It is now nine, split along seams the file already had
-as comment banners:
+piece of wiring work. It is now thirteen, split along seams the files already
+had as comment banners:
 
 | Module | Lines | Owns |
 | --- | ---: | --- |
-| `state.rs` | 6,282 | `AppState`: documents, workspace, saving, reloading, format detection, status labels, find matches, the security operations |
+| `state/security.rs` | 2,820 | Scan, redact, inspect metadata, hash, sign, verify, the security history all six write into, and the profile and Privacy Mode switches that govern them |
 | `menus.rs` | 2,662 | Menu contents and the action-id map |
+| `state.rs` | 2,555 | `AppState` itself: documents, workspace, opening, saving, reloading, format detection, the gutter and the status labels |
 | `lib.rs` | 1,209 | `run_with`, `refresh`, and the Slint callback wiring |
 | `editor_view.rs` | 946 | The custom surface: key translation, caret placement, what to draw, and the scroll that serves both a rope and a file |
 | `dispatch.rs` | 799 | The menu-action match, and the dialogs its arms share |
 | `default_editor.rs` | 754 | File ▸ Set as Default Editor: the report, the consent dialog, the artefacts (ADR-0012) |
+| `state/data.rs` | 498 | The Data menu: which `bp-data` operation a menu id means for the format in front of the user |
+| `state/encryption.rs` | 457 | The `.bpadx` passphrase flow: what the bar is asking, and what a wrong answer does |
 | `viewer.rs` | 322 | A document the rope does not hold: where the reader is looking, and the window handed to the surface (ADR-0030) |
 | `audit.rs` | 254 | Which file the security history is, and what a person reading it sees (ADR-0024) |
 | `passphrase.rs` | 141 | What the one-field passphrase bar is currently asking, as a state machine |
+| `state/find.rs` | 139 | What the find bar is looking for, and which match the user is standing on |
 
-**`state.rs` is the next thing that wants splitting**, and it is now more than
-twice the size the whole shell was when the first split happened. The seams
-are already there as comment banners; the reason it has not been done is that
-every wiring item touches it, so the split has to happen between items rather
-than during one.
+### Why the four new ones are children of `state` and not siblings
+
+`state.rs` was 6,282 lines -- more than twice the size the whole shell was
+when the first split happened -- and the four modules above came out of it in
+one pass.
+
+They are `state/*.rs` rather than `bp-ui/src/*.rs`, and that is the reason the
+split was possible at all rather than a filing preference. **A child module
+can see its parent's private items.** `AppState`'s `editors`, `stamps`,
+`gutter_lines` and `match_index` are private to `state`, and they stay that
+way: `state::security` reaches them because it is inside `state`. A sibling
+module would have needed every field it touched widened to `pub(crate)`, which
+is the crate-wide surface the original file's privacy was buying.
+
+What did *not* split is the struct. `AppState` is one set of fields with one
+`impl` block per module, because splitting the state would mean deciding which
+half of the product owns the active document, and there is no such division.
+
+Two seams the compiler pointed out, which are worth knowing before adding to
+either module:
+
+- **The passphrase bar serves signing as well as encryption.**
+  `answer_passphrase` lives in `state/encryption.rs` and routes
+  `Ask::UnlockKey` into `state/security.rs`, so `create_key_and_sign` and
+  `sign_with_stored_key` are `pub(super)` rather than private. One bar, two
+  subjects; ADR-0031 is why.
+- **`default_signing_key_path` is `pub(super)` and deliberately not
+  `pub(crate)`.** `AppState::new` is its only caller. A second place deciding
+  where the signing key lives is exactly the defect the `signing_key` field
+  exists to prevent.
+
+**`state/security.rs` is the largest file in the crate now**, and that is
+recorded rather than hidden. It is one subject -- nothing in it may put a
+secret somewhere the user did not ask for it to be -- and half of it is tests
+under their own banners. Its seams, if it ever needs them, are secrets and
+redaction against hash, sign and verify: different crates behind them
+(`bp-secrets`/`bp-redaction` against `bp-crypto`/`bp-integrity`) and different
+questions -- "what is in this document" against "is this document what it
+was".
 
 `ui/app.slint` took the same treatment for the same reason, and is now ten
 files rather than one 1,189-line one:
