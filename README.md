@@ -158,17 +158,45 @@ should spend an afternoon on these before checking the version changed.
   journal is filed under a digest of its path and can only be read once you
   have unlocked the document, so nothing prompts at startup — deliberately.
 
-- **Used in anger twice, and it paid both times.** The first pass found a menu
-  bar where twelve of fourteen menus swallowed clicks, and Save As defaulting
-  to the process working directory -- which wrote real documents into a git
-  checkout. The second, on 2026-08-20, found a tab drawn as a single glyph
-  while every column in `bp-editor` was computed as though it reached the next
-  tab stop, so the caret on any tab-bearing line sat where the character was
-  not. Both are fixed.
+- **Used in anger three times, and it paid every time.** The first pass found a
+  menu bar where twelve of fourteen menus swallowed clicks, and Save As
+  defaulting to the process working directory -- which wrote real documents
+  into a git checkout. The second, on 2026-08-20, found a tab drawn as a single
+  glyph while every column in `bp-editor` was computed as though it reached the
+  next tab stop, so the caret on any tab-bearing line sat where the character
+  was not. The first two are fixed.
 
-  **Both lived in the same seam, and it is the one a test in this repository
-  cannot see: what a toolkit does with the string it is handed.** 1,754 tests
-  will not find the third.
+  **The third, on 2026-08-21, found the worst of them and it is open: typing a
+  query into Find edits the document.** Ctrl+F, then type `replicas`: the `r`
+  reaches the find box and the box correctly reports `1 of 3`, and then
+  **`eplicas` is typed into the document, over the match the `r` had just
+  selected**. `alpha replicas beta` becomes `alpha eeplicas beta`, the tab goes
+  dirty, and the find box still reads `r`. Reproduced with 1.5 seconds between
+  keystrokes, so it is not a race.
+
+  The cause is one line with a comment that says what it is doing.
+  `on_find_changed` ([lib.rs](crates/bp-ui/src/lib.rs)) runs on **every**
+  keystroke in the query box and calls `dispatch::select`, which ends in
+  `editor.focus()` -- "Just take the focus back from the find box", says
+  `select-range` in `ui/app.slint`. That is right for Find Next, which is the
+  other caller and where the user does want the caret in the document
+  afterwards. It is wrong for the preview that runs while they are still
+  typing the query, and the two share one function.
+
+  **All three lived in the same seam, and it is the one a test in this
+  repository cannot see: what a toolkit does with the string it is handed.**
+  1,754 tests do not find this one either -- `AppState::find` is correct, and
+  every test of it passes. The defect is entirely in who holds the focus
+  afterwards.
+
+  A second, quieter one from the same pass: **crash recovery restores the text
+  and forgets the encoding and the line ending.** `AppState::restore` opens the
+  document and inserts the text, but never calls `set_line_ending` or
+  `set_encoding` the way `open` does, so a recovered document falls back to
+  `LineEnding::default()` -- CRLF on Windows. An LF file recovered on Windows
+  is rewritten CRLF throughout on the next save, and a UTF-16 one comes back as
+  UTF-8. Confirmed in the status bar (LF before the crash, CRLF after) and in
+  the code.
 
   Still unclicked, in the order they now matter: **the wheel** and **a window
   resize** -- both inherited by the huge-file viewer, which does nothing but
