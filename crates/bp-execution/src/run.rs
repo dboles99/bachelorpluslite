@@ -551,11 +551,36 @@ mod tests {
             return;
         };
 
-        let script = "import sys, time\nsys.stdout.write('before stop\\n')\nsys.stdout.flush()\ntime.sleep(30)";
-        let mut run = Run::start(language, script, gesture()).expect("the run starts");
-        // Give it long enough to print, polling rather than sleeping blindly
-        // so the test does not depend on interpreter startup being fast.
-        for _ in 0..400 {
+        // **The cell says when it has printed, and the test waits for that
+        // rather than for a number of milliseconds.** The first version of
+        // this polled 400 times at 10ms and carried a comment claiming it did
+        // not depend on interpreter startup being fast; four seconds is
+        // exactly such a dependency, and it failed on the Linux leg of a
+        // loaded machine, where the failure read as "stop lost the output"
+        // rather than "Python had not started yet".
+        //
+        // A marker file is the observable signal. `stdout` cannot be one:
+        // this crate only hands it back when the run is over, which is the
+        // very thing being tested.
+        let marker = std::env::temp_dir().join(format!(
+            "bp-execution-stop-{}-{:?}.marker",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_file(&marker);
+        let script = format!(
+            "import sys, time\nsys.stdout.write('before stop\\n')\nsys.stdout.flush()\nopen(r'{}', 'w').close()\ntime.sleep(30)",
+            marker.display()
+        );
+
+        let mut run = Run::start(language, &script, gesture()).expect("the run starts");
+        let deadline = Instant::now() + Duration::from_secs(60);
+        while !marker.exists() {
+            assert!(
+                Instant::now() < deadline,
+                "the interpreter never signalled that it had printed, so this \
+                 test never got as far as what it is about"
+            );
             match run.poll() {
                 Progress::Running(waiting) => run = waiting,
                 Progress::Finished(_) => panic!("a 30-second sleep should not have finished"),
@@ -564,6 +589,7 @@ mod tests {
         }
 
         let outcome = run.stop();
+        let _ = std::fs::remove_file(&marker);
 
         assert!(
             outcome.stdout().contains("before stop"),

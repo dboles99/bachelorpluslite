@@ -676,12 +676,12 @@ pub fn edit(clips: &[bp_clipboard::Entry], editor_view: bool) -> Vec<MenuItem> {
             enabled: editor_view,
             ..row_end("Move Line Down", "Alt+Down", action::MOVE_LINE_DOWN)
         },
-        // Caret work as well -- `Editor::go_to_line` moves the caret we own,
-        // and `TextInput`'s cannot be moved from here.
-        MenuItem {
-            enabled: editor_view,
-            ..row_end("Go to Line...", "Ctrl+G", action::GO_TO_LINE)
-        },
+        // **Not `editor_view`-gated any more, and the note that gated it was
+        // wrong.** `TextInput`'s caret cannot be *read* from here, which is
+        // what stops Duplicate Line and the date stamps above; it can be
+        // *moved*, via `set-selection-offsets`, which is how Find Next has
+        // always jumped. Going to a line only ever needed the second.
+        row_end("Go to Line...", "Ctrl+G", action::GO_TO_LINE),
         planned("Multi-cursor"),
         arrives("phase 2"),
     ]);

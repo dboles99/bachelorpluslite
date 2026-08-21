@@ -63,7 +63,7 @@ saves atomically, and does rather more than that:
 
 | Area | What works |
 | --- | --- |
-| Editing | Tabs, four themes plus Follow System, zoom, indentation (tabs or soft tabs, 2/4/8), honest save state, atomic save, undo/cut/copy/paste, sort / deduplicate / reverse / trim lines, duplicate and move lines, go to line |
+| Editing | Tabs, four themes plus Follow System, zoom, indentation (tabs or soft tabs, 2/4/8), honest save state, atomic save, undo/cut/copy/paste, sort / deduplicate / reverse / trim lines, duplicate and move lines, **go to line in either surface** |
 | Storage | A rope buffer holds every document; whole-document operations are one undo step |
 | Safety | Unsaved-changes prompts, external-change detection, crash recovery journal — encrypted and recovered at unlock for encrypted documents ([ADR-0022](docs/decisions/ADR-0022.md)) |
 | Files | Open/Save/Save As/Save All/Save a Copy/Reload, recent files, tab context menu, command-line file opening. A document is classified by size before it is read (ADR-0027): ordinary opens as ever, large opens with the size in the status bar, and a **huge one opens too** — read from disk as you scroll, in the custom surface whichever flag you started with (ADR-0030). A 192 MiB log costs 0.8 MiB more than a small note. UTF-8, UTF-8 with BOM and **UTF-16 LE/BE** all load and save; a truncated or malformed UTF-16 file is refused by name rather than repaired with replacement characters |
@@ -112,10 +112,20 @@ should spend an afternoon on these before checking the version changed.
   `DataTransfer` carries only plain text or an image, so there is no channel a
   dropped file's path could arrive through. Blocked on Slint, not on effort.
 
-- **Five features are enabled only under `--editor-view`**: duplicate and move
-  line, date and time insertion, and go to line. All need the caret
-  `TextInput` does not expose. [MENU_MAP.md](docs/product/MENU_MAP.md) marks
+- **Four features are enabled only under `--editor-view`**: duplicate and move
+  line, and date and time insertion. They need to know *where the caret is*,
+  and `TextInput` will not say. [MENU_MAP.md](docs/product/MENU_MAP.md) marks
   which rows those are.
+
+  **Go to Line left this list on 2026-08-22, and the reason it was on it is
+  worth keeping.** It was recorded as needing the caret, like the others. It
+  does not: it needs the caret *moved*, which `set-selection-offsets` does and
+  which Find Next has always relied on. Reading and moving turned out to be
+  different requirements filed under one word. What kept the mistake alive was
+  that the move used to be invisible — nothing scrolled the viewport to the
+  caret, so a correct jump looked like nothing happening — and fixing that
+  (see "Find did not scroll to its match", below) is what made the claim
+  checkable at all.
 
 - **No crate is unreachable.** This list was three crates long four sessions
   ago and is now empty: `bp-notebook` and `bp-execution` left it under

@@ -20,5 +20,11 @@ tempfile.workspace = true
 zeroize.workspace = true
 
 [dev-dependencies]
+# Test-only, and only to keep a *generator* honest: a property that invents
+# file names must not invent ones Windows refuses to create, and
+# `reserved_device_name` is this workspace's single answer to which those are.
+# A second list written here would be a second list to keep in step -- which
+# is the failure `bp-naming`'s two-way agreement test already exists to stop.
+bp-platform = { path = "../bp-platform" }
 proptest.workspace = true
 tempfile.workspace = true

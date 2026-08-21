@@ -545,10 +545,33 @@ proptest! {
 
     /// No manifest this crate can build holds a path that would escape the
     /// root it is checked against.
+    ///
+    /// **The stem is filtered, and the filter is the product's own rule.**
+    /// `[a-z]{1,8}` generates `nul`, `con`, `aux`, `prn` and the `com`/`lpt`
+    /// family, and Windows will not create a file *or a directory* by any of
+    /// those names -- so the fixture cannot be built and the property is
+    /// never reached. Proptest found `nul` on 2026-08-22, four sessions after
+    /// this test was written, which is the ordinary way a generator's blind
+    /// spot surfaces.
+    ///
+    /// `bp_platform::paths::reserved_device_name` is asked rather than a list
+    /// being written here: it is this workspace's single answer to the
+    /// question, it takes no `Platform` because the question has one answer,
+    /// and a second copy would be a second thing to keep in step. That is the
+    /// exact failure `bp-naming`'s two-way agreement test already exists to
+    /// stop.
+    ///
+    /// Filtering is right rather than a dodge: a device name is a question
+    /// about what a *name* may be, and this property is about whether a path
+    /// can escape its root. They are unrelated, and `bp-naming` already owns
+    /// the first.
     #[test]
     fn no_built_manifest_holds_a_path_that_escapes_its_root(
         depth in 1usize..4,
-        stem in "[a-z]{1,8}",
+        stem in "[a-z]{1,8}".prop_filter(
+            "a DOS device name cannot be created on Windows",
+            |stem| bp_platform::paths::reserved_device_name(stem).is_none(),
+        ),
     ) {
         let dir = tempdir().unwrap();
         let relative: String = std::iter::repeat_n(stem.as_str(), depth)

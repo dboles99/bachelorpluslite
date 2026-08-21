@@ -8,8 +8,14 @@ label that swallows a click reads as broken. This file is the same information
 in one place, for deciding what to build next.
 
 **Live** means reachable and doing something. **Caret** means live only under
-`--editor-view`, because it needs the caret Slint's `TextInput` does not
-expose. **Built** means the library work exists and is tested but has no row
+`--editor-view`, because it needs to know *where the caret is*, and Slint's
+`TextInput` will not say.
+
+**Needing the caret *moved* is a different thing, and this file used to
+conflate them.** `set-selection-offsets` moves `TextInput`'s caret perfectly
+well — Find Next has always jumped that way — so a feature that only has to
+put the caret somewhere is not a Caret feature at all. Go to Line was marked
+as one until 2026-08-22 and was not. **Built** means the library work exists and is tested but has no row
 yet — those are the cheapest items in `project/WORK_QUEUE.md`.
 
 One row state is worth naming separately, because it is the most common kind

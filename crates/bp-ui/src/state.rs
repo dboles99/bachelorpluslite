@@ -1262,13 +1262,23 @@ impl AppState {
     /// the line existed, so a number past the end lands at the last line and
     /// says why rather than doing nothing and looking broken.
     ///
-    /// Caret work, so `--editor-view` only: `TextInput`'s caret cannot be
-    /// moved from here (ADR-0018).
+    /// **Works in both surfaces, and the note saying otherwise was wrong.**
+    /// This used to refuse without `--editor-view`, on the grounds that
+    /// "`TextInput`'s caret cannot be moved from here". It can:
+    /// `set-selection-offsets` moves it, which is how Find Next has always
+    /// jumped. What `TextInput` will not do is let us *read* its caret, and
+    /// going to a line never needed to -- the line number and the rope are
+    /// enough to compute where to put it.
+    ///
+    /// The reason it stayed refused this long is that the move used to be
+    /// invisible: nothing scrolled the viewport to the caret, so a correct
+    /// jump looked like nothing happening. That was fixed in the same session
+    /// as this, and fixing it is what made the refusal checkable.
+    ///
+    /// The status bar still cannot report `Ln`/`Col` under `TextInput`,
+    /// because *that* does need the caret read back. Going somewhere and
+    /// saying where you are turn out to be different requirements.
     pub(crate) fn go_to_line(&mut self, text: &str) -> Option<std::ops::Range<usize>> {
-        if !self.editor_view {
-            self.goto_status = "Go to Line needs --editor-view".to_owned();
-            return None;
-        }
         let trimmed = text.trim();
         if trimmed.is_empty() {
             self.goto_status.clear();
@@ -1283,13 +1293,18 @@ impl AppState {
         let editor = self.active_editor_mut()?;
         let existed = editor.go_to_line(line);
         let cursor = editor.cursor();
+        // The whole line rather than a bare caret, for the reason the cell
+        // outline needs the same thing: it shows which line you landed on,
+        // and a zero-width selection is a weaker thing to ask a viewport to
+        // scroll to.
+        let length = editor.buffer().line_len_chars(line.saturating_sub(1));
         let total = editor.buffer().len_lines();
         self.goto_status = if existed {
             String::new()
         } else {
             format!("there are only {total} lines")
         };
-        Some(cursor..cursor)
+        Some(cursor..cursor + length)
     }
 
     /// True if `id`'s file changed underneath us since we last read or wrote
@@ -2506,16 +2521,40 @@ mod tests {
     }
 
     #[test]
-    fn go_to_line_without_the_custom_view_says_why_instead_of_doing_nothing() {
+    fn go_to_line_works_without_the_custom_view_and_used_to_refuse_to() {
+        // **This test asserted the opposite until 2026-08-22.** The refusal
+        // rested on "`TextInput`'s caret cannot be moved from here", which is
+        // false -- `set-selection-offsets` moves it, and Find Next has always
+        // jumped that way. What `TextInput` refuses is letting us *read* the
+        // caret, and going to a line never needed that.
         let mut state = AppState::new();
-        state.edit("one\ntwo".to_owned());
+        state.edit("one\ntwo\nthree".to_owned());
 
-        assert!(state.go_to_line("2").is_none());
-        assert!(
-            state.goto_status.contains("--editor-view"),
-            "got {:?}",
-            state.goto_status
+        let range = state
+            .go_to_line("2")
+            .expect("line 2 exists in both surfaces");
+        assert!(state.goto_status.is_empty(), "got {:?}", state.goto_status);
+        assert_eq!(range.start, 4, "line 2 starts after `one` and its newline");
+        assert_eq!(
+            range.end, 7,
+            "the whole line is selected, so a reader can see which one they landed on"
         );
+    }
+
+    #[test]
+    fn going_to_a_line_reads_the_same_in_both_surfaces() {
+        // The property the guard's removal rests on: nothing about where a
+        // line *is* depends on which surface draws it, because both are drawn
+        // from the same rope.
+        let text = "alpha\nbeta\ngamma".to_owned();
+
+        let mut plain = AppState::new();
+        plain.edit(text.clone());
+        let mut custom = AppState::new();
+        custom.editor_view = true;
+        custom.edit(text);
+
+        assert_eq!(plain.go_to_line("3"), custom.go_to_line("3"));
     }
 
     // --- tab context menu -------------------------------------------------
