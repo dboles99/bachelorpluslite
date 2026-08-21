@@ -39,6 +39,16 @@ import { EditorRow, MenuItem, Palette, SearchHit, SelectionBox, TabInfo } from "
 // compiled entry file exports. `bp-ui` names all six.
 export { EditorRow, MenuItem, Palette, SearchHit, SelectionBox, TabInfo }
 
+// Which bar is waiting for the caret. Not exported and not in `types.slint`:
+// nothing outside this file may set it, and Rust never sees it -- it exists
+// only to carry one request across one tick. See `focus-timer` below.
+enum PendingFocus {
+    none,
+    find,
+    goto,
+    passphrase,
+}
+
 export component AppWindow inherits Window {
     title: "BachelorPad+";
     preferred-width: 1000px;
@@ -238,19 +248,69 @@ export component AppWindow inherits Window {
         editor.paste();
     }
 
+    // --- opening a bar, and giving it the caret -------------------------
+    //
+    // **A bar asks for the caret on the tick after it opens, never in the
+    // same one.** Every route into these three functions is a callback that
+    // two other things run *after*, and both of them put the caret back in
+    // the editor:
+    //
+    // - `dispatch` calls `focus-editor()` immediately after `menu-action`
+    //   returns, which is right for every row that is not opening a bar;
+    // - closing a `MenuPopup` restores the focus the popup took from the
+    //   editor when it opened. Slint does that in `close_popup_impl`, which
+    //   `process_mouse_input` calls *after* it has dispatched the click that
+    //   chose the row (`i-slint-core-1.17.1/window.rs`) -- read rather than
+    //   inferred, and there is no way to opt a popup out of it.
+    //
+    // Neither is reachable from here, so the caret is handed over once both
+    // have had their turn. Asking directly loses the race, and what the user
+    // types next goes into the *document*: found on 2026-08-21 by
+    // `Security > Sign Document`, which typed a signing passphrase into the
+    // open document in plain text, where saving would have written it to
+    // disk in the clear.
+    //
+    // Every other route through a menu row into one of these three functions
+    // was exposed to the same race -- `Edit > Go to Line`, and the two
+    // encrypted-document paths that reach `focus-passphrase` from
+    // `Security > Encrypt Document` and an encrypted `File > Open`. The two
+    // encrypted paths were not driven: both put a native `rfd` dialog in
+    // front of the bar, and a native dialog swallows synthetic input.
+    private property <PendingFocus> pending-focus: PendingFocus.none;
+
+    focus-timer := Timer {
+        // Not a delay: the shortest interval that still lands in a later
+        // turn of the event loop than the click being dispatched now.
+        interval: 1ms;
+        // A binding rather than an assignment, so there is one source of
+        // truth for whether a request is outstanding, and clearing the
+        // request below is what stops the timer.
+        running: root.pending-focus != PendingFocus.none;
+        triggered => {
+            if (root.pending-focus == PendingFocus.find) {
+                find-bar.focus-query();
+            } else if (root.pending-focus == PendingFocus.goto) {
+                goto-bar.focus-input();
+            } else if (root.pending-focus == PendingFocus.passphrase) {
+                passphrase-bar.focus-input();
+            }
+            root.pending-focus = PendingFocus.none;
+        }
+    }
+
     public function focus-find() {
         root.find-open = true;
-        find-bar.focus-query();
+        root.pending-focus = PendingFocus.find;
     }
 
     public function focus-goto() {
         root.goto-open = true;
-        goto-bar.focus-input();
+        root.pending-focus = PendingFocus.goto;
     }
 
     public function focus-passphrase() {
         root.passphrase-open = true;
-        passphrase-bar.focus-input();
+        root.pending-focus = PendingFocus.passphrase;
     }
 
     /// Wipe the box without closing the bar -- a wrong passphrase gets

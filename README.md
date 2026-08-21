@@ -161,30 +161,34 @@ should spend an afternoon on these before checking the version changed.
   journal is filed under a digest of its path and can only be read once you
   have unlocked the document, so nothing prompts at startup — deliberately.
 
-- **Used in anger three times, and it paid every time.** The first pass found a
+- **Used in anger four times, and it paid every time.** The first pass found a
   menu bar where twelve of fourteen menus swallowed clicks, and Save As
   defaulting to the process working directory -- which wrote real documents
   into a git checkout. The second, on 2026-08-20, found a tab drawn as a single
   glyph while every column in `bp-editor` was computed as though it reached the
   next tab stop, so the caret on any tab-bearing line sat where the character
-  was not. The third, on 2026-08-21, found the worst of them: typing a query
-  into Find edited the document. All three are fixed -- the third's fix and
-  the crash-recovery defect found the same pass are below, in "Recently
-  closed".
+  was not. The third, on 2026-08-21, found typing a query into Find edited the
+  document. The fourth, later the same day, found the worst of the four:
+  `Security ▸ Sign Document`'s passphrase typed itself into the document in
+  plain text. All four are fixed -- the last two, and the crash-recovery
+  defect found alongside the third, are below in "Recently closed".
 
-  **All three lived in the same seam, and it is the one a test in this
-  repository cannot see: what a toolkit does with the string it is handed.**
-  1,754 tests did not find the third either -- `AppState::find` was correct
-  throughout, and every test of it passed. The defect was entirely in who
-  held the focus afterwards.
+  **All four lived in the same seam, and it is the one a test in this
+  repository cannot see: what a toolkit does with what it is handed.**
+  1,754 tests did not find the third -- `AppState::find` was correct
+  throughout, and every test of it passed. 1,812 did not find the fourth
+  either: `PassphraseBar`, its `focus-input()` and the Rust call site that
+  invokes it are each correct on their own, and the defect was entirely in
+  who took the caret back afterwards, and when.
 
-  Still unclicked, in the order they now matter: **the wheel** and **a window
-  resize** -- both inherited by the huge-file viewer, which does nothing but
-  scroll, so a wheel going the wrong way there is not a papercut but the
-  feature being broken; **reading an enormous document**, which has been
-  rendered and measured but not read; **signing one**, which is new and has
-  never been clicked; drag-to-select; and **File ▸ Set as Default Editor**,
-  the one row that changes state outside this application.
+  Still unclicked, in the order they now matter: **File ▸ Set as Default
+  Editor**, the one row that changes state outside this application, which
+  wants a person's explicit go-ahead rather than a script's click; and
+  drag-to-select in the default `TextInput` surface, which uses Slint's own
+  selection rather than this codebase's. The wheel, a window resize, reading
+  an enormous document, drag-to-select under `--editor-view` and the caret's
+  goal column are all checked and clean; signing one is now reachable, since
+  the passphrase bar takes the caret.
   [NEXT_SESSION.md](project/NEXT_SESSION.md) has the checklist and a four-line
   recipe for a 192 MiB fixture.
 
@@ -193,6 +197,40 @@ should spend an afternoon on these before checking the version changed.
 Kept rather than deleted, because every one of these went stale the same
 way — a fix landing without the record moving — and because the lesson in each
 is worth more than the fact.
+
+- **A signing passphrase no longer types itself into the document.** The
+  fourth manual pass, on 2026-08-21, found the worst of the four:
+  `Security ▸ Sign Document`, then type the passphrase the bar has just asked
+  for, and every character went **into the open document, in plain text**,
+  while the passphrase field stayed empty. Saving after that would have
+  written the passphrase to disk in the clear. Reproduced against the
+  unfixed binary while confirming the fix: `secret` typed at 1.6 s per
+  keystroke turned `alpha beta gamma` into `siecalpha beta gamma` and marked
+  the tab dirty.
+
+  **The cause was two focus-stealers, both running *after* the callback that
+  asked for the caret**, and the reason `PassphraseBar`, `focus-input()` and
+  the `SIGN_DOCUMENT` arm all read as correct in isolation is that none of
+  them is either one. First, `dispatch` in `ui/app.slint` ends every menu
+  action with `root.focus-editor()`, which is right for every row that is not
+  opening a bar. Second — and this one no amount of reading this repository
+  would have found — **closing a `MenuPopup` restores the focus the popup took
+  when it opened**: `i-slint-core`'s `process_mouse_input` computes which
+  popup to close *before* it dispatches the click, and calls `close_popup`
+  *after* the row's callback has returned, and `close_popup_impl` then hands
+  the caret back to whatever had it before the menu opened. There is no way
+  to opt a popup out of it.
+
+  **The fix is one tick of patience**: `focus-find`, `focus-goto` and
+  `focus-passphrase` now record *which* bar wants the caret and let a 1 ms
+  `Timer` hand it over on the next turn of the event loop, once both
+  focus-stealers have had theirs. `Edit ▸ Go to Line` had the identical
+  defect — confirmed against the same unfixed binary, where a typed `9`
+  landed in the document rather than the box — and the two encrypted-document
+  paths reach `focus-passphrase` the same way. Confirmed by driving the
+  window: the passphrase now arrives as six dots with the document untouched,
+  the confirm step keeps the caret too, and Find still behaves in both
+  surfaces.
 
 - **Find no longer edits the document while you type the query.** The third
   manual pass, on 2026-08-21, found the worst defect any of the three found:
