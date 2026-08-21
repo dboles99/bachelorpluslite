@@ -80,7 +80,7 @@ pub use error::ExecutionError;
 pub use gesture::UserGesture;
 pub use language::Language;
 pub use outcome::RunOutcome;
-pub use run::{DEFAULT_TIMEOUT, OUTPUT_CAP_BYTES, run, run_with_timeout};
+pub use run::{DEFAULT_TIMEOUT, OUTPUT_CAP_BYTES, Progress, Run, run, run_with_timeout};
 
 /// Crate identity used by workspace smoke tests and diagnostics.
 pub const CRATE_NAME: &str = "bp-execution";

@@ -24,6 +24,20 @@
 //! of `stdin` before writing any output, which `Command::output()` (write
 //! everything first, *then* read) would have to assume to be safe.
 //!
+//! ## Blocking and resumable are the same run, driven two ways
+//!
+//! [`run`] and [`run_with_timeout`] block until the cell is done, which is
+//! what a test or a batch caller wants. A window cannot afford that: a cell
+//! that sleeps for the whole timeout would freeze it for the whole timeout,
+//! and the point of a timeout is to bound a hang, not to schedule one.
+//!
+//! So the spawn and the waiting are separated. [`Run::start`] does everything
+//! up to and including the three threads, and [`Run::poll`] asks once,
+//! without blocking, whether the process has exited or the deadline has
+//! passed. `run_with_timeout` is then written in terms of those two, so there
+//! is exactly one implementation of what a run *is* and no chance of the two
+//! shapes drifting on the timeout, the cap or the teardown.
+//!
 //! ## The output cap is enforced while reading, not after
 //!
 //! [`read_capped`] stops pulling bytes off a pipe the moment it has
@@ -33,8 +47,8 @@
 //! point of a cap.
 
 use std::io::{Read, Write};
-use std::process::{Command, Stdio};
-use std::thread;
+use std::process::{Child, Command, ExitStatus, Stdio};
+use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use crate::error::ExecutionError;
@@ -88,99 +102,220 @@ pub fn run_with_timeout(
     timeout: Duration,
     gesture: UserGesture,
 ) -> Result<RunOutcome, ExecutionError> {
-    run_impl(language, language.candidates(), source, timeout, gesture)
+    block_on(Run::start_impl(
+        language,
+        language.candidates(),
+        source,
+        timeout,
+        gesture,
+    )?)
 }
 
-/// The real implementation, taking the candidate interpreter list as an
-/// explicit parameter rather than deriving it from `language` internally.
+/// Drive a [`Run`] to its end on this thread, sleeping between checks.
 ///
-/// This split exists for one reason: it lets a test exercise "no candidate
-/// resolves" (see [`ExecutionError::InterpreterNotFound`]) through the real
-/// spawn path end to end, by handing it a candidate list guaranteed to
-/// resolve nothing -- without inventing a fourth, fictitious [`Language`]
-/// variant, and without mutating the real `PATH` for the whole test process
-/// (which a parallel test run would race on).
-fn run_impl(
-    language: Language,
-    candidates: &[&'static str],
-    source: &str,
-    timeout: Duration,
-    gesture: UserGesture,
-) -> Result<RunOutcome, ExecutionError> {
-    let _ = gesture; // Consumed by value: proves a caller held one to give up.
-
-    let interpreter = resolve(candidates).ok_or_else(|| ExecutionError::InterpreterNotFound {
-        language,
-        tried: candidates.to_vec(),
-    })?;
-
-    let mut child = Command::new(interpreter)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(ExecutionError::Process)?;
-
-    // Infallible: all three were just requested as `Stdio::piped()` above.
-    let mut stdin = child.stdin.take().expect("stdin was requested as piped");
-    let stdout = child.stdout.take().expect("stdout was requested as piped");
-    let stderr = child.stderr.take().expect("stderr was requested as piped");
-
-    let source = source.to_owned();
-    let stdin_writer = thread::spawn(move || {
-        // A script that never reads stdin, or exits before we finish
-        // writing, closes its end early -- `write_all` then fails with a
-        // broken-pipe error. That is not this crate's failure to report: the
-        // process still ran, and its exit code and stderr say what
-        // happened. `stdin` is dropped when this closure returns, closing
-        // our end, which is how the interpreter is told "that's all of it."
-        let _ = stdin.write_all(source.as_bytes());
-    });
-    let stdout_reader = thread::spawn(move || read_capped(stdout));
-    let stderr_reader = thread::spawn(move || read_capped(stderr));
-
-    let start = Instant::now();
-    let mut timed_out = false;
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break Some(status),
-            Ok(None) => {
-                if start.elapsed() >= timeout {
-                    timed_out = true;
-                    // Kill, then reap: leaving a killed child unwaited is a
-                    // zombie process on Unix.
-                    let _ = child.kill();
-                    break child.wait().ok();
-                }
+/// The blocking half of the crate, and the only place that sleeps. Written
+/// over [`Run::poll`] rather than beside it so that the two shapes cannot
+/// come to disagree about when a run is over.
+fn block_on(mut run: Run) -> Result<RunOutcome, ExecutionError> {
+    loop {
+        match run.poll() {
+            Progress::Finished(outcome) => return Ok(outcome),
+            Progress::Running(waiting) => {
+                run = waiting;
                 thread::sleep(POLL_INTERVAL);
+            }
+        }
+    }
+}
+
+/// A run in flight, asked about rather than waited on.
+///
+/// **The type is what stops a finished run being polled again**, which is the
+/// whole reason [`Self::poll`] takes `self` and hands the run back only while
+/// it is still going: the reader threads are joined exactly once, when the
+/// outcome is built, and there is no state in which this holds a
+/// `JoinHandle` that has already been joined.
+///
+/// Dropping one leaves the child running. [`Self::stop`] is how a caller ends
+/// a cell it no longer wants, and it returns whatever the process managed to
+/// produce first rather than discarding it.
+#[derive(Debug)]
+pub struct Run {
+    child: Child,
+    start: Instant,
+    timeout: Duration,
+    stdin_writer: JoinHandle<()>,
+    stdout_reader: JoinHandle<(Vec<u8>, bool)>,
+    stderr_reader: JoinHandle<(Vec<u8>, bool)>,
+}
+
+/// What one [`Run::poll`] found.
+#[derive(Debug)]
+pub enum Progress {
+    /// Still going. The run is handed back so the caller can ask again.
+    Running(Run),
+    /// Over -- exited on its own, or killed at the deadline.
+    Finished(RunOutcome),
+}
+
+impl Run {
+    /// Spawn the interpreter and start feeding it, with [`DEFAULT_TIMEOUT`].
+    ///
+    /// Requires a [`UserGesture`] by value for the same reason [`run`] does:
+    /// this starts a process, and the gesture is the one greppable line where
+    /// a person is asserted to have asked for it.
+    pub fn start(
+        language: Language,
+        source: &str,
+        gesture: UserGesture,
+    ) -> Result<Self, ExecutionError> {
+        Self::start_with_timeout(language, source, DEFAULT_TIMEOUT, gesture)
+    }
+
+    /// Spawn with a chosen deadline.
+    pub fn start_with_timeout(
+        language: Language,
+        source: &str,
+        timeout: Duration,
+        gesture: UserGesture,
+    ) -> Result<Self, ExecutionError> {
+        Self::start_impl(language, language.candidates(), source, timeout, gesture)
+    }
+
+    /// How long this run has been going. For a caller that shows progress.
+    pub fn elapsed(&self) -> Duration {
+        self.start.elapsed()
+    }
+
+    /// Ask once whether the run is over. Never blocks.
+    ///
+    /// A run is over when the process exits *or* when the deadline passes, and
+    /// the second case kills and reaps before collecting -- leaving a killed
+    /// child unwaited is a zombie on Unix.
+    pub fn poll(mut self) -> Progress {
+        let status = match self.child.try_wait() {
+            Ok(Some(status)) => Some(status),
+            Ok(None) => {
+                if self.start.elapsed() < self.timeout {
+                    return Progress::Running(self);
+                }
+                let _ = self.child.kill();
+                let status = self.child_wait();
+                return Progress::Finished(self.collect(status, true));
             }
             // Cannot observe whether the process has exited. Rare and
             // OS-level, but the run was genuinely attempted and may already
             // have produced output worth keeping -- report it as an outcome
-            // with an unknown exit code rather than discarding everything
-            // captured so far.
-            Err(_) => break None,
+            // with an unknown exit code rather than discarding everything.
+            Err(_) => None,
+        };
+        Progress::Finished(self.collect(status, false))
+    }
+
+    /// End the run now, and keep whatever it produced.
+    ///
+    /// What the Stop the caller offers actually does. A cell that printed for
+    /// ten seconds and was then stopped has ten seconds of output worth
+    /// showing, and throwing it away would make Stop feel like a failure
+    /// rather than a decision.
+    pub fn stop(mut self) -> RunOutcome {
+        let _ = self.child.kill();
+        let status = self.child_wait();
+        // `timed_out` stays false: this ended because somebody said so, and
+        // reporting it as a timeout would blame the cell for the user's
+        // decision.
+        self.collect(status, false)
+    }
+
+    /// Reap the child after a kill, so it does not become a zombie.
+    fn child_wait(&mut self) -> Option<ExitStatus> {
+        self.child.wait().ok()
+    }
+
+    /// Join the readers and build the outcome. Consumes, because a
+    /// `JoinHandle` can only be joined once.
+    ///
+    /// No extra wait is needed first: by the time the process has exited or
+    /// been killed-and-reaped, the OS has closed its end of every pipe, so
+    /// each reader thread is at (or moments from) EOF regardless of how much
+    /// of its cap it had used.
+    fn collect(self, status: Option<ExitStatus>, timed_out: bool) -> RunOutcome {
+        let duration = self.start.elapsed();
+        let _ = self.stdin_writer.join();
+        let (stdout_bytes, stdout_truncated) = self.stdout_reader.join().unwrap_or_default();
+        let (stderr_bytes, stderr_truncated) = self.stderr_reader.join().unwrap_or_default();
+
+        RunOutcome {
+            stdout: String::from_utf8_lossy(&stdout_bytes).into_owned(),
+            stderr: String::from_utf8_lossy(&stderr_bytes).into_owned(),
+            exit_code: status.and_then(|s| s.code()),
+            stdout_truncated,
+            stderr_truncated,
+            timed_out,
+            duration,
         }
-    };
-    let duration = start.elapsed();
+    }
+}
 
-    // No extra wait needed here: by the time the process has exited or been
-    // killed-and-reaped above, the OS has closed its end of every pipe, so
-    // each reader thread is at (or moments from) EOF regardless of how much
-    // of its cap it had used.
-    let _ = stdin_writer.join();
-    let (stdout_bytes, stdout_truncated) = stdout_reader.join().unwrap_or_default();
-    let (stderr_bytes, stderr_truncated) = stderr_reader.join().unwrap_or_default();
+impl Run {
+    /// The real spawn, taking the candidate interpreter list as an explicit
+    /// parameter rather than deriving it from `language` internally.
+    ///
+    /// This split exists for one reason: it lets a test exercise "no candidate
+    /// resolves" (see [`ExecutionError::InterpreterNotFound`]) through the real
+    /// spawn path end to end, by handing it a candidate list guaranteed to
+    /// resolve nothing -- without inventing a fourth, fictitious [`Language`]
+    /// variant, and without mutating the real `PATH` for the whole test process
+    /// (which a parallel test run would race on).
+    fn start_impl(
+        language: Language,
+        candidates: &[&'static str],
+        source: &str,
+        timeout: Duration,
+        gesture: UserGesture,
+    ) -> Result<Self, ExecutionError> {
+        let _ = gesture; // Consumed by value: proves a caller held one to give up.
 
-    Ok(RunOutcome {
-        stdout: String::from_utf8_lossy(&stdout_bytes).into_owned(),
-        stderr: String::from_utf8_lossy(&stderr_bytes).into_owned(),
-        exit_code: status.and_then(|s| s.code()),
-        stdout_truncated,
-        stderr_truncated,
-        timed_out,
-        duration,
-    })
+        let interpreter =
+            resolve(candidates).ok_or_else(|| ExecutionError::InterpreterNotFound {
+                language,
+                tried: candidates.to_vec(),
+            })?;
+
+        let mut child = Command::new(interpreter)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(ExecutionError::Process)?;
+
+        // Infallible: all three were just requested as `Stdio::piped()` above.
+        let mut stdin = child.stdin.take().expect("stdin was requested as piped");
+        let stdout = child.stdout.take().expect("stdout was requested as piped");
+        let stderr = child.stderr.take().expect("stderr was requested as piped");
+
+        let source = source.to_owned();
+        let stdin_writer = thread::spawn(move || {
+            // A script that never reads stdin, or exits before we finish
+            // writing, closes its end early -- `write_all` then fails with a
+            // broken-pipe error. That is not this crate's failure to report: the
+            // process still ran, and its exit code and stderr say what
+            // happened. `stdin` is dropped when this closure returns, closing
+            // our end, which is how the interpreter is told "that's all of it."
+            let _ = stdin.write_all(source.as_bytes());
+        });
+        let stdout_reader = thread::spawn(move || read_capped(stdout));
+        let stderr_reader = thread::spawn(move || read_capped(stderr));
+
+        Ok(Self {
+            child,
+            start: Instant::now(),
+            timeout,
+            stdin_writer,
+            stdout_reader,
+            stderr_reader,
+        })
+    }
 }
 
 /// Read `reader` to EOF or [`OUTPUT_CAP_BYTES`], whichever comes first.
@@ -339,16 +474,140 @@ mod tests {
         assert!(outcome.stdout().len() <= OUTPUT_CAP_BYTES);
     }
 
+    /// Poll a run to its end, counting how many times it said it was still
+    /// going. The count is the point: a resumable run that never once
+    /// answered "still running" would be a blocking one wearing a different
+    /// signature.
+    fn drive(run: Run) -> (RunOutcome, usize) {
+        let mut run = run;
+        let mut still_running = 0;
+        loop {
+            match run.poll() {
+                Progress::Finished(outcome) => return (outcome, still_running),
+                Progress::Running(waiting) => {
+                    run = waiting;
+                    still_running += 1;
+                    thread::sleep(POLL_INTERVAL);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_resumable_run_reaches_the_same_outcome_the_blocking_one_does() {
+        // The property that makes one implementation safe to have two shapes:
+        // `run_with_timeout` is written over `poll`, so a difference here
+        // would mean the blocking path had grown its own idea of what a run
+        // is.
+        let Some(language) = python() else {
+            println!("no python interpreter; skipping");
+            return;
+        };
+
+        let blocking = run(language, "print('same')", gesture()).expect("the blocking run starts");
+        let started = Run::start(language, "print('same')", gesture()).expect("the run starts");
+        let (resumable, _) = drive(started);
+
+        assert_eq!(resumable.stdout(), blocking.stdout());
+        assert_eq!(resumable.exit_code(), blocking.exit_code());
+        assert!(!resumable.timed_out());
+    }
+
+    #[test]
+    fn a_run_that_takes_a_while_says_it_is_still_going_rather_than_blocking() {
+        // The whole reason this API exists. A window polls this between
+        // frames, so `poll` must return while the cell is still working --
+        // if it only ever came back at the end, the window would freeze for
+        // as long as the cell took.
+        let Some(language) = python() else {
+            println!("no python interpreter; skipping");
+            return;
+        };
+
+        let started = Run::start(
+            language,
+            "import time\ntime.sleep(0.4)\nprint('done')",
+            gesture(),
+        )
+        .expect("the run starts");
+        let (outcome, still_running) = drive(started);
+
+        assert!(
+            still_running > 0,
+            "poll never once reported the run in flight, so it blocked"
+        );
+        assert_eq!(outcome.stdout().trim(), "done");
+        assert!(!outcome.timed_out());
+    }
+
+    #[test]
+    fn stopping_a_run_keeps_what_it_had_already_printed() {
+        // What Stop has to mean for it to be a decision rather than a
+        // failure: a cell that printed for a while and was then stopped has
+        // output worth showing, and discarding it would punish the user for
+        // changing their mind.
+        let Some(language) = python() else {
+            println!("no python interpreter; skipping");
+            return;
+        };
+
+        let script = "import sys, time\nsys.stdout.write('before stop\\n')\nsys.stdout.flush()\ntime.sleep(30)";
+        let mut run = Run::start(language, script, gesture()).expect("the run starts");
+        // Give it long enough to print, polling rather than sleeping blindly
+        // so the test does not depend on interpreter startup being fast.
+        for _ in 0..400 {
+            match run.poll() {
+                Progress::Running(waiting) => run = waiting,
+                Progress::Finished(_) => panic!("a 30-second sleep should not have finished"),
+            }
+            thread::sleep(POLL_INTERVAL);
+        }
+
+        let outcome = run.stop();
+
+        assert!(
+            outcome.stdout().contains("before stop"),
+            "stopped run lost its output: {:?}",
+            outcome.stdout()
+        );
+        assert!(
+            !outcome.timed_out(),
+            "a run the user stopped must not be reported as a timeout -- that blames the cell for their decision"
+        );
+    }
+
+    #[test]
+    fn a_resumable_run_still_honours_its_deadline() {
+        // The timeout is the reader's protection against a hung cell, and it
+        // has to survive the run being driven from outside rather than from
+        // the loop that used to own it.
+        let Some(language) = python() else {
+            println!("no python interpreter; skipping");
+            return;
+        };
+
+        let started = Run::start_with_timeout(
+            language,
+            "while True:\n    pass",
+            Duration::from_millis(300),
+            gesture(),
+        )
+        .expect("the run starts");
+        let (outcome, _) = drive(started);
+
+        assert!(outcome.timed_out(), "the deadline did not end the run");
+    }
+
     #[test]
     fn an_unresolvable_interpreter_is_reported_as_not_found_not_a_panic() {
-        let err = run_impl(
+        let err = Run::start_impl(
             Language::Python,
             NO_SUCH_INTERPRETER,
             "print(1)",
             DEFAULT_TIMEOUT,
             gesture(),
         )
-        .unwrap_err();
+        .expect_err("an interpreter that does not exist cannot be started");
 
         let text = err.to_string();
         assert!(text.contains("Python"), "{text}");
