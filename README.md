@@ -58,7 +58,7 @@ cargo run --release -- --editor-view   # with the custom editor view (ADR-0018)
 
 ## Current state (2026-08-21)
 
-**25 crates, 1,812 tests, green on Windows and Linux.** The app opens, edits and
+**25 crates, 1,846 tests, green on Windows and Linux.** The app opens, edits and
 saves atomically, and does rather more than that:
 
 | Area | What works |
