@@ -32,7 +32,7 @@ use std::path::{Path, PathBuf};
 
 use bp_core::{Document, DocumentId};
 
-use super::{AppState, doc_path, now};
+use super::{AppState, checkpoint_encoding_of, checkpoint_line_ending_of, doc_path, now};
 
 /// Whether a signing key had to be made on the way to a signature.
 ///
@@ -584,6 +584,8 @@ impl AppState {
         if previous == security {
             return;
         }
+        let encoding = doc.encoding();
+        let line_ending = doc.line_ending();
 
         let policy = security.policy_under(self.privacy);
         if self.clips.enforce(policy.clipboard) {
@@ -609,6 +611,8 @@ impl AppState {
             name: self.display_name(id),
             text: self.text_of(id).to_owned(),
             written_at: bp_history::now_unix(),
+            encoding: checkpoint_encoding_of(encoding),
+            line_ending: Some(checkpoint_line_ending_of(line_ending)),
         };
         let passphrase = self.passphrases.get(&id).map(|p| p.to_string());
         if let Ok(bp_history::Written::Refused(refusal)) =

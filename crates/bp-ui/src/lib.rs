@@ -760,7 +760,11 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
             let selection = cell.borrow_mut().find(&query);
             ui.set_find_status(cell.borrow().find_status.as_str().into());
             if let Some(range) = selection {
-                dispatch::select(&ui, &mut cell.borrow_mut(), &range);
+                // A preview, not a jump: this fires on every keystroke while
+                // the query is still being typed, so it must not steal focus
+                // back from the find box the way `dispatch::select` does for
+                // Find Next/Previous, Go to Line, and cross-file results.
+                dispatch::preview_match(&ui, &mut cell.borrow_mut(), &range);
             }
         });
     }

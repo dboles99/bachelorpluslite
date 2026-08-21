@@ -58,7 +58,7 @@ cargo run --release -- --editor-view   # with the custom editor view (ADR-0018)
 
 ## Current state (2026-08-21)
 
-**24 crates, 1,754 tests, green on Windows and Linux.** The app opens, edits and
+**24 crates, 1,758 tests, green on Windows and Linux.** The app opens, edits and
 saves atomically, and does rather more than that:
 
 | Area | What works |
@@ -164,39 +164,16 @@ should spend an afternoon on these before checking the version changed.
   into a git checkout. The second, on 2026-08-20, found a tab drawn as a single
   glyph while every column in `bp-editor` was computed as though it reached the
   next tab stop, so the caret on any tab-bearing line sat where the character
-  was not. The first two are fixed.
-
-  **The third, on 2026-08-21, found the worst of them and it is open: typing a
-  query into Find edits the document.** Ctrl+F, then type `replicas`: the `r`
-  reaches the find box and the box correctly reports `1 of 3`, and then
-  **`eplicas` is typed into the document, over the match the `r` had just
-  selected**. `alpha replicas beta` becomes `alpha eeplicas beta`, the tab goes
-  dirty, and the find box still reads `r`. Reproduced with 1.5 seconds between
-  keystrokes, so it is not a race.
-
-  The cause is one line with a comment that says what it is doing.
-  `on_find_changed` ([lib.rs](crates/bp-ui/src/lib.rs)) runs on **every**
-  keystroke in the query box and calls `dispatch::select`, which ends in
-  `editor.focus()` -- "Just take the focus back from the find box", says
-  `select-range` in `ui/app.slint`. That is right for Find Next, which is the
-  other caller and where the user does want the caret in the document
-  afterwards. It is wrong for the preview that runs while they are still
-  typing the query, and the two share one function.
+  was not. The third, on 2026-08-21, found the worst of them: typing a query
+  into Find edited the document. All three are fixed -- the third's fix and
+  the crash-recovery defect found the same pass are below, in "Recently
+  closed".
 
   **All three lived in the same seam, and it is the one a test in this
   repository cannot see: what a toolkit does with the string it is handed.**
-  1,754 tests do not find this one either -- `AppState::find` is correct, and
-  every test of it passes. The defect is entirely in who holds the focus
-  afterwards.
-
-  A second, quieter one from the same pass: **crash recovery restores the text
-  and forgets the encoding and the line ending.** `AppState::restore` opens the
-  document and inserts the text, but never calls `set_line_ending` or
-  `set_encoding` the way `open` does, so a recovered document falls back to
-  `LineEnding::default()` -- CRLF on Windows. An LF file recovered on Windows
-  is rewritten CRLF throughout on the next save, and a UTF-16 one comes back as
-  UTF-8. Confirmed in the status bar (LF before the crash, CRLF after) and in
-  the code.
+  1,754 tests did not find the third either -- `AppState::find` was correct
+  throughout, and every test of it passed. The defect was entirely in who
+  held the focus afterwards.
 
   Still unclicked, in the order they now matter: **the wheel** and **a window
   resize** -- both inherited by the huge-file viewer, which does nothing but
@@ -213,6 +190,57 @@ should spend an afternoon on these before checking the version changed.
 Kept rather than deleted, because every one of these went stale the same
 way — a fix landing without the record moving — and because the lesson in each
 is worth more than the fact.
+
+- **Find no longer edits the document while you type the query.** The third
+  manual pass, on 2026-08-21, found the worst defect any of the three found:
+  Ctrl+F, then type `replicas`, and the `r` reached the find box correctly
+  (`1 of 3`), but every character after it went **into the document**, over
+  the match the `r` had just selected -- `alpha replicas beta` became
+  `alpha eeplicas beta`, the tab went dirty, and the find box still read `r`.
+  Reproduced with 1.5 seconds between keystrokes, so it was not a race.
+
+  The cause was one line with a comment that said what it was doing.
+  `on_find_changed` ([lib.rs](crates/bp-ui/src/lib.rs)) runs on **every**
+  keystroke in the query box and called `dispatch::select`, which ends in
+  `editor.focus()` -- "Just take the focus back from the find box", says
+  `select-range` in `ui/app.slint`. That is right for Find Next, the other
+  caller, where the user does want the caret in the document afterwards. It
+  was wrong for the preview that runs while they are still typing the query,
+  and the two shared one function.
+
+  **The fix is the split the toolkit's own comment implied it needed**: a
+  second, focus-preserving path -- `dispatch::preview_match` in Rust,
+  `preview-range` in `ui/app.slint` -- used only by the live-typing preview,
+  leaving the three deliberate "jump to it" callers (Find Next/Previous, Go to
+  Line, a cross-file search result) on the original focus-stealing one. Both
+  the `TextInput` and `--editor-view` branches got the same treatment; the
+  first pass's diagnosis of the `--editor-view` half was by reading the code,
+  not by driving it, and driving it afterward found nothing further wrong.
+
+  Two agents built this in parallel with an unrelated fix below, in files
+  that never overlapped; one of them hit the exact file-collision this
+  repository's own working notes warn about mid-run, from the other agent's
+  concurrent edits, and caught it itself with an isolated worktree rather
+  than reporting a false pass. Confirmed by driving the window again
+  afterward: four clean runs against the exact sequence that broke it, at
+  both typing speeds.
+
+- **Crash recovery restores the text now, and the encoding and line ending
+  with it.** Found in the same pass. `AppState::restore` opened the document
+  and inserted the checkpoint's text, but never called `set_line_ending` or
+  `set_encoding` the way `open` does, so a recovered document fell back to
+  `LineEnding::default()` -- CRLF on Windows. An LF file recovered on Windows
+  was rewritten CRLF throughout on the next save, and a UTF-16 document came
+  back as UTF-8 -- silently contradicting a test that was already green,
+  `saving_a_mixed_document_does_not_rewrite_the_minority_line_break`.
+
+  `bp_history::Checkpoint` now carries `encoding` and `line_ending`,
+  `#[serde(default)]` so a journal already on disk still deserializes.
+  Recovery re-detects a missing line ending from the text itself, the way the
+  rest of the codebase guesses when certainty is not available; a missing
+  encoding cannot be recovered the same way, because the checkpoint holds
+  already-decoded text, so it falls back to a documented guess rather than a
+  claim.
 
 - **A 2 GB file opens, and costs 0.8 MiB.** The last piece of phase 4
   ([ADR-0030](docs/decisions/ADR-0030.md)). A document past the huge threshold

@@ -199,6 +199,20 @@ export component AppWindow inherits Window {
         editor.focus();
     }
 
+    /// Select a range in the editor without moving focus -- a live preview
+    /// while the user is still typing in the find box, where taking focus
+    /// back on every keystroke (as `select-range` does) would send the next
+    /// character typed into the document instead of the box.
+    ///
+    /// Only reached under `TextInput`: under the custom surface Rust owns
+    /// the selection outright and never calls into Slint for a preview.
+    public function preview-range(start: int, end: int) {
+        if (root.use-editor-view) {
+            return;
+        }
+        editor.set-selection-offsets(start, end);
+    }
+
     /// Paste whatever the OS clipboard holds at the caret.
     ///
     /// Rust puts the chosen history entry on the clipboard first. Under

@@ -327,6 +327,8 @@ impl AppState {
                 name: doc.display_name().to_owned(),
                 text: self.text_of(id).to_owned(),
                 written_at: bp_history::now_unix(),
+                encoding: checkpoint_encoding_of(doc.encoding()),
+                line_ending: Some(checkpoint_line_ending_of(doc.line_ending())),
             };
             // The document's own profile, not a global setting: two tabs
             // open side by side can be governed differently, and the
@@ -358,6 +360,11 @@ impl AppState {
     }
 
     /// Open recovered documents as unsaved tabs.
+    ///
+    /// Encoding and line ending are restored alongside the text, or the next
+    /// save would rewrite the file in whatever the platform default happens
+    /// to be rather than the convention it was actually in (the bug this
+    /// guards against: an LF file coming back reporting CRLF on Windows).
     pub(crate) fn restore(&mut self, entries: Vec<(u64, bp_history::Checkpoint)>) {
         for (_, entry) in entries {
             let id = match entry.path {
@@ -365,8 +372,19 @@ impl AppState {
                 None => self.workspace.open_new(now()),
             };
             self.editors.insert(id, bp_editor::Editor::new(&entry.text));
-            // Recovered work is by definition not on disk yet.
             if let Some(doc) = self.workspace.get_mut(id) {
+                doc.set_encoding(encoding_of_checkpoint(entry.encoding));
+                // A pre-upgrade checkpoint has no recorded line ending; guess
+                // from the text itself the way the rest of the codebase does
+                // when certainty isn't available, rather than falling back to
+                // the platform default.
+                let line_ending = entry
+                    .line_ending
+                    .map(line_ending_of_checkpoint)
+                    .or_else(|| LineEnding::detect(&entry.text))
+                    .unwrap_or_default();
+                doc.set_line_ending(line_ending);
+                // Recovered work is by definition not on disk yet.
                 doc.mark_modified();
             }
         }
@@ -1501,6 +1519,41 @@ fn doc_path(workspace: &Workspace, id: DocumentId) -> Option<PathBuf> {
         .map(Path::to_path_buf)
 }
 
+/// `bp-history` mirrors `Encoding` and `LineEnding` rather than depending on
+/// `bp-core` for them, so a `Checkpoint` is built and read through these
+/// conversions rather than by sharing the type.
+fn checkpoint_encoding_of(encoding: Encoding) -> bp_history::CheckpointEncoding {
+    match encoding {
+        Encoding::Utf8 => bp_history::CheckpointEncoding::Utf8,
+        Encoding::Utf8Bom => bp_history::CheckpointEncoding::Utf8Bom,
+        Encoding::Utf16Le => bp_history::CheckpointEncoding::Utf16Le,
+        Encoding::Utf16Be => bp_history::CheckpointEncoding::Utf16Be,
+    }
+}
+
+fn encoding_of_checkpoint(encoding: bp_history::CheckpointEncoding) -> Encoding {
+    match encoding {
+        bp_history::CheckpointEncoding::Utf8 => Encoding::Utf8,
+        bp_history::CheckpointEncoding::Utf8Bom => Encoding::Utf8Bom,
+        bp_history::CheckpointEncoding::Utf16Le => Encoding::Utf16Le,
+        bp_history::CheckpointEncoding::Utf16Be => Encoding::Utf16Be,
+    }
+}
+
+fn checkpoint_line_ending_of(line_ending: LineEnding) -> bp_history::CheckpointLineEnding {
+    match line_ending {
+        LineEnding::Lf => bp_history::CheckpointLineEnding::Lf,
+        LineEnding::CrLf => bp_history::CheckpointLineEnding::CrLf,
+    }
+}
+
+fn line_ending_of_checkpoint(line_ending: bp_history::CheckpointLineEnding) -> LineEnding {
+    match line_ending {
+        bp_history::CheckpointLineEnding::Lf => LineEnding::Lf,
+        bp_history::CheckpointLineEnding::CrLf => LineEnding::CrLf,
+    }
+}
+
 /// Map a tab id from the UI back to a `DocumentId`.
 ///
 /// Returns `None` for ids that are no longer open, which is what makes a
@@ -1761,6 +1814,63 @@ mod tests {
             "● Unsaved │ Recovery 8:05 PM │ Last disk save 8:01 PM"
         );
         assert!(!label.contains("Saved 8:05"), "a checkpoint is not a save");
+    }
+
+    #[test]
+    fn restoring_a_checkpoint_recovers_its_encoding_and_line_ending_not_the_platform_default() {
+        // The bug this guards against: recovery rebuilt the text correctly
+        // but silently forgot the encoding and line ending, so a recovered
+        // LF document came back reporting the platform default (CRLF on
+        // Windows) instead of what it actually was.
+        let mut state = AppState::new();
+        let entry = bp_history::Checkpoint {
+            path: Some(PathBuf::from("/notes/recovered.txt")),
+            name: "recovered.txt".to_owned(),
+            text: "line one\nline two\n".to_owned(),
+            written_at: bp_history::now_unix(),
+            encoding: bp_history::CheckpointEncoding::Utf16Le,
+            line_ending: Some(bp_history::CheckpointLineEnding::Lf),
+        };
+        state.restore(vec![(1, entry)]);
+
+        let doc = state
+            .workspace
+            .iter()
+            .find(|d| d.display_name() == "recovered.txt")
+            .expect("the recovered document was opened");
+        assert_eq!(doc.encoding(), Encoding::Utf16Le);
+        assert_eq!(doc.line_ending(), LineEnding::Lf);
+    }
+
+    #[test]
+    fn restoring_a_pre_upgrade_checkpoint_guesses_the_line_ending_from_the_text() {
+        // Checkpoints already on disk were written before `line_ending`
+        // existed, so `#[serde(default)]` gives them `None` here. `restore`
+        // must guess from the text itself -- the same guess the rest of the
+        // codebase makes when certainty isn't available -- rather than fall
+        // back to the platform default, which would rewrite the file's line
+        // endings on the very next save.
+        let mut state = AppState::new();
+        let entry = bp_history::Checkpoint {
+            path: Some(PathBuf::from("/notes/old.txt")),
+            name: "old.txt".to_owned(),
+            text: "line one\nline two\n".to_owned(),
+            written_at: bp_history::now_unix(),
+            encoding: bp_history::CheckpointEncoding::default(),
+            line_ending: None,
+        };
+        state.restore(vec![(1, entry)]);
+
+        let doc = state
+            .workspace
+            .iter()
+            .find(|d| d.display_name() == "old.txt")
+            .expect("the recovered document was opened");
+        assert_eq!(
+            doc.line_ending(),
+            LineEnding::Lf,
+            "guessed from the text, not the platform default"
+        );
     }
 
     #[test]

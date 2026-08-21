@@ -199,6 +199,33 @@ pub(crate) fn select(ui: &AppWindow, state: &mut AppState, range: &std::ops::Ran
     ui.invoke_select_range(start, end);
 }
 
+/// Preview a match in the editor without moving focus.
+///
+/// `select` is for a completed "jump to this now" action -- Find Next/
+/// Previous, Go to Line, and clicking a cross-file search result all move
+/// focus into the editor on purpose, because each of those is a single
+/// deliberate jump the user makes once. This function is for the opposite
+/// case: the find box fires its `find-changed` callback on every keystroke
+/// as the user is still typing a query, and `select`'s focus-stealing would
+/// send the very next character typed into the document instead of the
+/// box. So this sets the same selection `select` would, but leaves focus
+/// wherever it already is.
+pub(crate) fn preview_match(ui: &AppWindow, state: &mut AppState, range: &std::ops::Range<usize>) {
+    use crate::editor_view::draw_editor_view;
+
+    if state.editor_view {
+        if let Some(editor) = state.active_editor_mut() {
+            editor.select(range.start, range.end);
+        }
+        state.reveal_caret();
+        draw_editor_view(ui, state);
+        return;
+    }
+    let start = i32::try_from(range.start).unwrap_or(i32::MAX);
+    let end = i32::try_from(range.end).unwrap_or(i32::MAX);
+    ui.invoke_preview_range(start, end);
+}
+
 /// Handle a menu action id from the UI.
 ///
 /// Returns `Some(push)` when the action was handled and the caller should

@@ -102,6 +102,8 @@ fn checkpoint_for(path: Option<&Path>) -> Checkpoint {
         name: "note.txt".to_owned(),
         text: format!("unsaved work\n{SENTINEL}\n"),
         written_at: 1_700_000_000,
+        encoding: bp_history::CheckpointEncoding::Utf8,
+        line_ending: Some(bp_history::CheckpointLineEnding::Lf),
     }
 }
 
