@@ -227,6 +227,10 @@ fn refresh(ui: &AppWindow, state: &mut state::AppState, push_text: state::PushTe
     // static: the Document Inspector row greys on `has_content`, which
     // changes with every keystroke and every tab switch.
     ui.set_tools_items(model(menus::tools(state.active_has_content())));
+    // Same reasoning: Related Notes and Duplicate Detection both need
+    // something to act on, and `has_content` changes with every keystroke,
+    // so this cannot be set once at startup either.
+    ui.set_organize_items(model(menus::organize(state.active_has_content())));
     ui.set_edit_items(model(menus::edit(state.clips.entries(), state.editor_view)));
     // Rebuilt rather than set once: it shows the *active* document's profile
     // and what that profile permits, both of which change with the tab.
@@ -262,7 +266,6 @@ fn set_static_menus(ui: &AppWindow) {
     let model = |items: Vec<MenuItem>| slint::ModelRc::new(slint::VecModel::from(items));
     ui.set_help_items(model(menus::help()));
     ui.set_notebook_items(model(menus::planned_menu("Notebook")));
-    ui.set_organize_items(model(menus::planned_menu("Organize")));
     ui.set_research_items(model(menus::planned_menu("Research")));
     ui.set_run_items(model(menus::planned_menu("Run")));
 }
@@ -958,6 +961,22 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
             // Select the match so the editor scrolls to it, rather than
             // opening the file at the top and leaving the user to hunt.
             dispatch::select(&ui, &mut cell.borrow_mut(), &(hit.offset..hit.offset));
+        });
+    }
+
+    // --- Organize ▸ Related Notes (ADR-0037) ----------------------------
+    {
+        let cell = Rc::clone(&state);
+        let weak = ui.as_weak();
+        ui.on_open_organize_hit(move |index| {
+            let Some(ui) = weak.upgrade() else { return };
+            let path = usize::try_from(index)
+                .ok()
+                .and_then(|i| cell.borrow().related_notes.get(i).map(|r| r.path.clone()));
+            let Some(path) = path else { return };
+
+            cell.borrow_mut().open(PathBuf::from(path));
+            refresh(&ui, &mut cell.borrow_mut(), state::PushText::Yes);
         });
     }
 

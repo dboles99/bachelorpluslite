@@ -29,6 +29,7 @@ import { EditorSurface } from "editor_surface.slint";
 import { FindBar } from "find_bar.slint";
 import { GotoBar } from "goto_bar.slint";
 import { PassphraseBar } from "passphrase_bar.slint";
+import { OrganizePanel } from "organize_panel.slint";
 import { ResultsPanel } from "results_panel.slint";
 import { StatusBar } from "status_bar.slint";
 import { Tab } from "tab.slint";
@@ -165,6 +166,14 @@ export component AppWindow inherits Window {
     in property <string> results-summary;
     callback search-folder();
     callback open-hit(int);
+
+    // Organize ▸ Related Notes (ADR-0037). Same shape as the cross-file
+    // search results just above.
+    in property <[SearchHit]> organize-hits;
+    // in-out: Rust opens it on a click, the close button shuts it.
+    in-out property <bool> organize-open;
+    in property <string> organize-summary;
+    callback open-organize-hit(int);
 
     // --- go to line -----------------------------------------------------
     // in-out: the menu row and Ctrl+G open it, the × closes it.
@@ -694,6 +703,19 @@ export component AppWindow inherits Window {
                 }
                 closed => {
                     root.results-open = false;
+                }
+            }
+
+            OrganizePanel {
+                open: root.organize-open;
+                hits: root.organize-hits;
+                summary: root.organize-summary;
+
+                open-hit(index) => {
+                    root.open-organize-hit(index);
+                }
+                closed => {
+                    root.organize-open = false;
                 }
             }
 

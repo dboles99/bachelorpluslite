@@ -30,6 +30,16 @@ Ctrl+0          Reset zoom
 Ctrl+D          Duplicate line
 Alt+Up / Down   Move line up / down";
 
+/// A document's filename, for a row whose detail column already shows the
+/// full path -- the same reasoning `state::organize`'s own `filename_of`
+/// applies to a status-bar notice, applied here to a panel row's label.
+fn filename(path: &str) -> &str {
+    std::path::Path::new(path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(path)
+}
+
 /// Static information, shown in a native dialog rather than built as a
 /// bespoke window.
 fn show_info(title: &str, body: &str) {
@@ -835,6 +845,54 @@ pub fn handle_menu_action(
                 }
                 NoteOutcome::Nothing => {}
             }
+        }
+
+        // Organize ▸ Related Notes (ADR-0037). Same shape as cross-file
+        // search's `on_search_folder`: the query runs once, here, rather
+        // than being re-run on every `refresh` -- `refresh` only converts
+        // whatever `related_notes` already holds into rows if it ever needs
+        // to, the way `note_items` and the rest of the state-dependent menus
+        // do, but nothing here forces it to re-query the store on every
+        // keystroke the way a field read in `refresh` would.
+        action::ORGANIZE_RELATED_NOTES => {
+            push = PushText::No;
+            let related = state.borrow().related_notes_for_active();
+            let rows: Vec<crate::SearchHit> = related
+                .iter()
+                .enumerate()
+                .map(|(index, record)| crate::SearchHit {
+                    label: record
+                        .title
+                        .clone()
+                        .unwrap_or_else(|| filename(&record.path).to_owned())
+                        .into(),
+                    detail: record.path.as_str().into(),
+                    index: i32::try_from(index).unwrap_or(i32::MAX),
+                })
+                .collect();
+            let summary = if rows.is_empty() {
+                "no related notes found".to_owned()
+            } else {
+                format!(
+                    "{} related note{}",
+                    rows.len(),
+                    if rows.len() == 1 { "" } else { "s" }
+                )
+            };
+            state.borrow_mut().related_notes = related;
+            ui.set_organize_hits(Rc::new(slint::VecModel::from(rows)).into());
+            ui.set_organize_summary(summary.into());
+            ui.set_organize_open(true);
+        }
+
+        // The on-demand half of Duplicate Detection. `duplicate_detection_report`
+        // is the same check the automatic save-time notice runs -- see
+        // `AppState::record_for_organize` -- so a click here and a save can
+        // never disagree about what counts as a duplicate.
+        action::ORGANIZE_DUPLICATE_DETECTION => {
+            let report = state.borrow().duplicate_detection_report();
+            push = PushText::No;
+            show_info("Duplicate Detection", &report);
         }
 
         // Two ranges rather than one, because the Data block at 70-79 had a

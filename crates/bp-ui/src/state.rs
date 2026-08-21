@@ -4,7 +4,7 @@
 //! document/workspace state: what the active document is, whether it is dirty,
 //! how to save it, and how to label it in the status bar.
 //!
-//! ## The four things that are not here
+//! ## The five things that are not here
 //!
 //! `AppState` is one struct with one set of fields, and it stays that way --
 //! splitting the *state* would mean deciding which half of the product owns
@@ -17,6 +17,7 @@
 //! | [`data`] | The Data menu: which `bp-data` operation a menu id means for the format in front of the user |
 //! | [`encryption`] | The `.bpadx` passphrase flow: what the bar is asking, and what a wrong answer does |
 //! | [`find`] | What the find bar is looking for, and which match the user is standing on |
+//! | [`organize`] | The local metadata store (ADR-0037): recording and tagging a document as it saves, Related Notes, and Duplicate Detection |
 //!
 //! They are children of this module rather than siblings, which is the whole
 //! reason the split is possible: a child can see its parent's private items,
@@ -45,6 +46,7 @@ use crate::menus::action;
 mod data;
 mod encryption;
 mod find;
+mod organize;
 mod security;
 
 // The names the rest of the shell knows this module by. `dispatch` asks for a
@@ -55,7 +57,8 @@ pub(crate) use security::{RedactionPlan, secret_scan_report};
 // Not `pub(crate)`: `AppState::new` is the only caller and the path is
 // deliberately not reachable from outside `state`, because a second place
 // deciding where the signing key lives is the defect this field exists to
-// prevent.
+// prevent. `default_store` is the same shape, for the same reason.
+use organize::default_store;
 use security::default_signing_key_path;
 
 /// How much of a document is enough to answer a question about its start.
@@ -249,6 +252,23 @@ pub struct AppState {
     /// reaching for `active_editor()` on one of these gets `None` and does
     /// nothing. See `crate::viewer` and ADR-0030.
     pub(crate) viewers: HashMap<DocumentId, crate::viewer::HugeView>,
+    /// The local metadata store Organize reads and writes (ADR-0037).
+    ///
+    /// **A field, opened once, not a function called per use** -- the fourth
+    /// time this shape has been needed in this crate, and by now the reason
+    /// is not news: a function that resolves the real platform Data
+    /// directory means `cargo test` opens (or creates) a real `.sqlite` file
+    /// in the developer's own profile, the same defect `signing_key` and
+    /// `audit_path` exist to prevent for a key and a history. `None` when the
+    /// platform does not say where the Data directory is, mirroring
+    /// `signing_key` -- every capability built on this must degrade to
+    /// quietly doing nothing rather than panicking on a missing store.
+    pub(crate) store: Option<bp_storage::Store>,
+    /// The active document's related notes, populated on demand by Organize
+    /// ▸ Related Notes -- the same shape `file_hits` holds cross-file search
+    /// results in: a click queries the store once, and this is what the row
+    /// the user then clicks maps back to a document.
+    pub(crate) related_notes: Vec<bp_storage::DocumentRecord>,
 }
 
 impl AppState {
@@ -298,6 +318,8 @@ impl AppState {
             signing_key: default_signing_key_path(),
             drawn_rows: 0,
             viewers: HashMap::new(),
+            store: default_store(),
+            related_notes: Vec::new(),
         }
     }
 
@@ -904,6 +926,13 @@ impl AppState {
                 // Re-stamp from what we just wrote, or our own save would
                 // look like somebody else's change on the next poll.
                 self.mark_in_step(id, &target);
+                // ADR-0037: record the document, tag it, and check for a
+                // possible duplicate -- after the write, not before, so a
+                // slow or unavailable store can never be the reason a save
+                // fails. `self.error` is `None` at this point (cleared at
+                // the top of this function and nothing since has set it), so
+                // a duplicate notice is never mistaken for a save failure.
+                self.record_for_organize(id, &target);
                 SaveResult::Saved
             }
             Err(e) => {

@@ -181,6 +181,10 @@ pub mod action {
     /// transform rows exist.
     pub const CLIP_TRANSFORM_BASE: i32 = 500;
 
+    /// Organize, ADR-0037. A block of its own -- 700-709, 702-709 free.
+    pub const ORGANIZE_RELATED_NOTES: i32 = 700;
+    pub const ORGANIZE_DUPLICATE_DETECTION: i32 = 701;
+
     /// Insert ▸ Markdown constructs. A block of their own -- 710-719, 715-719
     /// free -- rather than borrowed from an unrelated family's spare ids, for
     /// the reason `SET_DEFAULT_EDITOR`'s own comment gives.
@@ -1093,6 +1097,35 @@ pub fn help() -> Vec<MenuItem> {
     ]
 }
 
+/// The Organize menu (ADR-0037): what `bp-storage`'s two new queries give a
+/// user, plus what is still ahead for the rest of `docs/product/MENU_MAP.md`'s
+/// Organize section.
+///
+/// Gated on `has_content` the same way `note`'s rows are: both read the
+/// active document's text (a title to relate or check duplicates by), and an
+/// empty document has none to give either.
+pub fn organize(has_content: bool) -> Vec<MenuItem> {
+    let mut items = vec![
+        MenuItem {
+            enabled: has_content,
+            ..row("Related Notes", "", action::ORGANIZE_RELATED_NOTES)
+        },
+        MenuItem {
+            enabled: has_content,
+            ..row_end(
+                "Duplicate Detection",
+                "",
+                action::ORGANIZE_DUPLICATE_DETECTION,
+            )
+        },
+    ];
+    // What is left of `docs/product/MENU_MAP.md`'s Organize section --
+    // `planned_menu`'s own list, so the two real rows above are the only
+    // place that list had to change.
+    items.extend(planned_menu("Organize"));
+    items
+}
+
 /// The menus whose subsystems do not exist yet.
 ///
 /// Their contents come from `docs/product/MENU_MAP.md`, so the UI shows the
@@ -1135,14 +1168,11 @@ pub fn planned_menu(name: &str) -> Vec<MenuItem> {
             ],
             "phase 12",
         ),
+        // Related Notes and Duplicate Detection are real rows now
+        // (ADR-0037) -- see `organize`. What is left here is the rest of
+        // what `docs/product/MENU_MAP.md`'s Organize section names.
         "Organize" => (
-            &[
-                "Project",
-                "Suggested Folder",
-                "Topics",
-                "Duplicate Detection",
-                "Semantic Search",
-            ],
+            &["Project", "Suggested Folder", "Topics", "Semantic Search"],
             "phase 9",
         ),
         "Research" => (
@@ -1512,6 +1542,8 @@ mod tests {
         // guards against.
         for id in [
             action::NEW_WINDOW,
+            action::ORGANIZE_RELATED_NOTES,
+            action::ORGANIZE_DUPLICATE_DETECTION,
             action::INSERT_BOLD,
             action::INSERT_ITALIC,
             action::INSERT_LINK,

@@ -266,6 +266,65 @@ impl Store {
         let rows = statement.query_map(params![tag], document_from_row)?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
+
+    /// Other documents that share at least one tag with `document`, closest
+    /// first.
+    ///
+    /// "Closest" is the number of tags in common, most shared first, ties
+    /// broken by recency -- a stronger overlap outranks a fresher one because
+    /// it is the more specific claim. This is the relation ADR-0037's Related
+    /// Notes panel shows: the join is `documents_tagged`'s, run twice --
+    /// once to find `document`'s own tags, once to find who else has any of
+    /// them -- and folded into one query so the count and the ordering come
+    /// from SQL rather than from a second pass in Rust.
+    pub fn related_to(
+        &self,
+        document: i64,
+        limit: usize,
+    ) -> Result<Vec<DocumentRecord>, StoreError> {
+        let mut statement = self.connection.prepare(
+            "SELECT d.id, d.path, d.title, d.first_seen, d.last_seen
+               FROM documents d
+               JOIN document_tags dt ON dt.document_id = d.id
+              WHERE dt.tag_id IN (
+                        SELECT tag_id FROM document_tags WHERE document_id = ?1
+                    )
+                AND d.id != ?1
+              GROUP BY d.id
+              ORDER BY COUNT(*) DESC, d.last_seen DESC
+              LIMIT ?2",
+        )?;
+        let rows = statement.query_map(params![document, limit as i64], document_from_row)?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    /// Documents already recorded under the same title as `title`, excluding
+    /// the document at `exclude_path`.
+    ///
+    /// **Deliberately a simple, honest v1**: an exact, case-insensitive title
+    /// match, nothing fuzzier. `documents.title` carries no `NOCASE`
+    /// collation of its own the way `tags.name` does, so this asks for it at
+    /// the query rather than pretending a title comparison needs less care
+    /// than a tag does. Similarity scoring, edit distance or embeddings over
+    /// content are explicitly later work -- not attempted here, and not
+    /// needed for a duplicate detector to be useful: two documents saved
+    /// under the same title are already a strong, cheap signal.
+    pub fn possible_duplicates(
+        &self,
+        title: &str,
+        exclude_path: &Path,
+    ) -> Result<Vec<DocumentRecord>, StoreError> {
+        let mut statement = self.connection.prepare(
+            "SELECT id, path, title, first_seen, last_seen
+               FROM documents
+              WHERE title = ?1 COLLATE NOCASE
+                AND path != ?2
+              ORDER BY last_seen DESC, id DESC",
+        )?;
+        let rows =
+            statement.query_map(params![title, path_str(exclude_path)?], document_from_row)?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
 }
 
 fn document_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<DocumentRecord> {
@@ -636,6 +695,149 @@ mod tests {
 
         assert_eq!(recorded, None);
         assert_eq!(store.document(&path("secret.md")).unwrap(), None);
+    }
+
+    // --- related notes and duplicate detection (ADR-0037) -----------------
+
+    #[test]
+    fn related_to_orders_by_shared_tags_then_recency() {
+        let store = store();
+        let a = store
+            .record_document(&path("a.md"), None, 1, Metadata::Summary)
+            .unwrap()
+            .unwrap();
+        let b = store
+            .record_document(&path("b.md"), None, 2, Metadata::Summary)
+            .unwrap()
+            .unwrap();
+        let c = store
+            .record_document(&path("c.md"), None, 3, Metadata::Summary)
+            .unwrap()
+            .unwrap();
+        let unrelated = store
+            .record_document(&path("unrelated.md"), None, 4, Metadata::Summary)
+            .unwrap()
+            .unwrap();
+
+        // `a` shares two tags with `c` and one with `b`; `unrelated` shares
+        // none with `a` at all.
+        store.tag_document(a, "rust").unwrap();
+        store.tag_document(a, "notes").unwrap();
+        store.tag_document(b, "rust").unwrap();
+        store.tag_document(c, "rust").unwrap();
+        store.tag_document(c, "notes").unwrap();
+        store.tag_document(unrelated, "cooking").unwrap();
+
+        let related = store.related_to(a, 10).unwrap();
+        let ids: Vec<i64> = related.iter().map(|r| r.id).collect();
+        assert_eq!(ids, vec![c, b], "two shared tags outranks one");
+        assert!(
+            !ids.contains(&unrelated),
+            "a document sharing no tag is not related"
+        );
+        assert!(!ids.contains(&a), "a document is not related to itself");
+    }
+
+    #[test]
+    fn related_to_is_bounded_by_limit() {
+        let store = store();
+        let a = store
+            .record_document(&path("a.md"), None, 1, Metadata::Summary)
+            .unwrap()
+            .unwrap();
+        store.tag_document(a, "rust").unwrap();
+        for (index, name) in ["b.md", "c.md", "d.md"].iter().enumerate() {
+            let id = store
+                .record_document(
+                    &path(name),
+                    None,
+                    i64::try_from(index).unwrap() + 2,
+                    Metadata::Summary,
+                )
+                .unwrap()
+                .unwrap();
+            store.tag_document(id, "rust").unwrap();
+        }
+
+        assert_eq!(store.related_to(a, 2).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn a_document_with_no_tags_has_no_related_notes() {
+        let store = store();
+        let a = store
+            .record_document(&path("a.md"), None, 1, Metadata::Summary)
+            .unwrap()
+            .unwrap();
+        let b = store
+            .record_document(&path("b.md"), None, 2, Metadata::Summary)
+            .unwrap()
+            .unwrap();
+        store.tag_document(b, "rust").unwrap();
+
+        assert!(store.related_to(a, 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn possible_duplicates_matches_the_title_case_insensitively() {
+        let store = store();
+        store
+            .record_document(
+                &path("first.md"),
+                Some("Meeting Notes"),
+                1,
+                Metadata::Summary,
+            )
+            .unwrap()
+            .unwrap();
+        store
+            .record_document(
+                &path("second.md"),
+                Some("meeting notes"),
+                2,
+                Metadata::Summary,
+            )
+            .unwrap()
+            .unwrap();
+
+        let dupes = store
+            .possible_duplicates("Meeting Notes", &path("third.md"))
+            .unwrap();
+        assert_eq!(
+            dupes.len(),
+            2,
+            "both existing titles match, case-insensitively"
+        );
+    }
+
+    #[test]
+    fn possible_duplicates_excludes_the_document_itself() {
+        let store = store();
+        store
+            .record_document(&path("only.md"), Some("Draft"), 1, Metadata::Summary)
+            .unwrap()
+            .unwrap();
+
+        let dupes = store
+            .possible_duplicates("Draft", &path("only.md"))
+            .unwrap();
+        assert!(
+            dupes.is_empty(),
+            "the document being saved must not be its own duplicate"
+        );
+    }
+
+    #[test]
+    fn possible_duplicates_is_exact_match_only_not_fuzzy() {
+        // The deliberately simple v1: "Draft" and "Draft 2" do not match.
+        let store = store();
+        store
+            .record_document(&path("a.md"), Some("Draft"), 1, Metadata::Summary)
+            .unwrap()
+            .unwrap();
+
+        let dupes = store.possible_duplicates("Draft 2", &path("b.md")).unwrap();
+        assert!(dupes.is_empty());
     }
 
     #[test]

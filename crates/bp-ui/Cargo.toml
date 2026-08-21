@@ -41,6 +41,11 @@ bp-secrets = { path = "../bp-secrets" }
 # visible.
 bp-redaction = { path = "../bp-redaction" }
 bp-semantic = { path = "../bp-semantic" }
+# Organize ▸ Related Notes and Duplicate Detection (ADR-0037). The store
+# itself is opened here, never in `bp-storage`: which file on this machine it
+# is, and what happens when there is nowhere to put one, are shell questions,
+# the same split `bp-audit` and the recovery journal already make.
+bp-storage = { path = "../bp-storage" }
 bp-files = { path = "../bp-files" }
 bp-naming = { path = "../bp-naming" }
 bp-theme = { path = "../bp-theme" }
