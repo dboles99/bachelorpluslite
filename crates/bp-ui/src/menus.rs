@@ -141,7 +141,7 @@ pub mod action {
     pub const DATA_JSON_TO_YAML: i32 = 211;
 
     /// File ▸ Set as Default Editor (ADR-0012), opening a block of its own at
-    /// 220-229 for platform integration. 221-229 are free.
+    /// 220-229 for platform integration. 222-229 are free.
     ///
     /// Not one of the three ids left at 207-209, and not one of the eight at
     /// 212-219: those are the Security operations' block and the Data
@@ -153,6 +153,10 @@ pub mod action {
     /// Above 100, so outside Slint's `UNDO..=SELECT_ALL` window, on the same
     /// argument as the two blocks above.
     pub const SET_DEFAULT_EDITOR: i32 = 220;
+
+    /// File ▸ New Window: a second, independent instance of this process.
+    /// 222-229 are still free.
+    pub const NEW_WINDOW: i32 = 221;
 
     /// Clipboard history occupies `CLIP_BASE ..` (bounded by [`super::clip_end`]).
     ///
@@ -176,6 +180,25 @@ pub mod action {
     /// plain-paste arm's `id - CLIP_BASE` arithmetic never has to know
     /// transform rows exist.
     pub const CLIP_TRANSFORM_BASE: i32 = 500;
+
+    /// Insert ▸ Markdown constructs. A block of their own -- 710-719, 715-719
+    /// free -- rather than borrowed from an unrelated family's spare ids, for
+    /// the reason `SET_DEFAULT_EDITOR`'s own comment gives.
+    ///
+    /// Caret-only, same constraint as the date/time stamps above: `TextInput`
+    /// exposes no caret to insert at, so these need --editor-view.
+    pub const INSERT_BOLD: i32 = 710;
+    pub const INSERT_ITALIC: i32 = 711;
+    pub const INSERT_LINK: i32 = 712;
+    pub const INSERT_CODE_BLOCK: i32 = 713;
+    pub const INSERT_TABLE: i32 = 714;
+
+    /// Tools ▸ Document Inspector. A block of its own -- 720-729, 721-729
+    /// free.
+    pub const TOOLS_INSPECTOR: i32 = 720;
+
+    /// Help ▸ Diagnostics. A block of its own -- 730-739, 731-739 free.
+    pub const DIAGNOSTICS: i32 = 730;
 
     pub const NOTE_TITLE: i32 = 80;
     pub const NOTE_RENAME: i32 = 81;
@@ -466,6 +489,7 @@ pub fn file(
             "Notepad Replacement",
             action::SET_DEFAULT_EDITOR,
         ),
+        row("New Window", "", action::NEW_WINDOW),
     ]);
     items
 }
@@ -905,9 +929,32 @@ pub fn insert(at: time::OffsetDateTime, editor_view: bool) -> Vec<MenuItem> {
     if let Some(last) = items.last_mut() {
         last.separator_after = true;
     }
+    // Caret-only, same as the stamps above and for the same reason: each of
+    // these inserts at a position `TextInput` cannot report.
     items.extend([
-        planned("Markdown constructs, citation, code block, table"),
-        arrives("phase 6"),
+        MenuItem {
+            enabled: editor_view,
+            ..row("Bold", "", action::INSERT_BOLD)
+        },
+        MenuItem {
+            enabled: editor_view,
+            ..row("Italic", "", action::INSERT_ITALIC)
+        },
+        MenuItem {
+            enabled: editor_view,
+            ..row("Link", "", action::INSERT_LINK)
+        },
+        // The only one of the five that leaves the caret somewhere other
+        // than after the inserted text -- between the fences, so typing
+        // starts inside the code block rather than after it.
+        MenuItem {
+            enabled: editor_view,
+            ..row("Code Block", "", action::INSERT_CODE_BLOCK)
+        },
+        MenuItem {
+            enabled: editor_view,
+            ..row("Table", "", action::INSERT_TABLE)
+        },
     ]);
     items
 }
@@ -1019,12 +1066,30 @@ pub fn note(has_content: bool) -> Vec<MenuItem> {
     ]
 }
 
+/// The Tools menu: utilities over the active document that belong to neither
+/// Note (deterministic extraction about it) nor Security (protecting it).
+pub fn tools(has_content: bool) -> Vec<MenuItem> {
+    vec![
+        // Not gated on the format, unlike Data: `bp_semantic::statistics`
+        // reads any text, and the readout also carries the format, encoding
+        // and profile, which apply to every document regardless of shape.
+        MenuItem {
+            enabled: has_content,
+            ..row_end("Document Inspector", "", action::TOOLS_INSPECTOR)
+        },
+        planned("Security Inspector"),
+        planned("File Analysis"),
+        planned("Benchmarks"),
+        planned("Settings"),
+        arrives("phase 19"),
+    ]
+}
+
 pub fn help() -> Vec<MenuItem> {
     vec![
         row("Keyboard Shortcuts", "", action::SHORTCUTS),
-        row_end("About BachelorPad+", "", action::ABOUT),
-        planned("Diagnostics"),
-        arrives("phase 19"),
+        row("About BachelorPad+", "", action::ABOUT),
+        row_end("Diagnostics", "", action::DIAGNOSTICS),
     ]
 }
 
@@ -1106,16 +1171,6 @@ pub fn planned_menu(name: &str) -> Vec<MenuItem> {
             ],
             "phase 14",
         ),
-        "Tools" => (
-            &[
-                "Document Inspector",
-                "Security Inspector",
-                "File Analysis",
-                "Benchmarks",
-                "Settings",
-            ],
-            "phase 19",
-        ),
         _ => (&[], "later"),
     };
 
@@ -1141,7 +1196,13 @@ mod tests {
         // `stamp_end` is sized from `Stamp::all()`, so a sixth stamp extends
         // the window with the menu. This fails if the two ever part company.
         let items = insert(STAMP_CLOCK, true);
-        let rows: Vec<&MenuItem> = items.iter().filter(|i| i.action != action::NONE).collect();
+        // Scoped to the stamp window rather than "any real action": the
+        // markdown rows beside them now carry real ids too, and a filter
+        // that swept those in would count the wrong rows and still pass.
+        let rows: Vec<&MenuItem> = items
+            .iter()
+            .filter(|i| (action::STAMP_BASE..stamp_end()).contains(&i.action))
+            .collect();
 
         assert_eq!(rows.len(), bp_naming::Stamp::all().len());
         for (index, row) in rows.iter().enumerate() {
@@ -1440,6 +1501,119 @@ mod tests {
         assert!(
             (220..230).contains(&action::SET_DEFAULT_EDITOR),
             "the comment on this id promises a block at 220-229"
+        );
+    }
+
+    #[test]
+    fn the_ids_this_change_adds_sit_outside_every_range_dispatch_matches() {
+        // Each is matched by an exact arm in `handle_menu_action`, and a
+        // range arm coming first would silently dispatch it as something
+        // else -- the same failure `SET_DEFAULT_EDITOR`'s own test above
+        // guards against.
+        for id in [
+            action::NEW_WINDOW,
+            action::INSERT_BOLD,
+            action::INSERT_ITALIC,
+            action::INSERT_LINK,
+            action::INSERT_CODE_BLOCK,
+            action::INSERT_TABLE,
+            action::TOOLS_INSPECTOR,
+            action::DIAGNOSTICS,
+        ] {
+            for (name, window) in range_dispatch_windows() {
+                assert!(
+                    !window.contains(&id),
+                    "id {id} falls inside the {name} window and would be dispatched as one"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_file_menu_offers_a_new_window() {
+        let row = file(false, true, false, &[])
+            .into_iter()
+            .find(|i| i.action == action::NEW_WINDOW)
+            .expect("a New Window row");
+        assert!(row.enabled, "a second instance is always available");
+    }
+
+    #[test]
+    fn the_markdown_insert_rows_are_caret_only_and_in_order() {
+        // Same constraint as the date/time stamps beside them: `TextInput`
+        // exposes no caret to insert at.
+        let disabled = insert(STAMP_CLOCK, false);
+        let markdown_ids = [
+            action::INSERT_BOLD,
+            action::INSERT_ITALIC,
+            action::INSERT_LINK,
+            action::INSERT_CODE_BLOCK,
+            action::INSERT_TABLE,
+        ];
+        for id in markdown_ids {
+            let row = disabled
+                .iter()
+                .find(|i| i.action == id)
+                .unwrap_or_else(|| panic!("a row for {id}"));
+            assert!(!row.enabled, "'{}' should be greyed", row.label);
+        }
+
+        let enabled = insert(STAMP_CLOCK, true);
+        for id in markdown_ids {
+            let row = enabled
+                .iter()
+                .find(|i| i.action == id)
+                .unwrap_or_else(|| panic!("a row for {id}"));
+            assert!(
+                row.enabled,
+                "'{}' should be live under --editor-view",
+                row.label
+            );
+        }
+
+        let labels: Vec<&str> = markdown_ids
+            .iter()
+            .map(|id| {
+                enabled
+                    .iter()
+                    .find(|i| i.action == *id)
+                    .unwrap()
+                    .label
+                    .as_str()
+            })
+            .collect();
+        assert_eq!(labels, ["Bold", "Italic", "Link", "Code Block", "Table"]);
+    }
+
+    #[test]
+    fn the_tools_menu_greys_the_inspector_on_an_empty_document() {
+        let empty = tools(false);
+        let row = empty
+            .iter()
+            .find(|i| i.action == action::TOOLS_INSPECTOR)
+            .expect("a Document Inspector row");
+        assert!(!row.enabled, "nothing to inspect on an empty document");
+
+        let with_content = tools(true);
+        let row = with_content
+            .iter()
+            .find(|i| i.action == action::TOOLS_INSPECTOR)
+            .expect("a Document Inspector row");
+        assert!(row.enabled);
+    }
+
+    #[test]
+    fn help_offers_diagnostics_as_a_real_row() {
+        let items = help();
+        let row = items
+            .iter()
+            .find(|i| i.action == action::DIAGNOSTICS)
+            .expect("a Diagnostics row");
+        assert!(row.enabled, "diagnostics has nothing to grey on");
+        assert_ne!(
+            row.action,
+            action::NONE,
+            "this was a planned row and now has to do something"
         );
     }
 
@@ -2142,7 +2316,6 @@ mod tests {
     fn planned_menus_are_entirely_inert() {
         for name in [
             "Insert", "Data", "Note", "Notebook", "Organize", "Research", "Run", "Security",
-            "Tools",
         ] {
             let items = planned_menu(name);
             assert!(!items.is_empty(), "{name} has no contents");
@@ -2178,6 +2351,8 @@ mod tests {
         all.extend(format(Encoding::Utf8, LineEnding::Lf, Indent::default()));
         all.extend(data(Format::Csv));
         all.extend(data(Format::Yaml));
+        all.extend(insert(STAMP_CLOCK, true));
+        all.extend(tools(true));
         all.extend(help());
         all.extend(security_menu());
 
@@ -2290,6 +2465,7 @@ mod tests {
         rust_side.extend(data(Format::Yaml));
         rust_side.extend(help());
         rust_side.extend(insert(STAMP_CLOCK, true));
+        rust_side.extend(tools(true));
         rust_side.extend(tab_context(2, true));
         rust_side.extend(security(
             bp_security::Security::default(),

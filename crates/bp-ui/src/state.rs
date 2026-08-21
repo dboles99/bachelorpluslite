@@ -981,6 +981,45 @@ impl AppState {
         ));
     }
 
+    /// One combined report for Tools ▸ Document Inspector: statistics,
+    /// format, encoding, line ending, security profile and on-disk size,
+    /// concatenated rather than sent to four separate menus for four
+    /// separate numbers.
+    ///
+    /// Calls `bp_semantic::statistics` directly rather than through
+    /// `report_statistics`, which already writes its own answer to
+    /// `self.error` -- this wants the numbers folded into one report instead
+    /// of a second, competing write to the same field.
+    ///
+    /// `None` in the sense `active_has_content` uses it: an empty document
+    /// has nothing here worth a dialog.
+    pub(crate) fn inspector_report(&self) -> Option<String> {
+        if !self.active_has_content() {
+            return None;
+        }
+        let doc = self.workspace.active()?;
+        let stats = bp_semantic::statistics(&self.active_text());
+        let size = self
+            .workspace
+            .active_id()
+            .and_then(|id| self.sizes.get(&id))
+            .map_or_else(|| "not available".to_owned(), |&bytes| human_bytes(bytes));
+
+        Some(format!(
+            "{} words, {} lines, {} paragraphs, {} characters ({} without spaces)\n\n\
+             Format: {}\nEncoding: {}\nLine ending: {}\nSecurity profile: {}\nSize on disk: {size}",
+            stats.words,
+            stats.lines,
+            stats.paragraphs,
+            stats.characters,
+            stats.characters_no_whitespace,
+            self.format().label(),
+            doc.encoding().label(),
+            doc.line_ending().label(),
+            self.security().name(),
+        ))
+    }
+
     /// The active document as the bytes it would be written to disk as.
     ///
     /// The encoded form rather than the buffer, because a digest is a claim
@@ -1047,6 +1086,34 @@ impl AppState {
             return false;
         };
         editor.insert(&text);
+        self.mark_edited();
+        true
+    }
+
+    /// Insert a markdown skeleton at the caret, replacing any selection.
+    ///
+    /// One method taking the literal text rather than five, or an enum of
+    /// constructs: there is no behaviour here that differs by *which*
+    /// construct it is, only the text and how far back from the end of it
+    /// the caret should land -- `step_back` says that, `0` for "leave it at
+    /// the end", which is every construct but the code block.
+    ///
+    /// Same caret-only constraint as `insert_stamp`: `TextInput` exposes no
+    /// caret, so this is only reachable under `--editor-view`, and the menu
+    /// disables the rows there.
+    pub(crate) fn insert_markdown(&mut self, text: &str, step_back: usize) -> bool {
+        let Some(editor) = self.active_editor_mut() else {
+            return false;
+        };
+        editor.insert(text);
+        // Measured back from where the caret landed after the insert, not
+        // forward from where it started: a selection replaced by the insert
+        // moves the start, but `insert` always leaves the caret at the end of
+        // what it just wrote, which is the one position both cases agree on.
+        if step_back > 0 {
+            let end = editor.cursor();
+            editor.set_cursor(end.saturating_sub(step_back));
+        }
         self.mark_edited();
         true
     }
@@ -1563,6 +1630,41 @@ pub(crate) fn find_id(workspace: &Workspace, raw: i32) -> Option<DocumentId> {
         .iter()
         .map(Document::id)
         .find(|id| i32::try_from(id.get()).unwrap_or(i32::MAX) == raw)
+}
+
+/// Build the command that opens a second, independent instance of this
+/// process, with none of this process's own arguments carried over.
+///
+/// A function of its own rather than inlined at the dispatch call site, so
+/// the executable path and the empty argument list can be pinned by a test
+/// without a real process ever being spawned -- that part is what needs to
+/// be right; whether a window then opens is not this crate's to prove.
+pub(crate) fn new_window_command() -> std::io::Result<std::process::Command> {
+    Ok(std::process::Command::new(std::env::current_exe()?))
+}
+
+/// What the application thinks its environment is: version, renderer, and
+/// where it resolves its config, state and data directories to.
+///
+/// A free function rather than an `AppState` method: unlike the Document
+/// Inspector, nothing here is about the *active document*, so there is no
+/// state to reach into. Deliberately silent about what is inside those
+/// directories -- a passphrase, a document, a file listing -- this reports
+/// what the paths resolve to, not what is in them.
+pub(crate) fn diagnostics_report() -> String {
+    let named = |dir: Option<PathBuf>| {
+        dir.map_or_else(|| "not available".to_owned(), |p| p.display().to_string())
+    };
+    format!(
+        "BachelorPad+ {}\n\nRenderer: {}\n\nConfig file: {}\nState directory: {}\nData directory: {}",
+        env!("CARGO_PKG_VERSION"),
+        std::env::var("SLINT_BACKEND").unwrap_or_else(|_| "software".to_owned()),
+        named(bp_config::config_path()),
+        named(state_dir()),
+        named(bp_platform::dirs::host_directory(
+            bp_platform::DirKind::Data
+        )),
+    )
 }
 
 #[cfg(test)]
@@ -2213,6 +2315,34 @@ mod tests {
     }
 
     #[test]
+    fn the_inspector_report_folds_statistics_format_and_profile_into_one_string() {
+        let mut state = AppState::new();
+        state.edit("one two three\n\nfour\n".to_owned());
+
+        let report = state
+            .inspector_report()
+            .expect("a document with content has something to report");
+
+        assert!(report.contains("4 words"), "got {report}");
+        assert!(report.contains("Encoding:"), "got {report}");
+        assert!(report.contains("Line ending:"), "got {report}");
+        assert!(
+            report.contains(bp_security::Security::default().name()),
+            "got {report}"
+        );
+    }
+
+    #[test]
+    fn the_inspector_report_is_absent_for_an_empty_document() {
+        let state = AppState::new();
+        assert_eq!(
+            state.inspector_report(),
+            None,
+            "an empty document has nothing worth a dialog"
+        );
+    }
+
+    #[test]
     fn a_stamp_is_inserted_at_the_caret_and_marks_the_document_unsaved() {
         let mut state = AppState::new();
         state.editor_view = true;
@@ -2239,6 +2369,37 @@ mod tests {
 
         assert!(!state.insert_stamp(99));
         assert_eq!(state.active_text(), "text");
+    }
+
+    #[test]
+    fn a_markdown_construct_is_inserted_at_the_caret_and_marks_the_document_unsaved() {
+        let mut state = AppState::new();
+        state.editor_view = true;
+        state.edit("ab".to_owned());
+        state.active_editor_mut().unwrap().set_cursor(1);
+
+        assert!(state.insert_markdown("**text**", 0));
+
+        assert_eq!(state.active_text(), "a**text**b");
+        assert!(state.workspace.active().unwrap().is_dirty());
+    }
+
+    #[test]
+    fn a_code_block_leaves_the_caret_between_the_fences() {
+        // The one construct of the five with somewhere other than the end of
+        // the inserted text to land: typing right after the insert should
+        // start writing code, not follow the closing fence.
+        let mut state = AppState::new();
+        state.editor_view = true;
+
+        assert!(state.insert_markdown("```\n```", 3));
+
+        assert_eq!(state.active_text(), "```\n```");
+        assert_eq!(
+            state.active_editor_mut().unwrap().cursor(),
+            4,
+            "the caret should sit right after the opening fence's newline"
+        );
     }
 
     #[test]
@@ -2661,5 +2822,37 @@ mod tests {
         let path = dir.path().join("notes.txt");
         std::fs::write(&path, "BPAD is not BPADX\0 and this is prose").expect("write");
         assert!(!bp_crypto::is_bpadx(&read_header(&path).expect("header")));
+    }
+
+    // --- new window, diagnostics -----------------------------------------
+
+    #[test]
+    fn a_new_window_launches_the_same_executable_with_no_arguments() {
+        // Spawning a real process is heavier than this needs: what has to be
+        // right is which binary would run and that none of this process's
+        // own arguments follow it, not that a window then opens.
+        let command = new_window_command().expect("this test binary can resolve its own path");
+        assert_eq!(
+            command.get_program(),
+            std::env::current_exe().unwrap().as_os_str(),
+            "a second instance of the same binary, not a different one"
+        );
+        assert_eq!(
+            command.get_args().count(),
+            0,
+            "a fresh instance opens with no file, same as launching the app fresh"
+        );
+    }
+
+    #[test]
+    fn the_diagnostics_report_names_the_version_and_every_resolved_directory() {
+        let report = diagnostics_report();
+        assert!(report.contains(env!("CARGO_PKG_VERSION")), "got {report}");
+        assert!(report.contains("Config file:"), "got {report}");
+        assert!(report.contains("State directory:"), "got {report}");
+        assert!(report.contains("Data directory:"), "got {report}");
+        // Never a panic for an environment that resolves none of them --
+        // `named` says "not available" rather than unwrapping.
+        assert!(!report.contains("None"), "got {report}");
     }
 }

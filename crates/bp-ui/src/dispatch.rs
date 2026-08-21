@@ -383,6 +383,17 @@ pub fn handle_menu_action(
             push = PushText::No;
         }
 
+        action::TOOLS_INSPECTOR => {
+            // The borrow ends with the statement, before the dialog opens:
+            // `rfd` pumps events, and a re-entrant callback on a live
+            // `borrow_mut()` panics.
+            let report = state.borrow().inspector_report();
+            if let Some(report) = report {
+                show_info("Document Inspector", &report);
+            }
+            push = PushText::No;
+        }
+
         // Tab context menu. All three act on `tab_context` -- the tab that was
         // right-clicked -- falling back to the active one, so a row can never
         // act on a tab the user was not pointing at.
@@ -582,6 +593,21 @@ pub fn handle_menu_action(
             }
         }
 
+        // A second, wholly independent instance -- its own `AppState`, its
+        // own window, none of this process's arguments carried over, so it
+        // opens exactly as launching the app fresh would. Nothing about
+        // *this* window's state changes, so there is nothing to push back
+        // into the widget; the fall-through refresh below still runs, which
+        // is what shows the error message if the spawn failed.
+        action::NEW_WINDOW => {
+            push = PushText::No;
+            let spawned = crate::state::new_window_command()
+                .and_then(|mut command| command.spawn().map(|_child| ()));
+            if let Err(e) = spawned {
+                state.borrow_mut().error = Some(format!("could not open a new window -- {e}"));
+            }
+        }
+
         action::REDACT_SECRETS => {
             // Three statements, each ending its borrow before the next, and
             // the dialog in between opened while nothing is borrowed at all:
@@ -668,6 +694,30 @@ pub fn handle_menu_action(
             // Duplicate Line beside it.
         }
 
+        id if (action::INSERT_BOLD..=action::INSERT_TABLE).contains(&id) => {
+            // The text each construct inserts, and how far back from the end
+            // of it the caret should land -- 0 for every construct but the
+            // code block, which leaves it between the fences rather than
+            // after the closing one.
+            let (text, step_back): (&str, usize) = match id {
+                action::INSERT_BOLD => ("**text**", 0),
+                action::INSERT_ITALIC => ("*text*", 0),
+                action::INSERT_LINK => ("[text](url)", 0),
+                action::INSERT_CODE_BLOCK => ("```\n```", 3),
+                _ => ("| Header | Header |\n| --- | --- |\n| Cell | Cell |", 0),
+            };
+            let mut s = state.borrow_mut();
+            if !s.insert_markdown(text, step_back) {
+                // Same shape as the date/time stamps above: the rows are
+                // disabled without the custom editor view, so this is only
+                // reachable by a route that does not exist yet -- but a
+                // silent no-op would still be a bug report nobody could
+                // describe.
+                s.error = Some("markdown insertion needs --editor-view".to_owned());
+            }
+            // `PushText::Yes`, the default: the document changed.
+        }
+
         action::LINE_ENDING_LF => state.borrow_mut().set_line_ending(LineEnding::Lf),
         action::LINE_ENDING_CRLF => state.borrow_mut().set_line_ending(LineEnding::CrLf),
         action::ENCODING_UTF8 => state.borrow_mut().set_encoding(Encoding::Utf8),
@@ -683,6 +733,13 @@ pub fn handle_menu_action(
                 std::env::var("SLINT_BACKEND").unwrap_or_else(|_| "software".to_owned()),
             ),
         ),
+        // What the application thinks its environment is, not a file
+        // browser: no document content, no passphrase, no listing of what is
+        // in the directories it names -- only where it resolved them to.
+        action::DIAGNOSTICS => {
+            show_info("Diagnostics", &crate::state::diagnostics_report());
+            push = PushText::No;
+        }
 
         // Only reachable with the custom surface. Under `TextInput`
         // Slint handles these on the widget itself and they never get

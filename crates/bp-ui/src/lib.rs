@@ -223,6 +223,10 @@ fn refresh(ui: &AppWindow, state: &mut state::AppState, push_text: state::PushTe
     ui.set_insert_items(model(menus::insert(state::now(), state.editor_view)));
     ui.set_data_items(model(menus::data(format)));
     ui.set_note_items(model(menus::note(state.active_has_content())));
+    // Rebuilt rather than set once, for the same reason `note_items` is not
+    // static: the Document Inspector row greys on `has_content`, which
+    // changes with every keystroke and every tab switch.
+    ui.set_tools_items(model(menus::tools(state.active_has_content())));
     ui.set_edit_items(model(menus::edit(state.clips.entries(), state.editor_view)));
     // Rebuilt rather than set once: it shows the *active* document's profile
     // and what that profile permits, both of which change with the tab.
@@ -261,7 +265,6 @@ fn set_static_menus(ui: &AppWindow) {
     ui.set_organize_items(model(menus::planned_menu("Organize")));
     ui.set_research_items(model(menus::planned_menu("Research")));
     ui.set_run_items(model(menus::planned_menu("Run")));
-    ui.set_tools_items(model(menus::planned_menu("Tools")));
 }
 
 /// The query the find bar currently describes.
