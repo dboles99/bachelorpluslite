@@ -30,6 +30,7 @@ import { FindBar } from "find_bar.slint";
 import { GotoBar } from "goto_bar.slint";
 import { PassphraseBar } from "passphrase_bar.slint";
 import { OrganizePanel } from "organize_panel.slint";
+import { RunPanel } from "run_panel.slint";
 import { ResultsPanel } from "results_panel.slint";
 import { StatusBar } from "status_bar.slint";
 import { Tab } from "tab.slint";
@@ -196,6 +197,23 @@ export component AppWindow inherits Window {
     callback search-folder();
     callback open-hit(int);
 
+    // Run ▸ a notebook cell (ADR-0043). `run-items` is declared with the
+    // other menu models above; these are the panel and the run itself.
+    /// Rebuilt from the active document when the menu is about to open, not
+    /// on every refresh. Parsing a notebook is not free and a Run menu nobody
+    /// has opened is a parse nobody asked for.
+    callback run-menu-opening();
+    // in-out: Rust opens it when a cell starts, the close button shuts it.
+    in-out property <bool> run-open;
+    in property <string> run-summary;
+    in property <string> run-output;
+    in property <string> run-errors;
+    /// True while a cell is running. Drives the timer below, exactly as
+    /// `scanning` drives the scan's -- and stopping is, again, the timer not
+    /// firing again.
+    in-out property <bool> running;
+    callback run-tick();
+
     // Organize ▸ Related Notes (ADR-0037). Same shape as the cross-file
     // search results just above.
     in property <[SearchHit]> organize-hits;
@@ -327,6 +345,14 @@ export component AppWindow inherits Window {
         running: root.scanning && root.find-open;
         triggered => {
             root.scan-tick();
+        }
+    }
+
+    run-timer := Timer {
+        interval: root.scan-tick-ms * 1ms;
+        running: root.running;
+        triggered => {
+            root.run-tick();
         }
     }
 
@@ -607,6 +633,7 @@ export component AppWindow inherits Window {
                     run-label := MenuLabel {
                         label: "Run";
                         clicked => {
+                            root.run-menu-opening();
                             run-menu.show();
                         }
                     }
@@ -820,6 +847,18 @@ export component AppWindow inherits Window {
                 }
                 closed => {
                     root.results-open = false;
+                }
+            }
+
+            RunPanel {
+                open: root.run-open;
+                summary: root.run-summary;
+                output: root.run-output;
+                errors: root.run-errors;
+
+                closed => {
+                    root.run-open = false;
+                    root.focus-editor();
                 }
             }
 

@@ -14,6 +14,13 @@ bp-config = { path = "../bp-config" }
 bp-core = { path = "../bp-core" }
 bp-data = { path = "../bp-data" }
 bp-editor = { path = "../bp-editor" }
+# Run ▸ a notebook cell (ADR-0043). This crate is the only place
+# `bp-notebook`'s eight cell kinds and `bp-execution`'s three languages are
+# both visible -- neither depends on the other, deliberately -- so the mapping
+# between them lives in `state/notebook.rs`, the same way `bp-secrets` and
+# `bp-redaction` meet here rather than knowing about each other.
+bp-execution = { path = "../bp-execution" }
+bp-notebook = { path = "../bp-notebook" }
 bp-formats = { path = "../bp-formats" }
 bp-history = { path = "../bp-history" }
 bp-search = { path = "../bp-search" }
@@ -67,6 +74,7 @@ rfd = { version = "0.17", default-features = false, features = [
     "xdg-portal",
     "pollster",
 ] }
+serde_json.workspace = true
 thiserror.workspace = true
 time.workspace = true
 tracing.workspace = true

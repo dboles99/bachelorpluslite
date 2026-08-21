@@ -46,6 +46,7 @@ use crate::menus::action;
 mod data;
 mod encryption;
 mod find;
+pub(crate) mod notebook;
 mod organize;
 mod research;
 mod security;
@@ -246,6 +247,19 @@ pub struct AppState {
     /// which lines are on screen, so it has to be told what was drawn rather
     /// than what was asked for.
     pub(crate) drawn_rows: usize,
+    /// The cell running right now, if any (ADR-0043).
+    ///
+    /// One at a time: ADR-0038 chose a one-cell-at-a-time utility, so there
+    /// is no queue here and no map of runs by cell.
+    pub(crate) run: Option<notebook::CellRun>,
+    /// Whether the run panel is showing.
+    pub(crate) run_open: bool,
+    /// The line above the output: which cell, and how it ended.
+    pub(crate) run_summary: String,
+    /// The cell's `stdout`, and its `stderr`, kept apart because
+    /// `bp-execution` went to the trouble of keeping them apart.
+    pub(crate) run_output: String,
+    pub(crate) run_errors: String,
     /// Which surface `refresh` last told the window to draw with.
     ///
     /// Kept so a *change* can be noticed, which is the only moment the caret
@@ -325,6 +339,11 @@ impl AppState {
             clips: bp_clipboard::History::new(),
             signing_key: default_signing_key_path(),
             drawn_rows: 0,
+            run: None,
+            run_open: false,
+            run_summary: String::new(),
+            run_output: String::new(),
+            run_errors: String::new(),
             surface_shown: None,
             viewers: HashMap::new(),
             store: default_store(),

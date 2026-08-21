@@ -453,6 +453,27 @@ pub fn handle_menu_action(
             push = PushText::No;
         }
 
+        action::RUN_STOP => {
+            state.borrow_mut().stop_run();
+            push = PushText::No;
+        }
+
+        id if (action::RUN_CELL_BASE..crate::menus::run_cell_end()).contains(&id) => {
+            // **The one place in this product where a run is consented to.**
+            // specs.md section 15 says never auto-run an opened or pasted
+            // notebook, and both crates demand a gesture by value for that
+            // reason. This arm is reached only from a click on a Run menu
+            // row, which is what `from_user_command` is documented to mean --
+            // "somewhere a human's action is on the stack".
+            let index = usize::try_from(id - action::RUN_CELL_BASE).unwrap_or(0);
+            state.borrow_mut().run_cell(
+                index,
+                bp_notebook::UserGesture::from_user_command(),
+                bp_execution::UserGesture::from_user_command(),
+            );
+            push = PushText::No;
+        }
+
         action::PRIVACY_MODE => {
             let next = if state.borrow().privacy.is_on() {
                 bp_security::Privacy::Off

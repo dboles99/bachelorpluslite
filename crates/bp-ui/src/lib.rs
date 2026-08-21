@@ -91,6 +91,17 @@ fn apply_theme(ui: &AppWindow, theme: ThemeId) {
     palette.set_accent(c(p.accent));
 }
 
+/// Put a cell's run into the panel.
+///
+/// One function rather than four setters at three call sites, because the
+/// four strings are one thing: what happened when a cell ran.
+fn push_run_panel(ui: &AppWindow, state: &state::AppState) {
+    ui.set_run_open(state.run_open);
+    ui.set_run_summary(state.run_summary.as_str().into());
+    ui.set_run_output(state.run_output.as_str().into());
+    ui.set_run_errors(state.run_errors.as_str().into());
+}
+
 fn refresh(ui: &AppWindow, state: &mut state::AppState, push_text: state::PushText) {
     apply_theme(ui, state.theme);
     ui.set_theme_name(state.theme.name().into());
@@ -196,6 +207,12 @@ fn refresh(ui: &AppWindow, state: &mut state::AppState, push_text: state::PushTe
     }
     ui.set_passphrase_status(state.passphrase_status.as_str().into());
 
+    // The run panel, and whether a cell is going. Pushed here as well as from
+    // the tick, so that starting a run from a menu click shows its panel
+    // without waiting for the first tick.
+    push_run_panel(ui, state);
+    ui.set_running(state.is_running());
+
     ui.set_show_gutter(state.show_gutter);
     ui.set_wrap_text(state.wrap_text);
     // Points to Slint's `length`. Both editor views read this one property,
@@ -282,7 +299,10 @@ fn set_static_menus(ui: &AppWindow) {
     let model = |items: Vec<MenuItem>| slint::ModelRc::new(slint::VecModel::from(items));
     ui.set_help_items(model(menus::help()));
     ui.set_notebook_items(model(menus::planned_menu("Notebook")));
-    ui.set_run_items(model(menus::planned_menu("Run")));
+    // Not the Run menu any more (ADR-0043). Its rows depend on the active
+    // document, and `run-menu-opening` rebuilds them the moment before the
+    // menu is shown -- a set here would be a list of the wrong document's
+    // cells waiting to be replaced.
 }
 
 /// The query the find bar currently describes.
@@ -886,6 +906,37 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
             ui.set_scanning(running);
             ui.set_find_status(cell.borrow().find_status.as_str().into());
             editor_view::draw_editor_view(&ui, &mut cell.borrow_mut());
+        });
+    }
+
+    {
+        let cell = Rc::clone(&state);
+        let weak = ui.as_weak();
+        // The Run menu's rows, built the moment before the menu opens
+        // (ADR-0043). Not in `refresh`: parsing a notebook costs real work
+        // and a menu nobody has opened is a parse nobody asked for.
+        ui.on_run_menu_opening(move || {
+            let Some(ui) = weak.upgrade() else { return };
+            let items = {
+                let s = cell.borrow();
+                menus::run(&s.run_menu(), s.is_running())
+            };
+            ui.set_run_items(Rc::new(slint::VecModel::from(items)).into());
+        });
+    }
+
+    {
+        let cell = Rc::clone(&state);
+        let weak = ui.as_weak();
+        // One tick of a cell that is running (ADR-0043). The same shape as
+        // the scan's tick, for the same reason: `bp_execution::run` would
+        // block the window for as long as the cell took, and a *hung* cell
+        // for the whole timeout.
+        ui.on_run_tick(move || {
+            let Some(ui) = weak.upgrade() else { return };
+            let running = cell.borrow_mut().poll_run();
+            ui.set_running(running);
+            push_run_panel(&ui, &cell.borrow());
         });
     }
 

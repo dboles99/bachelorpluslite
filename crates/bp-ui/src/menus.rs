@@ -264,8 +264,80 @@ pub mod action {
     pub const PASTE: i32 = 104;
     pub const SELECT_ALL: i32 = 105;
 
+    /// End the cell that is running (ADR-0043).
+    pub const RUN_STOP: i32 = 750;
+
+    /// One runnable cell of the active notebook occupies
+    /// `RUN_CELL_BASE + i`, bounded by [`super::MAX_LISTED_CELLS`].
+    ///
+    /// Bounded for the reason `RECENT_BASE`'s window is: a notebook may have
+    /// thousands of cells, and an unbounded range here would silently swallow
+    /// whatever block is allocated above it next -- which is exactly how the
+    /// recent-files arm once claimed everything from 60 to 100.
+    pub const RUN_CELL_BASE: i32 = 800;
+
     /// Rows that do nothing yet.
     pub const NONE: i32 = 0;
+}
+
+/// How many of a notebook's cells the Run menu will list.
+///
+/// A menu nobody can scroll to the end of is the same as no menu, and
+/// `MenuPopup` already scrolls past `menu-max-height`. Generous enough that a
+/// literate document will never reach it, and finite so the id window is.
+pub const MAX_LISTED_CELLS: usize = 200;
+
+/// One past the last id `RUN_CELL_BASE` can produce.
+pub(crate) fn run_cell_end() -> i32 {
+    action::RUN_CELL_BASE + i32::try_from(MAX_LISTED_CELLS).unwrap_or(0)
+}
+
+/// The Run menu: what the active document offers to run (ADR-0043).
+///
+/// Built from the document rather than written down, like the Edit menu's
+/// clipboard history and the Insert menu's timestamps. A menu built once at
+/// startup would list the last notebook's cells for the rest of the session.
+pub fn run(menu: &crate::state::notebook::RunMenu, running: bool) -> Vec<MenuItem> {
+    use crate::state::notebook::RunMenu;
+
+    let mut items = Vec::new();
+    match menu {
+        // Not `planned()`: notebook running exists, and this document simply
+        // is not one. Saying which kind of file would work is the difference
+        // between a limitation and a mystery.
+        RunMenu::NotANotebook => items.push(planned("Open an .ipynb to run its cells")),
+        // Distinct from an empty list, deliberately -- see `RunMenu`.
+        RunMenu::Unreadable(reason) => {
+            items.push(planned(&format!("Cannot read this notebook: {reason}")))
+        }
+        RunMenu::Cells(rows) if rows.is_empty() => {
+            items.push(planned("This notebook has no cells that can run"));
+        }
+        // The reason, rather than the symptom. "No cells that can run" would
+        // be true here and would tell the reader nothing they could act on.
+        RunMenu::NoKnownLanguage { cells } => items.push(planned(&format!(
+            "{cells} code cell(s) of no named language: this notebook has no kernelspec"
+        ))),
+        RunMenu::Cells(rows) => {
+            for (index, row) in rows.iter().take(MAX_LISTED_CELLS).enumerate() {
+                let id = action::RUN_CELL_BASE + i32::try_from(index).unwrap_or(0);
+                items.push(row_enabled(&row.label, "", id, row.enabled && !running));
+            }
+            if rows.len() > MAX_LISTED_CELLS {
+                items.push(planned(&format!(
+                    "… and {} more, not listed",
+                    rows.len() - MAX_LISTED_CELLS
+                )));
+            }
+        }
+    }
+    if let Some(last) = items.last_mut() {
+        last.separator_after = true;
+    }
+    // Real but not always available, which is `row_enabled`'s whole subject:
+    // Stop exists, and there is nothing to stop until something is running.
+    items.push(row_enabled("Stop", "", action::RUN_STOP, running));
+    items
 }
 
 fn row(label: &str, shortcut: &str, action: i32) -> MenuItem {

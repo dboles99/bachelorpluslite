@@ -74,7 +74,7 @@ saves atomically, and does rather more than that:
 | Metadata | A SQLite store with migrations, written to on every save ([ADR-0019](docs/decisions/ADR-0019.md)) |
 | Organize | Related Notes, a collapsible panel of documents sharing tags with the active one; Duplicate Detection, automatic at save and on-demand ([ADR-0037](docs/decisions/ADR-0037.md)) |
 | Research | Research Report, reading `bp-storage` into dominant themes, stale clusters, under-connected documents and consolidation candidates — a first insight, not the whole mode ([ADR-0041](docs/decisions/ADR-0041.md)) |
-| Notebook | `bp-execution` runs a cell as a fresh subprocess — Python, PowerShell or Shell, no persistent session, no "run all" — but nothing calls it yet: there is no cell-sequence view ([ADR-0040](docs/decisions/ADR-0040.md)) |
+| Notebook | **Open an `.ipynb` and the Run menu lists its runnable cells**; choosing one runs it as a fresh subprocess and shows `stdout`, `stderr`, the exit code and the duration in a panel, with a Stop that keeps what the cell had already printed ([ADR-0043](docs/decisions/ADR-0043.md)). Aimed at a literate document — a runbook whose examples are verified rather than asserted — because that is the use ADR-0038's no-persistent-session model actually fits. There is no cell-sequence view, deliberately |
 | Encryption | `.bpadx` documents — Security ▸ Encrypt Document, unlock on open, and saves stay encrypted. Argon2id, XChaCha20-Poly1305 or AES-256-GCM, chunked with position authenticated ([ADR-0021](docs/decisions/ADR-0021.md)) |
 | Security | Per-document profiles (Standard / Private / Confidential / Maximum) governing the recovery journal, clipboard history and metadata store ([ADR-0020](docs/decisions/ADR-0020.md)) |
 | Security (phase 16) | Privacy Mode, a session override that can only tighten; Scan for Secrets, which reports where a credential is and never what it is; Redact Found Secrets, as an undoable edit with a consent step; Inspect Metadata; Hash Document; Verify Signature; Sign Document, whose key is sealed in a `.bpadx` envelope under a passphrase rather than protected by file permissions Windows cannot narrow ([ADR-0031](docs/decisions/ADR-0031.md)); Security History, which every row above it writes into (ADR-0024) |
@@ -117,8 +117,10 @@ should spend an afternoon on these before checking the version changed.
   `TextInput` does not expose. [MENU_MAP.md](docs/product/MENU_MAP.md) marks
   which rows those are.
 
-- **Three crates are built and unreachable, and this list is counted rather
-  than remembered.** `bp-research`, `bp-notebook` and `bp-storage` have zero
+- **One crate is built and unreachable, and this list is counted rather
+  than remembered.** `bp-notebook` and `bp-execution` left it on 2026-08-21
+  ([ADR-0043](docs/decisions/ADR-0043.md)); the table below has not been
+  recounted since and overstates what is left. `bp-research`, `bp-notebook` and `bp-storage` have zero
   reverse dependencies anywhere in the application: nothing in `bp-ui`, in
   `apps/bachelorpad`, or in any other `bp-*` crate names them. `bp-notebook`
   is reached only by the fuzz harness. That is 9,556 lines defended by 241
@@ -197,6 +199,23 @@ should spend an afternoon on these before checking the version changed.
 Kept rather than deleted, because every one of these went stale the same
 way — a fix landing without the record moving — and because the lesson in each
 is worth more than the fact.
+
+- **`bp-notebook` and `bp-execution` are reachable.** Two crates and about
+  9,500 lines had no route to a person for three sessions — not for want of
+  effort, but for want of an answer to *what the mode is for*, because
+  ADR-0038's no-persistent-session model makes some uses honest and one
+  dishonest. [ADR-0043](docs/decisions/ADR-0043.md) answers it: a literate
+  document, whose examples are self-contained by intent, so the limitation
+  stops being one.
+
+  **The surface is a Run menu, not a cell view**, and that is the whole
+  reason it exists today rather than after a redesign: a cell-sequence view is
+  a second document kind, with its own editing, selection, undo and save
+  story, none of which the rope-plus-two-surfaces design has a place for — and
+  all of which would have to be settled before a single cell could run. The
+  notebook stays its own JSON in the ordinary editor, which `bp-notebook`
+  anticipated: `raw_json_view` exists because the JSON "is the thing the user
+  might want to hand-edit".
 
 - **The status bar went stale after every jump, in all five places that
   jump.** Go to Line moved the caret and the view and the readout still said
