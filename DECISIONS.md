@@ -40,6 +40,13 @@ Adding a decision means adding both.
 | BP-ADR-0030 | 2026-08-20 | A huge document opens in the custom surface, read-only, in every build | Accepted, shipped | [ADR-0030](docs/decisions/ADR-0030.md) |
 | BP-ADR-0031 | 2026-08-20 | A signing key lives in a sealed `.bpadx` key file, not a permission-protected one | Accepted, shipped | [ADR-0031](docs/decisions/ADR-0031.md) |
 | BP-ADR-0032 | 2026-08-20 | The application id is reverse-DNS, and is not the directory name | Accepted, shipped | [ADR-0032](docs/decisions/ADR-0032.md) |
+| BP-ADR-0033 | 2026-08-21 | OpenAI's API is the vetted destination for content that leaves the machine | Accepted | [ADR-0033](docs/decisions/ADR-0033.md) |
+| BP-ADR-0034 | 2026-08-21 | Default-editor registration stays a `.reg` handoff, never a `winreg` dependency | Accepted, shipped | [ADR-0034](docs/decisions/ADR-0034.md) |
+| BP-ADR-0035 | 2026-08-21 | The `.bpadx` validation ceiling is lowered to 256 MiB / 16 iterations | Accepted | [ADR-0035](docs/decisions/ADR-0035.md) |
+| BP-ADR-0036 | 2026-08-21 | A long security history stays usable by reading it lazily, not by a faster key | Accepted | [ADR-0036](docs/decisions/ADR-0036.md) |
+| BP-ADR-0037 | 2026-08-21 | Phase 9 is a related-notes panel and duplicate detection | Accepted | [ADR-0037](docs/decisions/ADR-0037.md) |
+| BP-ADR-0038 | 2026-08-21 | Notebook mode is a lightweight, one-cell-at-a-time utility | Accepted | [ADR-0038](docs/decisions/ADR-0038.md) |
+| BP-ADR-0039 | 2026-08-21 | Research mode turns gathered data into design recommendations, offline | Proposed | [ADR-0039](docs/decisions/ADR-0039.md) |
 
 ## Decisions needed before the work they block
 
