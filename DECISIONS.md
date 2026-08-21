@@ -47,6 +47,13 @@ Adding a decision means adding both.
 | BP-ADR-0037 | 2026-08-21 | Phase 9 is a related-notes panel and duplicate detection | Accepted | [ADR-0037](docs/decisions/ADR-0037.md) |
 | BP-ADR-0038 | 2026-08-21 | Notebook mode is a lightweight, one-cell-at-a-time utility | Accepted | [ADR-0038](docs/decisions/ADR-0038.md) |
 | BP-ADR-0039 | 2026-08-21 | Research mode turns gathered data into design recommendations, offline, on its own data model | Accepted | [ADR-0039](docs/decisions/ADR-0039.md) |
+| BP-ADR-0040 | 2026-08-21 | `bp-execution` runs a cell as a fresh subprocess, three languages first | Accepted, shipped | [ADR-0040](docs/decisions/ADR-0040.md) |
+| BP-ADR-0041 | 2026-08-21 | Research mode's data is `bp-storage`'s, not a new store | Accepted, shipped | [ADR-0041](docs/decisions/ADR-0041.md) |
+| BP-ADR-0042 | 2026-08-21 | Find in a document served from disk is resumable, not threaded | Accepted, shipped | [ADR-0042](docs/decisions/ADR-0042.md) |
+| BP-ADR-0043 | 2026-08-21 | Notebook mode arrives as a Run menu over a literate document, not a cell view | Accepted, shipped | [ADR-0043](docs/decisions/ADR-0043.md) |
+| BP-ADR-0044 | 2026-08-21 | The Research menu is what a citation crate can honestly do offline | Accepted, shipped | [ADR-0044](docs/decisions/ADR-0044.md) |
+| BP-ADR-0045 | 2026-08-21 | A Markdown file is a notebook, and the panel that lists things is one component | Accepted, shipped | [ADR-0045](docs/decisions/ADR-0045.md) |
+| BP-ADR-0046 | 2026-08-22 | Research mode's last five planned rows were a paper's structure; two fold into the report, one becomes Open Questions, one becomes What the Store Holds, one is dropped | Accepted, shipped | [ADR-0046](docs/decisions/ADR-0046.md) |
 
 ## Decisions needed before the work they block
 
@@ -259,3 +266,132 @@ Adding a decision means adding both.
   passes for the wrong reason if the redirection fails. Recorded here instead,
   because three occurrences is a pattern and the fourth will not announce
   itself either.
+
+- **Three modes were sized as large and were only undecided**, and that is the
+  most expensive mistake in this log. Phases 9, 12 and 13 -- storage,
+  notebooks, research -- sat as "built with no way in" for four sessions,
+  described each time as *modes* rather than menu rows, with `NEXT_SESSION.md`
+  calling a notebook view "the largest unscoped thing in the product" three
+  sessions running.
+
+  None of them was large. Each was waiting on a question:
+
+  - Notebooks needed to know what the mode is *for*. ADR-0038's
+    no-persistent-session model makes exploratory analysis dishonest and a
+    literate document free, because a runbook's examples are self-contained by
+    intent. Choose that and no cell view is needed at all -- the notebook
+    stays its own JSON in the ordinary editor and the surface is a menu.
+  - Research needed two decisions read as two features rather than one
+    contradiction: ADR-0039/0041 define synthesis over `bp-storage` and rule
+    out the bibliography types, while `MENU_MAP.md` names citation metadata.
+    Both are right; they are different features sharing a menu.
+  - Storage was the same shape and was settled first, by ADR-0037.
+
+  **Undecided reads like large**, and an estimate made before the question is
+  answered measures the question rather than the work. Worth remembering the
+  next time something is described as a mode.
+
+- **A refusal outlived the only evidence that could have contradicted it.**
+  Go to Line was recorded as needing "the caret `TextInput` does not expose",
+  alongside four features that genuinely do. It needed the caret *moved*,
+  which `set-selection-offsets` does and which Find Next had always relied on.
+
+  What kept the error alive is the part worth keeping: the move used to be
+  *invisible* -- nothing scrolled the viewport to the caret -- so even if
+  somebody had removed the guard, a correct jump would have looked like
+  nothing happening. The claim only became checkable once that was fixed,
+  which happened for an unrelated reason a day earlier.
+
+  Reading a caret and moving one had been filed under one word. So had
+  "going somewhere" and "saying where you are" -- the second still does need
+  the caret read, which is why the status bar cannot report `Ln`/`Col` under
+  `TextInput` and Go to Line now can work anyway.
+
+- **Find never scrolled to its match, and every test of it used a document
+  that fitted on one screen.** Four manual passes and three of the same
+  session's own runs confirmed Find "worked" on fixtures where the match was
+  already visible -- which tested the search and nothing about the viewport.
+  It surfaced only because a new feature jumped to a line a hundred below the
+  fold and visibly did nothing.
+
+  The methodology finding outlives the fix: **a fixture that fits on one
+  screen cannot test anything about scrolling**, and most of this product's
+  readouts are about where you are. It is now a row on the manual-pass
+  checklist, phrased about the fixture rather than the feature.
+
+- **Two keyboard defects masked each other in the custom surface.**
+  `scroll_for_command` returned "handled" for every key it was given,
+  including the `Command::Ignore` that `bp_editor::keys::command_for` produces
+  for exactly the keys its own comment calls the window's -- so a huge
+  document had no shortcuts at all, Ctrl+F among them, since the viewer
+  shipped. Behind it, `forward-focus: editor` named the `TextInput`, invisible
+  whenever `use-editor-view` is true, so nothing held the keyboard until you
+  clicked.
+
+  Fixing the first is what made the second visible: until keys arrived at all,
+  there was no way to notice nothing was holding them. **"Handled" is a claim
+  with a consequence somewhere else**, and the two `return true`s that caused
+  it had been written to mean "there is nothing to do here".
+
+- **A property test found a Windows device name four sessions after it was
+  written.** `bp-integrity`'s manifest proptest generates file names from
+  `[a-z]{1,8}`; a fresh seed produced `nul`, which Windows will not create as
+  a file *or* a directory, so the fixture could not be built and the property
+  was never reached.
+
+  The generator now asks `bp_platform::paths::reserved_device_name` rather
+  than carrying a list -- a second list is the exact failure `bp-naming`'s
+  two-way agreement test exists to stop. **This is the fourth time this
+  workspace has been bitten by Win32 device names**, after the sanitiser,
+  `atomic_write`, and the env-root property test. The rule has one home; the
+  recurring mistake is not asking it.
+
+- **A name that has sat in a plan long enough starts to read like a
+  specification.** `docs/product/MENU_MAP.md` listed five Research rows --
+  research question, evidence, findings, methods, datasets -- from `9f98b8a`,
+  the scaffold commit, where they were part of one sentence describing a menu
+  nobody had designed. Four sessions of planning treated them as a backlog.
+  They are the section headings of a research *paper*, and ADR-0039 had
+  already decided the mode was something else; scoping them took an afternoon
+  and resolved all five, two of them by deletion.
+
+  **This is the mirror of "undecided reads like large", and it is the more
+  dangerous of the two.** An unscoped mode at least *looks* unscoped, so
+  somebody eventually asks. A named row in a table looks decided. Nothing
+  about it invites the question, and it can therefore sit in a plan
+  indefinitely, being counted.
+
+  The tell, when it comes round again: **ask where the name came from.** If
+  the answer is a commit that scaffolded the repository rather than a decision
+  that chose it, it is a sketch, and it has been read as a plan ever since.
+
+- **"Inspectable" is a claim about the product, not about the source.**
+  ADR-0041 committed Research Report to "a plain aggregate query with a fixed,
+  inspectable rule", and every rule was indeed inspectable -- in
+  `state/research.rs`. Meanwhile the report scanned the five hundred
+  most-recently-seen documents and told the reader nothing about it, so a
+  store of nine hundred produced a report that read as complete. Both things
+  were true at once for a session: the rule was written down, and the person
+  it was written for could not see it.
+
+  The fix was six lines saying what the thresholds are and when the truncation
+  bit. The lesson is the same shape as the comment-versus-code trap that
+  precedes it: **ask of any honesty commitment, honest to whom?** If the answer
+  is "to whoever reads this file", it has not been kept.
+
+- **A comment and a test disagreed inside the same file, and both were read
+  as right.** `Store::forget_document`'s doc comment promised "and with it any
+  tags that were only on it"; forty lines below, its own test asserted
+  `"the tag itself survives; nothing carries it"`. The code did the second.
+  Nobody noticed, because every tag-shaped query in `bp-storage` joins
+  `document_tags` and so cannot see an orphaned tag -- there was no query whose
+  answer depended on which of the two was true, until `Store::summary` had to
+  count tags and pick one.
+
+  **Two claims about the same function can coexist for as long as nothing
+  asks.** That is a different failure from a comment that is merely wrong: a
+  wrong comment is one mistake, and this was two readers each correctly
+  describing what they were looking at. The generalisation for this repository
+  is that the question "what would fail if this stopped being true?" has a
+  second edge -- when the answer is "nothing", the comment is a wish *and* the
+  test beside it is free to say the opposite.

@@ -25,7 +25,7 @@ Status as of **2026-08-21**. Three words, meaning three different things:
 | 10 | Semantic/hybrid search | Not started | [07-semantic](project/tasks/07-semantic/) | — |
 | 11 | Clipboard system | **Started** | [08-clipboard](project/tasks/08-clipboard/) | `bp-clipboard` |
 | 12 | Notebook/execution system | **Built, unwired** | [09-notebook](project/tasks/09-notebook/) | `bp-notebook` |
-| 13 | Research mode | **Built, unwired** | [10-research](project/tasks/10-research/) | `bp-research` |
+| 13 | Research mode | **Started** | [10-research](project/tasks/10-research/) | `bp-research`, `bp-storage`, `bp-semantic` |
 | 14 | Security foundation | **Started** | [11-security](project/tasks/11-security/) | `bp-security` |
 | 15 | Encrypted `.bpadx` documents | **Started** | [11-security](project/tasks/11-security/) | `bp-crypto` |
 | 16 | Advanced security | **Started** | [11-security](project/tasks/11-security/) | `bp-secrets`, `bp-redaction`, `bp-audit`, `bp-integrity` |
@@ -48,25 +48,57 @@ that points at them for no gain.
 
 ## Where the work actually is
 
-Phases 1, 3 and 4 are complete. Phases 2, 5, 6, 7, 8, 11, 14, 15, 16, 17 and
-18 each have a tested slice reachable in the product — phase 18 joined them
-when File ▸ Set as Default Editor shipped. Phases 9, 12 and 13 are built and
-have no way in: `bp-research`, `bp-notebook` and `bp-storage` have zero
-reverse dependencies anywhere in the application, which is 9,556 lines and
-241 unit tests behind code no user can reach.
+Phases 1, 3 and 4 are complete. **Every other phase now has a tested slice
+reachable in the product**, and phases 9, 12 and 13 — the three that were
+"built with no way in" for four sessions — joined them across 2026-08-21/22.
 
-**The wiring backlog shrank to three modes.** Phase 6's YAML, phase 16's
-redaction and metadata inspector all have menu rows, the audit log's sealed
-destination has an implementor instead of refusing every append, phases 16 and
-18 gained Verify Signature and Set as Default Editor, and **`bp-buffer`'s
-large-file engine — the largest thing on that list — came off it**: a 2 GB
-file opens, and costs 0.8 MiB. `bp-audit` came off when Security ▸ Security
-History shipped, with five capabilities writing into it and one row reading it
-back.
+**No crate in this workspace is unreachable.** That sentence has been the
+headline of this section since the fourth session, when it was three crates,
+9,556 lines and 241 unit tests behind code no user could reach. `bp-storage`
+left under [ADR-0037](docs/decisions/ADR-0037.md), `bp-notebook` and
+`bp-execution` under [ADR-0043](docs/decisions/ADR-0043.md), and
+`bp-research` under [ADR-0044](docs/decisions/ADR-0044.md).
 
-What is left is `bp-notebook`, `bp-research` and `bp-storage`, and none of the
-three is a menu row: each is a *mode*. That is why they are what is left, and
-it is why "wire it up" stopped being the right description of the work.
+**What actually unblocked the last three was not effort.** Each had been
+sized as a *mode* — a large, unscoped thing — and each turned out to be
+waiting on a question rather than on work:
+
+- **Phase 12, notebooks.** Sized as a cell-sequence view for three sessions.
+  The blocking question was what the mode is *for*, and ADR-0038's
+  no-persistent-session model answers it: a literate document, whose examples
+  are self-contained by intent. Pick that and the view is not needed at all —
+  the notebook stays its own JSON in the ordinary editor, and the surface is
+  a menu. [ADR-0043](docs/decisions/ADR-0043.md).
+- **Phase 13, research.** Blocked on reading two decisions as a
+  contradiction. ADR-0039/0041 define the mode as synthesis over `bp-storage`
+  and say the bibliography types are not what it is built on, while
+  `MENU_MAP.md` names citation metadata. They are two features sharing a
+  menu, not one feature with two definitions.
+  [ADR-0044](docs/decisions/ADR-0044.md).
+
+  **Its remaining backlog went the same way, one session later, and in the
+  opposite direction.** The five rows `MENU_MAP.md` still listed — research
+  question, evidence, findings, methods, datasets — were the sections of a
+  research *paper*, written into the file by the scaffold commit and never
+  elaborated. Sized as work they looked like five features; asked what each
+  was *for*, two became part of Research Report, one became **Open
+  Questions**, one became **What the Store Holds**, and one was dropped as a
+  second name for the report itself. [ADR-0046](docs/decisions/ADR-0046.md).
+  So the corollary of "undecided reads like large" is worth writing down too:
+  **a name that has sat in a plan long enough starts to read like a
+  specification.** Nobody ever wrote these five as one.
+- **Phase 9, storage.** Settled first, by ADR-0037, and the same shape: a
+  decision about presentation rather than a body of work.
+
+The lesson is recorded because the estimate was the error:
+**undecided reads like large.**
+
+**Phase 4 is finished, including the piece it deliberately left out.** Find
+over a document served from disk shipped under
+[ADR-0042](docs/decisions/ADR-0042.md) — a resumable scan rather than a
+threaded one, measured on a 213.5 MiB log: `searching 86%` while it ran, then
+`1 of 1` at line 4,800,001. Ctrl+End and a total line count remain refusals
+with reasons rather than gaps.
 
 **Cross-crate tests found seven defects, and all seven are fixed.** Until the
 fourth session every test in the repository tested one crate. Eleven files of
@@ -89,13 +121,14 @@ or `
 ` and nothing else. **There is no `#[ignore]`d test left anywhere in
 the tree.** `DECISIONS.md` has the evidence for each.
 
-**Phase 4 is done.** The open path classifies from metadata before a byte is
-read, and all three classes now have somewhere to go: an ordinary document
-opens as it always did, a large one opens and edits with its size in the
-status bar, and **a huge one opens too**, served from disk as the reader
-scrolls ([ADR-0030](docs/decisions/ADR-0030.md)). Measured rather than
-asserted — a few lines of text peaked at 31.3 MiB and a 192 MiB log at
-32.1 MiB, so a document 240 times the size costs 0.8 MiB more.
+**Phase 4's measurements, kept because they are the claim.** The open path
+classifies from metadata before a byte is read, and all three classes have
+somewhere to go: an ordinary document opens as it always did, a large one
+opens and edits with its size in the status bar, and a huge one is served
+from disk as the reader scrolls
+([ADR-0030](docs/decisions/ADR-0030.md)). A few lines of text peaked at
+31.3 MiB and a 192 MiB log at 32.1 MiB — a document 240 times the size costs
+0.8 MiB more.
 
 It draws in the custom surface in *every* build, not only under
 `--editor-view`, because `TextInput` owns its own text and cannot be handed a
@@ -105,9 +138,9 @@ which surface *edits* a document the rope holds.
 Two things in that phase are deliberately not built and each is a refusal with
 a reason rather than a gap: **Ctrl+End** and **a total line count**. Both need
 the whole file indexed, which for these documents means reading two gigabytes
-to answer one question while the window is frozen. Find over a document served
-from disk is the remaining feature — `LargeFile::windows` exists for it — and
-it is a feature rather than wiring.
+to answer one question while the window is frozen. Find is no longer on that
+list: ADR-0042 built it, and it is resumable for exactly the reason those two
+are refused — a window must not be frozen while a file is read.
 
 Two whole-file reads also came off the open path. `bp_crypto::is_bpadx` needs
 six bytes and was being handed the entire file, which `bp_files::load` then

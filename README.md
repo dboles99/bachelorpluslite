@@ -56,9 +56,9 @@ cargo run --release -- --editor-view   # with the custom editor view (ADR-0018)
 ./scripts/Measure-Startup.ps1  # startup and idle memory vs specs.md §22
 ```
 
-## Current state (2026-08-21)
+## Current state (2026-08-22)
 
-**25 crates, 1,846 tests, green on Windows and Linux.** The app opens, edits and
+**25 crates, 1,941 tests, green on Windows and Linux.** The app opens, edits and
 saves atomically, and does rather more than that:
 
 | Area | What works |
@@ -73,7 +73,7 @@ saves atomically, and does rather more than that:
 | Clipboard | History with kind detection, paste from history, format-aware paste transformations |
 | Metadata | A SQLite store with migrations, written to on every save ([ADR-0019](docs/decisions/ADR-0019.md)) |
 | Organize | Related Notes, a collapsible panel of documents sharing tags with the active one; Duplicate Detection, automatic at save and on-demand ([ADR-0037](docs/decisions/ADR-0037.md)) |
-| Research | Research Report, reading `bp-storage` into dominant themes, stale clusters, under-connected documents and consolidation candidates ([ADR-0041](docs/decisions/ADR-0041.md)). Plus three rows that read the document in front of you ([ADR-0044](docs/decisions/ADR-0044.md)): **Citation Metadata**, **Find Identifiers** — every DOI and arXiv id with its `line:column` and the address it points to, nothing resolved — and **Check Bibliography** |
+| Research | Research Report, reading `bp-storage` into dominant themes, stale clusters, under-connected documents and consolidation candidates ([ADR-0041](docs/decisions/ADR-0041.md)) — each insight now **naming the documents it is drawn from**, and closing with a section that states every threshold it applied and every number it applied them over, including the truncation it used to leave silent ([ADR-0046](docs/decisions/ADR-0046.md)). Plus four rows that read the document in front of you: **Citation Metadata**, **Find Identifiers** — every DOI and arXiv id with its `line:column` and the address it points to, nothing resolved — **Check Bibliography** ([ADR-0044](docs/decisions/ADR-0044.md)) and **Open Questions**, every question the document asks, at the line it begins on. And **What the Store Holds**, which says what the store has recorded about you and that it never holds the text of a document |
 | Notebook | **Open an `.ipynb` *or a `.md` with fenced code blocks* and the Run menu lists what can run** ([ADR-0045](docs/decisions/ADR-0045.md) reads a Markdown file as a notebook, so consent and the prose-cell refusal carry over untouched); **Notebook ▸ Cell Outline** maps the whole document, prose included, and clicking a row goes to it; choosing one runs it as a fresh subprocess and shows `stdout`, `stderr`, the exit code and the duration in a panel, with a Stop that keeps what the cell had already printed ([ADR-0043](docs/decisions/ADR-0043.md)). Aimed at a literate document — a runbook whose examples are verified rather than asserted — because that is the use ADR-0038's no-persistent-session model actually fits. There is no cell-sequence view, deliberately |
 | Encryption | `.bpadx` documents — Security ▸ Encrypt Document, unlock on open, and saves stay encrypted. Argon2id, XChaCha20-Poly1305 or AES-256-GCM, chunked with position authenticated ([ADR-0021](docs/decisions/ADR-0021.md)) |
 | Security | Per-document profiles (Standard / Private / Confidential / Maximum) governing the recovery journal, clipboard history and metadata store ([ADR-0020](docs/decisions/ADR-0020.md)) |
@@ -132,11 +132,6 @@ should spend an afternoon on these before checking the version changed.
   [ADR-0043](docs/decisions/ADR-0043.md), `bp-research` under
   [ADR-0044](docs/decisions/ADR-0044.md). Kept as a heading because the count
   is worth being able to check rather than remember.
-- **`bp-storage` is still not called by the application.** That is now a
-  product decision rather than a security one: ADR-0020 permits recording a
-  summary under Standard, and `record_document` honours the policy. What
-  remains is ADR-0019's judgement plus a design pass.
-
 - **A plaintext document under Private or Confidential gets no crash
   recovery.** The journal for those profiles is sealed with the document's
   own passphrase ([ADR-0022](docs/decisions/ADR-0022.md)), so a document
@@ -183,6 +178,47 @@ should spend an afternoon on these before checking the version changed.
 Kept rather than deleted, because every one of these went stale the same
 way — a fix landing without the record moving — and because the lesson in each
 is worth more than the fact.
+
+- **Research mode's last five planned rows turned out to be a paper's
+  structure, and none of them survived as a row.** `MENU_MAP.md` had named
+  research question, evidence, findings, methods and datasets since the
+  scaffold commit. They are IMRaD — the sections of a research *paper* — and
+  [ADR-0039](docs/decisions/ADR-0039.md) defines the mode as synthesis over
+  your own notes, which is not the same thing.
+  [ADR-0046](docs/decisions/ADR-0046.md) scoped each against what
+  `bp-storage` actually holds: evidence and methods became part of Research
+  Report, datasets became **What the Store Holds**, findings was dropped as a
+  second name for the report itself, and research question became **Open
+  Questions**.
+
+  **The lesson is the one this repository keeps relearning from the other
+  side.** Four sessions were lost to sizing modes before the question of what
+  they were *for* had been answered — "undecided reads like large". This is
+  the same mistake at a smaller scale and in the opposite direction: five
+  names sitting in a plan long enough to look like a specification. Nobody
+  wrote them as one. They were a sentence in the scaffold commit, and asking
+  what each was actually *for* resolved all five in an afternoon — two of them
+  by deleting them.
+
+  **And scoping them found something.** Research Report looked for
+  under-connected documents among the five hundred most recently seen and said
+  so nowhere the reader could see. A store of nine hundred documents got a
+  report drawn from five hundred of them and looked complete. The rule was
+  inspectable in `research.rs`; it was not inspectable from the window, which
+  is where the reader is. ADR-0041 had promised "a fixed, inspectable rule" —
+  it turns out that is a claim about the product, not about the source.
+
+- **A doc comment promised something the code had never done.**
+  `Store::forget_document` said "and with it any tags that were only on it".
+  `ON DELETE CASCADE` took the join rows; the `tags` row was left orphaned,
+  and its own test *asserted the survival* in a comment while the doc comment
+  above it promised the opposite. Neither reader was wrong about what they
+  were looking at. It survived because every tag-shaped query in `bp-storage`
+  joins `document_tags` and so cannot see an orphan — until `Store::summary`
+  wanted to count tags and had to pick which number was true. The third time
+  this repository has caught a comment asserting a property the code lacks,
+  and the first where a test agreed with the code and disagreed with the
+  comment without anybody noticing the two were in the same file.
 
 - **`bp-notebook` and `bp-execution` are reachable.** Two crates and about
   9,500 lines had no route to a person for three sessions — not for want of

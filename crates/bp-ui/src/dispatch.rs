@@ -953,6 +953,19 @@ pub fn handle_menu_action(
             show_info("Bibliography", &report);
         }
 
+        // Research ▸ what the active document asks, and what the store holds
+        // (ADR-0046). Same borrow discipline as every arm above.
+        action::OPEN_QUESTIONS => {
+            let report = state.borrow().open_questions_report();
+            push = PushText::No;
+            show_info("Open Questions", &report);
+        }
+        action::STORE_CONTENTS => {
+            let report = state.borrow().store_contents_report();
+            push = PushText::No;
+            show_info("What the Store Holds", &report);
+        }
+
         // Two ranges rather than one, because the Data block at 70-79 had a
         // single id left when YAML needed two. Both reach the same place; the
         // arm that decides which library function a click meant is

@@ -65,6 +65,36 @@ pub struct DocumentRecord {
     pub last_seen: i64,
 }
 
+/// What the store actually holds, in one read.
+///
+/// Every insight over this store is an aggregate, and an aggregate is only
+/// as honest as the reader's sense of what it was taken over. This is that
+/// denominator: "four documents mention Rust" reads very differently against
+/// a store of six than against a store of six hundred.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct StoreSummary {
+    pub documents: usize,
+    /// Documents carrying at least one tag.
+    ///
+    /// Separate from `documents` because an untagged document is invisible
+    /// to every tag-shaped query in this crate -- `documents_tagged`,
+    /// `related_to`, `tag_frequency` -- and a report that never says how many
+    /// there are cannot explain why it found so little.
+    pub tagged_documents: usize,
+    /// Distinct tags in use.
+    ///
+    /// In *use*, counted through the join, rather than rows in `tags` --
+    /// so this is always `tag_frequency().len()`, which is the list the
+    /// report actually shows. `forget_document` now clears orphaned tag rows
+    /// as well, so the two agree; counting through the join means they still
+    /// would if it stopped.
+    pub tags: usize,
+    /// The earliest `first_seen` and the latest `last_seen` recorded, or
+    /// `None` for a store with no documents in it.
+    pub first_seen: Option<i64>,
+    pub last_seen: Option<i64>,
+}
+
 /// The local metadata database.
 pub struct Store {
     connection: Connection,
@@ -201,10 +231,25 @@ impl Store {
     }
 
     /// Forget a document, and with it any tags that were only on it.
+    ///
+    /// **The second half of that sentence was a wish until 2026-08-22.**
+    /// `ON DELETE CASCADE` takes the join rows, which is what the existing
+    /// test asserted; nothing took the now-unused `tags` row, so a store
+    /// silently accumulated tag names carried by nothing. It went unnoticed
+    /// because every tag-shaped query here joins `document_tags` and so
+    /// cannot see an orphan -- until [`Store::summary`] wanted to count them
+    /// and had to decide which number was the true one.
     pub fn forget_document(&self, path: &Path) -> Result<bool, StoreError> {
         let removed = self.connection.execute(
             "DELETE FROM documents WHERE path = ?1",
             params![path_str(path)?],
+        )?;
+        // After the cascade, not before: a tag is orphaned by this delete,
+        // and asking first would find it still attached.
+        self.connection.execute(
+            "DELETE FROM tags
+              WHERE id NOT IN (SELECT tag_id FROM document_tags)",
+            [],
         )?;
         Ok(removed > 0)
     }
@@ -321,6 +366,41 @@ impl Store {
             Ok((name, uses as usize))
         })?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    /// What the store holds: how much, how many of it is tagged, and the
+    /// span of time it covers.
+    ///
+    /// One statement rather than five, for the reason `tag_frequency`'s own
+    /// comment gives: the counting is SQL's job, and five round trips to
+    /// answer one question is five chances for the answers to describe
+    /// different moments.
+    ///
+    /// `MIN(first_seen)` and `MAX(last_seen)` are `NULL` over no rows, which
+    /// is exactly the `None` a store with nothing in it should report --
+    /// rather than the epoch, which would read as a document recorded in
+    /// 1970.
+    pub fn summary(&self) -> Result<StoreSummary, StoreError> {
+        Ok(self.connection.query_row(
+            "SELECT (SELECT COUNT(*) FROM documents),
+                    (SELECT COUNT(DISTINCT document_id) FROM document_tags),
+                    (SELECT COUNT(DISTINCT tag_id) FROM document_tags),
+                    (SELECT MIN(first_seen) FROM documents),
+                    (SELECT MAX(last_seen) FROM documents)",
+            [],
+            |row| {
+                let documents: i64 = row.get(0)?;
+                let tagged: i64 = row.get(1)?;
+                let tags: i64 = row.get(2)?;
+                Ok(StoreSummary {
+                    documents: documents as usize,
+                    tagged_documents: tagged as usize,
+                    tags: tags as usize,
+                    first_seen: row.get(3)?,
+                    last_seen: row.get(4)?,
+                })
+            },
+        )?)
     }
 
     /// Documents already recorded under the same title as `title`, excluding
@@ -613,7 +693,94 @@ mod tests {
         assert_eq!(orphans, 0, "the join rows went with the document");
         assert!(
             store.documents_tagged("rust").unwrap().is_empty(),
-            "the tag itself survives; nothing carries it"
+            "nothing carries the tag any more"
+        );
+
+        let names: i64 = store
+            .connection
+            .query_row("SELECT COUNT(*) FROM tags", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(
+            names, 0,
+            "and the tag name went too, which this doc comment promised long              before the code did it"
+        );
+    }
+
+    #[test]
+    fn a_tag_still_carried_by_something_else_survives_a_forget() {
+        let store = store();
+        let a = store
+            .record_document(&path("a.md"), None, 1, Metadata::Summary)
+            .unwrap()
+            .unwrap();
+        let b = store
+            .record_document(&path("b.md"), None, 2, Metadata::Summary)
+            .unwrap()
+            .unwrap();
+        store.tag_document(a, "rust").unwrap();
+        store.tag_document(b, "rust").unwrap();
+
+        store.forget_document(&path("a.md")).unwrap();
+        assert_eq!(
+            store.documents_tagged("rust").unwrap().len(),
+            1,
+            "clearing orphans must not clear a tag that is still in use"
+        );
+    }
+
+    #[test]
+    fn an_empty_store_summarises_to_nothing_rather_than_to_the_epoch() {
+        let summary = store().summary().unwrap();
+        assert_eq!(summary, StoreSummary::default());
+        assert_eq!(
+            summary.first_seen, None,
+            "MIN over no rows is NULL, and a store with nothing in it has no              first day"
+        );
+    }
+
+    #[test]
+    fn a_summary_counts_documents_tags_and_the_span_they_cover() {
+        let store = store();
+        let a = store
+            .record_document(&path("a.md"), None, 100, Metadata::Summary)
+            .unwrap()
+            .unwrap();
+        let b = store
+            .record_document(&path("b.md"), None, 400, Metadata::Summary)
+            .unwrap()
+            .unwrap();
+        store.tag_document(a, "rust").unwrap();
+        store.tag_document(a, "notes").unwrap();
+        store.tag_document(b, "rust").unwrap();
+        // Recorded, never tagged -- the number the report needs to explain
+        // why a tag-shaped query found less than the store holds.
+        store
+            .record_document(&path("c.md"), None, 250, Metadata::Summary)
+            .unwrap()
+            .unwrap();
+
+        let summary = store.summary().unwrap();
+        assert_eq!(summary.documents, 3);
+        assert_eq!(summary.tagged_documents, 2);
+        assert_eq!(summary.tags, 2);
+        assert_eq!(summary.first_seen, Some(100));
+        assert_eq!(summary.last_seen, Some(400));
+    }
+
+    #[test]
+    fn a_summary_counts_the_same_tags_the_frequency_list_shows() {
+        let store = store();
+        let id = store
+            .record_document(&path("a.md"), None, 1, Metadata::Summary)
+            .unwrap()
+            .unwrap();
+        store.tag_document(id, "rust").unwrap();
+        store.tag_document(id, "Rust").unwrap();
+
+        assert_eq!(
+            store.summary().unwrap().tags,
+            store.tag_frequency().unwrap().len(),
+            "one number, whichever way it is asked -- `tags.name` is NOCASE,              so these are one tag"
         );
     }
 

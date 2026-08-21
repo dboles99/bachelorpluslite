@@ -312,9 +312,325 @@ impl Statistics {
     }
 }
 
+/// A question a document asks.
+///
+/// The sibling of [`Heading`]: both are something the text demonstrably
+/// contains, reported with the line it is on, and neither is an
+/// interpretation of what the author meant by it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Question {
+    /// The sentence, question mark included, whitespace collapsed.
+    pub text: String,
+    /// 1-based line the question *begins* on.
+    ///
+    /// Where it begins rather than where the `?` lands, because a question
+    /// wrapped across three lines is one thing to go and read, and its first
+    /// line is where a reader would want to be put down.
+    pub line: usize,
+}
+
+/// Every question the document asks.
+///
+/// **A question has a grammar, so it can be recognised locally; whether it is
+/// the question you are asking is not something the document says.** That is
+/// the same split `bp-research` draws between finding a DOI and resolving
+/// one, and it is why this is not called "research questions": this reports
+/// what was written, and the reader decides which of them they are actually
+/// working on.
+///
+/// The rule, in full, because every rule in this crate is meant to be
+/// inspectable:
+///
+/// - a **fenced code block** is skipped entirely. A `?` inside one is a
+///   language's punctuation -- a ternary, Rust's try operator -- not a
+///   question, and including them would bury the real ones;
+/// - a question is a run of text ending in `?`, beginning after the previous
+///   `.`, `!` or `?`, and it may **cross lines within one paragraph**,
+///   because prose wrapped by an editor is still one sentence;
+/// - leading Markdown decoration -- heading hashes, quote markers, list
+///   bullets and numbers -- is trimmed, so a bulleted question reads as the
+///   question rather than as the bullet;
+/// - a candidate with no letter in it (`???`, `1 + 1 = ?`) is not a question.
+///
+/// Returned in document order, which is the order they were asked in.
+pub fn questions(text: &str) -> Vec<Question> {
+    let mut found = Vec::new();
+    // Characters of the paragraph being read, each carrying the line it came
+    // from -- so a question spanning four lines still knows which one it
+    // started on without a second pass to find out.
+    let mut paragraph: Vec<(char, usize)> = Vec::new();
+    let mut in_fence = false;
+
+    for (index, line) in text.lines().enumerate() {
+        let number = index + 1;
+        let trimmed = line.trim();
+
+        if is_fence(trimmed) {
+            // A fence both ends the paragraph before it and toggles whether
+            // the lines after it are prose. Opening one mid-paragraph is
+            // malformed Markdown either way; ending the paragraph is the
+            // reading that cannot glue prose to code.
+            drain_questions(&mut paragraph, &mut found);
+            in_fence = !in_fence;
+            continue;
+        }
+        if in_fence {
+            continue;
+        }
+        if trimmed.is_empty() {
+            drain_questions(&mut paragraph, &mut found);
+            continue;
+        }
+
+        let content = strip_leading_markers(trimmed);
+        if content.is_empty() {
+            continue;
+        }
+        if !paragraph.is_empty() {
+            // The join is a space, not the newline the file has: a question
+            // is being read as a sentence here, and the line break inside it
+            // is the editor's, not the author's.
+            paragraph.push((' ', number));
+        }
+        paragraph.extend(content.chars().map(|c| (c, number)));
+    }
+
+    // A document ending without a blank line still ends its last paragraph.
+    drain_questions(&mut paragraph, &mut found);
+    found
+}
+
+/// Whether `trimmed` opens or closes a fenced code block.
+///
+/// Both fence characters, because `bp-notebook` reads both (ADR-0045) and a
+/// rule that recognised only backticks would let a tilde-fenced block's
+/// contents through as prose.
+fn is_fence(trimmed: &str) -> bool {
+    trimmed.starts_with("```") || trimmed.starts_with("~~~")
+}
+
+/// Strip heading hashes, quote markers and list bullets from the front of a
+/// line, however many are stacked.
+///
+/// A loop rather than one pass, because `> - Should we?` carries two and
+/// stopping after the first would leave the bullet inside the question.
+fn strip_leading_markers(line: &str) -> &str {
+    let mut rest = line;
+    loop {
+        let stripped = strip_one_marker(rest);
+        if stripped == rest {
+            return rest;
+        }
+        rest = stripped.trim_start();
+    }
+}
+
+/// One marker, or `line` unchanged when there is none.
+fn strip_one_marker(line: &str) -> &str {
+    for marker in ['#', '>', '-', '*', '+'] {
+        if let Some(rest) = line.strip_prefix(marker) {
+            // `#Rust` and `*emphasis*` are not markers; a real one is
+            // followed by space or is the whole line. Requiring the space is
+            // what keeps `*bold*` out of the trimmer.
+            if rest.is_empty() || rest.starts_with(char::is_whitespace) {
+                return rest;
+            }
+            // A repeated hash is one marker (`###`), so keep eating.
+            if marker == '#' && rest.starts_with('#') {
+                return rest;
+            }
+        }
+    }
+
+    // An ordered-list number: digits, then `.` or `)`, then space.
+    let digits: String = line.chars().take_while(char::is_ascii_digit).collect();
+    if !digits.is_empty() {
+        let rest = line.get(digits.len()..).unwrap_or_default();
+        if let Some(after) = rest.strip_prefix('.').or_else(|| rest.strip_prefix(')'))
+            && (after.is_empty() || after.starts_with(char::is_whitespace))
+        {
+            return after;
+        }
+    }
+    line
+}
+
+/// Split the accumulated paragraph into sentences, keep the ones that ask
+/// something, and empty it ready for the next paragraph.
+fn drain_questions(paragraph: &mut Vec<(char, usize)>, found: &mut Vec<Question>) {
+    let mut sentence: Vec<(char, usize)> = Vec::new();
+    for (character, line) in paragraph.drain(..) {
+        sentence.push((character, line));
+        if !matches!(character, '.' | '!' | '?') {
+            continue;
+        }
+        if character == '?'
+            && let Some(question) = question_from(&sentence)
+        {
+            found.push(question);
+        }
+        sentence.clear();
+    }
+    // Whatever trails the last terminator is not a question: it never asked.
+}
+
+/// One sentence as a [`Question`], or `None` when it does not read as one.
+fn question_from(sentence: &[(char, usize)]) -> Option<Question> {
+    let start = sentence.iter().find(|(c, _)| !c.is_whitespace())?;
+    let text: String = sentence.iter().map(|(c, _)| *c).collect();
+    // `???` and `1 + 1 = ?` end in a question mark and ask nothing. A letter
+    // is the cheapest test for "somebody wrote words here" that does not
+    // assume English.
+    if !text.chars().any(char::is_alphabetic) {
+        return None;
+    }
+    Some(Question {
+        text: text.split_whitespace().collect::<Vec<_>>().join(" "),
+        line: start.1,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The question text of every question found, in order.
+    fn asked(text: &str) -> Vec<String> {
+        questions(text).into_iter().map(|q| q.text).collect()
+    }
+
+    #[test]
+    fn a_sentence_ending_in_a_question_mark_is_a_question() {
+        assert_eq!(
+            asked("We shipped the parser. Should the tokeniser follow?"),
+            vec!["Should the tokeniser follow?"]
+        );
+    }
+
+    #[test]
+    fn a_question_wrapped_across_lines_is_still_one_question() {
+        let text = "Should the tokeniser follow the parser,
+or wait until the grammar settles?";
+        assert_eq!(
+            asked(text),
+            vec!["Should the tokeniser follow the parser, or wait until the grammar settles?"],
+            "a line break inside a sentence is the editor's, not the author's"
+        );
+    }
+
+    #[test]
+    fn a_wrapped_question_reports_the_line_it_begins_on() {
+        let text = "Intro paragraph.
+
+Should the tokeniser follow,
+or wait?";
+        let found = questions(text);
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!(
+            found[0].line, 3,
+            "the line to go and read is where the question starts, not where the ? lands"
+        );
+    }
+
+    #[test]
+    fn a_question_mark_inside_a_fenced_block_is_not_a_question() {
+        let text = "Notes.
+
+```rust
+let x = maybe()?;
+let y = if a { b } else { c };
+```
+
+Does that read?";
+        assert_eq!(
+            asked(text),
+            vec!["Does that read?"],
+            "a ? in code is a language's punctuation, not a question"
+        );
+    }
+
+    #[test]
+    fn a_tilde_fence_hides_its_contents_too() {
+        let text = "~~~
+what about this?
+~~~";
+        assert!(
+            asked(text).is_empty(),
+            "bp-notebook reads both fence styles"
+        );
+    }
+
+    #[test]
+    fn a_bulleted_question_reads_as_the_question_and_not_the_bullet() {
+        assert_eq!(
+            asked(
+                "- Should we ship it?
+- What breaks if we do not?"
+            ),
+            vec!["Should we ship it?", "What breaks if we do not?"]
+        );
+    }
+
+    #[test]
+    fn stacked_markers_are_all_trimmed() {
+        assert_eq!(asked("> - Should we ship it?"), vec!["Should we ship it?"]);
+    }
+
+    #[test]
+    fn an_ordered_list_number_is_a_marker() {
+        assert_eq!(
+            asked(
+                "1. Who owns the schema?
+2) Who reviews it?"
+            ),
+            vec!["Who owns the schema?", "Who reviews it?"]
+        );
+    }
+
+    #[test]
+    fn a_heading_that_asks_something_is_a_question() {
+        assert_eq!(asked("## Why a rope?"), vec!["Why a rope?"]);
+    }
+
+    #[test]
+    fn emphasis_is_not_a_list_bullet() {
+        assert_eq!(
+            asked("*Should* we ship it?"),
+            vec!["*Should* we ship it?"],
+            "a marker is followed by a space; *bold* is not one"
+        );
+    }
+
+    #[test]
+    fn a_question_mark_with_no_words_in_front_of_it_asks_nothing() {
+        assert!(asked("???").is_empty());
+        assert!(asked("1 + 1 = ?").is_empty());
+    }
+
+    #[test]
+    fn text_trailing_the_last_question_is_not_swept_into_one() {
+        assert_eq!(
+            asked("Should we ship it? Probably not this week"),
+            vec!["Should we ship it?"],
+            "an unterminated trailing clause never asked anything"
+        );
+    }
+
+    #[test]
+    fn a_document_with_nothing_in_it_asks_nothing() {
+        assert!(questions("").is_empty());
+    }
+
+    #[test]
+    fn questions_come_back_in_the_order_they_were_asked() {
+        let text = "First, why? Then, how?
+
+And finally, when?";
+        assert_eq!(
+            asked(text),
+            vec!["First, why?", "Then, how?", "And finally, when?"]
+        );
+    }
 
     #[test]
     fn a_markdown_heading_becomes_the_title() {

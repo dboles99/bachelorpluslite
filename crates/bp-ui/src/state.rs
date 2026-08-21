@@ -18,6 +18,9 @@
 //! | [`encryption`] | The `.bpadx` passphrase flow: what the bar is asking, and what a wrong answer does |
 //! | [`find`] | What the find bar is looking for, and which match the user is standing on |
 //! | [`organize`] | The local metadata store (ADR-0037): recording and tagging a document as it saves, Related Notes, and Duplicate Detection |
+//! | [`research`] | Research mode's synthesis half (ADR-0041, ADR-0046): what the *store* says the user has been writing about, and what the store holds |
+//! | [`citations`] | What the active document *cites* (ADR-0044) |
+//! | [`questions`] | What the active document *asks* (ADR-0046) |
 //!
 //! They are children of this module rather than siblings, which is the whole
 //! reason the split is possible: a child can see its parent's private items,
@@ -49,6 +52,7 @@ mod encryption;
 mod find;
 pub(crate) mod notebook;
 mod organize;
+mod questions;
 mod research;
 mod security;
 

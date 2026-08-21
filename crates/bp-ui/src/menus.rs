@@ -205,7 +205,7 @@ pub mod action {
     pub const DIAGNOSTICS: i32 = 730;
 
     /// Research ▸ Research Report (ADR-0041). A block of its own -- 740-749,
-    /// 741-749 free.
+    /// 747-749 free.
     pub const RESEARCH_REPORT: i32 = 740;
 
     pub const NOTE_TITLE: i32 = 80;
@@ -271,6 +271,16 @@ pub mod action {
     pub const CITATION_METADATA: i32 = 741;
     pub const FIND_IDENTIFIERS: i32 = 742;
     pub const CHECK_BIBLIOGRAPHY: i32 = 743;
+
+    /// Research ▸ what the active document asks (ADR-0046). In the Research
+    /// block with the rest of the menu rather than beside `DOCUMENT_STATS`,
+    /// whose crate it shares: an id block follows the menu a row is in,
+    /// because `range_dispatch_windows` is what the blocks exist to keep
+    /// clear of, and that is a dispatch concern rather than a crate one.
+    pub const OPEN_QUESTIONS: i32 = 745;
+
+    /// Research ▸ What the Store Holds (ADR-0046).
+    pub const STORE_CONTENTS: i32 = 746;
 
     /// End the cell that is running (ADR-0043).
     pub const RUN_STOP: i32 = 750;
@@ -1253,20 +1263,32 @@ pub fn research(has_content: bool) -> Vec<MenuItem> {
         action::FIND_IDENTIFIERS,
         has_content,
     ));
+    items.push(row_enabled(
+        "Check Bibliography",
+        "",
+        action::CHECK_BIBLIOGRAPHY,
+        has_content,
+    ));
+    // **Not "Research Question", which `MENU_MAP.md` named until 2026-08-22**
+    // -- ADR-0046, and the same correction "DOI Lookup" got one row up.
+    // A question has a grammar and can be found; which one you are actually
+    // asking is not something the document says, so the row is named for the
+    // act it can perform.
     items.push(MenuItem {
         separator_after: true,
-        ..row_enabled(
-            "Check Bibliography",
-            "",
-            action::CHECK_BIBLIOGRAPHY,
-            has_content,
-        )
+        ..row_enabled("Open Questions", "", action::OPEN_QUESTIONS, has_content)
     });
 
-    // What is left of `MENU_MAP.md`'s Research section is the *synthesis*
-    // half -- more of what ADR-0041 built, over `bp-storage`, rather than
-    // more of what the three rows above do.
-    items.extend(planned_menu("Research"));
+    // Below the second separator: the store talking about itself rather than
+    // about the user's subject matter. Not gated on `has_content`, for the
+    // reason Research Report is not -- it reads the store, not the tab.
+    items.push(row_end("What the Store Holds", "", action::STORE_CONTENTS));
+
+    // Nothing is left of `MENU_MAP.md`'s Research section: ADR-0046 scoped
+    // its last five names, and none of them survived as a row of its own.
+    // `planned_menu("Research")` is therefore gone rather than empty -- a
+    // menu that ends in a separator with nothing after it is a promise the
+    // product has already kept.
     items
 }
 
@@ -1334,20 +1356,15 @@ pub fn planned_menu(name: &str) -> Vec<MenuItem> {
             &["Project", "Suggested Folder", "Topics", "Semantic Search"],
             "phase 9",
         ),
-        // Citation Metadata and DOI Lookup have left this list: the first is
-        // built (ADR-0044) and the second is not a thing this product can do
-        // offline, so it is named for what it is instead. What remains is the
-        // synthesis half of the menu.
-        "Research" => (
-            &[
-                "Research Question",
-                "Evidence",
-                "Findings",
-                "Methods",
-                "Datasets",
-            ],
-            "phase 13",
-        ),
+        // **"Research" is not a name this function answers to any more**, and
+        // that is ADR-0046 rather than an omission. Its last five planned
+        // rows -- research question, evidence, findings, methods, datasets --
+        // were a paper's IMRaD structure written down before anybody had
+        // decided what the mode was for, and scoping them against ADR-0039
+        // resolved every one: two became part of Research Report, one became
+        // Open Questions, and two were dropped as second names for what the
+        // report already is. A menu with nothing planned left in it should
+        // say nothing, not list five things it has decided against.
         "Run" => (
             &[
                 "Run Selection",
@@ -1770,6 +1787,9 @@ mod tests {
             action::CITATION_METADATA,
             action::FIND_IDENTIFIERS,
             action::CHECK_BIBLIOGRAPHY,
+            // ADR-0046.
+            action::OPEN_QUESTIONS,
+            action::STORE_CONTENTS,
         ] {
             for (name, window) in range_dispatch_windows() {
                 assert!(
@@ -2564,9 +2584,60 @@ mod tests {
     }
 
     #[test]
+    fn the_research_menu_has_nothing_planned_left_in_it() {
+        let items = research(true);
+        assert!(
+            items.iter().all(|i| i.action != action::NONE),
+            "ADR-0046 resolved the last five planned names; a row that does \
+             nothing should not have outlived them"
+        );
+    }
+
+    #[test]
+    fn open_questions_greys_out_with_nothing_to_read_and_the_store_row_does_not() {
+        let empty = research(false);
+        let asks = |items: &[MenuItem], id: i32| {
+            items
+                .iter()
+                .find(|i| i.action == id)
+                .expect("the row exists")
+                .enabled
+        };
+        assert!(
+            !asks(&empty, action::OPEN_QUESTIONS),
+            "a document reading has nothing to read"
+        );
+        assert!(
+            asks(&empty, action::STORE_CONTENTS),
+            "the store is there whether or not a tab is -- the same reasoning \
+             Research Report already applies to itself"
+        );
+        assert!(asks(&research(true), action::OPEN_QUESTIONS));
+    }
+
+    #[test]
+    fn the_research_menu_offers_no_row_named_for_a_paper_section() {
+        // ADR-0046. The five IMRaD names were written down before anybody had
+        // decided what the mode was for, and a row that carried one now would
+        // be a promise about a structure this product does not have.
+        for absent in [
+            "Research Question",
+            "Evidence",
+            "Findings",
+            "Methods",
+            "Datasets",
+        ] {
+            assert!(
+                !research(true).iter().any(|i| i.label.contains(absent)),
+                "{absent} is back in the Research menu"
+            );
+        }
+    }
+
+    #[test]
     fn planned_menus_are_entirely_inert() {
         for name in [
-            "Insert", "Data", "Note", "Notebook", "Organize", "Research", "Run", "Security",
+            "Insert", "Data", "Note", "Notebook", "Organize", "Run", "Security",
         ] {
             let items = planned_menu(name);
             assert!(!items.is_empty(), "{name} has no contents");

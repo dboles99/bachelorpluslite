@@ -113,9 +113,15 @@ no data rows rather than a column of greyed ones.
 
 ## Notebook
 
-Enable mode, new cell, run, run selection, run all, convert selection,
-split/merge cells, export. All planned — phase 12. Notebook content never
-auto-runs (ADR-0011).
+| Row | State |
+| --- | --- |
+| Cell Outline | **live** — every cell of the active document, prose included, with a marker on the ones the Run menu would offer. Clicking a row *goes to* the cell; it does not run it ([ADR-0045](../decisions/ADR-0045.md)) |
+| Enable mode, new cell, run all, convert selection, split/merge cells, export | planned — phase 12 |
+
+The outline lists prose as well as code, and that is where it differs from the
+Run menu: the menu offers what can run, an outline is a map of the whole
+document, and a runbook is mostly prose. Notebook content never auto-runs
+(ADR-0011).
 
 ## Organize
 
@@ -126,13 +132,61 @@ before adding anything here.
 
 ## Research
 
-Citation metadata, DOI and scholarly metadata, research question, evidence,
-findings, methods, datasets. All planned — phase 13.
+| Row | State |
+| --- | --- |
+| Research Report | **live** — dominant themes, stale clusters, under-connected documents, consolidation candidates, each naming the documents behind it, and a closing section stating every threshold it applied ([ADR-0041](../decisions/ADR-0041.md), [ADR-0046](../decisions/ADR-0046.md)) |
+| Citation Metadata | **live** — what the active document says about itself ([ADR-0044](../decisions/ADR-0044.md)) |
+| Find Identifiers | **live** — every DOI and arXiv id, with `line:column` and the address it points to |
+| Check Bibliography | **live** — the document read as BibTeX: entry counts by kind, or the failure with its position |
+| Open Questions | **live** — every question the document asks, at the line it begins on; code inside a fence is skipped ([ADR-0046](../decisions/ADR-0046.md)) |
+| What the Store Holds | **live** — the store's own contents, and the statement that it never holds the text of a document ([ADR-0046](../decisions/ADR-0046.md)) |
+
+**Nothing in this menu is planned any more.** It is the first menu in this
+file to have emptied its own backlog rather than grown one.
+
+**Three features share this menu and none is the other.** Research Report
+reads the *store* and says what you have been writing about over time. Four
+rows read the *document in front of you*: three say what it cites (ADR-0044)
+and one says what it asks. What the Store Holds, below the second separator,
+is the store talking about itself.
+
+**Two rows this file named for years are not here, and their absence is the
+decision.**
+
+- **"DOI Lookup"**, until 2026-08-22. Finding an identifier and resolving one
+  are different acts, and only the first is available under ADR-0006 —
+  `bp-research` has no HTTP client and a test whose job is to notice if that
+  changes. A row called Lookup would be a promise the product cannot keep.
+- **"Research question, evidence, findings, methods, datasets"**, until
+  2026-08-22. Those five are the structure of a research *paper* (IMRaD),
+  written into this file by the scaffold commit and never elaborated;
+  [ADR-0039](../decisions/ADR-0039.md) defines the mode as synthesis over your
+  own notes, which is a different thing. ADR-0046 scoped all five: evidence
+  and methods became part of Research Report, datasets became What the Store
+  Holds, findings was dropped as a second name for the report itself, and
+  research question became **Open Questions** — because a question has a
+  grammar and can be found, while which one you are actually asking is not
+  something the document says.
 
 ## Run
 
-Run selection/cell/document, choose interpreter, stop, history, Rust
-scratchpad. All planned — phase 12.
+| Row | State |
+| --- | --- |
+| One row per runnable cell of the active document | **live** — `.ipynb` cells, or fenced code blocks in a `.md` ([ADR-0043](../decisions/ADR-0043.md), [ADR-0045](../decisions/ADR-0045.md)). Numbered by cell for a notebook and by *line* for Markdown, because a `.md` has no cells written in it |
+| Stop | **live** — ends the cell and keeps what it had already printed. Greyed when nothing is running, which is `row_enabled`'s whole subject |
+| Run selection, Choose Interpreter, Rust scratchpad | planned — phase 12 |
+
+**The rows are the document**, rebuilt the moment before the menu opens rather
+than on every refresh: parsing a notebook is real work and a menu nobody has
+opened is a parse nobody asked for. A row for a language with no runner (Rust,
+SQL — both deferred by name in ADR-0040) is offered and greyed rather than
+hidden.
+
+**Nothing runs without a click.** `UserGesture::from_user_command()` is called
+in exactly one place in `bp-ui`, the arm that handles a Run row's click, and
+both `bp-notebook` and `bp-execution` demand one by value. Listing the cells
+is deliberately not gated — reading a document to say what is in it is what
+every other menu here does.
 
 ## Security (the rest)
 
