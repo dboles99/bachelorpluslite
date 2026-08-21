@@ -73,8 +73,8 @@ saves atomically, and does rather more than that:
 | Clipboard | History with kind detection, paste from history, format-aware paste transformations |
 | Metadata | A SQLite store with migrations, written to on every save ([ADR-0019](docs/decisions/ADR-0019.md)) |
 | Organize | Related Notes, a collapsible panel of documents sharing tags with the active one; Duplicate Detection, automatic at save and on-demand ([ADR-0037](docs/decisions/ADR-0037.md)) |
-| Research | Research Report, reading `bp-storage` into dominant themes, stale clusters, under-connected documents and consolidation candidates — a first insight, not the whole mode ([ADR-0041](docs/decisions/ADR-0041.md)) |
-| Notebook | **Open an `.ipynb` and the Run menu lists its runnable cells**; choosing one runs it as a fresh subprocess and shows `stdout`, `stderr`, the exit code and the duration in a panel, with a Stop that keeps what the cell had already printed ([ADR-0043](docs/decisions/ADR-0043.md)). Aimed at a literate document — a runbook whose examples are verified rather than asserted — because that is the use ADR-0038's no-persistent-session model actually fits. There is no cell-sequence view, deliberately |
+| Research | Research Report, reading `bp-storage` into dominant themes, stale clusters, under-connected documents and consolidation candidates ([ADR-0041](docs/decisions/ADR-0041.md)). Plus three rows that read the document in front of you ([ADR-0044](docs/decisions/ADR-0044.md)): **Citation Metadata**, **Find Identifiers** — every DOI and arXiv id with its `line:column` and the address it points to, nothing resolved — and **Check Bibliography** |
+| Notebook | **Open an `.ipynb` *or a `.md` with fenced code blocks* and the Run menu lists what can run** ([ADR-0045](docs/decisions/ADR-0045.md) reads a Markdown file as a notebook, so consent and the prose-cell refusal carry over untouched); **Notebook ▸ Cell Outline** maps the whole document, prose included, and clicking a row goes to it; choosing one runs it as a fresh subprocess and shows `stdout`, `stderr`, the exit code and the duration in a panel, with a Stop that keeps what the cell had already printed ([ADR-0043](docs/decisions/ADR-0043.md)). Aimed at a literate document — a runbook whose examples are verified rather than asserted — because that is the use ADR-0038's no-persistent-session model actually fits. There is no cell-sequence view, deliberately |
 | Encryption | `.bpadx` documents — Security ▸ Encrypt Document, unlock on open, and saves stay encrypted. Argon2id, XChaCha20-Poly1305 or AES-256-GCM, chunked with position authenticated ([ADR-0021](docs/decisions/ADR-0021.md)) |
 | Security | Per-document profiles (Standard / Private / Confidential / Maximum) governing the recovery journal, clipboard history and metadata store ([ADR-0020](docs/decisions/ADR-0020.md)) |
 | Security (phase 16) | Privacy Mode, a session override that can only tighten; Scan for Secrets, which reports where a credential is and never what it is; Redact Found Secrets, as an undoable edit with a consent step; Inspect Metadata; Hash Document; Verify Signature; Sign Document, whose key is sealed in a `.bpadx` envelope under a passphrase rather than protected by file permissions Windows cannot narrow ([ADR-0031](docs/decisions/ADR-0031.md)); Security History, which every row above it writes into (ADR-0024) |
@@ -117,37 +117,11 @@ should spend an afternoon on these before checking the version changed.
   `TextInput` does not expose. [MENU_MAP.md](docs/product/MENU_MAP.md) marks
   which rows those are.
 
-- **One crate is built and unreachable, and this list is counted rather
-  than remembered.** `bp-notebook` and `bp-execution` left it on 2026-08-21
-  ([ADR-0043](docs/decisions/ADR-0043.md)); the table below has not been
-  recounted since and overstates what is left. `bp-research`, `bp-notebook` and `bp-storage` have zero
-  reverse dependencies anywhere in the application: nothing in `bp-ui`, in
-  `apps/bachelorpad`, or in any other `bp-*` crate names them. `bp-notebook`
-  is reached only by the fuzz harness. That is 9,556 lines defended by 241
-  unit tests no user can reach, and it is still the largest thing standing
-  between this repository and a product.
-
-  | Crate | Lines | Tests | Reached by |
-  | --- | --- | --- | --- |
-  | `bp-research` | 5,208 | 161 | nothing |
-  | `bp-notebook` | 3,627 | 59 | the fuzz harness only |
-  | `bp-storage` | 721 | 21 | nothing, pending a design pass (ADR-0019) |
-
-  **`bp-buffer`'s large-file engine came off this list**, and it was the
-  largest thing on it. `SizeClass` and `Access` decide how every document is
-  opened; `LargeFile` — the chunked reader — now has the view it was waiting
-  for. `bp-audit` came off when Security ▸ Security History shipped, and
-  `bp-integrity`, `bp-platform` and `bp-redaction` when Verify Signature, Set
-  as Default Editor, redaction and the metadata inspector got rows.
-
-  What is left is genuinely three modes rather than three menus, which is why
-  it is what is left.
-
-  Two things also stopped happening on the open path: every open used to read
-  the whole file to hand six bytes to `bp_crypto::is_bpadx`, and `load` then
-  read it again. A 2 GB document cost 4 GB of I/O before anything reached the
-  screen.
-
+- **No crate is unreachable.** This list was three crates long four sessions
+  ago and is now empty: `bp-notebook` and `bp-execution` left it under
+  [ADR-0043](docs/decisions/ADR-0043.md), `bp-research` under
+  [ADR-0044](docs/decisions/ADR-0044.md). Kept as a heading because the count
+  is worth being able to check rather than remember.
 - **`bp-storage` is still not called by the application.** That is now a
   product decision rather than a security one: ADR-0020 permits recording a
   summary under Standard, and `record_document` honours the policy. What
@@ -216,6 +190,40 @@ is worth more than the fact.
   notebook stays its own JSON in the ordinary editor, which `bp-notebook`
   anticipated: `raw_json_view` exists because the JSON "is the thing the user
   might want to hand-edit".
+
+- **Find did not scroll to its match**, in the surface most people use.
+  On a 165-line document, searching for text at line 143 reported `1 of 1`
+  — correct — and left the reader looking at line 1, with the match selected
+  off screen. It affected Find, Find Next and Previous, and opening a
+  cross-file result.
+
+  **Every earlier test of Find used a document that fitted on one screen**,
+  which is why four manual passes and three of the same session's own runs
+  did not see it. It surfaced only because a new feature — clicking a row of
+  the cell outline — jumped to a line a hundred below the fold and visibly
+  did nothing.
+
+  `set-selection-offsets` moves the caret and nothing moves the viewport.
+  Slint exposes `cursor-position-changed` precisely so a scroll container can
+  follow the caret, its own `TextEdit` uses it that way, and this editor was
+  already inside a `Flickable` — so the fix is the toolkit's own pattern,
+  clamps included. **Watched working in both directions**, because it sits on
+  the typing path: the view scrolls to a match a hundred lines down, and
+  typing mid-document leaves the viewport exactly where it was.
+
+- **Research mode, and the last unreachable crate.** `bp-research` had 5,208
+  lines and 161 tests no user could reach. What kept it there was reading two
+  decisions as a contradiction — ADR-0039/0041 say research mode is synthesis
+  over `bp-storage` and *not* built on the bibliography types, while
+  `MENU_MAP.md` names citation metadata and DOI lookup. They are two features
+  sharing a menu: one reads the store and says what you have been writing
+  about, the other reads the document in front of you and says what it cites.
+  [ADR-0044](docs/decisions/ADR-0044.md).
+
+  **"DOI Lookup" is renamed, not implemented**, and that is the substance:
+  finding an identifier and resolving one are different acts, and only the
+  first works offline (ADR-0006). A row called Lookup would be a promise this
+  product cannot keep.
 
 - **The status bar went stale after every jump, in all five places that
   jump.** Go to Line moved the caret and the view and the readout still said
