@@ -58,7 +58,7 @@ cargo run --release -- --editor-view   # with the custom editor view (ADR-0018)
 
 ## Current state (2026-08-21)
 
-**24 crates, 1,758 tests, green on Windows and Linux.** The app opens, edits and
+**25 crates, 1,812 tests, green on Windows and Linux.** The app opens, edits and
 saves atomically, and does rather more than that:
 
 | Area | What works |
@@ -71,7 +71,10 @@ saves atomically, and does rather more than that:
 | Data | JSON / JSONL / TOML / **YAML** validate, format, minify, convert; RFC 4180 CSV/TSV shape report, conversion to JSON and JSON Lines, column types. YAML refuses deep nesting, alias bombs and duplicate keys in words that say what to do ([ADR-0023](docs/decisions/ADR-0023.md)) |
 | Semantic | Title, keywords, summary and outline extracted from the document; document statistics; date and time insertion |
 | Clipboard | History with kind detection, paste from history, format-aware paste transformations |
-| Metadata | A SQLite store with migrations — built and tested, not yet wired in ([ADR-0019](docs/decisions/ADR-0019.md)) |
+| Metadata | A SQLite store with migrations, written to on every save ([ADR-0019](docs/decisions/ADR-0019.md)) |
+| Organize | Related Notes, a collapsible panel of documents sharing tags with the active one; Duplicate Detection, automatic at save and on-demand ([ADR-0037](docs/decisions/ADR-0037.md)) |
+| Research | Research Report, reading `bp-storage` into dominant themes, stale clusters, under-connected documents and consolidation candidates — a first insight, not the whole mode ([ADR-0041](docs/decisions/ADR-0041.md)) |
+| Notebook | `bp-execution` runs a cell as a fresh subprocess — Python, PowerShell or Shell, no persistent session, no "run all" — but nothing calls it yet: there is no cell-sequence view ([ADR-0040](docs/decisions/ADR-0040.md)) |
 | Encryption | `.bpadx` documents — Security ▸ Encrypt Document, unlock on open, and saves stay encrypted. Argon2id, XChaCha20-Poly1305 or AES-256-GCM, chunked with position authenticated ([ADR-0021](docs/decisions/ADR-0021.md)) |
 | Security | Per-document profiles (Standard / Private / Confidential / Maximum) governing the recovery journal, clipboard history and metadata store ([ADR-0020](docs/decisions/ADR-0020.md)) |
 | Security (phase 16) | Privacy Mode, a session override that can only tighten; Scan for Secrets, which reports where a credential is and never what it is; Redact Found Secrets, as an undoable edit with a consent step; Inspect Metadata; Hash Document; Verify Signature; Sign Document, whose key is sealed in a `.bpadx` envelope under a passphrase rather than protected by file permissions Windows cannot narrow ([ADR-0031](docs/decisions/ADR-0031.md)); Security History, which every row above it writes into (ADR-0024) |
