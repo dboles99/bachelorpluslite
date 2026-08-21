@@ -198,6 +198,19 @@ Kept rather than deleted, because every one of these went stale the same
 way — a fix landing without the record moving — and because the lesson in each
 is worth more than the fact.
 
+- **The status bar went stale after every jump, in all five places that
+  jump.** Go to Line moved the caret and the view and the readout still said
+  where the caret used to be; so did Find Next and Previous, opening a
+  cross-file result, and stepping a scan of a huge document. `refresh` sets
+  that readout, and every one of those paths deliberately does *not* refresh
+  — they move and then draw the surface directly. Nothing corrected it
+  afterwards either: both background pollers refresh only when they
+  themselves found a change, so it stayed wrong until the next keystroke.
+
+  Fixed in `draw_editor_view` rather than at any of the five call sites,
+  because a sixth would have been wrong too — **drawing the surface and
+  saying where it is are one act, so they are now one function.**
+
 - **Nothing held the keyboard until you clicked, in every `--editor-view`
   launch and every huge document.** Ctrl+F on a fresh window did nothing;
   click anywhere in the document first and it worked. Found on 2026-08-21

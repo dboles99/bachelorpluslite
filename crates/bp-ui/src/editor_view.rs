@@ -149,6 +149,9 @@ pub(crate) fn push_editor_view(ui: &AppWindow, state: &mut AppState) {
 pub(crate) fn draw_editor_view(ui: &AppWindow, state: &mut AppState) {
     if state.active_is_viewer() {
         draw_viewer(ui, state);
+        // After, not before: `draw_viewer` is what sets `drawn_rows`, and the
+        // readout for a viewer is the range of lines it just drew.
+        sync_cursor_label(ui, state);
         return;
     }
     let rows = state.visible_rows.max(1);
@@ -200,6 +203,29 @@ pub(crate) fn draw_editor_view(ui: &AppWindow, state: &mut AppState) {
         .map_or(-1, clamp_i32);
     ui.set_caret_row(visible_row);
     ui.set_caret_column(clamp_i32(column));
+    sync_cursor_label(ui, state);
+}
+
+/// Push the `Ln`/`Col` readout for what was just drawn.
+///
+/// **Here rather than at any of the call sites, because every one of them was
+/// wrong and a sixth would have been too.** `refresh` sets this readout, but
+/// the paths that *jump* deliberately do not refresh -- Go to Line, Find
+/// Next and Previous, opening a cross-file result, and stepping a scan of a
+/// document served from disk all move the caret or the viewport and then draw
+/// the surface directly. The status bar kept reporting where the caret used
+/// to be, and nothing corrected it: both background pollers refresh only when
+/// *they* found a change, so a stale readout stayed stale until the next
+/// keystroke.
+///
+/// Drawing the surface and saying where it is are one act, so they live in
+/// one function. The `TextInput` surface never shows `Ln`/`Col` at all -- it
+/// reports a line count, because Slint owns that caret and will not say where
+/// it is -- so there is nothing for this to be wrong about there.
+fn sync_cursor_label(ui: &AppWindow, state: &AppState) {
+    if state.workspace.active().is_some() {
+        ui.set_cursor_label(state.cursor_label().as_str().into());
+    }
 }
 
 /// Draw a document that is read from disk as the reader scrolls.
