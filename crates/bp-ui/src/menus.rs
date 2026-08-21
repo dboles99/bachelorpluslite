@@ -204,6 +204,10 @@ pub mod action {
     /// Help ▸ Diagnostics. A block of its own -- 730-739, 731-739 free.
     pub const DIAGNOSTICS: i32 = 730;
 
+    /// Research ▸ Research Report (ADR-0041). A block of its own -- 740-749,
+    /// 741-749 free.
+    pub const RESEARCH_REPORT: i32 = 740;
+
     pub const NOTE_TITLE: i32 = 80;
     pub const NOTE_RENAME: i32 = 81;
     pub const NOTE_SUMMARY: i32 = 82;
@@ -1126,6 +1130,23 @@ pub fn organize(has_content: bool) -> Vec<MenuItem> {
     items
 }
 
+/// The Research menu (ADR-0041): the one real row `AppState::research_report`
+/// gives, plus what is still ahead for the rest of
+/// `docs/product/MENU_MAP.md`'s Research section.
+///
+/// Unlike `organize`'s rows, not gated on `has_content`: the report reads
+/// the whole store through `bp-storage`, not the active document, so an
+/// empty active tab is not a reason to grey it out -- the same reasoning
+/// `DOCUMENT_STATS` already applies to itself above.
+pub fn research() -> Vec<MenuItem> {
+    let mut items = vec![row_end("Research Report", "", action::RESEARCH_REPORT)];
+    // What is left of `docs/product/MENU_MAP.md`'s Research section --
+    // `planned_menu`'s own list, so the one real row above is the only place
+    // that list had to change.
+    items.extend(planned_menu("Research"));
+    items
+}
+
 /// The menus whose subsystems do not exist yet.
 ///
 /// Their contents come from `docs/product/MENU_MAP.md`, so the UI shows the
@@ -1551,6 +1572,7 @@ mod tests {
             action::INSERT_TABLE,
             action::TOOLS_INSPECTOR,
             action::DIAGNOSTICS,
+            action::RESEARCH_REPORT,
         ] {
             for (name, window) in range_dispatch_windows() {
                 assert!(

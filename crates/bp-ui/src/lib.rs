@@ -231,6 +231,11 @@ fn refresh(ui: &AppWindow, state: &mut state::AppState, push_text: state::PushTe
     // something to act on, and `has_content` changes with every keystroke,
     // so this cannot be set once at startup either.
     ui.set_organize_items(model(menus::organize(state.active_has_content())));
+    // Real as of ADR-0041, moved here for the same reason `organize_items`
+    // was: no field it depends on changes with a keystroke, but it is no
+    // longer `planned_menu`'s static list either, so it belongs beside its
+    // siblings rather than in `set_static_menus`.
+    ui.set_research_items(model(menus::research()));
     ui.set_edit_items(model(menus::edit(state.clips.entries(), state.editor_view)));
     // Rebuilt rather than set once: it shows the *active* document's profile
     // and what that profile permits, both of which change with the tab.
@@ -266,7 +271,6 @@ fn set_static_menus(ui: &AppWindow) {
     let model = |items: Vec<MenuItem>| slint::ModelRc::new(slint::VecModel::from(items));
     ui.set_help_items(model(menus::help()));
     ui.set_notebook_items(model(menus::planned_menu("Notebook")));
-    ui.set_research_items(model(menus::planned_menu("Research")));
     ui.set_run_items(model(menus::planned_menu("Run")));
 }
 

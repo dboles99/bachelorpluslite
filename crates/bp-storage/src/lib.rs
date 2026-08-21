@@ -298,6 +298,31 @@ impl Store {
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
+    /// Every tag currently in use, with how many documents carry it, most
+    /// frequent first.
+    ///
+    /// For ADR-0041's "dominant themes" and "consolidation candidates"
+    /// reports: one aggregate query over the same `tags`/`document_tags`
+    /// join `documents_tagged` and `related_to` already use, rather than a
+    /// Rust-side loop calling `documents_tagged` once per tag -- the count
+    /// and the ordering come from SQL, the same discipline `related_to`'s
+    /// own doc comment holds itself to.
+    pub fn tag_frequency(&self) -> Result<Vec<(String, usize)>, StoreError> {
+        let mut statement = self.connection.prepare(
+            "SELECT t.name, COUNT(*) AS uses
+               FROM tags t
+               JOIN document_tags dt ON dt.tag_id = t.id
+              GROUP BY t.id
+              ORDER BY uses DESC, t.name COLLATE NOCASE",
+        )?;
+        let rows = statement.query_map([], |row| {
+            let name: String = row.get(0)?;
+            let uses: i64 = row.get(1)?;
+            Ok((name, uses as usize))
+        })?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
     /// Documents already recorded under the same title as `title`, excluding
     /// the document at `exclude_path`.
     ///
@@ -838,6 +863,41 @@ mod tests {
 
         let dupes = store.possible_duplicates("Draft 2", &path("b.md")).unwrap();
         assert!(dupes.is_empty());
+    }
+
+    // --- research synthesis (ADR-0041) -------------------------------------
+
+    #[test]
+    fn tag_frequency_counts_documents_per_tag_most_frequent_first() {
+        let store = store();
+        let a = store
+            .record_document(&path("a.md"), None, 1, Metadata::Summary)
+            .unwrap()
+            .unwrap();
+        let b = store
+            .record_document(&path("b.md"), None, 2, Metadata::Summary)
+            .unwrap()
+            .unwrap();
+        let c = store
+            .record_document(&path("c.md"), None, 3, Metadata::Summary)
+            .unwrap()
+            .unwrap();
+
+        store.tag_document(a, "rust").unwrap();
+        store.tag_document(b, "rust").unwrap();
+        store.tag_document(c, "rust").unwrap();
+        store.tag_document(a, "notes").unwrap();
+
+        assert_eq!(
+            store.tag_frequency().unwrap(),
+            vec![("rust".to_owned(), 3), ("notes".to_owned(), 1)],
+            "the more widely used tag sorts first"
+        );
+    }
+
+    #[test]
+    fn tag_frequency_is_empty_when_nothing_is_tagged() {
+        assert!(store().tag_frequency().unwrap().is_empty());
     }
 
     #[test]

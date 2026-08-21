@@ -47,6 +47,7 @@ mod data;
 mod encryption;
 mod find;
 mod organize;
+mod research;
 mod security;
 
 // The names the rest of the shell knows this module by. `dispatch` asks for a

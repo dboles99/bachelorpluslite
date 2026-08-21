@@ -895,6 +895,16 @@ pub fn handle_menu_action(
             show_info("Duplicate Detection", &report);
         }
 
+        // Research ▸ Research Report (ADR-0041). The borrow ends with the
+        // statement, before the dialog opens -- the same reason
+        // `TOOLS_INSPECTOR`'s own arm gives: `rfd` pumps events, and a
+        // re-entrant callback on a live `borrow_mut()` panics.
+        action::RESEARCH_REPORT => {
+            let report = state.borrow().research_report();
+            push = PushText::No;
+            show_info("Research Report", &report);
+        }
+
         // Two ranges rather than one, because the Data block at 70-79 had a
         // single id left when YAML needed two. Both reach the same place; the
         // arm that decides which library function a click meant is
