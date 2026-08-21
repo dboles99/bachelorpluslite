@@ -926,6 +926,33 @@ pub fn handle_menu_action(
             show_info("Research Report", &report);
         }
 
+        // Notebook ▸ Cell Outline (ADR-0045). Toggles, like every other
+        // bottom panel: the row that opened it closes it again.
+        action::CELL_OUTLINE => {
+            let mut s = state.borrow_mut();
+            s.outline_open = !s.outline_open;
+            push = PushText::No;
+        }
+
+        // Research ▸ what the active document cites (ADR-0044). Each borrow
+        // ends with its statement, before the dialog opens, for the reason
+        // `RESEARCH_REPORT` gives just above.
+        action::CITATION_METADATA => {
+            let report = state.borrow().citation_metadata_report();
+            push = PushText::No;
+            show_info("Citation Metadata", &report);
+        }
+        action::FIND_IDENTIFIERS => {
+            let report = state.borrow().identifiers_report();
+            push = PushText::No;
+            show_info("Identifiers", &report);
+        }
+        action::CHECK_BIBLIOGRAPHY => {
+            let report = state.borrow().bibliography_report();
+            push = PushText::No;
+            show_info("Bibliography", &report);
+        }
+
         // Two ranges rather than one, because the Data block at 70-79 had a
         // single id left when YAML needed two. Both reach the same place; the
         // arm that decides which library function a click meant is

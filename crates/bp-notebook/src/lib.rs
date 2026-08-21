@@ -55,6 +55,7 @@
 
 pub mod cell;
 pub mod ipynb;
+pub mod markdown;
 pub mod notebook;
 pub mod output;
 pub mod run;
@@ -67,6 +68,7 @@ pub use ipynb::{
     BACHELORPAD_KEY, FILE_MIME, Import, ImportWarning, IpynbError, NBFORMAT_MAJOR, NBFORMAT_MINOR,
     OutputDropped, TABLE_MIME, export_ipynb, import_ipynb, parse_raw_json_view, raw_json_view,
 };
+pub use markdown::MarkdownDocument;
 pub use notebook::{Notebook, NotebookError};
 pub use output::{Output, Stream};
 pub use run::{RunRequest, UserGesture};

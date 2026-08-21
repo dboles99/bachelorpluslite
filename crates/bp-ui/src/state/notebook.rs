@@ -1,4 +1,4 @@
-//! Running one cell of a literate document (ADR-0043).
+//! Running one cell of a literate document (ADR-0043, ADR-0045).
 //!
 //! **This module is the only place `bp-notebook`'s cell kinds and
 //! `bp-execution`'s languages are both visible**, and that is deliberate on
@@ -33,6 +33,98 @@ use bp_notebook::{CellKind, Notebook};
 
 use super::AppState;
 
+/// A document that has runnable pieces in it, and which kind it is.
+///
+/// **Both arms produce a `bp_notebook::Notebook`**, which is the whole reason
+/// a `.md` file costs almost nothing here: consent, the refusal of a prose
+/// cell, and everything else built on `Notebook` work on a README without
+/// knowing it was ever one. What differs is only how a row names a piece's
+/// position -- a notebook has cells, a Markdown file has lines.
+#[derive(Debug)]
+pub(crate) enum Source {
+    /// A `.ipynb`. Carries the whole import, because its warnings are the
+    /// only place "we could not name this language" survives.
+    Ipynb(Box<bp_notebook::Import>),
+    /// A `.md`, read as prose and fenced blocks (ADR-0045).
+    Markdown(Box<bp_notebook::MarkdownDocument>),
+}
+
+impl Source {
+    pub(crate) fn notebook(&self) -> &Notebook {
+        match self {
+            Self::Ipynb(import) => import.notebook(),
+            Self::Markdown(document) => document.notebook(),
+        }
+    }
+
+    /// How a row names the `index`-th cell's position.
+    ///
+    /// The reader is looking at the file, so the name has to be findable in
+    /// it: a cell number for a notebook, whose JSON has cells in order, and a
+    /// **line** for Markdown, whose cells are this product's idea rather than
+    /// anything written in the document.
+    fn position(&self, index: usize) -> String {
+        match self {
+            Self::Ipynb(_) => format!("Cell {}", index + 1),
+            Self::Markdown(document) => match document.line_of(index) {
+                Some(line) => format!("Line {line}"),
+                None => format!("Block {}", index + 1),
+            },
+        }
+    }
+
+    /// The 1-based line the `index`-th cell begins on.
+    ///
+    /// Markdown knows exactly, because its cells *are* spans of the file.
+    /// A `.ipynb` does not: its cells are JSON objects, and the line a
+    /// reader would scroll to is the line of the `"source"` array, which
+    /// `bp-notebook` has no reason to record. `None` says so rather than
+    /// guessing, and the caller leaves the reader where they are.
+    pub(crate) fn line_of(&self, index: usize) -> Option<usize> {
+        match self {
+            Self::Ipynb(_) => None,
+            Self::Markdown(document) => document.line_of(index),
+        }
+    }
+
+    /// How many pieces name a language this build cannot run.
+    ///
+    /// Counted differently on each side, and neither way works for the other:
+    /// a notebook's unknown languages survive only as import *warnings*,
+    /// because `Raw` is equally what a deliberately-raw cell is; a Markdown
+    /// file has no warnings, but every `Raw` cell in one *is* an unlabelled
+    /// or unrecognised fence, because its prose becomes `Markdown` cells.
+    fn unnamed(&self) -> usize {
+        match self {
+            Self::Ipynb(import) => import
+                .warnings()
+                .iter()
+                .filter(|warning| {
+                    matches!(
+                        warning,
+                        bp_notebook::ImportWarning::UnknownCodeLanguage { .. }
+                    )
+                })
+                .count(),
+            Self::Markdown(document) => document
+                .notebook()
+                .cells()
+                .iter()
+                .filter(|cell| cell.kind() == CellKind::Raw)
+                .count(),
+        }
+    }
+}
+
+/// Why a document that read correctly still offers nothing to run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Unnamed {
+    /// A `.ipynb` with no `metadata.kernelspec`.
+    NotebookWithoutKernelspec,
+    /// Fenced blocks with no language after the backticks.
+    FencesWithoutLanguage,
+}
+
 /// A cell run in flight, and what it is about.
 #[derive(Debug)]
 pub(crate) struct CellRun {
@@ -50,6 +142,21 @@ pub(crate) struct RunRow {
     /// than omitted**: a reader looking at a Rust cell should be told it
     /// cannot run, not left to wonder where it went.
     pub(crate) enabled: bool,
+}
+
+/// One row of the cell outline.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct OutlineRow {
+    /// "Line 42" or "Cell 3", whichever the document can be searched by.
+    pub(crate) position: String,
+    pub(crate) kind: String,
+    /// The first thing the cell says, for telling one from another.
+    pub(crate) summary: String,
+    /// Where a click goes, when there is anywhere to go.
+    pub(crate) line: Option<usize>,
+    /// Whether the Run menu would offer it. Shown so the outline and the menu
+    /// agree in front of the reader rather than only in the code.
+    pub(crate) runnable: bool,
 }
 
 /// What the Run menu should show for the active document.
@@ -75,8 +182,12 @@ pub(crate) enum RunMenu {
     /// through is what makes `import_ipynb` returning a report rather than a
     /// notebook worth the extra call.
     NoKnownLanguage {
-        /// How many code cells were affected.
-        cells: usize,
+        /// How many pieces were affected.
+        count: usize,
+        /// Which shape of document it is, because the fix differs: a
+        /// notebook needs a kernelspec, a fence needs a word after its
+        /// backticks.
+        why: Unnamed,
     },
 }
 
@@ -129,32 +240,15 @@ fn first_line(source: &str) -> String {
     format!("{cut}…")
 }
 
-/// How many code cells the import could not name a language for.
-///
-/// Counted from the report rather than by re-inspecting the cells: `Raw` is
-/// also what a genuinely raw cell is, so the cells alone cannot tell "carried
-/// verbatim on purpose" from "we could not tell what this was".
-pub(crate) fn unknown_languages(import: &bp_notebook::Import) -> usize {
-    import
-        .warnings()
-        .iter()
-        .filter(|warning| {
-            matches!(
-                warning,
-                bp_notebook::ImportWarning::UnknownCodeLanguage { .. }
-            )
-        })
-        .count()
-}
-
 /// The rows a notebook offers, in document order.
 ///
 /// Pure, and separate from [`AppState::run_menu`] for that reason: everything
 /// decided here -- which cells appear, what they are called, which of them
 /// grey -- can be asserted against a notebook built from a string, with no
 /// window, no file and no interpreter anywhere near it.
-pub(crate) fn rows_of(notebook: &Notebook) -> Vec<RunRow> {
-    notebook
+pub(crate) fn rows_of(source: &Source) -> Vec<RunRow> {
+    source
+        .notebook()
         .cells()
         .iter()
         .enumerate()
@@ -165,8 +259,8 @@ pub(crate) fn rows_of(notebook: &Notebook) -> Vec<RunRow> {
             // 1, 2, 3 would name something that appears nowhere in the
             // document they can see.
             label: format!(
-                "Cell {} · {} · {}",
-                index + 1,
+                "{} · {} · {}",
+                source.position(index),
                 kind_label(cell.kind()),
                 first_line(cell.source())
             ),
@@ -182,17 +276,29 @@ impl AppState {
     /// kept across edits would list cells the file no longer has. The cost is
     /// paid when the Run menu opens rather than on every refresh, which is
     /// what keeps it off the typing path.
-    pub(crate) fn notebook(&self) -> Option<Result<bp_notebook::Import, String>> {
+    pub(crate) fn notebook(&self) -> Option<Result<Source, String>> {
         self.workspace.active()?;
-        if self.format() != bp_formats::Format::Notebook {
-            return None;
-        }
         let text = self.active_text();
-        let value: serde_json::Value = match serde_json::from_str(&text) {
-            Ok(value) => value,
-            Err(e) => return Some(Err(e.to_string())),
-        };
-        Some(bp_notebook::import_ipynb(&value).map_err(|e| e.to_string()))
+        match self.format() {
+            bp_formats::Format::Notebook => {
+                let value: serde_json::Value = match serde_json::from_str(&text) {
+                    Ok(value) => value,
+                    Err(e) => return Some(Err(e.to_string())),
+                };
+                Some(
+                    bp_notebook::import_ipynb(&value)
+                        .map(|import| Source::Ipynb(Box::new(import)))
+                        .map_err(|e| e.to_string()),
+                )
+            }
+            // Markdown never fails to read -- an unclosed fence is a fence
+            // that reaches the end, not an error -- so this arm has no
+            // failure to report (ADR-0045).
+            bp_formats::Format::Markdown => Some(Ok(Source::Markdown(Box::new(
+                bp_notebook::markdown::parse(&text),
+            )))),
+            _ => None,
+        }
     }
 
     /// The rows the Run menu should offer for the active document.
@@ -200,18 +306,81 @@ impl AppState {
         let Some(parsed) = self.notebook() else {
             return RunMenu::NotANotebook;
         };
-        let import = match parsed {
-            Ok(import) => import,
+        let source = match parsed {
+            Ok(source) => source,
             Err(reason) => return RunMenu::Unreadable(reason),
         };
-        let rows = rows_of(import.notebook());
+        let rows = rows_of(&source);
         if rows.is_empty() {
-            let unknown = unknown_languages(&import);
-            if unknown > 0 {
-                return RunMenu::NoKnownLanguage { cells: unknown };
+            let count = source.unnamed();
+            if count > 0 {
+                return RunMenu::NoKnownLanguage {
+                    count,
+                    why: match source {
+                        Source::Ipynb(_) => Unnamed::NotebookWithoutKernelspec,
+                        Source::Markdown(_) => Unnamed::FencesWithoutLanguage,
+                    },
+                };
             }
         }
         RunMenu::Cells(rows)
+    }
+
+    /// Notebook ▸ Cell Outline (ADR-0045): every cell, prose included.
+    ///
+    /// **Not the same list as the Run menu's**, and the difference is the
+    /// point: the Run menu offers what can run, and an outline is a map of
+    /// the whole document. A reader of a runbook wants to see the prose
+    /// headings between the examples, which is most of what makes it a
+    /// runbook rather than a script.
+    pub(crate) fn outline(&self) -> Vec<OutlineRow> {
+        let Some(Ok(source)) = self.notebook() else {
+            return Vec::new();
+        };
+        source
+            .notebook()
+            .cells()
+            .iter()
+            .enumerate()
+            .map(|(index, cell)| OutlineRow {
+                position: source.line_of(index).map_or_else(
+                    || format!("Cell {}", index + 1),
+                    |line| format!("Line {line}"),
+                ),
+                kind: kind_label(cell.kind()).to_owned(),
+                summary: first_line(cell.source()),
+                line: source.line_of(index),
+                runnable: language_of(cell.kind()).is_some(),
+            })
+            .collect()
+    }
+
+    /// Put the caret at the `index`-th cell, for a click on an outline row.
+    ///
+    /// `None` when there is no line to go to -- a `.ipynb`'s cells have none
+    /// -- and the caller then leaves the reader where they are rather than
+    /// scrolling somewhere arbitrary.
+    pub(crate) fn go_to_cell(&mut self, index: usize) -> Option<std::ops::Range<usize>> {
+        let line = {
+            let Some(Ok(source)) = self.notebook() else {
+                return None;
+            };
+            source.line_of(index)?
+        };
+        // Through the editor rather than through `AppState::go_to_line`,
+        // which refuses without `--editor-view` because it moves a caret the
+        // `TextInput` surface does not expose. A *selection* works in both,
+        // which is how Find jumps in either one.
+        let editor = self.active_editor_mut()?;
+        editor.go_to_line(line);
+        let start = editor.cursor();
+        // **The whole line, not a caret at its start.** A zero-width
+        // selection gives `TextInput` nothing to scroll to, so the jump
+        // silently does nothing in the default surface -- which is how this
+        // was found. Selecting the line also shows the reader which cell
+        // they landed on, which a bare caret would not.
+        let length = editor.buffer().line_len_chars(line.saturating_sub(1));
+        Some(start..start + length)
     }
 
     /// Start running the `index`-th *executable* cell of the active notebook.
@@ -225,11 +394,11 @@ impl AppState {
         notebook_gesture: bp_notebook::UserGesture,
         execution_gesture: bp_execution::UserGesture,
     ) -> bool {
-        let Some(Ok(import)) = self.notebook() else {
-            self.error = Some("this document is not a notebook this product can read".to_owned());
+        let Some(Ok(source)) = self.notebook() else {
+            self.error = Some("this document has nothing this product knows how to run".to_owned());
             return false;
         };
-        let notebook = import.notebook();
+        let notebook = source.notebook();
         let executable: Vec<&bp_notebook::Cell> = notebook
             .cells()
             .iter()
@@ -401,8 +570,12 @@ mod tests {
         bp_notebook::import_ipynb(&value).expect("the fixture is a valid notebook")
     }
 
-    fn notebook_of(cells: &str) -> Notebook {
-        import_of(cells).into_notebook()
+    fn ipynb_of(cells: &str) -> Source {
+        Source::Ipynb(Box::new(import_of(cells)))
+    }
+
+    fn markdown_of(text: &str) -> Source {
+        Source::Markdown(Box::new(bp_notebook::markdown::parse(text)))
     }
 
     fn code(source: &str) -> String {
@@ -454,7 +627,7 @@ mod tests {
     fn a_row_is_numbered_by_its_position_in_the_file() {
         // Not by its position among the runnable cells. The reader is looking
         // at the JSON, and a number that appears nowhere in it names nothing.
-        let notebook = notebook_of(&format!(
+        let source = ipynb_of(&format!(
             "{},{},{},{}",
             prose("intro"),
             code("print(1)"),
@@ -462,7 +635,7 @@ mod tests {
             code("print(2)")
         ));
 
-        let rows = rows_of(&notebook);
+        let rows = rows_of(&source);
 
         assert_eq!(rows.len(), 2, "two code cells among four");
         assert!(
@@ -479,8 +652,7 @@ mod tests {
 
     #[test]
     fn a_row_names_the_language_and_the_first_thing_the_cell_does() {
-        let notebook = notebook_of(&code("print('hello')"));
-        let rows = rows_of(&notebook);
+        let rows = rows_of(&ipynb_of(&code("print('hello')")));
 
         assert_eq!(rows.len(), 1);
         assert!(rows[0].label.contains("Python"), "{:?}", rows[0].label);
@@ -501,13 +673,14 @@ mod tests {
         let json = r#"{"nbformat":4,"nbformat_minor":5,"metadata":{},"cells":[{"cell_type":"code","metadata":{},"source":["print(1)"],"outputs":[],"execution_count":null}]}"#;
         let value: serde_json::Value = serde_json::from_str(json).expect("valid JSON");
         let import = bp_notebook::import_ipynb(&value).expect("a valid notebook");
+        let source = Source::Ipynb(Box::new(import));
 
         assert!(
-            rows_of(import.notebook()).is_empty(),
+            rows_of(&source).is_empty(),
             "a cell of unknown language must not be offered a runner"
         );
         assert_eq!(
-            unknown_languages(&import),
+            source.unnamed(),
             1,
             "and the reason must survive the import"
         );
@@ -518,14 +691,14 @@ mod tests {
         // `Raw` is both "carried verbatim on purpose" and "we could not tell
         // what this was", which is why the count comes from the warnings
         // rather than from the cells.
-        let import = import_of(r#"{"cell_type":"raw","metadata":{},"source":["verbatim"]}"#);
-        assert_eq!(unknown_languages(&import), 0);
+        let source = ipynb_of(r#"{"cell_type":"raw","metadata":{},"source":["verbatim"]}"#);
+        assert_eq!(source.unnamed(), 0);
     }
 
     #[test]
     fn a_notebook_of_nothing_but_prose_offers_no_rows() {
-        let notebook = notebook_of(&format!("{},{}", prose("one"), prose("two")));
-        assert!(rows_of(&notebook).is_empty());
+        let source = ipynb_of(&format!("{},{}", prose("one"), prose("two")));
+        assert!(rows_of(&source).is_empty());
     }
 
     #[test]
@@ -551,6 +724,112 @@ mod tests {
         let label = first_line(&long);
         assert!(label.ends_with('\u{2026}'));
         assert!(label.chars().count() <= 49);
+    }
+
+    #[test]
+    fn a_markdown_row_is_named_by_its_line_and_not_by_a_cell_number() {
+        // A `.md` has no cells written in it -- they are this product's idea
+        // -- so a cell number would name something the reader cannot find.
+        // A line number they can go to.
+        let source = markdown_of("intro\n\n```python\nprint(1)\n```\n");
+
+        let rows = rows_of(&source);
+        assert_eq!(rows.len(), 1);
+        assert!(
+            rows[0].label.starts_with("Line 3 · Python · "),
+            "{:?}",
+            rows[0].label
+        );
+    }
+
+    #[test]
+    fn prose_around_a_fence_is_not_offered_as_something_to_run() {
+        let source = markdown_of("words\n\n```sh\necho hi\n```\n\nmore words\n");
+        let rows = rows_of(&source);
+
+        assert_eq!(rows.len(), 1, "one fence among three cells");
+        assert!(rows[0].label.contains("Shell"), "{:?}", rows[0].label);
+    }
+
+    #[test]
+    fn an_unlabelled_fence_is_counted_as_unnamed_and_the_fix_differs_from_a_notebooks() {
+        // Both shapes can read correctly and still offer nothing, and the
+        // thing the reader has to do about it is different: a notebook needs
+        // a kernelspec, a fence needs a word after its backticks.
+        let source = markdown_of("```\nsomething\n```\n");
+
+        assert!(rows_of(&source).is_empty());
+        assert_eq!(source.unnamed(), 1);
+    }
+
+    #[test]
+    fn a_markdown_file_with_no_fences_offers_nothing_and_is_not_an_unnamed_block() {
+        // Plain prose is not a broken document, so it must not produce the
+        // "name your fences" hint -- there are no fences to name.
+        let source = markdown_of("just words, no code at all\n");
+
+        assert!(rows_of(&source).is_empty());
+        assert_eq!(source.unnamed(), 0);
+    }
+
+    #[test]
+    fn a_fence_and_a_notebook_cell_of_the_same_language_produce_the_same_row_but_its_position() {
+        // The property that makes ADR-0045 cheap: past the position, a
+        // Markdown fence and a notebook cell are the same thing to
+        // everything downstream.
+        let from_markdown = rows_of(&markdown_of("```python\nprint('x')\n```\n"));
+        let from_notebook = rows_of(&ipynb_of(&code("print('x')")));
+
+        assert_eq!(from_markdown.len(), 1);
+        assert_eq!(from_notebook.len(), 1);
+        assert!(from_markdown[0].enabled && from_notebook[0].enabled);
+
+        let tail = |label: &str| {
+            label
+                .split_once(" · ")
+                .map(|(_, rest)| rest.to_owned())
+                .unwrap_or_default()
+        };
+        assert_eq!(tail(&from_markdown[0].label), tail(&from_notebook[0].label));
+    }
+
+    #[test]
+    fn the_outline_lists_prose_as_well_as_code() {
+        // The difference between an outline and the Run menu, and the reason
+        // both exist: a runbook is mostly prose, and a map of it that showed
+        // only the code would leave out what the code is for.
+        let source = markdown_of("# Heading\n\n```python\nprint(1)\n```\n");
+        let rows: Vec<OutlineRow> = source
+            .notebook()
+            .cells()
+            .iter()
+            .enumerate()
+            .map(|(index, cell)| OutlineRow {
+                position: source.line_of(index).map_or_else(
+                    || format!("Cell {}", index + 1),
+                    |line| format!("Line {line}"),
+                ),
+                kind: kind_label(cell.kind()).to_owned(),
+                summary: first_line(cell.source()),
+                line: source.line_of(index),
+                runnable: language_of(cell.kind()).is_some(),
+            })
+            .collect();
+
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].kind, "Markdown");
+        assert!(!rows[0].runnable);
+        assert_eq!(rows[1].kind, "Python");
+        assert!(rows[1].runnable);
+    }
+
+    #[test]
+    fn a_markdown_cell_knows_its_line_and_a_notebook_cell_admits_it_does_not() {
+        // A `.md` cell *is* a span of the file. A `.ipynb` cell is a JSON
+        // object, and the line a reader would scroll to is not something
+        // `bp-notebook` records -- so the answer is `None`, not a guess.
+        assert_eq!(markdown_of("a\n\n```sh\nx\n```\n").line_of(1), Some(3));
+        assert_eq!(ipynb_of(&code("print(1)")).line_of(0), None);
     }
 
     #[test]

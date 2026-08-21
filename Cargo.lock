@@ -1027,6 +1027,7 @@ dependencies = [
  "bp-notebook",
  "bp-platform",
  "bp-redaction",
+ "bp-research",
  "bp-search",
  "bp-secrets",
  "bp-security",

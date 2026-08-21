@@ -47,6 +47,11 @@ bp-secrets = { path = "../bp-secrets" }
 # here, which is the only place `bp-secrets` and `bp-redaction` are both
 # visible.
 bp-redaction = { path = "../bp-redaction" }
+# Research ▸ Citation Metadata, Find Identifiers, Check Bibliography
+# (ADR-0044). Offline throughout, because the crate has no HTTP client and a
+# test whose job is to notice if that changes -- a DOI has a grammar, so it
+# can be recognised here; it has no meaning here, so it is never resolved.
+bp-research = { path = "../bp-research" }
 bp-semantic = { path = "../bp-semantic" }
 # Organize ▸ Related Notes and Duplicate Detection (ADR-0037). The store
 # itself is opened here, never in `bp-storage`: which file on this machine it

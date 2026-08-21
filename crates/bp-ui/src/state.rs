@@ -43,6 +43,7 @@ use time::OffsetDateTime;
 
 use crate::menus::action;
 
+mod citations;
 mod data;
 mod encryption;
 mod find;
@@ -252,6 +253,10 @@ pub struct AppState {
     /// One at a time: ADR-0038 chose a one-cell-at-a-time utility, so there
     /// is no queue here and no map of runs by cell.
     pub(crate) run: Option<notebook::CellRun>,
+    /// Whether the cell outline is showing (ADR-0045).
+    pub(crate) outline_open: bool,
+    /// What the outline says it is looking at.
+    pub(crate) outline_summary: String,
     /// Whether the run panel is showing.
     pub(crate) run_open: bool,
     /// The line above the output: which cell, and how it ended.
@@ -339,6 +344,8 @@ impl AppState {
             clips: bp_clipboard::History::new(),
             signing_key: default_signing_key_path(),
             drawn_rows: 0,
+            outline_open: false,
+            outline_summary: String::new(),
             run: None,
             run_open: false,
             run_summary: String::new(),

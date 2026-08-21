@@ -29,9 +29,8 @@ import { EditorSurface } from "editor_surface.slint";
 import { FindBar } from "find_bar.slint";
 import { GotoBar } from "goto_bar.slint";
 import { PassphraseBar } from "passphrase_bar.slint";
-import { OrganizePanel } from "organize_panel.slint";
+import { ListPanel } from "list_panel.slint";
 import { RunPanel } from "run_panel.slint";
-import { ResultsPanel } from "results_panel.slint";
 import { StatusBar } from "status_bar.slint";
 import { Tab } from "tab.slint";
 import { EditorRow, MenuItem, Palette, SearchHit, SelectionBox, TabInfo } from "types.slint";
@@ -204,6 +203,13 @@ export component AppWindow inherits Window {
     /// has opened is a parse nobody asked for.
     callback run-menu-opening();
     // in-out: Rust opens it when a cell starts, the close button shuts it.
+    // Notebook ▸ Cell Outline (ADR-0045).
+    in property <[SearchHit]> outline-cells;
+    in property <string> outline-summary;
+    // in-out: Rust opens it from the menu, the close button shuts it.
+    in-out property <bool> outline-open;
+    callback go-to-cell(int);
+
     in-out property <bool> run-open;
     in property <string> run-summary;
     in property <string> run-output;
@@ -742,7 +748,7 @@ export component AppWindow inherits Window {
                     }
                 }
 
-                Flickable {
+                editor-scroll := Flickable {
                     visible: !root.use-editor-view;
                     viewport-height: max(self.height, editor-row.preferred-height);
 
@@ -773,6 +779,39 @@ export component AppWindow inherits Window {
                             horizontal-stretch: 1;
                             edited => {
                                 root.text-edited(self.text);
+                            }
+
+                            // **Scroll the caret into view.** `TextInput`
+                            // does not do this for a selection set from
+                            // outside it -- `set-selection-offsets` moves the
+                            // caret and nothing moves the viewport -- so Find
+                            // could report `1 of 1` for a match a hundred
+                            // lines below the fold and leave the reader
+                            // looking at line 1. Found on 2026-08-21; every
+                            // earlier test of Find used a document that fitted
+                            // on one screen, which is why four manual passes
+                            // did not see it.
+                            //
+                            // This is Slint's own answer, from
+                            // `widgets/common/textedit-base.slint`: the
+                            // toolkit exposes `cursor-position-changed`
+                            // precisely so a scroll container can follow the
+                            // caret, and `TextEdit` uses it the same way.
+                            // The clamp shape is theirs too -- the middle
+                            // term is what stops the view jumping back and
+                            // forth between the two branches when the visible
+                            // height is less than one line.
+                            cursor-position-changed(caret) => {
+                                if (caret.y + editor-scroll.viewport-y < 0px) {
+                                    editor-scroll.viewport-y = min(0px, min(
+                                        editor-scroll.height - caret.y - root.font-size * 2,
+                                        max(editor-scroll.height - editor-row.preferred-height, -caret.y)));
+                                } else if (caret.y + editor-scroll.viewport-y
+                                        > editor-scroll.height - root.font-size * 2) {
+                                    editor-scroll.viewport-y = min(0px, max(
+                                        editor-scroll.height - editor-row.preferred-height,
+                                        editor-scroll.height - caret.y - root.font-size * 2));
+                                }
                             }
                         }
                     }
@@ -837,16 +876,36 @@ export component AppWindow inherits Window {
                 }
             }
 
-            ResultsPanel {
+            ListPanel {
                 open: root.results-open;
                 hits: root.search-hits;
                 summary: root.results-summary;
+                // A file path plus a line number, which is the widest of the
+                // three uses.
+                label-width: 320px;
 
                 open-hit(index) => {
                     root.open-hit(index);
                 }
                 closed => {
                     root.results-open = false;
+                }
+            }
+
+            // Notebook ▸ Cell Outline (ADR-0045). An outline, not a runner:
+            // clicking a row goes to it, and running stays in the Run menu
+            // where consent is asserted in exactly one place.
+            ListPanel {
+                open: root.outline-open;
+                hits: root.outline-cells;
+                summary: root.outline-summary;
+                label-width: 200px;
+
+                open-hit(index) => {
+                    root.go-to-cell(index);
+                }
+                closed => {
+                    root.outline-open = false;
                 }
             }
 
@@ -862,7 +921,7 @@ export component AppWindow inherits Window {
                 }
             }
 
-            OrganizePanel {
+            ListPanel {
                 open: root.organize-open;
                 hits: root.organize-hits;
                 summary: root.organize-summary;

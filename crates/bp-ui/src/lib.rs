@@ -91,6 +91,37 @@ fn apply_theme(ui: &AppWindow, theme: ThemeId) {
     palette.set_accent(c(p.accent));
 }
 
+/// The outline, as the rows the panel draws.
+///
+/// Here rather than in `state/notebook.rs` for the reason every other
+/// `SearchHit` conversion is here: `SearchHit` is a Slint type, and the state
+/// modules stay free of the toolkit so their tests need no window.
+fn outline_hits(state: &mut state::AppState) -> Vec<SearchHit> {
+    let rows = state.outline();
+    state.outline_summary = if rows.is_empty() {
+        "No cells here: open an .ipynb, or a .md with fenced code blocks".to_owned()
+    } else {
+        let runnable = rows.iter().filter(|row| row.runnable).count();
+        format!("{} cells, {runnable} runnable", rows.len())
+    };
+    rows.iter()
+        .enumerate()
+        .map(|(index, row)| SearchHit {
+            // The dot marks what the Run menu would offer, so the two agree
+            // in front of the reader rather than only in the code.
+            label: format!(
+                "{}{} · {}",
+                if row.runnable { "▸ " } else { "  " },
+                row.position,
+                row.kind
+            )
+            .into(),
+            detail: row.summary.as_str().into(),
+            index: i32::try_from(index).unwrap_or(i32::MAX),
+        })
+        .collect()
+}
+
 /// Put a cell's run into the panel.
 ///
 /// One function rather than four setters at three call sites, because the
@@ -210,6 +241,16 @@ fn refresh(ui: &AppWindow, state: &mut state::AppState, push_text: state::PushTe
     // The run panel, and whether a cell is going. Pushed here as well as from
     // the tick, so that starting a run from a menu click shows its panel
     // without waiting for the first tick.
+    // The outline follows the document it is an outline of. Rebuilt only
+    // while it is open: parsing to build a list nobody is looking at is the
+    // work `run-menu-opening` avoids for the Run menu, for the same reason.
+    if state.outline_open {
+        let cells = outline_hits(state);
+        ui.set_outline_summary(state.outline_summary.as_str().into());
+        ui.set_outline_cells(Rc::new(slint::VecModel::from(cells)).into());
+    }
+    ui.set_outline_open(state.outline_open);
+
     push_run_panel(ui, state);
     ui.set_running(state.is_running());
 
@@ -259,11 +300,14 @@ fn refresh(ui: &AppWindow, state: &mut state::AppState, push_text: state::PushTe
     // something to act on, and `has_content` changes with every keystroke,
     // so this cannot be set once at startup either.
     ui.set_organize_items(model(menus::organize(state.active_has_content())));
-    // Real as of ADR-0041, moved here for the same reason `organize_items`
-    // was: no field it depends on changes with a keystroke, but it is no
-    // longer `planned_menu`'s static list either, so it belongs beside its
-    // siblings rather than in `set_static_menus`.
-    ui.set_research_items(model(menus::research()));
+    // Real as of ADR-0041, and as of ADR-0044 three of its rows read the
+    // active document -- so it takes `has_content` like Organize above, and
+    // for the same reason: the rows grey when there is nothing to read, and
+    // that changes with every keystroke.
+    ui.set_research_items(model(menus::research(state.active_has_content())));
+    // Real as of ADR-0045, and it reads the active document, so it moves out
+    // of `set_static_menus` for the same reason Organize and Research did.
+    ui.set_notebook_items(model(menus::notebook(state.active_has_content())));
     ui.set_edit_items(model(menus::edit(state.clips.entries(), state.editor_view)));
     // Rebuilt rather than set once: it shows the *active* document's profile
     // and what that profile permits, both of which change with the tab.
@@ -298,7 +342,7 @@ fn refresh(ui: &AppWindow, state: &mut state::AppState, push_text: state::PushTe
 fn set_static_menus(ui: &AppWindow) {
     let model = |items: Vec<MenuItem>| slint::ModelRc::new(slint::VecModel::from(items));
     ui.set_help_items(model(menus::help()));
-    ui.set_notebook_items(model(menus::planned_menu("Notebook")));
+
     // Not the Run menu any more (ADR-0043). Its rows depend on the active
     // document, and `run-menu-opening` rebuilds them the moment before the
     // menu is shown -- a set here would be a list of the wrong document's
@@ -937,6 +981,23 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
             let running = cell.borrow_mut().poll_run();
             ui.set_running(running);
             push_run_panel(&ui, &cell.borrow());
+        });
+    }
+
+    {
+        let cell = Rc::clone(&state);
+        let weak = ui.as_weak();
+        // Clicking a row of the outline goes to that cell (ADR-0045). It does
+        // not run it: a click that starts a process would be a second place
+        // consent is asserted, and there is exactly one.
+        ui.on_go_to_cell(move |index| {
+            let Some(ui) = weak.upgrade() else { return };
+            let range = cell
+                .borrow_mut()
+                .go_to_cell(usize::try_from(index).unwrap_or(0));
+            if let Some(range) = range {
+                dispatch::select(&ui, &mut cell.borrow_mut(), &range);
+            }
         });
     }
 

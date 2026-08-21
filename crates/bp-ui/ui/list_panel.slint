@@ -1,19 +1,34 @@
-// Cross-file search results.
+// The bottom panel that lists things you can click (ADR-0045).
 //
-// Collapsed rather than conditional, for the same reason the find bar is: an
-// element inside an `if` cannot be referred to from outside it, and keeping
-// both panels on the same rule means one fewer difference to remember.
+// **One component, three uses**: cross-file search results, Organize ▸ Related
+// Notes, and Notebook ▸ Cell Outline. The first two were separate files whose
+// only differences were their comments -- `diff` on them, with the names
+// normalised, showed nothing structural at all -- and ADR-0044 said adding a
+// third copy would prejudge a question worth answering once. This is the
+// answer.
+//
+// Collapsed rather than conditional, like every other bottom panel here: an
+// element inside a Slint `if` cannot be referred to from outside it, and
+// keeping all of them on one rule means one fewer difference to remember.
+//
+// `SearchHit` carries every row, and is not renamed: a row is a label, a
+// detail line and an id to click, and a second struct with those three fields
+// would be a second name for one idea.
 
 import { MenuLabel } from "menu.slint";
 import { SearchHit, Palette } from "types.slint";
 
-export component ResultsPanel inherits Rectangle {
+export component ListPanel inherits Rectangle {
     in property <bool> open;
     in property <[SearchHit]> hits;
     in property <string> summary;
+    /// How wide the label column is. The one thing the three uses disagree
+    /// about: a file path needs more room than "Line 42 · Python".
+    in property <length> label-width: 260px;
 
     /// The index carried by the hit, not its position in the list -- the list
-    /// is a view of what Rust found, and only Rust can turn a hit into a file.
+    /// is a view of what Rust found, and only Rust can turn a hit into a
+    /// file, a document or a position.
     callback open-hit(int);
     callback closed();
 
@@ -62,7 +77,7 @@ export component ResultsPanel inherits Rectangle {
                             color: Palette.accent;
                             font-size: 12px;
                             vertical-alignment: center;
-                            width: 260px;
+                            width: root.label-width;
                             overflow: elide;
                         }
                         Text {

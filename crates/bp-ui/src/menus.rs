@@ -264,6 +264,14 @@ pub mod action {
     pub const PASTE: i32 = 104;
     pub const SELECT_ALL: i32 = 105;
 
+    /// Notebook ▸ Cell Outline (ADR-0045).
+    pub const CELL_OUTLINE: i32 = 744;
+
+    /// Research ▸ what the active document cites (ADR-0044).
+    pub const CITATION_METADATA: i32 = 741;
+    pub const FIND_IDENTIFIERS: i32 = 742;
+    pub const CHECK_BIBLIOGRAPHY: i32 = 743;
+
     /// End the cell that is running (ADR-0043).
     pub const RUN_STOP: i32 = 750;
 
@@ -305,7 +313,9 @@ pub fn run(menu: &crate::state::notebook::RunMenu, running: bool) -> Vec<MenuIte
         // Not `planned()`: notebook running exists, and this document simply
         // is not one. Saying which kind of file would work is the difference
         // between a limitation and a mystery.
-        RunMenu::NotANotebook => items.push(planned("Open an .ipynb to run its cells")),
+        RunMenu::NotANotebook => items.push(planned(
+            "Nothing to run here: open an .ipynb, or a .md with fenced code blocks",
+        )),
         // Distinct from an empty list, deliberately -- see `RunMenu`.
         RunMenu::Unreadable(reason) => {
             items.push(planned(&format!("Cannot read this notebook: {reason}")))
@@ -315,9 +325,17 @@ pub fn run(menu: &crate::state::notebook::RunMenu, running: bool) -> Vec<MenuIte
         }
         // The reason, rather than the symptom. "No cells that can run" would
         // be true here and would tell the reader nothing they could act on.
-        RunMenu::NoKnownLanguage { cells } => items.push(planned(&format!(
-            "{cells} code cell(s) of no named language: this notebook has no kernelspec"
-        ))),
+        RunMenu::NoKnownLanguage { count, why } => {
+            use crate::state::notebook::Unnamed;
+            items.push(planned(&match why {
+                Unnamed::NotebookWithoutKernelspec => format!(
+                    "{count} code cell(s) of no named language: this notebook has no kernelspec"
+                ),
+                Unnamed::FencesWithoutLanguage => format!(
+                    "{count} fenced block(s) name no language: try ```python, ```sh or ```pwsh"
+                ),
+            }));
+        }
         RunMenu::Cells(rows) => {
             for (index, row) in rows.iter().take(MAX_LISTED_CELLS).enumerate() {
                 let id = action::RUN_CELL_BASE + i32::try_from(index).unwrap_or(0);
@@ -1210,12 +1228,60 @@ pub fn organize(has_content: bool) -> Vec<MenuItem> {
 /// the whole store through `bp-storage`, not the active document, so an
 /// empty active tab is not a reason to grey it out -- the same reasoning
 /// `DOCUMENT_STATS` already applies to itself above.
-pub fn research() -> Vec<MenuItem> {
+pub fn research(has_content: bool) -> Vec<MenuItem> {
+    // Two features share this menu, and the separator is where one ends and
+    // the other begins (ADR-0044). Above it: what the *store* says the user
+    // has been writing about (ADR-0041). Below it: what the *document in
+    // front of them* cites.
     let mut items = vec![row_end("Research Report", "", action::RESEARCH_REPORT)];
-    // What is left of `docs/product/MENU_MAP.md`'s Research section --
-    // `planned_menu`'s own list, so the one real row above is the only place
-    // that list had to change.
+
+    // Each of the three reads the active document, so each is greyed when
+    // there is nothing to read -- `row_enabled`, not `planned`: they exist.
+    items.push(row_enabled(
+        "Citation Metadata",
+        "",
+        action::CITATION_METADATA,
+        has_content,
+    ));
+    // **Not "DOI Lookup", which `MENU_MAP.md` used to name.** Finding an
+    // identifier and resolving one are different acts, and only the first is
+    // available offline (ADR-0006). A row named Lookup would be a promise
+    // this product cannot keep.
+    items.push(row_enabled(
+        "Find Identifiers",
+        "",
+        action::FIND_IDENTIFIERS,
+        has_content,
+    ));
+    items.push(MenuItem {
+        separator_after: true,
+        ..row_enabled(
+            "Check Bibliography",
+            "",
+            action::CHECK_BIBLIOGRAPHY,
+            has_content,
+        )
+    });
+
+    // What is left of `MENU_MAP.md`'s Research section is the *synthesis*
+    // half -- more of what ADR-0041 built, over `bp-storage`, rather than
+    // more of what the three rows above do.
     items.extend(planned_menu("Research"));
+    items
+}
+
+/// The Notebook menu (ADR-0045).
+///
+/// One real row so far. The outline reads whatever the active document is --
+/// a `.ipynb`'s cells or a `.md`'s fenced blocks -- so it greys when there is
+/// nothing to read rather than when the document is the wrong kind: an empty
+/// outline is an honest answer about a document with no cells in it.
+pub fn notebook(has_content: bool) -> Vec<MenuItem> {
+    let mut items = vec![MenuItem {
+        separator_after: true,
+        ..row_enabled("Cell Outline", "", action::CELL_OUTLINE, has_content)
+    }];
+    items.extend(planned_menu("Notebook"));
     items
 }
 
@@ -1268,8 +1334,18 @@ pub fn planned_menu(name: &str) -> Vec<MenuItem> {
             &["Project", "Suggested Folder", "Topics", "Semantic Search"],
             "phase 9",
         ),
+        // Citation Metadata and DOI Lookup have left this list: the first is
+        // built (ADR-0044) and the second is not a thing this product can do
+        // offline, so it is named for what it is instead. What remains is the
+        // synthesis half of the menu.
         "Research" => (
-            &["Citation Metadata", "DOI Lookup", "Evidence", "Datasets"],
+            &[
+                "Research Question",
+                "Evidence",
+                "Findings",
+                "Methods",
+                "Datasets",
+            ],
             "phase 13",
         ),
         "Run" => (
@@ -1580,7 +1656,51 @@ mod tests {
                 "caret line edits",
                 action::DUPLICATE_LINE..action::MOVE_LINE_DOWN + 1,
             ),
+            // ADR-0043. Added here in the same change that added the arm --
+            // which is the whole point of this list being a second copy
+            // written by hand: it was *not* added in that change, and the
+            // test below is what said so.
+            ("notebook cells", action::RUN_CELL_BASE..run_cell_end()),
         ]
+    }
+
+    #[test]
+    fn no_two_range_dispatch_windows_overlap() {
+        // A range arm swallowing another range's ids is the same failure as
+        // one swallowing an exact id, and nothing else checks for it. The
+        // recent-files window has caused that once already, from 60 to 100.
+        let windows = range_dispatch_windows();
+        for (i, (left_name, left)) in windows.iter().enumerate() {
+            for (right_name, right) in windows.iter().skip(i + 1) {
+                assert!(
+                    left.end <= right.start || right.end <= left.start,
+                    "the {left_name} window {left:?} overlaps the {right_name} window {right:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_notebook_cell_window_is_bounded_and_sits_above_everything_else() {
+        // Bounded, because an open-ended range above the highest block would
+        // swallow whatever is allocated next -- and there *is* nothing above
+        // it today, which is exactly when an unbounded range looks harmless.
+        let end = run_cell_end();
+        assert!(end > action::RUN_CELL_BASE, "the window must contain ids");
+        assert_eq!(
+            end,
+            action::RUN_CELL_BASE + i32::try_from(MAX_LISTED_CELLS).unwrap(),
+            "the window is sized by the cap the menu actually applies"
+        );
+        for (name, window) in range_dispatch_windows() {
+            if name == "notebook cells" {
+                continue;
+            }
+            assert!(
+                window.end <= action::RUN_CELL_BASE,
+                "the {name} window reaches into the notebook-cell block"
+            );
+        }
     }
 
     #[test]
@@ -1645,6 +1765,11 @@ mod tests {
             action::TOOLS_INSPECTOR,
             action::DIAGNOSTICS,
             action::RESEARCH_REPORT,
+            // ADR-0043 and ADR-0044.
+            action::RUN_STOP,
+            action::CITATION_METADATA,
+            action::FIND_IDENTIFIERS,
+            action::CHECK_BIBLIOGRAPHY,
         ] {
             for (name, window) in range_dispatch_windows() {
                 assert!(
