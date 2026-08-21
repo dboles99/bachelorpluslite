@@ -742,6 +742,21 @@ mod tests {
     }
 
     #[test]
+    fn a_memory_cost_that_was_valid_under_the_old_ceiling_is_now_refused() {
+        // ADR-0035 lowered the memory ceiling from 1 GiB to 256 MiB. 512 MiB
+        // was legal under the old bound and is refused under the new one --
+        // catching an accidental reversion of this change.
+        let mut sealed = seal(b"secret", PASS, options(Suite::default())).unwrap();
+        let tightened = (512u32 * 1024).to_le_bytes(); // 512 MiB, above new 256 MiB ceiling
+        sealed[10..14].copy_from_slice(&tightened);
+
+        assert!(matches!(
+            open(&sealed, PASS),
+            Err(CryptoError::UnreasonableCost { .. })
+        ));
+    }
+
+    #[test]
     fn an_absurd_chunk_size_is_refused() {
         let mut sealed = seal(b"secret", PASS, options(Suite::default())).unwrap();
         // magic 6 + version 2 + suite 1 + kdf 1 + cost 12 + salt 16 = 38.

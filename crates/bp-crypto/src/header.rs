@@ -75,9 +75,9 @@ impl KdfParams {
         // Argon2's own minimum is 8 KiB per lane; below that it refuses
         // anyway, and refusing here names the reason.
         let sane = self.memory_kib >= 8
-            && self.memory_kib <= 1024 * 1024
+            && self.memory_kib <= 256 * 1024
             && self.iterations >= 1
-            && self.iterations <= 64
+            && self.iterations <= 16
             && self.lanes >= 1
             && self.lanes <= 64;
 
