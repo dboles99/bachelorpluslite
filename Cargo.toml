@@ -15,6 +15,7 @@ members = [
     "crates/bp-crypto",
     "crates/bp-data",
     "crates/bp-editor",
+    "crates/bp-execution",
     "crates/bp-formats",
     "crates/bp-history",
     "crates/bp-naming",

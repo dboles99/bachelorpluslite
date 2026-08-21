@@ -833,6 +833,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "bp-execution"
+version = "0.1.0"
+dependencies = [
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "bp-files"
 version = "0.1.0"
 dependencies = [
