@@ -246,6 +246,13 @@ pub struct AppState {
     /// which lines are on screen, so it has to be told what was drawn rather
     /// than what was asked for.
     pub(crate) drawn_rows: usize,
+    /// Which surface `refresh` last told the window to draw with.
+    ///
+    /// Kept so a *change* can be noticed, which is the only moment the caret
+    /// has to be handed over: the surface that had it has just become
+    /// invisible. `None` until the first refresh, so the first one counts as
+    /// a change and startup is not a special case.
+    pub(crate) surface_shown: Option<bool>,
     /// Documents served from disk in chunks rather than held in a rope.
     ///
     /// A document is in exactly one of `editors` and `viewers`, never both
@@ -318,6 +325,7 @@ impl AppState {
             clips: bp_clipboard::History::new(),
             signing_key: default_signing_key_path(),
             drawn_rows: 0,
+            surface_shown: None,
             viewers: HashMap::new(),
             store: default_store(),
             related_notes: Vec::new(),

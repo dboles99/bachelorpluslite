@@ -47,6 +47,7 @@ enum PendingFocus {
     find,
     goto,
     passphrase,
+    editor,
 }
 
 export component AppWindow inherits Window {
@@ -311,6 +312,8 @@ export component AppWindow inherits Window {
                 goto-bar.focus-input();
             } else if (root.pending-focus == PendingFocus.passphrase) {
                 passphrase-bar.focus-input();
+            } else if (root.pending-focus == PendingFocus.editor) {
+                root.focus-editor();
             }
             root.pending-focus = PendingFocus.none;
         }
@@ -340,6 +343,31 @@ export component AppWindow inherits Window {
     public function focus-passphrase() {
         root.passphrase-open = true;
         root.pending-focus = PendingFocus.passphrase;
+    }
+
+    /// Give the caret to whichever surface is drawing the document -- but not
+    /// if anything else wants it.
+    ///
+    /// **`forward-focus` cannot do this job, and that is why this exists.**
+    /// It names `editor`, the `TextInput`, which is `visible:
+    /// !use-editor-view` -- invisible for a document served from disk
+    /// (ADR-0030) and for every document under `--editor-view`. It is also
+    /// resolved at *compile* time into the component's init code
+    /// (`i-slint-compiler`'s `focus_handling` pass), so it is one fixed
+    /// element chosen once and cannot follow a property. Left alone, the
+    /// window opens with the keyboard held by something nobody can see, and
+    /// Ctrl+F does nothing until the reader clicks in the document.
+    ///
+    /// Called at startup and whenever the surface changes under the active
+    /// document. **The guard is the whole of the difference between this and
+    /// a defect**: switching to a tab drawn by the other surface must not
+    /// take the caret out of an open find box, and a bar that has already
+    /// asked for it this tick outranks a surface that merely changed.
+    public function focus-editor-soon() {
+        if (root.pending-focus == PendingFocus.none && !root.find-open && !root.goto-open
+            && !root.passphrase-open) {
+            root.pending-focus = PendingFocus.editor;
+        }
     }
 
     /// Wipe the box without closing the bar -- a wrong passphrase gets

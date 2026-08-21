@@ -99,26 +99,6 @@ Things that do not work, with the reason. Where the reason is "Slint
 citation is in `project/WORK_QUEUE.md`, and the point of it is that nobody
 should spend an afternoon on these before checking the version changed.
 
-- **A document drawn in the custom surface has no keyboard focus until you
-  click in it.** Open a huge log and press Ctrl+F, and nothing happens; click
-  anywhere in the document first and it works. **Found 2026-08-21 by driving
-  the window, diagnosed, and deliberately not fixed in the same change as the
-  feature that found it.**
-
-  `AppWindow`'s `forward-focus: editor` names the `TextInput`, which is
-  `visible: !use-editor-view` — invisible for any document served from disk
-  ([ADR-0030](docs/decisions/ADR-0030.md)) and for every document under
-  `--editor-view`. So nothing focusable holds the keyboard when the window
-  opens. It is not the same defect as the swallowed shortcuts below in
-  "Recently closed", which was about a key that *arrived* and was eaten; this
-  is about one that never arrives.
-
-  It wants a decision rather than a patch, which is why it is here: Slint's
-  `forward-focus` takes an element, not an expression, so it cannot simply
-  follow `use-editor-view`. Calling `focus-editor()` at startup and whenever
-  the surface changes is the small answer; whether it survives the window
-  being re-activated is the part that needs checking rather than assuming.
-
 - **Input-method composition does not work under `--editor-view`, and cannot
   on this Slint.** `FocusScope` rejects `UpdateComposition` and
   `CommitComposition` in both its handlers and exposes no callback for either;
@@ -217,6 +197,34 @@ should spend an afternoon on these before checking the version changed.
 Kept rather than deleted, because every one of these went stale the same
 way — a fix landing without the record moving — and because the lesson in each
 is worth more than the fact.
+
+- **Nothing held the keyboard until you clicked, in every `--editor-view`
+  launch and every huge document.** Ctrl+F on a fresh window did nothing;
+  click anywhere in the document first and it worked. Found on 2026-08-21
+  while fixing the defect below, which had been hiding it.
+
+  `AppWindow`'s `forward-focus: editor` names the `TextInput`, and the
+  `TextInput` is `visible: !use-editor-view` — invisible for any document
+  served from disk ([ADR-0030](docs/decisions/ADR-0030.md)) and for *every*
+  document under `--editor-view`. So the window opened with the keyboard held
+  by an element nobody could see.
+
+  **`forward-focus` cannot be made to follow the flag, and that is the part
+  worth writing down.** It takes an element rather than an expression, and
+  `i-slint-compiler`'s `focus_handling` pass resolves it at *compile* time
+  into the component's init code — so it is one fixed element, chosen once,
+  and no binding will ever move it. Checked in the toolkit's source, like the
+  other Slint findings here, rather than inferred from the symptom. The fix is
+  therefore a hand-over rather than a binding: `focus-editor-soon()` gives the
+  caret to whichever surface is drawing, at startup and whenever the surface
+  changes under the active document.
+
+  **The guard on it is the whole difference between a fix and a new defect**,
+  and it is the same lesson as the passphrase leak two entries down: switching
+  to a tab drawn by the other surface must not take the caret out of an open
+  find box. Confirmed by driving the window — with a query typed and the huge
+  tab active, clicking across to a small file leaves the next keystrokes in
+  the find box.
 
 - **A huge document had no keyboard shortcuts at all, and nobody had noticed.**
   Not Ctrl+F, not Ctrl+S, not Ctrl+O — nothing. Found on 2026-08-21 by

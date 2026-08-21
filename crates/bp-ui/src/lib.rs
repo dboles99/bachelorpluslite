@@ -119,6 +119,17 @@ fn refresh(ui: &AppWindow, state: &mut state::AppState, push_text: state::PushTe
     // them.
     let custom = state.uses_custom_surface();
     ui.set_use_editor_view(custom);
+    // **The surface that had the caret has just become invisible.** Both
+    // editors exist at all times with `visible` toggled, so the one that is
+    // hidden keeps the focus it was holding and every keystroke goes nowhere
+    // -- which is what `forward-focus: editor` does at startup for any
+    // document the custom surface draws. Handed over only on a *change*,
+    // never on every refresh, and `focus-editor-soon` declines if a bar is
+    // open or has already asked.
+    if state.surface_shown != Some(custom) {
+        state.surface_shown = Some(custom);
+        ui.invoke_focus_editor_soon();
+    }
     if custom {
         editor_view::push_editor_view(ui, state);
     }
