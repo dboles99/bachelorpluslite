@@ -17,7 +17,11 @@ use regex::{Regex, RegexBuilder};
 use thiserror::Error;
 
 mod files;
+mod stream;
 pub use files::{FileHit, FileSearchReport, MAX_FILE_BYTES, MAX_HITS, search_dir};
+pub use stream::{
+    STREAM_TICK, StreamHit, StreamLimits, StreamSearch, StreamSearchError, WINDOWS_PER_TICK,
+};
 
 /// Crate identity used by workspace smoke tests and diagnostics.
 pub const CRATE_NAME: &str = "bp-search";
@@ -58,7 +62,12 @@ impl Query {
     ///
     /// A literal query is escaped, so searching for `a.b` finds `a.b` and not
     /// `axb`. That is the whole difference between a find box and a footgun.
-    fn compile(&self) -> Result<Regex, SearchError> {
+    ///
+    /// `pub(crate)` for [`stream`], which compiles once and then scans a
+    /// couple of thousand windows with the result -- compiling per window
+    /// would be two thousand compilations of the same pattern, and would
+    /// report a bad one two thousand times instead of at the start.
+    pub(crate) fn compile(&self) -> Result<Regex, SearchError> {
         let base = if self.regex {
             self.pattern.clone()
         } else {
@@ -140,10 +149,18 @@ pub fn find_all(text: &str, query: &Query) -> Result<Vec<Match>, SearchError> {
     if query.is_empty() {
         return Ok(Vec::new());
     }
-    let regex = query.compile()?;
-    let offsets = Offsets::of(text);
+    Ok(matches_with(text, &query.compile()?))
+}
 
-    Ok(regex
+/// Every match of an already-compiled pattern, in document order.
+///
+/// Split out of [`find_all`] for [`stream`], which compiles once and calls
+/// this per window. Sharing the body rather than writing a second one is the
+/// point: a streaming search that disagreed with `find_all` about what a
+/// match is would be a defect nobody could see from either side.
+pub(crate) fn matches_with(text: &str, regex: &Regex) -> Vec<Match> {
+    let offsets = Offsets::of(text);
+    regex
         .find_iter(text)
         .map(|m| {
             let start = offsets.char_at(m.start());
@@ -153,7 +170,7 @@ pub fn find_all(text: &str, query: &Query) -> Result<Vec<Match>, SearchError> {
                 text: m.as_str().to_owned(),
             }
         })
-        .collect())
+        .collect()
 }
 
 /// Count matches without materialising them.
