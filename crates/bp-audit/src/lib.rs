@@ -883,46 +883,47 @@ impl AuditLog {
         file.sync_all().map_err(io)
     }
 
-    /// Read and validate an existing history.
+    /// Read and validate an existing history, all of it, before returning any
+    /// of it.
+    ///
+    /// A thin wrapper over [`read_lazy`], kept so there is exactly one
+    /// implementation of the read-and-decrypt logic. [`open`] needs the whole
+    /// history anyway -- it cannot trust [`next_sequence`] until every line
+    /// has been checked -- so it collects the iterator to completion here
+    /// rather than driving it by hand.
+    ///
+    /// [`read_lazy`]: AuditLog::read_lazy
+    /// [`open`]: AuditLog::open
+    /// [`next_sequence`]: AuditLog::next_sequence
     fn read(path: &Path, sealer: Option<&dyn Sealer>) -> Result<Vec<Record>, AuditError> {
-        let text = match std::fs::read_to_string(path) {
-            Ok(text) => text,
-            // A history that has never been written is an empty one, not a
-            // problem to report to somebody who has done nothing wrong.
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-            Err(source) => {
-                return Err(AuditError::Io {
-                    path: path.to_path_buf(),
-                    source,
-                });
-            }
-        };
+        Self::read_lazy(path, sealer).collect()
+    }
 
-        let mut records: Vec<Record> = Vec::new();
-        for (index, raw) in text.lines().enumerate() {
-            let line = index + 1;
-            let raw = raw.trim();
-            // A crash between the newline and the next entry can leave a
-            // blank line. It carries no claim, so it is not tampering.
-            if raw.is_empty() {
-                continue;
-            }
-            let record = Self::parse_line(raw, line, sealer)?;
-            // Exactly 1, 2, 3, ... -- see the type's note on what this does
-            // and does not catch.
-            let expected = records
-                .last()
-                .map_or(1, |r: &Record| r.seq.saturating_add(1));
-            if record.seq != expected {
-                return Err(AuditError::OutOfOrder {
-                    line,
-                    expected,
-                    found: record.seq,
-                });
-            }
-            records.push(record);
+    /// Read a history lazily, one record at a time.
+    ///
+    /// Neither the file nor a sealed line's decryption happens until the
+    /// caller asks for it by calling `.next()` -- see ADR-0036. Where
+    /// [`read`] (and, through it, [`open`]) must see every line to validate
+    /// the sequence before it can trust the result, a caller that only wants
+    /// the newest few records, or wants to show progress while decrypting a
+    /// long history, can drive this directly and stop whenever it likes,
+    /// paying for exactly the Argon2id derivations it asked for and none it
+    /// did not.
+    ///
+    /// A missing file yields no records and no error, matching [`open`]: the
+    /// first call to `.next()` returns `None` immediately.
+    ///
+    /// [`read`]: AuditLog::read
+    /// [`open`]: AuditLog::open
+    #[must_use]
+    pub fn read_lazy<'a>(path: &Path, sealer: Option<&'a dyn Sealer>) -> Records<'a> {
+        Records {
+            path: path.to_path_buf(),
+            sealer,
+            state: RecordsState::Unopened,
+            expected: 1,
+            stopped: false,
         }
-        Ok(records)
     }
 
     /// Turn one line back into a record, sealed or not.
@@ -942,6 +943,122 @@ impl AuditLog {
         let sealer = sealer.ok_or(AuditError::Sealed { line })?;
         let plain = sealer.unseal(&sealed)?;
         serde_json::from_slice(&plain).map_err(|_| AuditError::Malformed { line })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Reading lazily
+// ---------------------------------------------------------------------------
+
+/// A history read one record at a time, decrypting a sealed line only when
+/// the caller asks for it.
+///
+/// Built by [`AuditLog::read_lazy`]; see there, and ADR-0036, for why this
+/// exists instead of the `Vec<Record>` [`AuditLog::read`] returns, which a
+/// caller has no way to stop partway through.
+///
+/// # After an error, the iterator is finished
+///
+/// Once `next()` yields `Some(Err(_))`, every later call returns `None`
+/// rather than skipping the bad line and continuing, or repeating the same
+/// error forever. The sequence-order check depends on unbroken state --
+/// "the next record is one more than the last one this iterator saw" -- so
+/// there is no line past a malformed or out-of-order one that this iterator
+/// could resume validating. Stopping for good is the same choice
+/// [`AuditLog::open`] already makes about the file as a whole; this just
+/// makes it per-iterator instead of per-file.
+pub struct Records<'a> {
+    path: PathBuf,
+    sealer: Option<&'a dyn Sealer>,
+    state: RecordsState,
+    expected: u64,
+    stopped: bool,
+}
+
+/// Whether the file behind a [`Records`] has been opened yet.
+///
+/// Kept out of `Records` itself so the file read genuinely does not happen
+/// until the first call to `.next()` -- constructing a `Records` touches
+/// neither the filesystem nor the sealer.
+enum RecordsState {
+    /// Nothing has touched the filesystem yet.
+    Unopened,
+    /// The file has been split into lines; each is parsed, and (if sealed)
+    /// decrypted, only when its turn comes.
+    Reading {
+        lines: std::vec::IntoIter<String>,
+        line: usize,
+    },
+}
+
+impl Iterator for Records<'_> {
+    type Item = Result<Record, AuditError>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.stopped {
+            return None;
+        }
+
+        if matches!(self.state, RecordsState::Unopened) {
+            match std::fs::read_to_string(&self.path) {
+                Ok(text) => {
+                    let lines: Vec<String> = text.lines().map(str::to_owned).collect();
+                    self.state = RecordsState::Reading {
+                        lines: lines.into_iter(),
+                        line: 0,
+                    };
+                }
+                // A history that has never been written is an empty one, not
+                // a problem to report to somebody who has done nothing
+                // wrong.
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    self.stopped = true;
+                    return None;
+                }
+                Err(source) => {
+                    self.stopped = true;
+                    return Some(Err(AuditError::Io {
+                        path: self.path.clone(),
+                        source,
+                    }));
+                }
+            }
+        }
+
+        let RecordsState::Reading { lines, line } = &mut self.state else {
+            unreachable!("the branch above always leaves Unopened for Reading");
+        };
+
+        loop {
+            let raw = lines.next()?;
+            *line += 1;
+            let raw = raw.trim();
+            // A crash between the newline and the next entry can leave a
+            // blank line. It carries no claim, so it is not tampering.
+            if raw.is_empty() {
+                continue;
+            }
+
+            let record = match AuditLog::parse_line(raw, *line, self.sealer) {
+                Ok(record) => record,
+                Err(err) => {
+                    self.stopped = true;
+                    return Some(Err(err));
+                }
+            };
+            // Exactly 1, 2, 3, ... -- see `Record::seq`'s note on what this
+            // does and does not catch.
+            if record.seq != self.expected {
+                self.stopped = true;
+                return Some(Err(AuditError::OutOfOrder {
+                    line: *line,
+                    expected: self.expected,
+                    found: record.seq,
+                }));
+            }
+            self.expected = self.expected.saturating_add(1);
+            return Some(Ok(record));
+        }
     }
 }
 
@@ -1011,6 +1128,23 @@ mod tests {
         }
         fn unseal(&self, _: &[u8]) -> Result<Vec<u8>, SealFailed> {
             Err(SealFailed::new("the document key was rejected"))
+        }
+    }
+
+    /// [`Reversing`], but counting how many times a line was actually
+    /// unsealed -- the only way to see from outside whether `Records`
+    /// touched a line it was never asked for.
+    struct CountingUnseal<'a> {
+        calls: &'a std::cell::Cell<usize>,
+    }
+
+    impl Sealer for CountingUnseal<'_> {
+        fn seal(&self, plaintext: &[u8]) -> Result<Vec<u8>, SealFailed> {
+            Reversing.seal(plaintext)
+        }
+        fn unseal(&self, sealed: &[u8]) -> Result<Vec<u8>, SealFailed> {
+            self.calls.set(self.calls.get() + 1);
+            Reversing.unseal(sealed)
         }
     }
 
@@ -1756,6 +1890,217 @@ mod tests {
             message.contains("edited or truncated"),
             "the message must suggest what happened: {message}"
         );
+    }
+
+    // -- reading lazily (ADR-0036) ------------------------------------------
+
+    #[test]
+    fn the_lazy_reader_yields_the_same_records_in_the_same_order_as_read() {
+        let dir = tempfile::tempdir().expect("a temporary directory");
+        let path = dir.path().join("security.log");
+        let mut log = log_in(&dir);
+        for (index, event) in [
+            Event::DocumentEncrypted,
+            Event::DocumentUnlocked,
+            Event::SignatureMade,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            log.append(
+                at(1_700_000_000 + i64::try_from(index).expect("small")),
+                None,
+                event,
+                Profile::Standard.policy(),
+                None,
+            )
+            .expect("Standard writes");
+        }
+
+        let eager = AuditLog::open(path.clone(), None)
+            .expect("the eager reader opens")
+            .records()
+            .to_vec();
+        let lazy: Vec<Record> = AuditLog::read_lazy(&path, None)
+            .collect::<Result<_, _>>()
+            .expect("the lazy reader reads the same file");
+
+        assert_eq!(lazy, eager);
+        assert_eq!(lazy, log.records());
+    }
+
+    #[test]
+    fn the_lazy_reader_decrypts_sealed_lines_just_like_read() {
+        // The round trip already proven for `read` (formerly `open`'s only
+        // path), proven again for `read_lazy`, so the eager path is not the
+        // only one this crate's sealed/plaintext promise holds for.
+        let dir = tempfile::tempdir().expect("a temporary directory");
+        let path = dir.path().join("security.log");
+        let mut log = AuditLog::open(path.clone(), Some(&Reversing)).expect("a fresh log opens");
+        log.append(
+            at(1),
+            Some(DocumentId::new(9)),
+            Event::DocumentDecrypted,
+            Profile::Private.policy(),
+            Some(&Reversing),
+        )
+        .expect("Private with a key writes a sealed line");
+        log.append(
+            at(2),
+            Some(DocumentId::new(9)),
+            Event::SignatureVerified { valid: true },
+            Profile::Private.policy(),
+            Some(&Reversing),
+        )
+        .expect("a second sealed line");
+
+        let lazy: Vec<Record> = AuditLog::read_lazy(&path, Some(&Reversing))
+            .collect::<Result<_, _>>()
+            .expect("sealed lines decrypt through the lazy path too");
+        assert_eq!(lazy, log.records());
+
+        let err = AuditLog::read_lazy(&path, None)
+            .next()
+            .expect("a sealed file is not an empty history")
+            .expect_err("no key, no record");
+        assert!(matches!(err, AuditError::Sealed { line: 1 }), "got {err}");
+    }
+
+    #[test]
+    fn the_lazy_reader_stops_decrypting_once_the_caller_stops_asking() {
+        // The entire point: a caller that only calls `.next()` a few times
+        // must not have paid for the Argon2id derivation of every other
+        // line. Counting actual `unseal` calls is the only way to observe
+        // that from outside `Records`.
+        let dir = tempfile::tempdir().expect("a temporary directory");
+        let path = dir.path().join("security.log");
+        let calls = std::cell::Cell::new(0);
+        {
+            let sealer = CountingUnseal { calls: &calls };
+            let mut log = AuditLog::open(path.clone(), Some(&sealer)).expect("a fresh log opens");
+            for _ in 0..5 {
+                log.append(
+                    at(1),
+                    None,
+                    Event::DocumentUnlocked,
+                    Profile::Private.policy(),
+                    Some(&sealer),
+                )
+                .expect("Private with a key writes");
+            }
+        }
+        calls.set(0); // writing seals, not unseals, but reset to be exact.
+
+        let sealer = CountingUnseal { calls: &calls };
+        let mut records = AuditLog::read_lazy(&path, Some(&sealer));
+        assert_eq!(
+            records
+                .next()
+                .expect("first record")
+                .expect("decrypts")
+                .seq(),
+            1
+        );
+        assert_eq!(
+            records
+                .next()
+                .expect("second record")
+                .expect("decrypts")
+                .seq(),
+            2
+        );
+        drop(records);
+
+        assert_eq!(
+            calls.get(),
+            2,
+            "the lazy reader decrypted more than the two lines actually asked for"
+        );
+    }
+
+    #[test]
+    fn the_lazy_reader_reports_out_of_order_lines_at_the_same_point_as_read() {
+        let dir = tempfile::tempdir().expect("a temporary directory");
+        let path = dir.path().join("security.log");
+        std::fs::write(
+            &path,
+            "{\"seq\":1,\"at_unix\":0,\"at_offset\":0,\"event\":{\"kind\":\"signature_made\"}}\n\
+             {\"seq\":3,\"at_unix\":0,\"at_offset\":0,\"event\":{\"kind\":\"signature_made\"}}\n",
+        )
+        .expect("the file is written");
+
+        let mut records = AuditLog::read_lazy(&path, None);
+        assert_eq!(records.next().expect("first record").expect("ok").seq(), 1);
+        let err = records
+            .next()
+            .expect("a second item, an error")
+            .expect_err("the sequence jumped from 1 to 3");
+        assert!(
+            matches!(
+                err,
+                AuditError::OutOfOrder {
+                    line: 2,
+                    expected: 2,
+                    found: 3
+                }
+            ),
+            "got {err}"
+        );
+
+        assert!(
+            records.next().is_none(),
+            "the iterator must not resume past a sequence error"
+        );
+    }
+
+    #[test]
+    fn the_lazy_reader_reports_a_malformed_line_at_the_same_point_as_read() {
+        let dir = tempfile::tempdir().expect("a temporary directory");
+        let path = dir.path().join("security.log");
+        std::fs::write(
+            &path,
+            "{\"seq\":1,\"at_unix\":0,\"at_offset\":0,\"event\":{\"kind\":\"signature_made\"}}\n\
+             {\"seq\":2,\"this is not\":\"a record\",\"passphrase\":\"hunter2\"}\n",
+        )
+        .expect("the file is written");
+
+        let mut records = AuditLog::read_lazy(&path, None);
+        assert_eq!(records.next().expect("first record").expect("ok").seq(), 1);
+        let err = records
+            .next()
+            .expect("a second item, an error")
+            .expect_err("line 2 is not a record");
+        assert!(
+            matches!(err, AuditError::Malformed { line: 2 }),
+            "got {err}"
+        );
+
+        assert!(
+            records.next().is_none(),
+            "the iterator must not resume past a malformed line"
+        );
+    }
+
+    #[test]
+    fn a_history_that_has_never_been_written_is_empty_and_not_an_error_when_read_lazily() {
+        let dir = tempfile::tempdir().expect("a temporary directory");
+        let path = dir.path().join("security.log");
+
+        let mut records = AuditLog::read_lazy(&path, None);
+        assert!(
+            records.next().is_none(),
+            "a missing file must not be reported as an error"
+        );
+    }
+
+    #[test]
+    fn a_file_of_nothing_but_blank_lines_is_an_empty_history_when_read_lazily() {
+        let dir = tempfile::tempdir().expect("a temporary directory");
+        let path = dir.path().join("security.log");
+        std::fs::write(&path, "\n\n   \n").expect("the file is written");
+
+        let mut records = AuditLog::read_lazy(&path, None);
+        assert!(records.next().is_none(), "blank lines are not records");
     }
 
     #[test]
