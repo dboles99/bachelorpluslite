@@ -46,7 +46,7 @@ Adding a decision means adding both.
 | BP-ADR-0036 | 2026-08-21 | A long security history stays usable by reading it lazily, not by a faster key | Accepted | [ADR-0036](docs/decisions/ADR-0036.md) |
 | BP-ADR-0037 | 2026-08-21 | Phase 9 is a related-notes panel and duplicate detection | Accepted | [ADR-0037](docs/decisions/ADR-0037.md) |
 | BP-ADR-0038 | 2026-08-21 | Notebook mode is a lightweight, one-cell-at-a-time utility | Accepted | [ADR-0038](docs/decisions/ADR-0038.md) |
-| BP-ADR-0039 | 2026-08-21 | Research mode turns gathered data into design recommendations, offline | Proposed | [ADR-0039](docs/decisions/ADR-0039.md) |
+| BP-ADR-0039 | 2026-08-21 | Research mode turns gathered data into design recommendations, offline, on its own data model | Accepted | [ADR-0039](docs/decisions/ADR-0039.md) |
 
 ## Decisions needed before the work they block
 
