@@ -49,16 +49,25 @@ const RELATED_LIMIT: usize = 20;
 /// `None` when the environment does not say where the user's profile is.
 /// `bp-platform` refuses to guess one, and this says so rather than putting a
 /// database beside whatever file the user happened to open. A failure to
-/// open the file (a locked or corrupt store, say) is folded into the same
-/// `None`: Organize is a convenience layered on `bp-storage`, not a
-/// requirement the rest of the shell depends on, so a store that cannot be
-/// opened is a store this session does not have, not a reason to refuse to
-/// start.
+/// create the directory or open the file (a locked or corrupt store, say) is
+/// folded into the same `None`: Organize is a convenience layered on
+/// `bp-storage`, not a requirement the rest of the shell depends on, so a
+/// store that cannot be opened is a store this session does not have, not a
+/// reason to refuse to start.
+///
+/// **`create_dir_all` first, matching the exact pattern `begin_signing`
+/// already uses for its own key file** (`state/security.rs`) -- found by
+/// driving the built binary, not by a test: `Store::open` is a bare
+/// `Connection::open`, which does not create a missing parent directory, and
+/// `DirKind::Data` names a directory nothing had ever created before this.
+/// The signing key's directory exists on a machine that has already signed
+/// something; a fresh machine's `data` directory does not exist until
+/// something asks for it to.
 #[cfg(not(test))]
 pub(super) fn default_store() -> Option<Store> {
-    let path =
-        bp_platform::dirs::host_directory(bp_platform::DirKind::Data)?.join("organize.sqlite");
-    Store::open(&path).ok()
+    let dir = bp_platform::dirs::host_directory(bp_platform::DirKind::Data)?;
+    std::fs::create_dir_all(&dir).ok()?;
+    Store::open(&dir.join("organize.sqlite")).ok()
 }
 
 /// The same, redirected under test.
