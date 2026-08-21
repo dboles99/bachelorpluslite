@@ -22,6 +22,19 @@
 //! harmful": saving a document whose text reads as empty would write an empty
 //! file over two gigabytes.
 //!
+//! ## Finding something in it
+//!
+//! ADR-0042. The same document that cannot be held cannot be searched in one
+//! pass either, so a scan lives here beside the viewport: `bp_search`'s
+//! `StreamSearch` reads the file a window at a time and reports each hit as a
+//! document line and a column in it, which is exactly what this view can act
+//! on -- it scrolls by line and draws by line.
+//!
+//! **The scan belongs to the view rather than to the find bar**, so it cannot
+//! outlive the document it is about: closing the tab drops the `HugeView` and
+//! the scan and its file handle with it. It also means switching tabs away
+//! and back resumes the scan rather than restarting it.
+//!
 //! ## ADR-0030
 //!
 //! This is drawn by `EditorSurface` in every build, whether or not
@@ -31,9 +44,27 @@
 //! one reason it is opt-in — input-method composition — has nothing to say
 //! about a surface that accepts no text.
 
+use std::ops::Range;
 use std::path::Path;
 
 use bp_buffer::{Access, DisplayLine, LargeFile, LargeFileError};
+use bp_search::{Query, StreamHit, StreamSearch, StreamSearchError};
+
+/// A scan of one document for one query, and which hit the reader is on.
+#[derive(Debug)]
+struct Scan {
+    search: StreamSearch,
+    /// Index into `search.hits()`. Meaningless while there are none.
+    index: usize,
+    /// Whether the viewport has already been moved to a hit.
+    ///
+    /// The *first* hit found moves the view once, which is what the
+    /// in-memory find does as a query is typed. Every hit after that is the
+    /// reader's to step to -- a view that jumped to each new hit as the scan
+    /// turned it up would be unreadable, and would keep moving long after
+    /// the reader started reading.
+    jumped: bool,
+}
 
 /// One huge document, and where in it the reader is looking.
 #[derive(Debug)]
@@ -49,6 +80,8 @@ pub(crate) struct HugeView {
     /// for, so a resize invalidates it as surely as a scroll does.
     rows: Vec<DisplayLine>,
     fetched_for: Option<(usize, usize)>,
+    /// The scan in flight, if the find bar has asked for one.
+    scan: Option<Scan>,
 }
 
 impl HugeView {
@@ -63,6 +96,7 @@ impl HugeView {
             top: 0,
             rows: Vec::new(),
             fetched_for: None,
+            scan: None,
         })
     }
 
@@ -141,6 +175,209 @@ impl HugeView {
         self.fetched_for = Some((line, count));
         true
     }
+}
+
+impl HugeView {
+    /// Begin scanning this document for `query`, discarding any scan in
+    /// flight.
+    ///
+    /// `O(1)`: an open handle and a compiled pattern, so the find bar may
+    /// call this on every keystroke. Nothing is read until the first
+    /// [`Self::advance_scan`].
+    ///
+    /// An empty query clears the scan rather than starting one, which is what
+    /// an empty find box means. A pattern that is not a pattern is refused
+    /// here -- once, before any of the file is read.
+    pub(crate) fn begin_scan(&mut self, query: &Query) -> Result<(), StreamSearchError> {
+        self.scan = None;
+        if query.is_empty() {
+            return Ok(());
+        }
+        self.scan = Some(Scan {
+            search: StreamSearch::start(self.file.path(), query)?,
+            index: 0,
+            jumped: false,
+        });
+        Ok(())
+    }
+
+    /// Whether a scan is in flight and has more of the file to read.
+    pub(crate) fn is_scanning(&self) -> bool {
+        self.scan
+            .as_ref()
+            .is_some_and(|scan| !scan.search.is_finished())
+    }
+
+    /// Scan `windows` more windows, and report whether there is more to do.
+    ///
+    /// **A read failure ends the scan rather than pausing it**, and says so:
+    /// the disk has stopped answering for a document that is only ever read
+    /// from the disk, so there is nothing to resume. Returning `Ok(false)`
+    /// after an error would be indistinguishable from finishing.
+    pub(crate) fn advance_scan(
+        &mut self,
+        windows: usize,
+        rows: usize,
+    ) -> Result<bool, StreamSearchError> {
+        // The borrow of `scan` has to end before the scroll, which needs all
+        // of `self`.
+        let stepped = {
+            let Some(scan) = self.scan.as_mut() else {
+                return Ok(false);
+            };
+            match scan.search.advance(windows) {
+                Err(e) => Err(e),
+                Ok(_) => {
+                    let first = (!scan.jumped)
+                        .then(|| scan.search.hits().first().map(|hit| hit.line))
+                        .flatten();
+                    if first.is_some() {
+                        scan.jumped = true;
+                    }
+                    Ok((!scan.search.is_finished(), first))
+                }
+            }
+        };
+        match stepped {
+            Err(e) => {
+                self.scan = None;
+                Err(e)
+            }
+            Ok((running, first)) => {
+                if let Some(line) = first {
+                    self.reveal(line, rows);
+                }
+                Ok(running)
+            }
+        }
+    }
+
+    /// Step to the next or previous hit, wrapping, and move the view to it.
+    ///
+    /// Returns whether there was a hit to step to. Wrapping is what a find
+    /// box does, and it wraps over *what has been found so far*: a scan still
+    /// running has an end that keeps moving, and refusing to wrap until it
+    /// stops would make the button dead for as long as the file is long.
+    pub(crate) fn step_hit(&mut self, forward: bool, rows: usize) -> bool {
+        let line = {
+            let Some(scan) = self.scan.as_mut() else {
+                return false;
+            };
+            let len = scan.search.hits().len();
+            if len == 0 {
+                return false;
+            }
+            scan.index = if forward {
+                (scan.index + 1) % len
+            } else {
+                (scan.index + len - 1) % len
+            };
+            scan.search.hits().get(scan.index).map(|hit| hit.line)
+        };
+        match line {
+            Some(line) => {
+                self.reveal(line, rows);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Put `line` on screen, without moving if it already is.
+    ///
+    /// A third of a screen above it rather than at the top: a match at the
+    /// very first row has no context above it, and context is most of what a
+    /// reader of a log wants around a hit.
+    fn reveal(&mut self, line: usize, rows: usize) {
+        let rows = rows.max(1);
+        if (self.top..self.top + self.drawn_or(rows)).contains(&line) {
+            return;
+        }
+        self.scroll_to(line.saturating_sub(rows / 3), rows);
+    }
+
+    /// How many rows are actually drawn, for a containment test that must not
+    /// claim the end of the file is on screen when it is not.
+    fn drawn_or(&self, rows: usize) -> usize {
+        match self.fetched_for {
+            Some((top, _)) if top == self.top => self.rows.len(),
+            _ => rows,
+        }
+    }
+
+    /// The hit the reader is standing on, if a scan has found one.
+    fn current_hit(&self) -> Option<&StreamHit> {
+        let scan = self.scan.as_ref()?;
+        scan.search.hits().get(scan.index)
+    }
+
+    /// Where to draw the highlight: a row of the viewport, and the visual
+    /// columns of the match within it.
+    ///
+    /// Visual columns, because the surface draws tabs expanded and a
+    /// character column would put the box somewhere the text is not -- the
+    /// same trap the editor's caret fell into, and it goes through the same
+    /// function.
+    ///
+    /// `None` when there is no scan, no hit, the hit is off screen, or the
+    /// hit has no column at all -- which is the giant-line case
+    /// `StreamHit::column` names. The view still scrolls to it; there is
+    /// simply nothing to draw a box around.
+    pub(crate) fn highlight(
+        &mut self,
+        rows: usize,
+        tab_width: usize,
+    ) -> Option<(usize, Range<usize>)> {
+        let hit = self.current_hit()?.clone();
+        let column = hit.column?;
+        let row = hit.line.checked_sub(self.top)?;
+        let line = self.rows(rows).get(row)?;
+        let start = bp_editor::view::visual_column(&line.text, column.start, tab_width);
+        let end = bp_editor::view::visual_column(&line.text, column.end, tab_width);
+        Some((row, start..end))
+    }
+
+    /// What the find bar should say about this document's scan.
+    ///
+    /// `None` when there is no scan, so the caller leaves whatever the bar
+    /// already said rather than blanking it.
+    pub(crate) fn scan_status(&self) -> Option<String> {
+        let scan = self.scan.as_ref()?;
+        Some(scan_label(&scan.search, scan.index))
+    }
+}
+
+/// What the find bar says about a scan of a document served from disk.
+///
+/// A free function for the same reason as [`viewer_label`]: its test asserts
+/// the product's sentence rather than a copy of it.
+///
+/// **While the scan is running the count is explicitly "so far", and there is
+/// no total.** `find_all` can say "1 of 27" the moment it is asked because it
+/// has seen the whole document; this has not, and a number that grows while
+/// it is labelled a total is a number that was never one. When the scan
+/// finishes the wording becomes the in-memory find's exactly, so a reader
+/// learns one vocabulary rather than two -- with a `+` when the scan stopped
+/// at the cap, because "500 matches" and "at least 500 matches" are different
+/// answers.
+pub(crate) fn scan_label(search: &StreamSearch, index: usize) -> String {
+    let found = search.hits().len();
+    if !search.is_finished() {
+        let percent = match search.len_bytes() {
+            0 => 100,
+            len => search.bytes_searched() * 100 / len,
+        };
+        return if found == 0 {
+            format!("searching {percent}%")
+        } else {
+            format!("searching {percent}% ({found} so far)")
+        };
+    }
+    if found == 0 {
+        return "no matches".to_owned();
+    }
+    let more = if search.truncated() { "+" } else { "" };
+    format!("{} of {found}{more}", index + 1)
 }
 
 /// What the status bar says about a document being served from disk.
@@ -301,6 +538,248 @@ mod tests {
             !viewer_label(0, 48).contains(" of "),
             "a total would be a promise this viewer cannot keep cheaply"
         );
+    }
+
+    /// A file whose lines are given, one per line.
+    fn a_file_of(lines: &[&str]) -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::tempdir().expect("a temporary directory");
+        let path = dir.path().join("huge.log");
+        let mut text = String::new();
+        for line in lines {
+            text.push_str(line);
+            text.push('\n');
+        }
+        std::fs::write(&path, text).expect("the fixture is written");
+        (dir, path)
+    }
+
+    /// Open a view and scan it to the end.
+    fn scanned(path: &std::path::Path, pattern: &str, rows: usize) -> HugeView {
+        let mut view = HugeView::open(path).expect("the fixture opens");
+        view.begin_scan(&Query::literal(pattern))
+            .expect("the scan starts");
+        while view.advance_scan(64, rows).expect("the scan runs") {}
+        view
+    }
+
+    #[test]
+    fn the_first_hit_a_scan_finds_brings_the_view_to_it() {
+        // The live preview a find box does as a query is typed, and the only
+        // automatic movement: everything after this is the reader's to step
+        // to.
+        let (_dir, path) = a_file(400);
+        let mut view = HugeView::open(&path).expect("the fixture opens");
+        assert_eq!(view.top(), 0);
+
+        view.begin_scan(&Query::literal("line 300"))
+            .expect("the scan starts");
+        while view.advance_scan(64, 10).expect("the scan runs") {}
+
+        assert!(
+            (view.top()..view.top() + 10).contains(&299),
+            "line 300 is 0-based line 299, and it must be on screen: top {}",
+            view.top()
+        );
+    }
+
+    #[test]
+    fn a_hit_already_on_screen_does_not_move_the_view() {
+        // Scrolling to something the reader can already see is movement they
+        // did not ask for, and in a log viewer it loses their place.
+        let (_dir, path) = a_file(400);
+        let mut view = HugeView::open(&path).expect("the fixture opens");
+        let _ = view.rows(10);
+
+        view.begin_scan(&Query::literal("line 3"))
+            .expect("the scan starts");
+        while view.advance_scan(64, 10).expect("the scan runs") {}
+
+        assert_eq!(view.top(), 0, "the first hit is on line 3, already drawn");
+    }
+
+    #[test]
+    fn stepping_walks_the_hits_and_wraps_in_both_directions() {
+        let (_dir, path) = a_file_of(&["needle a", "no", "needle b", "no", "needle c"]);
+        let mut view = scanned(&path, "needle", 2);
+
+        // The scan's own jump landed on the first hit.
+        assert_eq!(view.scan_status().as_deref(), Some("1 of 3"));
+
+        assert!(view.step_hit(true, 2));
+        assert_eq!(view.scan_status().as_deref(), Some("2 of 3"));
+        assert!(view.step_hit(true, 2));
+        assert_eq!(view.scan_status().as_deref(), Some("3 of 3"));
+        assert!(view.step_hit(true, 2), "forward from the last wraps");
+        assert_eq!(view.scan_status().as_deref(), Some("1 of 3"));
+        assert!(view.step_hit(false, 2), "back from the first wraps");
+        assert_eq!(view.scan_status().as_deref(), Some("3 of 3"));
+    }
+
+    #[test]
+    fn stepping_moves_the_view_to_the_hit() {
+        // "line 39" matches line 39 and lines 390-399, which is two clusters
+        // far enough apart that stepping between them has to move the view.
+        // A pattern whose hits share a screen would pass this without the
+        // scroll ever happening.
+        let (_dir, path) = a_file(400);
+        let mut view = scanned(&path, "line 39", 10);
+        let first = view.top();
+        assert_ne!(first, 0, "the scan's own jump moved the view to line 39");
+
+        assert!(view.step_hit(true, 10));
+        assert_ne!(view.top(), first, "the view followed the step");
+    }
+
+    #[test]
+    fn stepping_with_nothing_found_does_nothing_rather_than_panicking() {
+        // A find box whose query matches nothing still has two arrows on it.
+        let (_dir, path) = a_file(50);
+        let mut view = scanned(&path, "absent", 10);
+
+        assert!(!view.step_hit(true, 10));
+        assert!(!view.step_hit(false, 10));
+        assert_eq!(view.top(), 0);
+    }
+
+    #[test]
+    fn an_empty_query_clears_the_scan_rather_than_starting_one() {
+        // What an empty find box means, and it must also clear what the last
+        // one found -- a stale highlight over a document nobody is searching
+        // is worse than none.
+        let (_dir, path) = a_file(50);
+        let mut view = scanned(&path, "line", 10);
+        assert!(view.scan_status().is_some());
+
+        view.begin_scan(&Query::default()).expect("an empty query");
+
+        assert_eq!(view.scan_status(), None);
+        assert!(!view.is_scanning());
+        assert_eq!(view.highlight(10, 4), None);
+    }
+
+    #[test]
+    fn a_bad_pattern_is_refused_before_the_file_is_read() {
+        let (_dir, path) = a_file(50);
+        let mut view = HugeView::open(&path).expect("the fixture opens");
+
+        let query = Query {
+            pattern: "a(b".to_owned(),
+            regex: true,
+            ..Query::default()
+        };
+        assert!(view.begin_scan(&query).is_err());
+        assert!(!view.is_scanning(), "a refused scan must not look started");
+    }
+
+    #[test]
+    fn the_highlight_is_the_row_on_screen_and_the_visual_columns_in_it() {
+        // Visual columns, not character ones: the surface draws tabs
+        // expanded, so a character column would put the box where the text
+        // is not. This is the trap the editor's caret fell into, and the
+        // highlight goes through the same function it does.
+        let (_dir, path) = a_file_of(&["first", "a\tneedle", "third"]);
+        let mut view = scanned(&path, "needle", 5);
+
+        assert_eq!(
+            view.highlight(5, 4),
+            Some((1, 4..10)),
+            "row 1 of the viewport; the tab reaches column 4, then six characters"
+        );
+        assert_eq!(
+            view.highlight(5, 8),
+            Some((1, 8..14)),
+            "a wider tab moves the box with the text"
+        );
+    }
+
+    #[test]
+    fn a_hit_that_is_not_on_screen_is_not_highlighted() {
+        // The reader has scrolled away from the hit. Drawing a box at the
+        // arithmetic's answer would put it on an unrelated line.
+        let (_dir, path) = a_file(400);
+        let mut view = scanned(&path, "line 2", 10);
+        assert!(view.highlight(10, 4).is_some());
+
+        view.scroll_to(300, 10);
+
+        assert_eq!(view.highlight(10, 4), None);
+    }
+
+    #[test]
+    fn a_view_with_no_scan_highlights_nothing() {
+        let (_dir, path) = a_file(50);
+        let mut view = HugeView::open(&path).expect("the fixture opens");
+
+        assert_eq!(view.highlight(10, 4), None);
+        assert_eq!(view.scan_status(), None);
+        assert!(!view.is_scanning());
+    }
+
+    #[test]
+    fn a_scan_in_progress_says_so_and_does_not_claim_a_total() {
+        // `find_all` can say "1 of 27" at once because it has seen the whole
+        // document. This has not, and a number that grows while it is
+        // labelled a total is a number that was never one.
+        // Two things the fixture has to be, and both are easy to get wrong:
+        // more than one window long, so a single tick cannot finish it; and
+        // matched by fewer than `MAX_HITS` hits in that first window, or the
+        // scan stops at the cap instead and is finished after all.
+        let (_dir, path) = a_file(150_000);
+        let mut view = HugeView::open(&path).expect("the fixture opens");
+        view.begin_scan(&Query::literal("line 199"))
+            .expect("the scan starts");
+
+        assert!(view.advance_scan(1, 10).expect("one window"));
+        let status = view.scan_status().expect("a scan says something");
+
+        assert!(
+            status.starts_with("searching "),
+            "expected progress, got {status:?}"
+        );
+        assert!(
+            status.contains("so far"),
+            "a running count must be labelled as one, got {status:?}"
+        );
+        assert!(
+            !status.contains(" of "),
+            "a total is a promise a running scan cannot keep: {status:?}"
+        );
+    }
+
+    #[test]
+    fn the_readout_finishes_in_the_same_words_the_in_memory_find_uses() {
+        // One vocabulary rather than two. `AppState::find` says "1 of 3" and
+        // "no matches"; a scan that finished saying something else would make
+        // the same bar mean different things on different documents.
+        let (_dir, path) = a_file_of(&["needle", "no", "needle"]);
+        assert_eq!(
+            scanned(&path, "needle", 5).scan_status().as_deref(),
+            Some("1 of 2")
+        );
+        assert_eq!(
+            scanned(&path, "absent", 5).scan_status().as_deref(),
+            Some("no matches")
+        );
+    }
+
+    #[test]
+    fn a_capped_scan_says_there_are_more_rather_than_a_wrong_total() {
+        let dir = tempfile::tempdir().expect("a temporary directory");
+        let path = dir.path().join("many.log");
+        let mut text = String::new();
+        for _ in 0..bp_search::MAX_HITS + 50 {
+            text.push_str("needle\n");
+        }
+        std::fs::write(&path, text).expect("the fixture is written");
+
+        let view = scanned(&path, "needle", 10);
+
+        let status = view.scan_status().expect("a scan says something");
+        assert!(
+            status.ends_with('+'),
+            "a capped total must be marked as one, got {status:?}"
+        );
+        assert!(status.starts_with("1 of "));
     }
 
     #[test]

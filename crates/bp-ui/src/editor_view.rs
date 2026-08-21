@@ -217,6 +217,10 @@ fn draw_viewer(ui: &AppWindow, state: &mut AppState) {
         return;
     };
     let visible = viewer_rows(view, count, tab_width);
+    // The one thing a viewer can highlight: the hit a scan is standing on
+    // (ADR-0042). Asked for after the rows, because it reads the same cached
+    // screen they came from.
+    let hit = view.highlight(count, tab_width);
 
     // Recorded before the borrow ends, so the status bar says which lines are
     // *drawn* rather than how many were asked for. At the end of the file, and
@@ -224,10 +228,20 @@ fn draw_viewer(ui: &AppWindow, state: &mut AppState) {
     state.drawn_rows = visible.len();
 
     ui.set_editor_rows(Rc::new(slint::VecModel::from(visible)).into());
-    // No selection and no caret. Both are positions in a buffer, and there is
-    // no buffer -- and -1 is what the surface already checks before drawing
-    // one, so this needs nothing new on the Slint side.
-    ui.set_editor_selection(Rc::new(slint::VecModel::from(Vec::<SelectionBox>::new())).into());
+    // No caret: it is a position in a buffer and there is no buffer, and -1
+    // is what the surface already checks before drawing one. A *selection*
+    // box is different -- it is a rectangle over drawn rows, which this view
+    // does have, so a search hit reuses the editor's own highlight rather
+    // than needing anything new on the Slint side.
+    let boxes: Vec<SelectionBox> = hit
+        .into_iter()
+        .map(|(row, columns)| SelectionBox {
+            row: clamp_i32(row),
+            start: clamp_i32(columns.start),
+            end: clamp_i32(columns.end),
+        })
+        .collect();
+    ui.set_editor_selection(Rc::new(slint::VecModel::from(boxes)).into());
     ui.set_caret_row(-1);
     ui.set_caret_column(0);
 }
@@ -297,6 +311,23 @@ const TRUNCATION_MARK: &str = "[…]";
 /// frozen editor.
 fn scroll_for_command(state: &mut AppState, command: &bp_editor::Command) -> bool {
     use bp_editor::{Command, Motion};
+
+    // **A key the editor did not map belongs to the window, and saying it was
+    // handled here is how a huge document ends up with no shortcuts at all.**
+    // `command_for` returns `Ignore` for exactly that class, in its own words:
+    // "Ctrl+S, Ctrl+F and the rest belong to the window." `EditorSurface`'s
+    // `FocusScope` accepts whatever this reports as handled, and an accepted
+    // key never bubbles to the `KeyBinding` that wanted it -- so every
+    // shortcut in the product was dead in a document served from disk, Ctrl+F
+    // among them, which is the only way to reach Find here.
+    //
+    // The swallowing below it is still right and is a different statement: an
+    // *editing* command has no meaning in a document with no caret, and a
+    // Delete that bubbled to the window would be worse than one that did
+    // nothing.
+    if matches!(command, Command::Ignore) {
+        return false;
+    }
 
     let page = state.visible_rows.max(1);
     let delta = match command {

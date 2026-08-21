@@ -67,7 +67,7 @@ saves atomically, and does rather more than that:
 | Storage | A rope buffer holds every document; whole-document operations are one undo step |
 | Safety | Unsaved-changes prompts, external-change detection, crash recovery journal — encrypted and recovered at unlock for encrypted documents ([ADR-0022](docs/decisions/ADR-0022.md)) |
 | Files | Open/Save/Save As/Save All/Save a Copy/Reload, recent files, tab context menu, command-line file opening. A document is classified by size before it is read (ADR-0027): ordinary opens as ever, large opens with the size in the status bar, and a **huge one opens too** — read from disk as you scroll, in the custom surface whichever flag you started with (ADR-0030). A 192 MiB log costs 0.8 MiB more than a small note. UTF-8, UTF-8 with BOM and **UTF-16 LE/BE** all load and save; a truncated or malformed UTF-16 file is refused by name rather than repaired with replacement characters |
-| Search | Find and replace with case-sensitive, whole-word and regex toggles, changes shown before they are applied, recursive cross-file search. A document too large to hold has an engine of its own — `bp_search::StreamSearch` scans it a window at a time, resumably, and reports each hit as a line and a column in it ([ADR-0042](docs/decisions/ADR-0042.md)) — **which nothing calls yet** |
+| Search | Find and replace with case-sensitive, whole-word and regex toggles, changes shown before they are applied, recursive cross-file search. **Find works in a document too large to hold too** ([ADR-0042](docs/decisions/ADR-0042.md)): the find bar scans it from disk a window at a time, says `searching 62%` rather than claiming a total it cannot know, then jumps to the hit and highlights it. Measured on a 213.5 MiB log — `1 of 1` at line 4,800,001, and `1 of 500+` when a query matches more than the cap |
 | Data | JSON / JSONL / TOML / **YAML** validate, format, minify, convert; RFC 4180 CSV/TSV shape report, conversion to JSON and JSON Lines, column types. YAML refuses deep nesting, alias bombs and duplicate keys in words that say what to do ([ADR-0023](docs/decisions/ADR-0023.md)) |
 | Semantic | Title, keywords, summary and outline extracted from the document; document statistics; date and time insertion |
 | Clipboard | History with kind detection, paste from history, format-aware paste transformations |
@@ -98,6 +98,26 @@ Things that do not work, with the reason. Where the reason is "Slint
 1.17.1", it was checked in the toolkit's source rather than assumed — the
 citation is in `project/WORK_QUEUE.md`, and the point of it is that nobody
 should spend an afternoon on these before checking the version changed.
+
+- **A document drawn in the custom surface has no keyboard focus until you
+  click in it.** Open a huge log and press Ctrl+F, and nothing happens; click
+  anywhere in the document first and it works. **Found 2026-08-21 by driving
+  the window, diagnosed, and deliberately not fixed in the same change as the
+  feature that found it.**
+
+  `AppWindow`'s `forward-focus: editor` names the `TextInput`, which is
+  `visible: !use-editor-view` — invisible for any document served from disk
+  ([ADR-0030](docs/decisions/ADR-0030.md)) and for every document under
+  `--editor-view`. So nothing focusable holds the keyboard when the window
+  opens. It is not the same defect as the swallowed shortcuts below in
+  "Recently closed", which was about a key that *arrived* and was eaten; this
+  is about one that never arrives.
+
+  It wants a decision rather than a patch, which is why it is here: Slint's
+  `forward-focus` takes an element, not an expression, so it cannot simply
+  follow `use-editor-view`. Calling `focus-editor()` at startup and whenever
+  the surface changes is the small answer; whether it survives the window
+  being re-activated is the part that needs checking rather than assuming.
 
 - **Input-method composition does not work under `--editor-view`, and cannot
   on this Slint.** `FocusScope` rejects `UpdateComposition` and
@@ -197,6 +217,38 @@ should spend an afternoon on these before checking the version changed.
 Kept rather than deleted, because every one of these went stale the same
 way — a fix landing without the record moving — and because the lesson in each
 is worth more than the fact.
+
+- **A huge document had no keyboard shortcuts at all, and nobody had noticed.**
+  Not Ctrl+F, not Ctrl+S, not Ctrl+O — nothing. Found on 2026-08-21 by
+  building Find for exactly those documents and discovering the feature could
+  not be reached, because Ctrl+F is its only route: there is no Find menu row.
+
+  **The cause is a function saying it handled something it did not.**
+  `apply_editor_command` sends every key in a viewer to `scroll_for_command`,
+  which returned `true` for everything it was given — including the
+  `Command::Ignore` that `bp_editor::keys::command_for` produces for the keys
+  its own comment calls out as belonging to the window: "Ctrl+S, Ctrl+F and
+  the rest." `EditorSurface`'s `FocusScope` accepts whatever that reports as
+  handled, and an accepted key never bubbles to the `KeyBinding` waiting for
+  it. It had been that way since the viewer shipped (ADR-0030).
+
+  **The lesson is about the boolean, not the keyboard.** "Handled" is a claim
+  with a consequence somewhere else, and `scroll_for_command`'s two `return
+  true`s were written to mean "there is nothing to do here" — which is the
+  opposite of what the caller does with it. Its deliberate swallowing of
+  *editing* commands was and is right; it was the catch-all that was too wide.
+
+- **Find works in a document the rope does not hold.** The last piece of the
+  large-file story, and the third of the three things
+  [ADR-0030](docs/decisions/ADR-0030.md) named as deliberately unbuilt.
+  [ADR-0042](docs/decisions/ADR-0042.md) has the design; what is worth
+  repeating here is that the scan is **resumable rather than threaded** —
+  `advance(windows)` does a few megabytes and returns, so cancelling is the
+  absence of the next call rather than a flag another thread has to notice,
+  and a scan cannot outlive its document because it lives on the `HugeView`.
+  Driven against a 213.5 MiB log: `searching 86%` while it ran, `1 of 1` at
+  line 4,800,001 when it finished, the match highlighted on its own
+  characters.
 
 - **A signing passphrase no longer types itself into the document.** The
   fourth manual pass, on 2026-08-21, found the worst of the four:
