@@ -28,6 +28,17 @@
 //! * without the last-chunk flag, the file can be truncated and the remainder
 //!   still authenticates -- data loss that looks like a successful decrypt.
 //!
+//! ## Being reviewed
+//!
+//! ADR-0011 permits composing primitives and forbids implementing them, which
+//! makes the *arrangement* below the part nobody here can check by re-reading
+//! it. `docs/architecture/BPADX_ENVELOPE_REVIEW.md` is written for somebody
+//! who has not seen this repository: the byte layout, the four call sites, a
+//! self-audit against fourteen standard pitfalls with the test behind each,
+//! and the ten questions a reviewer is asked. Four of the fourteen are
+//! conceded rather than mitigated -- no key commitment, no domain separation,
+//! no padding, no streaming API.
+//!
 //! ## One thing this cannot do
 //!
 //! **Tell a wrong passphrase from a corrupted file.** Both are an

@@ -150,7 +150,9 @@ itself. Covers `open` under three passphrases (right, wrong, empty),
   reached rather than rejected in the first comparison;
 - a real document with a random slice overwritten, which is the highest-yield
   generator in the file;
-- `seal`/`open` round trips over arbitrary options.
+- `seal`/`open` round trips over arbitrary options;
+- **the three golden vectors**, which are the only assertion anywhere about a
+  document this build did not write. See "The corpus", below.
 
 ### 3. `tests/notebook.rs` — `bp_notebook::import_ipynb`
 
@@ -200,6 +202,20 @@ provoke. Re-running the seeder is **not** idempotent for `corpus/envelope/` —
 `seal` draws a fresh random salt per document — so only re-run it if a format
 actually changed.
 
+**Three of those entries are golden vectors, and that is a stronger claim than
+the rest of the corpus makes.** `envelope/sealed.bpadx`, `sealed-aes.bpadx`
+and `sealed-multichunk.bpadx` were sealed once, under a known passphrase over
+known plaintext, and `a_document_sealed_by_an_earlier_build_still_opens`
+asserts that this build still opens each of them to exactly those bytes. It is
+the only test in the repository that says anything about a document *this*
+build did not write — every other round trip seals and opens with the same
+build, which proves the two halves agree with each other and cannot prove
+either agrees with what is on somebody's disk (ADR-0050).
+
+So **regenerating `corpus/envelope/` is the one action that would make that
+test pass vacuously.** If it fails, the format changed: decide whether that was
+meant before reaching for the seeder.
+
 The pathological entries, which came from the ADRs and crate docs rather than
 being invented here:
 
@@ -216,6 +232,7 @@ being invented here:
 | `envelope/truncated-body.bpadx`, `truncated-header.bpadx` | a partial copy or an interrupted sync |
 | `envelope/flipped-ciphertext-byte.bpadx`, `flipped-header-byte.bpadx` | ADR-0021 authenticates the header as additional data, so both must refuse |
 | `envelope/kdf-cost-raised.bpadx`, `kdf-cost-absurd.bpadx` | one inside the format's cost ceiling, one past it |
+| `envelope/sealed.bpadx`, `sealed-aes.bpadx`, `sealed-multichunk.bpadx` | golden vectors: ADR-0021's promise that a document written today opens in ten years |
 | `files/utf16le-odd-length.bin` | `LoadError::TruncatedUtf16` — an odd body, so the last code unit is cut in half |
 | `files/utf16le-unpaired-high-surrogate.bin` and three siblings | `LoadError::UnpairedSurrogate`, in both byte orders and at end-of-file |
 | `files/utf16le-lone-bom.bin` | a file that is nothing but a mark: a valid empty document, not an error |
@@ -266,29 +283,42 @@ needs a key — but it means the cost written in an **unauthenticated** header
 is paid in full before the reader can say the document is rubbish. A single
 flipped bit in the cost field of a real document is enough.
 
-`KdfParams::validate` is the bound, and it is doing its job: 4 GiB is refused
-in microseconds. Measured on this machine (release, `--ignored`):
+`KdfParams::validate` is the bound, and it is doing its job: a cost one KiB
+past the ceiling is refused in microseconds. Measured on this machine
+(release, `--ignored`), 2026-08-22:
 
 ```text
-declared cost       8 KiB ->   46.5µs to refuse
-declared cost    1024 KiB ->    1.5ms to refuse
-declared cost   65536 KiB ->  124.2ms to refuse
-declared cost  524288 KiB ->     1.1s to refuse
-declared cost 1048576 KiB ->     2.1s to refuse
-64 MiB at   1 passes ->  125.1ms to refuse
-64 MiB at   8 passes ->  643.6ms to refuse
-64 MiB at  64 passes ->     4.7s to refuse
-declared cost 4 GiB -> refused immediately
+declared cost       8 KiB ->   55.3µs to refuse
+declared cost    1024 KiB ->    1.3ms to refuse
+declared cost   65536 KiB ->   96.0ms to refuse
+declared cost  262144 KiB ->  407.4ms to refuse
+64 MiB at   1 passes ->  104.9ms to refuse
+64 MiB at   8 passes ->  583.6ms to refuse
+64 MiB at  16 passes ->     1.1s to refuse
+declared cost 256 MiB + 1 KiB -> refused immediately
 ```
 
-The ceiling `validate` permits is 1 GiB × 64 passes × 64 lanes. Argon2's time
-is linear in passes, so that corner is roughly **75 seconds and a gigabyte of
-resident memory per attempt**, on an unauthenticated header, before the user
-is told the file is damaged. That is a bound rather than an unbounded
-denial-of-service, which is what ADR-0021 set out to achieve, and it is
-written down here because "generous but finite" is easier to review with the
-number attached. Test:
+The ceiling `validate` permits is **256 MiB × 16 passes × 64 lanes**
+([ADR-0035](../docs/decisions/ADR-0035.md), which lowered it from 1 GiB and 64
+passes). ADR-0035 measured that corner in release at **~5.56 s**, down from the
+~75 s the old ceiling allowed -- a quarter of a gigabyte of resident memory per
+attempt, on an unauthenticated header, before the user is told the file is
+damaged. The sweep above walks memory and passes; it does not isolate the lane
+multiplier, which is why the corner's number comes from the ADR rather than
+from this table.
+
+That is a bound rather than an unbounded denial-of-service, which is what
+ADR-0021 set out to achieve, and it is written down here because "generous but
+finite" is easier to review with the number attached. Test:
 `envelope::the_declared_kdf_cost_is_paid_before_anything_is_authenticated`.
+
+**This table was wrong for a session and the shape of the mistake is worth
+keeping.** It carried the 1 GiB ceiling after ADR-0035 lowered it, so three of
+its rows -- 512 MiB, 1 GiB, and 64 passes -- were past the bound and were
+timing an *instant refusal* rather than the work. The numbers were real
+measurements of the wrong thing, which is the hardest kind of stale figure to
+notice. The control is now one KiB past the ceiling rather than sixteen times
+past it: a bound is only demonstrated at its edge.
 
 ### The corpus is hostile to the editor, too
 

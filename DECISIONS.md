@@ -57,6 +57,7 @@ Adding a decision means adding both.
 | BP-ADR-0047 | 2026-08-22 | An agent gets standing authorities; one home per kind of fact; pre-push checks for a full gate rather than repeating it; nextest with a doctest stage | Accepted, shipped | [ADR-0047](docs/decisions/ADR-0047.md) |
 | BP-ADR-0048 | 2026-08-22 | Every menu row either works or is a readout; ten built, eleven deleted, `planned_menu` and `arrives` removed | Accepted, shipped | [ADR-0048](docs/decisions/ADR-0048.md) |
 | BP-ADR-0049 | 2026-08-22 | The window is driven by a script; a clipped menu label is elided and shortened; a temp path a recycled pid can reuse is not unique | Accepted, shipped | [ADR-0049](docs/decisions/ADR-0049.md) |
+| BP-ADR-0050 | 2026-08-22 | D4's envelope review is prepared as a brief; the format had no test that a document written by an earlier build still opens | Accepted, shipped | [ADR-0050](docs/decisions/ADR-0050.md) |
 
 ## Decisions needed before the work they block
 
@@ -106,6 +107,47 @@ in the fourth.
 Kept rather than deleted, because every one of these went stale the same
 way — a fix landing without the record moving — and because the lesson in each
 is worth more than the fact.
+
+- **A round trip through one build is not evidence about another build.**
+  Every round-trip test in this workspace -- `bp-crypto`'s own, the
+  integration tests, and a property test over arbitrary plaintexts and
+  arbitrary options -- **sealed and opened with the same build**. That proves
+  the writer and the reader agree with each other; it cannot prove either
+  agrees with what is already on somebody's disk. A change altering the header
+  layout, the additional authenticated data, the nonce construction or the
+  Argon2id invocation *coherently on both sides* would have passed the entire
+  suite and both gate legs and silently orphaned every document ever written.
+
+  ADR-0021 opens by saying a document written today has to open in ten years.
+  Asked what would fail if that stopped being true -- trap 3, aimed at an
+  ADR's first sentence rather than at a comment -- the answer was **nothing**.
+  Three golden vectors had been sitting in `fuzz/corpus/envelope/` since the
+  corpus was seeded, real envelopes under a known passphrase over known
+  plaintext, and the survival harness fed all three to `open` and *discarded
+  the result*, because a survival harness asserts survival. The assertion was
+  one line away and nobody had written it. [ADR-0050](docs/decisions/ADR-0050.md).
+
+- **A task that cannot be finished can usually be prepared.** D4 -- an outside
+  review of the `.bpadx` envelope -- was answered *yes* five sessions ago and
+  moved not at all, and the reason was neither laziness nor difficulty. **An
+  agent cannot discharge it**: a reviewer inside the session is not an outside
+  one. So every session correctly declined to do the thing and then did
+  nothing else about it either. The question that unstuck it was not "can this
+  session review the envelope" but "what would make a reviewer's hour cheap?",
+  which has an answer:
+  [BPADX_ENVELOPE_REVIEW.md](docs/architecture/BPADX_ENVELOPE_REVIEW.md).
+
+- **A stale figure that is a real measurement of the wrong thing is the
+  hardest kind to notice.** ADR-0035 lowered the pre-authentication Argon2id
+  ceiling from 1 GiB and 64 iterations to 256 MiB and 16; `fuzz/` kept
+  measuring the old one. Three rows of its cost table -- 512 MiB, 1 GiB, and
+  64 passes -- were past the bound, so they were timing an *instant refusal*
+  rather than the work, and the README's headline of "roughly 75 seconds and a
+  gigabyte of resident memory" described a bound the code had stopped
+  enforcing. Nothing looked wrong: the numbers were genuine, the test passed,
+  and the units were right. The control has moved from 4 GiB -- sixteen times
+  past the ceiling -- to **one KiB past it**, because a bound is only
+  demonstrated at its edge. ADR-0050.
 
 - **Research mode's last five planned rows turned out to be a paper's
   structure, and none of them survived as a row.** `MENU_MAP.md` had named

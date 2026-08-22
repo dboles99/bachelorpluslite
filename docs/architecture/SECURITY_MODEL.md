@@ -49,6 +49,13 @@ the header, chunked from the start with the chunk index bound into the AAD.
 The recovery journal is sealed with the document's own passphrase and read
 back at unlock, so a strict profile keeps recovery rather than losing it.
 
+**The composition is written out for an outside reviewer** in
+[BPADX_ENVELOPE_REVIEW.md](BPADX_ENVELOPE_REVIEW.md) -- the byte layout, the
+four call sites, a self-audit against fourteen standard pitfalls with the test
+behind each, and the ten questions a reviewer is asked. That is D4's
+preparation, not D4's discharge: the review itself still needs somebody who
+did not write this ([ADR-0050](../decisions/ADR-0050.md)).
+
 Platform key protection is **not** built and is phase 18. Nothing in the
 product uses DPAPI or Secret Service today.
 

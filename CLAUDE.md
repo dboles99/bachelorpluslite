@@ -179,7 +179,8 @@ Named here, explained in `DECISIONS.md`:
    Trap 3 from the other side — when trap 3's answer is "nothing would fail",
    the test beside the comment is free to say the opposite, and probably does.
 
-**And two more, both about verification itself** ([ADR-0049](docs/decisions/ADR-0049.md)):
+**And three more, all about verification itself** ([ADR-0049](docs/decisions/ADR-0049.md),
+[ADR-0050](docs/decisions/ADR-0050.md)):
 
 5. **"Unique" must mean no *earlier* run either.** A temp path from a process
    id and a counter is unique within a run and reused by the next one that
@@ -188,6 +189,10 @@ Named here, explained in `DECISIONS.md`:
    five sessions on a premise one `git` command disproved. A question that has
    waited several sessions should have its premise checked before it is asked
    again.
+7. **A round trip through one build says nothing about another build.** Seal
+   and open agreeing with each other is weaker than it reads, and it is what
+   almost every format test actually asserts. The test that means something is
+   a byte vector somebody committed *before* the change.
 
 **And the one no test can catch:** what a toolkit does with what it is handed.
 Five defects have lived in that seam, including a signing passphrase typed
