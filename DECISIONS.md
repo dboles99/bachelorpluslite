@@ -60,6 +60,7 @@ Adding a decision means adding both.
 | BP-ADR-0050 | 2026-08-22 | D4's envelope review is prepared as a brief; the format had no test that a document written by an earlier build still opens | Accepted, shipped | [ADR-0050](docs/decisions/ADR-0050.md) |
 | BP-ADR-0051 | 2026-08-22 | The Run menu denied there was anything to run while offering to run it; `every_menu()` never held the Run menu; the window driver photographed the wrong window again | Accepted, shipped | [ADR-0051](docs/decisions/ADR-0051.md) |
 | BP-ADR-0052 | 2026-08-22 | Enter twice in the find box replaced the match with a line break; `preview_match` becomes `reveal` and is the default | Accepted, shipped, confirmed at the keyboard | [ADR-0052](docs/decisions/ADR-0052.md) |
+| BP-ADR-0053 | 2026-08-22 | `main` advances by pull request; opening one is an agent's job, merging is not. D13 closed after six sessions | Accepted | [ADR-0053](docs/decisions/ADR-0053.md) |
 
 ## Decisions needed before the work they block
 
@@ -109,6 +110,16 @@ in the fourth.
 Kept rather than deleted, because every one of these went stale the same
 way — a fix landing without the record moving — and because the lesson in each
 is worth more than the fact.
+
+- **An unanswerable question and an unasked one look identical in a queue.**
+  D13 sat for six sessions and was neither: it was a question whose *premise*
+  had gone stale, which reads like a hard decision and is really a stale fact
+  wearing one. The record said "111 commits live on the branch; `main` has
+  none of them"; `git merge-base` disproved it in one command, and what was
+  actually being asked turned out to be small enough to answer in a message.
+  **The tell is that nobody could say what would change if it were answered
+  either way.** Both remaining questions were answered the same day the
+  premise was corrected. [ADR-0053](docs/decisions/ADR-0053.md).
 
 - **A comment that enumerates its cases is asserting something about every
   one of them.** `dispatch::select` said Find Next/Previous, Go to Line and a
