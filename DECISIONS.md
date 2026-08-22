@@ -61,6 +61,7 @@ Adding a decision means adding both.
 | BP-ADR-0051 | 2026-08-22 | The Run menu denied there was anything to run while offering to run it; `every_menu()` never held the Run menu; the window driver photographed the wrong window again | Accepted, shipped | [ADR-0051](docs/decisions/ADR-0051.md) |
 | BP-ADR-0052 | 2026-08-22 | Enter twice in the find box replaced the match with a line break; `preview_match` becomes `reveal` and is the default | Accepted, shipped, confirmed at the keyboard | [ADR-0052](docs/decisions/ADR-0052.md) |
 | BP-ADR-0053 | 2026-08-22 | `main` advances by pull request; opening one is an agent's job, merging is not. D13 closed after six sessions | Accepted | [ADR-0053](docs/decisions/ADR-0053.md) |
+| BP-ADR-0017 | amended 2026-08-22 | Half of the renderer revert condition is now a number rather than a feeling: per-frame row building, and its independence from document size | Accepted, amended | [ADR-0017](docs/decisions/ADR-0017.md) |
 
 ## Decisions needed before the work they block
 
@@ -110,6 +111,25 @@ in the fourth.
 Kept rather than deleted, because every one of these went stale the same
 way — a fix landing without the record moving — and because the lesson in each
 is worth more than the fact.
+
+- **A performance claim in a comment is trap 3 with worse consequences.**
+  `bp_editor::view::Anchor` explains itself by saying a global row index
+  "would have to be computed by laying out every line above it -- an
+  O(document) cost on every frame", and that anchoring instead means
+  "scrolling costs only what is on screen". True, well-reasoned, and until
+  2026-08-22 **nothing would have failed if it stopped being true**: a change
+  making `visible_rows` count from line 0 passes every test and both gate
+  legs, and surfaces only as an editor that gets slower the further down you
+  go -- the kind of regression that arrives as a vague complaint months later.
+
+  `bp-editor/benches/scroll.rs` makes it fail instead. The useful threshold
+  turned out not to be a time but a **ratio between two columns of one run**:
+  a document a thousand times larger costs **1.19x** as much per frame, which
+  is the rope's logarithmic indexing and nothing else. Times are worthless
+  across machines; a ratio inside one run is not. The same trick made the
+  other half of [ADR-0017](docs/decisions/ADR-0017.md)'s revert condition
+  honest by leaving it alone -- rasterisation still needs a capture rig, and
+  the bench prints that rather than letting a green run imply it.
 
 - **An unanswerable question and an unasked one look identical in a queue.**
   D13 sat for six sessions and was neither: it was a question whose *premise*
