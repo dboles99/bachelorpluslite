@@ -240,12 +240,74 @@ impl AppState {
     pub(crate) fn forget_passphrase(&mut self, id: DocumentId) {
         self.passphrases.remove(&id);
     }
+
+    /// Security ▸ Lock Document (ADR-0048): forget this document's
+    /// passphrase now, so the next save or reload asks for it again.
+    ///
+    /// **The row exists because unlocking is sticky and nothing said so.**
+    /// Opening a `.bpadx` holds its passphrase for the life of the tab, which
+    /// is what makes saving bearable -- and it means a document unlocked an
+    /// hour ago is still unlocked to anyone at the keyboard. Closing the tab
+    /// was the only way to undo that, and closing a tab is not what somebody
+    /// stepping away from the machine wants to do.
+    ///
+    /// Returns the sentence the status bar shows. **It does not re-encrypt
+    /// anything**: the file on disk has been encrypted the whole time and the
+    /// text in the buffer stays where it is. What changes is that this
+    /// process no longer holds the key.
+    pub(crate) fn lock_document(&mut self) -> String {
+        let Some(id) = self.workspace.active_id() else {
+            return "There is no document to lock.".to_owned();
+        };
+        if !self.passphrases.contains_key(&id) {
+            // Two different situations, one sentence, because from the user's
+            // side they are the same: this tab is not holding a key.
+            return "This document is not unlocked: either it is not encrypted,                     or its passphrase is not being held."
+                .to_owned();
+        }
+
+        self.forget_passphrase(id);
+        "Locked. The passphrase will be asked for again on the next save or          reload; the text on screen is unchanged."
+            .to_owned()
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::state::SaveResult;
+
+    #[test]
+    fn locking_a_document_that_holds_no_passphrase_says_so() {
+        let mut state = AppState::new();
+        assert!(
+            state.lock_document().contains("not unlocked"),
+            "a plain document and a locked one are the same situation from              the user's side: this tab is not holding a key"
+        );
+    }
+
+    #[test]
+    fn locking_forgets_the_passphrase_without_touching_the_text() {
+        let mut state = AppState::new();
+        let id = state.workspace.active_id().expect("a tab");
+        state
+            .passphrases
+            .insert(id, zeroize::Zeroizing::new("hunter2".to_owned()));
+        let before = state.active_text();
+
+        let said = state.lock_document();
+
+        assert!(said.starts_with("Locked."), "{said}");
+        assert!(
+            !state.passphrases.contains_key(&id),
+            "the whole point of the row is that the process stops holding it"
+        );
+        assert_eq!(
+            state.active_text(),
+            before,
+            "locking must not re-encrypt or clear the buffer -- the file on              disk was encrypted the whole time"
+        );
+    }
 
     /// Drive the passphrase bar the way the shell does: submit, and be told
     /// whether it stays open.

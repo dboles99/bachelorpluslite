@@ -388,6 +388,183 @@ impl AppState {
     /// Both gestures come from the caller by value, and this function does
     /// not make either -- see the module docs. Returns whether a run started;
     /// when it did not, [`AppState::error`] says why.
+    /// Run ▸ Run Document (ADR-0048): the whole active file as a script.
+    ///
+    /// **The sibling of `run_cell`, for a file that is a script rather than
+    /// a notebook.** A `.py` is not a notebook and has no cells, so the Run
+    /// menu had nothing to offer it even though `bp-execution` could run it
+    /// perfectly well.
+    ///
+    /// Takes a `UserGesture` by value for the same reason `run_cell` does,
+    /// and it is the *whole* reason this is not a convenience wrapper: ADR-0011
+    /// and specs.md section 15 say notebook content is never auto-run, and a
+    /// gesture that only a click can produce is how that is enforced by the
+    /// type system rather than by everyone remembering.
+    ///
+    /// Unlike `run_cell` there is no `bp-notebook` request to go through --
+    /// there is no cell, no prose to refuse, and the source is the document.
+    pub(crate) fn run_document(&mut self, gesture: bp_execution::UserGesture) -> bool {
+        let Some(language) = self.document_language() else {
+            self.error = Some(
+                "there is no runner for this kind of file: Run Document works                  on .py, .ps1 and .sh"
+                    .to_owned(),
+            );
+            return false;
+        };
+
+        // The whole document, which `active_text` copies. A one-off on a menu
+        // click, never the typing path (R011 rule 5).
+        let source = self.active_text();
+        if source.trim().is_empty() {
+            self.error = Some("there is nothing in this document to run".to_owned());
+            return false;
+        }
+
+        let label = self
+            .workspace
+            .active()
+            .and_then(bp_core::Document::path)
+            .and_then(|path| path.file_name())
+            .and_then(|name| name.to_str())
+            .map_or_else(|| format!("{language} document"), ToOwned::to_owned);
+
+        match bp_execution::Run::start(language, &source, gesture) {
+            Ok(run) => {
+                self.run_summary = format!("Running {label}…");
+                self.run_output.clear();
+                self.run_errors.clear();
+                self.run = Some(CellRun { run, label });
+                self.run_open = true;
+                true
+            }
+            Err(e) => {
+                self.error = Some(e.to_string());
+                self.run_summary = format!("{label} — {e}");
+                self.run_output.clear();
+                self.run_errors.clear();
+                self.run_open = true;
+                false
+            }
+        }
+    }
+
+    /// Run ▸ Interpreters (ADR-0048): which interpreter each language
+    /// resolves to on this machine.
+    ///
+    /// **Not "Choose Interpreter", which `MENU_MAP.md` named until
+    /// 2026-08-22.** An interpreter here is *resolved*, not chosen -- each
+    /// language has a documented fallback chain (`python3` then `python`,
+    /// `pwsh` then `powershell`, `sh`) and the first that answers wins.
+    /// Letting a user point the runner at an arbitrary binary is a security
+    /// decision, not a menu row, and ADR-0011's "notebook content never
+    /// auto-runs" is the neighbourhood it would sit in.
+    ///
+    /// What the row *can* honestly do is answer the question the chain makes
+    /// unanswerable from outside: **why did my cell not run?** A machine with
+    /// neither `python3` nor `python` produced a failure naming neither.
+    ///
+    /// Spawns each candidate until one answers, so this is a menu-click
+    /// operation and never a refresh.
+    pub(crate) fn interpreters_report(&self) -> String {
+        let mut lines = vec![
+            "What each runnable language resolves to on this machine:".to_owned(),
+            String::new(),
+        ];
+        for language in bp_execution::Language::all() {
+            let candidates = language.candidates().join(", ");
+            match language.interpreter() {
+                Some(found) => lines.push(format!("- {language}: {found}")),
+                // Names what it looked for. "Not found" without the list is
+                // the same dead end the chain already was.
+                None => lines.push(format!("- {language}: not found — tried {candidates}")),
+            }
+        }
+        lines.push(String::new());
+        lines.push(
+            "The first candidate that answers wins, and the order is fixed. \
+             There is no way to point the runner at a different binary: \
+             choosing one is a security decision rather than a setting."
+                .to_owned(),
+        );
+        lines.join("\n")
+    }
+
+    /// Which language the *whole* active document is, by its extension.
+    ///
+    /// Deliberately the extension and not the format registry: `bp-formats`
+    /// answers "what shape is this text" for the Data menu, and a `.py` file
+    /// is plain text to it. Running a file is a question about what the file
+    /// claims to be.
+    pub(crate) fn document_language(&self) -> Option<bp_execution::Language> {
+        let extension = self
+            .workspace
+            .active()
+            .and_then(bp_core::Document::path)
+            .and_then(|path| path.extension())
+            .and_then(|extension| extension.to_str())?
+            .to_ascii_lowercase();
+
+        match extension.as_str() {
+            "py" => Some(bp_execution::Language::Python),
+            "ps1" => Some(bp_execution::Language::PowerShell),
+            "sh" => Some(bp_execution::Language::Shell),
+            _ => None,
+        }
+    }
+
+    /// The filename the export dialog suggests: the document's own stem with
+    /// an `.ipynb` extension.
+    ///
+    /// The stem rather than the whole name, so `runbook.md` suggests
+    /// `runbook.ipynb` and not `runbook.md.ipynb` -- `with_bpadx_extension`
+    /// appends deliberately, because an encrypted `notes.txt` is still a
+    /// `notes.txt`; an exported notebook is a different document and takes
+    /// the name outright.
+    pub(crate) fn suggested_ipynb_name(&self) -> String {
+        self.workspace
+            .active()
+            .and_then(bp_core::Document::path)
+            .and_then(|path| path.file_stem())
+            .and_then(|stem| stem.to_str())
+            .map_or_else(
+                || "notebook.ipynb".to_owned(),
+                |stem| format!("{stem}.ipynb"),
+            )
+    }
+
+    /// Notebook ▸ Export as .ipynb (ADR-0048): the active document written
+    /// out as a Jupyter notebook.
+    ///
+    /// **The useful direction is Markdown to `.ipynb`**, and it is what makes
+    /// this a row rather than a round trip. ADR-0045 made a `.md` with fenced
+    /// blocks readable as a `Notebook`; this is the other end of that, so a
+    /// runbook written as ordinary prose can leave as something Jupyter
+    /// opens. Exporting an `.ipynb` that was imported as one is allowed and
+    /// nearly a no-op -- refusing it would mean explaining a distinction the
+    /// user has no reason to care about.
+    ///
+    /// Returns the JSON to write, or the reason there is none. The shell owns
+    /// the file dialog; this owns what goes in the file.
+    pub(crate) fn export_ipynb(&self) -> Result<String, String> {
+        let Some(source) = self.notebook() else {
+            return Err("There is no document to export.".to_owned());
+        };
+        let source = source?;
+        let notebook = source.notebook();
+        if notebook.cells().is_empty() {
+            return Err(
+                "This document has no cells to export. A `.md` needs fenced                  code blocks; an `.ipynb` needs at least one cell."
+                    .to_owned(),
+            );
+        }
+
+        // Pretty-printed rather than compact: an `.ipynb` is JSON somebody
+        // may well open in this very editor, and `bp-notebook`'s own raw view
+        // is formatted for the same reason.
+        serde_json::to_string_pretty(&bp_notebook::ipynb::export_ipynb(notebook))
+            .map_err(|error| format!("The notebook could not be written: {error}"))
+    }
+
     pub(crate) fn run_cell(
         &mut self,
         index: usize,

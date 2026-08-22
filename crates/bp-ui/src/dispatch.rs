@@ -767,6 +767,96 @@ pub fn handle_menu_action(
         // What the application thinks its environment is, not a file
         // browser: no document content, no passphrase, no listing of what is
         // in the directories it names -- only where it resolved them to.
+        // Run ▸ the whole document as a script, and what will run it
+        // (ADR-0048).
+        action::RUN_DOCUMENT => {
+            // The same consent this product demands of a cell: a gesture only
+            // a click can produce (ADR-0011, specs.md section 15).
+            push = PushText::No;
+            state
+                .borrow_mut()
+                .run_document(bp_execution::UserGesture::from_user_command());
+        }
+        action::RUN_INTERPRETERS => {
+            let report = state.borrow().interpreters_report();
+            push = PushText::No;
+            show_info("Interpreters", &report);
+        }
+
+        // Organize ▸ where documents sharing this one's tags already live.
+        action::ORGANIZE_SUGGESTED_FOLDER => {
+            let report = state.borrow().suggested_folder_report();
+            push = PushText::No;
+            show_info("Suggested Folder", &report);
+        }
+
+        // Security ▸ forget this document's passphrase now.
+        action::LOCK_DOCUMENT => {
+            let said = state.borrow_mut().lock_document();
+            show_info("Lock Document", &said);
+            push = PushText::No;
+        }
+
+        // Notebook ▸ Export as .ipynb (ADR-0048). The borrow ends before the
+        // file dialog opens, for the reason every arm here gives.
+        action::EXPORT_IPYNB => {
+            push = PushText::No;
+            match state.borrow().export_ipynb() {
+                Ok(json) => {
+                    let suggested = state.borrow().suggested_ipynb_name();
+                    let chosen = rfd::FileDialog::new()
+                        .set_directory(state.borrow().dialog_directory())
+                        .set_file_name(suggested)
+                        .save_file();
+                    if let Some(path) = chosen {
+                        // Not `atomic_write`'s document path: this is an
+                        // export to somewhere the user chose, and it must not
+                        // touch the tab, its dirty flag or Open Recent -- the
+                        // three things Save a Copy is careful not to do.
+                        if let Err(error) = std::fs::write(&path, json) {
+                            show_info(
+                                "Export as .ipynb",
+                                &format!("The notebook could not be written: {error}"),
+                            );
+                        }
+                    }
+                }
+                Err(reason) => show_info("Export as .ipynb", &reason),
+            }
+        }
+
+        // Note ▸ the store's view of this document, and the journal's
+        // (ADR-0048).
+        action::NOTE_TAGS => {
+            let report = state.borrow().tags_report();
+            push = PushText::No;
+            show_info("Tags", &report);
+        }
+        action::NOTE_RECOVERY => {
+            let report = state.borrow().recovery_report();
+            push = PushText::No;
+            show_info("Recovery Checkpoints", &report);
+        }
+
+        // Tools ▸ the three readouts ADR-0048 added. Same borrow discipline
+        // as `TOOLS_INSPECTOR` above: the borrow ends with the statement,
+        // before `rfd` pumps events.
+        action::TOOLS_SECURITY_INSPECTOR => {
+            let report = state.borrow().security_inspector_report();
+            push = PushText::No;
+            show_info("Security Inspector", &report);
+        }
+        action::TOOLS_FILE_ANALYSIS => {
+            let report = state.borrow().file_analysis_report();
+            push = PushText::No;
+            show_info("File Analysis", &report);
+        }
+        action::TOOLS_CONFIGURATION => {
+            let report = state.borrow().configuration_report();
+            push = PushText::No;
+            show_info("Configuration", &report);
+        }
+
         action::DIAGNOSTICS => {
             show_info("Diagnostics", &crate::state::diagnostics_report());
             push = PushText::No;

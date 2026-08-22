@@ -21,6 +21,7 @@
 //! | [`research`] | Research mode's synthesis half (ADR-0041, ADR-0046): what the *store* says the user has been writing about, and what the store holds |
 //! | [`citations`] | What the active document *cites* (ADR-0044) |
 //! | [`questions`] | What the active document *asks* (ADR-0046) |
+//! | [`inspectors`] | The Tools menu's three readouts: the policy in force, the file on disk, and where each setting came from (ADR-0048) |
 //!
 //! They are children of this module rather than siblings, which is the whole
 //! reason the split is possible: a child can see its parent's private items,
@@ -50,6 +51,7 @@ mod citations;
 mod data;
 mod encryption;
 mod find;
+mod inspectors;
 pub(crate) mod notebook;
 mod organize;
 mod questions;

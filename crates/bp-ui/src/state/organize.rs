@@ -189,6 +189,149 @@ impl AppState {
     /// Empty rather than an error whenever there is nothing to relate --
     /// no store, no active document, no path (an unsaved document has never
     /// been recorded), or a path the store has never seen.
+    /// Organize ▸ Suggested Folder (ADR-0048): where documents sharing this
+    /// one's tags already live.
+    ///
+    /// **A suggestion drawn from what the user has already done**, not a
+    /// scheme imposed on them: the folders are counted from the store, so the
+    /// answer is "your notes about this subject are mostly in here" rather
+    /// than "notes about this subject belong in here". `bp-organize` was to
+    /// have owned a filing scheme; it is an empty crate, and this needs
+    /// nothing it would have provided.
+    ///
+    /// **It never moves a file.** A physical rename or move needs explicit
+    /// approval, and File ▸ Save a Copy is where that already lives.
+    pub(crate) fn suggested_folder_report(&self) -> String {
+        let Some(store) = &self.store else {
+            return "There is no store on this machine, so there is nothing to \
+                    suggest from."
+                .to_owned();
+        };
+        let Some(path) = self.workspace.active().and_then(Document::path) else {
+            return "This document has never been saved, so it has no tags to \
+                    match against. Save it, and the suggestion is drawn from \
+                    where similar notes already live."
+                .to_owned();
+        };
+        let Some(record) = store.document(path).ok().flatten() else {
+            return "The store has no record of this document yet.".to_owned();
+        };
+
+        let tags = store.tags_of(record.id).unwrap_or_default();
+        if tags.is_empty() {
+            return "No tags were recorded for this document, so there is \
+                    nothing to match it against."
+                .to_owned();
+        }
+
+        // Count the folders that documents sharing a tag are already in.
+        // The document's own folder is excluded: suggesting where it already
+        // is answers nothing.
+        let mut counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        // `std::path`, not `bp_platform::paths` -- and the distinction is the
+        // one trap 2 is about. These are paths recorded on *this* machine by
+        // this machine, so the host's own rules are the correct ones; the
+        // platform seam exists for code that takes a `Platform` and must not
+        // let `std::path` answer for it. `research.rs`'s `filename_of` reads
+        // store paths the same way.
+        let own_folder = folder_of(path);
+        for tag in &tags {
+            for other in store.documents_tagged(tag).unwrap_or_default() {
+                if other.id == record.id {
+                    continue;
+                }
+                let folder = folder_of(std::path::Path::new(&other.path));
+                if folder.is_empty() || folder == own_folder {
+                    continue;
+                }
+                *counts.entry(folder).or_default() += 1;
+            }
+        }
+
+        if counts.is_empty() {
+            return "Nothing else in the store shares a tag with this document \
+                    from a different folder, so there is nowhere to suggest."
+                .to_owned();
+        }
+
+        let mut ranked: Vec<(String, usize)> = counts.into_iter().collect();
+        // Count first, then the name, so the answer does not depend on how a
+        // hash map happened to order itself.
+        ranked.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+
+        let mut lines = vec!["Documents sharing this one's tags mostly live in:".to_owned()];
+        for (folder, count) in ranked.iter().take(5) {
+            lines.push(format!(
+                "- {folder} — {count} document{}",
+                if *count == 1 { "" } else { "s" }
+            ));
+        }
+        lines.push(String::new());
+        lines.push(
+            "Counted from what you have already filed, not from a scheme. \
+             Nothing here moves a file: use File ▸ Save a Copy if you want it \
+             somewhere else."
+                .to_owned(),
+        );
+        lines.join("\n")
+    }
+
+    /// Note ▸ Tags (ADR-0048): the tags the store has recorded for the
+    /// active document.
+    ///
+    /// **Read-only, and the report says so in as many words.** There is no
+    /// manual-tagging UI and ADR-0037 put building one out of scope; tags are
+    /// `bp_semantic::keywords` extracted at save. A row called Tags that
+    /// silently could not add one would be worse than no row, so the sentence
+    /// naming where they come from is not decoration -- it is the row's
+    /// honesty.
+    ///
+    /// The sibling of Note ▸ Keywords, and the difference is worth stating:
+    /// Keywords reads the *document in front of you*, live, whatever its
+    /// unsaved state. This reads what was *recorded* at the last save. They
+    /// disagree exactly when there are unsaved edits, which is the useful
+    /// case rather than a defect.
+    pub(crate) fn tags_report(&self) -> String {
+        let Some(store) = &self.store else {
+            return "There is no store on this machine, so nothing has been \
+                    tagged."
+                .to_owned();
+        };
+        let Some(path) = self.workspace.active().and_then(Document::path) else {
+            return "This document has never been saved, so the store has not \
+                    seen it yet. Tags are recorded when you save."
+                .to_owned();
+        };
+
+        let Some(record) = store.document(path).ok().flatten() else {
+            return "The store has no record of this document yet. Tags are \
+                    recorded when you save."
+                .to_owned();
+        };
+        let tags = store.tags_of(record.id).unwrap_or_default();
+
+        if tags.is_empty() {
+            return "No tags were recorded for this document. Tags come from \
+                    the keywords the text yields, so a very short document \
+                    may produce none."
+                .to_owned();
+        }
+
+        format!(
+            "{} tag{} recorded for this document:\n{}\n\nTags are extracted \
+             automatically from the document's keywords when it is saved \
+             (ADR-0037); there is no way to set one by hand. Note ▸ Keywords \
+             reads the text in front of you, which is what these will become \
+             at the next save.",
+            tags.len(),
+            if tags.len() == 1 { "" } else { "s" },
+            tags.iter()
+                .map(|tag| format!("- {tag}"))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        )
+    }
+
     pub(crate) fn related_notes_for_active(&self) -> Vec<DocumentRecord> {
         let Some(store) = &self.store else {
             return Vec::new();
@@ -247,6 +390,14 @@ fn filename_of(path: &str) -> &str {
 /// rather than each call site repeating it.
 fn unix_now() -> i64 {
     i64::try_from(bp_history::now_unix()).unwrap_or(i64::MAX)
+}
+
+/// A path's containing folder as a displayable string, or empty when it has
+/// none.
+fn folder_of(path: &Path) -> String {
+    path.parent()
+        .map(|parent| parent.display().to_string())
+        .unwrap_or_default()
 }
 
 #[cfg(test)]

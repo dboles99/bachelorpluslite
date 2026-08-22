@@ -55,6 +55,7 @@ Adding a decision means adding both.
 | BP-ADR-0045 | 2026-08-21 | A Markdown file is a notebook, and the panel that lists things is one component | Accepted, shipped | [ADR-0045](docs/decisions/ADR-0045.md) |
 | BP-ADR-0046 | 2026-08-22 | Research mode's last five planned rows were a paper's structure; two fold into the report, one becomes Open Questions, one becomes What the Store Holds, one is dropped | Accepted, shipped | [ADR-0046](docs/decisions/ADR-0046.md) |
 | BP-ADR-0047 | 2026-08-22 | An agent gets standing authorities; one home per kind of fact; pre-push checks for a full gate rather than repeating it; nextest with a doctest stage | Accepted, shipped | [ADR-0047](docs/decisions/ADR-0047.md) |
+| BP-ADR-0048 | 2026-08-22 | Every menu row either works or is a readout; ten built, eleven deleted, `planned_menu` and `arrives` removed | Accepted, shipped | [ADR-0048](docs/decisions/ADR-0048.md) |
 
 ## Decisions needed before the work they block
 
@@ -547,6 +548,41 @@ All of it, in one pass. What is worth carrying forward:
   moved.
 
 ## Open items
+
+- **A backlog that was mostly finished work, and nobody had looked.**
+  `menus::planned_menu` listed 38 greyed rows across eight menus, each under a
+  "not implemented yet (phase N)" line. An inventory taken before building
+  anything found most had already shipped under another name: six of the
+  Security menu's seven, five of the Data menu's six, three of Insert's five.
+  The genuine gap was 21 rows, and eleven of *those* were better deleted than
+  built.
+
+  **The mechanism is worth naming, because it is not laziness.** Each row was
+  correct when written. A feature would land under a name somebody chose at
+  the time -- "Hash Document (SHA-256)" -- while the planned list kept the
+  name from the original sketch -- "Hash and Sign". Nothing connected them, so
+  nothing ever said the row was done. The list did not rot; it was never
+  attached to anything that could tell it the truth.
+
+  This is [ADR-0046](docs/decisions/ADR-0046.md)'s "a name that has sat in a
+  plan long enough starts to read like a specification" at ten times the
+  scale, and with a second edge: **the Data menu contradicted itself in one
+  popup.** For a `.txt` it said "nothing for TXT documents" and then listed
+  six things underneath. It had done since the menu was built, and nobody
+  reading either half had read the other.
+
+  The fix that will hold is not the pruning, it is
+  `no_menu_offers_a_row_that_does_nothing` -- a test over a single list of
+  every menu. **A plan that no test can contradict is a plan that will drift.**
+
+- **Ten built, eleven deleted, and the deletions carry more information.**
+  Every removal in ADR-0048 records *why* a row could not honestly exist:
+  Run All against ADR-0038's no-persistent-session model, Benchmarks against
+  an empty `benches/`, Semantic Search against embeddings nothing computes,
+  Multi-cursor against a `TextInput` that can draw one caret. Each of those is
+  a sentence somebody would otherwise have had to rediscover by starting the
+  work.
+
 
 - **A comment sat above the wrong rule, and a whole chain of correct reasoning
   hung off it.** `.gitignore` reads:

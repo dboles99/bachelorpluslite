@@ -963,7 +963,11 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
             let Some(ui) = weak.upgrade() else { return };
             let items = {
                 let s = cell.borrow();
-                menus::run(&s.run_menu(), s.is_running())
+                menus::run(
+                    &s.run_menu(),
+                    s.is_running(),
+                    s.document_language().is_some(),
+                )
             };
             ui.set_run_items(Rc::new(slint::VecModel::from(items)).into());
         });

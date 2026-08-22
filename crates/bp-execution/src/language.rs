@@ -33,9 +33,39 @@ pub enum Language {
 }
 
 impl Language {
+    /// Every language this crate can run.
+    ///
+    /// For a caller that wants to say what is available rather than ask about
+    /// one language -- Run ▸ Interpreters is the first (ADR-0048), and a list
+    /// built by hand there would go stale the moment a fourth arrives.
+    #[must_use]
+    pub fn all() -> &'static [Language] {
+        &[Language::Python, Language::PowerShell, Language::Shell]
+    }
+
+    /// The interpreter this language actually resolves to on this machine,
+    /// or `None` when none of its candidates is installed.
+    ///
+    /// **Runs the probe, so it is not free** -- it spawns each candidate
+    /// until one answers. Fine on a menu click; never on a refresh.
+    ///
+    /// Public because "why did my cell not run" has no other answer: the
+    /// fallback chain is documented on the variants and invisible from
+    /// outside, so a user with no `python3` and no `python` got a failure
+    /// naming neither.
+    #[must_use]
+    pub fn interpreter(self) -> Option<&'static str> {
+        resolve(self.candidates())
+    }
+
     /// Candidate interpreter binary names, tried in order. First one that
     /// actually runs wins -- see [`resolve`].
-    pub(crate) fn candidates(self) -> &'static [&'static str] {
+    ///
+    /// Public alongside [`Language::interpreter`]: a readout that says which
+    /// interpreter was found is only half an answer when none was, and the
+    /// other half is what it looked for.
+    #[must_use]
+    pub fn candidates(self) -> &'static [&'static str] {
         match self {
             Language::Python => &["python3", "python"],
             Language::PowerShell => &["pwsh", "powershell"],
@@ -98,6 +128,23 @@ mod tests {
         assert_eq!(Language::Python.to_string(), "Python");
         assert_eq!(Language::PowerShell.to_string(), "PowerShell");
         assert_eq!(Language::Shell.to_string(), "Shell");
+    }
+
+    #[test]
+    fn every_language_is_in_the_list_of_all_of_them() {
+        // A list built by hand goes stale the moment a fourth arrives, so
+        // this asserts the two agree rather than asserting a count.
+        for language in Language::all() {
+            assert!(
+                !language.candidates().is_empty(),
+                "{language} has no interpreter to try"
+            );
+        }
+        assert_eq!(
+            Language::all().len(),
+            3,
+            "a language was added without this list being told"
+        );
     }
 
     #[test]
