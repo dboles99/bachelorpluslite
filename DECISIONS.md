@@ -550,6 +550,27 @@ All of it, in one pass. What is worth carrying forward:
 
 ## Open items
 
+- **A claim in the record is not a property of the repository.** D13 sat
+  unanswered for five sessions as "111 commits live on
+  `feat/phase-01-foundation-ui`; `main` has none of them", and every
+  housekeeping pass repeated it, several of them calling it "the item most
+  likely to hurt and least likely to be noticed".
+
+  It was false. `main` is at `31f6858`, *"Merge phases 1-19 into main
+  (PR #1)"* — most of the branch's history is already in `main`, and the
+  branch is 48 commits past that merge rather than 111 commits past nothing.
+  One `git merge-base --is-ancestor` settles it, and it was never run.
+
+  **This is trap 3 with the record in place of a comment**, and the mechanism
+  is the one that makes trap 3 expensive: nothing depended on the claim, so
+  nothing could contradict it. A question nobody can act on gets re-read
+  rather than re-checked, and re-reading is what preserved it.
+
+  The generalisation, and it is cheap: **a question that has waited several
+  sessions should have its premise checked before it is asked again.** The
+  reason it is still open may be that it was never the right question.
+
+
 - **A flake that gets worse the more you run the tests.**
   `signing_reaches_the_security_history` failed one run in five *in
   isolation*. The cause was a temp path built from the process id and a

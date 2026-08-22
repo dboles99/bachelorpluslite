@@ -10,6 +10,10 @@ Status as of **2026-08-21**. Three words, meaning three different things:
 - **Built, unwired** — the library work exists and is tested, but nothing in
   the application calls it. Used where that is a deliberate decision rather
   than an unfinished job, and the reason is always recorded.
+  **No phase carries it any more**, as of 2026-08-22. It is kept because the
+  state is a real one and will recur, and because the count of phases in it —
+  three, for four sessions — was this project's most useful single number
+  while it was not zero.
 
 | # | Phase | Status | Tasks | Crates |
 | --- | --- | --- | --- | --- |
@@ -21,10 +25,10 @@ Status as of **2026-08-21**. Three words, meaning three different things:
 | 6 | Structured formats | **Started** | [05-formats](project/tasks/05-formats/) | `bp-data` |
 | 7 | Search engine | **Started** | [06-search](project/tasks/06-search/) | `bp-search` |
 | 8 | Semantic foundation and naming | **Started** | [07-semantic](project/tasks/07-semantic/) | `bp-semantic`, `bp-naming` |
-| 9 | Organization and related-note graph | **Built, unwired** | [07-semantic](project/tasks/07-semantic/) | `bp-storage` |
+| 9 | Organization and related-note graph | **Started** | [07-semantic](project/tasks/07-semantic/) | `bp-storage` |
 | 10 | Semantic/hybrid search | Not started | [07-semantic](project/tasks/07-semantic/) | — |
 | 11 | Clipboard system | **Started** | [08-clipboard](project/tasks/08-clipboard/) | `bp-clipboard` |
-| 12 | Notebook/execution system | **Built, unwired** | [09-notebook](project/tasks/09-notebook/) | `bp-notebook` |
+| 12 | Notebook/execution system | **Started** | [09-notebook](project/tasks/09-notebook/) | `bp-notebook`, `bp-execution` |
 | 13 | Research mode | **Started** | [10-research](project/tasks/10-research/) | `bp-research`, `bp-storage`, `bp-semantic` |
 | 14 | Security foundation | **Started** | [11-security](project/tasks/11-security/) | `bp-security` |
 | 15 | Encrypted `.bpadx` documents | **Started** | [11-security](project/tasks/11-security/) | `bp-crypto` |
@@ -36,8 +40,13 @@ Status as of **2026-08-21**. Three words, meaning three different things:
 
 ## Two numbering schemes, reconciled
 
-The phase numbers above are canonical — they are what `specs.md`, the ADRs and
-the application's own "not implemented yet (phase N)" menu rows refer to.
+The phase numbers above are canonical — they are what `specs.md` and the ADRs
+refer to.
+
+**They are no longer what any menu row refers to.** Until 2026-08-22 a greyed
+row read "not implemented yet (phase 19)" and the number pointed here;
+[ADR-0048](docs/decisions/ADR-0048.md) removed every such row, so a phase
+number is now a planning device rather than something a user can see.
 
 `project/tasks/` uses fourteen directories rather than twenty, because several
 roadmap phases share a task folder (all three security phases live under

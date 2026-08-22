@@ -101,7 +101,7 @@ an edge, because a dependency diagram that has drifted is worse than none.
 `bp-platform`, `bp-redaction`, `bp-research`, `bp-search`, `bp-secrets`,
 `bp-security`, `bp-semantic` and `bp-theme`. That is what keeps them cheap to
 test and impossible to entangle with the UI toolkit — and it is why all but
-371 of the workspace's 1,941 tests run without a window.
+401 of the workspace's 1,972 tests run without a window.
 
 `bp-platform` is on that list for its *real* dependencies and takes
 `bp-formats` as a **dev**-dependency, deliberately and one-directionally: it
@@ -129,28 +129,30 @@ Two deliberate non-dependencies:
 ## Inside `bp-ui`
 
 The shell was one 2,675-line file and the single-writer bottleneck for every
-piece of wiring work. It is now eighteen, split along seams the files already
+piece of wiring work. It is now twenty, split along seams the files already
 had as comment banners:
 
 | Module | Lines | Owns |
 | --- | ---: | --- |
-| `menus.rs` | 3,160 | Menu contents and the action-id map |
+| `menus.rs` | 3,478 | Menu contents and the action-id map |
 | `state.rs` | 2,961 | `AppState` itself: documents, workspace, opening, saving, reloading, format detection, the gutter and the status labels |
 | `state/security.rs` | 2,824 | Scan, redact, inspect metadata, hash, sign, verify, the security history all six write into, and the profile and Privacy Mode switches that govern them |
 | `lib.rs` | 1,402 | `run_with`, `refresh`, and the Slint callback wiring |
 | `editor_view.rs` | 1,003 | The custom surface: key translation, caret placement, what to draw, and the scroll that serves both a rope and a file |
-| `dispatch.rs` | 1,012 | The menu-action match, and the dialogs its arms share |
+| `dispatch.rs` | 1,102 | The menu-action match, and the dialogs its arms share |
 | `state/notebook.rs` | 887 | Running one cell of a literate document: the `.ipynb`/Markdown reading, the Run menu's rows, the cell outline (ADR-0043, ADR-0045) |
 | `viewer.rs` | 801 | A document the rope does not hold: where the reader is looking, the window handed to the surface, and the scan of it a find runs (ADR-0030, ADR-0042) |
 | `default_editor.rs` | 754 | File ▸ Set as Default Editor: the report, the consent dialog, the artefacts (ADR-0012) |
 | `state/data.rs` | 498 | The Data menu: which `bp-data` operation a menu id means for the format in front of the user |
 | `state/encryption.rs` | 457 | The `.bpadx` passphrase flow: what the bar is asking, and what a wrong answer does |
 | `state/research.rs` | 758 | Research Report: aggregate reads over `bp-storage`, worded as insights, each naming the documents behind it and closing with the rules it applied (ADR-0041, ADR-0046); and what the store holds |
-| `state/organize.rs` | 434 | Related Notes and duplicate detection, over `bp-storage` (ADR-0037) |
+| `state/organize.rs` | 585 | Related Notes, duplicate detection and Suggested Folder, over `bp-storage` (ADR-0037, ADR-0048) |
+| `state/inspectors.rs` | 533 | The Tools menu's readouts: the policy in force on all seven axes, the file on disk, and where each setting came from (ADR-0048) |
 | `state/citations.rs` | 365 | What the document in front of you cites, through `bp-research` — offline, and named for it (ADR-0044) |
 | `audit.rs` | 254 | Which file the security history is, and what a person reading it sees (ADR-0024) |
 | `state/find.rs` | 220 | What the find bar is looking for, which match the user is standing on, and driving a scan of a document served from disk |
 | `state/questions.rs` | 175 | What the document in front of you *asks*, through `bp_semantic::questions` (ADR-0046) |
+| `testpaths.rs` | 148 | **Test-only.** One temp path per test that no *earlier* run can have left behind (ADR-0049) |
 | `passphrase.rs` | 141 | What the one-field passphrase bar is currently asking, as a state machine |
 
 **Three modules meet in the Research menu and none knows the other two**,

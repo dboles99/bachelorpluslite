@@ -1,5 +1,18 @@
 # BachelorPad+ Project Memory
 
+**This file is the *original* brief, kept as written.** It records what was
+asked for before anything was built, which is why it is worth not editing:
+several of its items have since been decided differently, and the value is in
+being able to see that.
+
+**Every decision made since lives in [DECISIONS.md](DECISIONS.md)**, which
+indexes 49 ADRs. Where the two disagree, the ADR is current. The most visible
+example is in "Suggested implementation style" below: Slint was "a leading
+candidate to be benchmarked"; it was benchmarked and chosen
+([ADR-0015](docs/decisions/ADR-0015.md)).
+
+[CLAUDE.md](CLAUDE.md) is the entry point for working here.
+
 ## Identity
 
 Project: **BachelorPad+**

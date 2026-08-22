@@ -50,7 +50,8 @@ feature branch, push, and report. Do not ask first.
 
 Two things this authority does *not* cover, and both need a human:
 
-- merging to `main` — that is decision **D13** and has waited five sessions;
+- merging to `main`, or opening a pull request into it — that is decision
+  **D13**;
 - `git push --force`, a rebase of pushed history, or anything that rewrites a
   commit somebody may already have.
 
@@ -121,6 +122,7 @@ clause and link; it must not retell it.
 ./scripts/Invoke-LocalCI.ps1 -Linux     # the real one, both legs, ~7 min
 ./scripts/Invoke-LocalCI.ps1 -Quick     # what pre-commit and pre-push run
 ./scripts/Install-GitHooks.ps1          # once per clone
+./scripts/Drive-Window.ps1 -Kill        # launch the app and photograph it
 ```
 
 This **is** CI — there is no hosted CI ([ADR-0016](docs/decisions/ADR-0016.md)).
@@ -163,7 +165,7 @@ The repository has a strong and consistent voice. Match it.
 - Every module has a `//!` header saying what it owns and what it deliberately
   does not.
 
-## The four traps this repository springs repeatedly
+## The traps this repository springs repeatedly
 
 Named here, explained in `DECISIONS.md`:
 
@@ -176,6 +178,16 @@ Named here, explained in `DECISIONS.md`:
 4. **Two claims about the same function coexist for as long as nothing asks.**
    Trap 3 from the other side — when trap 3's answer is "nothing would fail",
    the test beside the comment is free to say the opposite, and probably does.
+
+**And two more, both about verification itself** ([ADR-0049](docs/decisions/ADR-0049.md)):
+
+5. **"Unique" must mean no *earlier* run either.** A temp path from a process
+   id and a counter is unique within a run and reused by the next one that
+   gets that pid. `crate::testpaths` is the one home.
+6. **A claim in the record is not a property of the repository.** D13 sat for
+   five sessions on a premise one `git` command disproved. A question that has
+   waited several sessions should have its premise checked before it is asked
+   again.
 
 **And the one no test can catch:** what a toolkit does with what it is handed.
 Five defects have lived in that seam, including a signing passphrase typed
