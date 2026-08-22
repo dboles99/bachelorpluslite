@@ -33,6 +33,7 @@ artifacts/test-evidence/*.json
 /*.txt
 /*.md
 !/README.md
+!/CLAUDE.md
 !/DECISIONS.md
 !/PROJECT_MEMORY.md
 !/ROADMAP.md

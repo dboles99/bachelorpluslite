@@ -59,39 +59,19 @@ left under [ADR-0037](docs/decisions/ADR-0037.md), `bp-notebook` and
 `bp-execution` under [ADR-0043](docs/decisions/ADR-0043.md), and
 `bp-research` under [ADR-0044](docs/decisions/ADR-0044.md).
 
-**What actually unblocked the last three was not effort.** Each had been
-sized as a *mode* — a large, unscoped thing — and each turned out to be
-waiting on a question rather than on work:
+**What actually unblocked the last three was not effort.** Each had been sized
+as a *mode* -- a large, unscoped thing -- and each turned out to be waiting on
+a question rather than on work: phase 12 on what a notebook is *for*
+([ADR-0043](docs/decisions/ADR-0043.md)), phase 13 on whether two decisions
+were a contradiction ([ADR-0044](docs/decisions/ADR-0044.md)), and phase 9 on
+presentation ([ADR-0037](docs/decisions/ADR-0037.md)). Research mode's last
+five planned rows went the same way one session later, in the opposite
+direction ([ADR-0046](docs/decisions/ADR-0046.md)).
 
-- **Phase 12, notebooks.** Sized as a cell-sequence view for three sessions.
-  The blocking question was what the mode is *for*, and ADR-0038's
-  no-persistent-session model answers it: a literate document, whose examples
-  are self-contained by intent. Pick that and the view is not needed at all —
-  the notebook stays its own JSON in the ordinary editor, and the surface is
-  a menu. [ADR-0043](docs/decisions/ADR-0043.md).
-- **Phase 13, research.** Blocked on reading two decisions as a
-  contradiction. ADR-0039/0041 define the mode as synthesis over `bp-storage`
-  and say the bibliography types are not what it is built on, while
-  `MENU_MAP.md` names citation metadata. They are two features sharing a
-  menu, not one feature with two definitions.
-  [ADR-0044](docs/decisions/ADR-0044.md).
-
-  **Its remaining backlog went the same way, one session later, and in the
-  opposite direction.** The five rows `MENU_MAP.md` still listed — research
-  question, evidence, findings, methods, datasets — were the sections of a
-  research *paper*, written into the file by the scaffold commit and never
-  elaborated. Sized as work they looked like five features; asked what each
-  was *for*, two became part of Research Report, one became **Open
-  Questions**, one became **What the Store Holds**, and one was dropped as a
-  second name for the report itself. [ADR-0046](docs/decisions/ADR-0046.md).
-  So the corollary of "undecided reads like large" is worth writing down too:
-  **a name that has sat in a plan long enough starts to read like a
-  specification.** Nobody ever wrote these five as one.
-- **Phase 9, storage.** Settled first, by ADR-0037, and the same shape: a
-  decision about presentation rather than a body of work.
-
-The lesson is recorded because the estimate was the error:
-**undecided reads like large.**
+**The lesson from all four -- "undecided reads like large", and its mirror --
+is in [DECISIONS.md](DECISIONS.md)**, which is the one home for a lesson. It
+is named here rather than retold because it decides whether a phase can be
+estimated at all, which is this file's subject.
 
 **Phase 4 is finished, including the piece it deliberately left out.** Find
 over a document served from disk shipped under

@@ -54,6 +54,7 @@ Adding a decision means adding both.
 | BP-ADR-0044 | 2026-08-21 | The Research menu is what a citation crate can honestly do offline | Accepted, shipped | [ADR-0044](docs/decisions/ADR-0044.md) |
 | BP-ADR-0045 | 2026-08-21 | A Markdown file is a notebook, and the panel that lists things is one component | Accepted, shipped | [ADR-0045](docs/decisions/ADR-0045.md) |
 | BP-ADR-0046 | 2026-08-22 | Research mode's last five planned rows were a paper's structure; two fold into the report, one becomes Open Questions, one becomes What the Store Holds, one is dropped | Accepted, shipped | [ADR-0046](docs/decisions/ADR-0046.md) |
+| BP-ADR-0047 | 2026-08-22 | An agent gets standing authorities; one home per kind of fact; pre-push checks for a full gate rather than repeating it; nextest with a doctest stage | Accepted, shipped | [ADR-0047](docs/decisions/ADR-0047.md) |
 
 ## Decisions needed before the work they block
 
@@ -88,7 +89,492 @@ Adding a decision means adding both.
   the software renderer's time to first interaction cannot be measured, so
   half of ADR-0017's target has no number behind it.
 
+## Recently closed, and what each one cost to learn
+
+Moved here from `README.md` on 2026-08-22. It was 3,586 words -- roughly
+two thirds of that file -- and every word of it was a *lesson*, which this
+file owns. README now carries the one-line facts and links here, per the
+ownership table in `CLAUDE.md`.
+
+**Why the split matters more than the tidiness:** the same lesson was being
+written into three or four files per session and read out of all of them the
+next, which is exactly how a fact gets updated in three places and left stale
+in the fourth.
+
+Kept rather than deleted, because every one of these went stale the same
+way — a fix landing without the record moving — and because the lesson in each
+is worth more than the fact.
+
+- **Research mode's last five planned rows turned out to be a paper's
+  structure, and none of them survived as a row.** `MENU_MAP.md` had named
+  research question, evidence, findings, methods and datasets since the
+  scaffold commit. They are IMRaD — the sections of a research *paper* — and
+  [ADR-0039](docs/decisions/ADR-0039.md) defines the mode as synthesis over
+  your own notes, which is not the same thing.
+  [ADR-0046](docs/decisions/ADR-0046.md) scoped each against what
+  `bp-storage` actually holds: evidence and methods became part of Research
+  Report, datasets became **What the Store Holds**, findings was dropped as a
+  second name for the report itself, and research question became **Open
+  Questions**.
+
+  **The lesson is the one this repository keeps relearning from the other
+  side.** Four sessions were lost to sizing modes before the question of what
+  they were *for* had been answered — "undecided reads like large". This is
+  the same mistake at a smaller scale and in the opposite direction: five
+  names sitting in a plan long enough to look like a specification. Nobody
+  wrote them as one. They were a sentence in the scaffold commit, and asking
+  what each was actually *for* resolved all five in an afternoon — two of them
+  by deleting them.
+
+  **And scoping them found something.** Research Report looked for
+  under-connected documents among the five hundred most recently seen and said
+  so nowhere the reader could see. A store of nine hundred documents got a
+  report drawn from five hundred of them and looked complete. The rule was
+  inspectable in `research.rs`; it was not inspectable from the window, which
+  is where the reader is. ADR-0041 had promised "a fixed, inspectable rule" —
+  it turns out that is a claim about the product, not about the source.
+
+- **A doc comment promised something the code had never done.**
+  `Store::forget_document` said "and with it any tags that were only on it".
+  `ON DELETE CASCADE` took the join rows; the `tags` row was left orphaned,
+  and its own test *asserted the survival* in a comment while the doc comment
+  above it promised the opposite. Neither reader was wrong about what they
+  were looking at. It survived because every tag-shaped query in `bp-storage`
+  joins `document_tags` and so cannot see an orphan — until `Store::summary`
+  wanted to count tags and had to pick which number was true. The third time
+  this repository has caught a comment asserting a property the code lacks,
+  and the first where a test agreed with the code and disagreed with the
+  comment without anybody noticing the two were in the same file.
+
+- **`bp-notebook` and `bp-execution` are reachable.** Two crates and about
+  9,500 lines had no route to a person for three sessions — not for want of
+  effort, but for want of an answer to *what the mode is for*, because
+  ADR-0038's no-persistent-session model makes some uses honest and one
+  dishonest. [ADR-0043](docs/decisions/ADR-0043.md) answers it: a literate
+  document, whose examples are self-contained by intent, so the limitation
+  stops being one.
+
+  **The surface is a Run menu, not a cell view**, and that is the whole
+  reason it exists today rather than after a redesign: a cell-sequence view is
+  a second document kind, with its own editing, selection, undo and save
+  story, none of which the rope-plus-two-surfaces design has a place for — and
+  all of which would have to be settled before a single cell could run. The
+  notebook stays its own JSON in the ordinary editor, which `bp-notebook`
+  anticipated: `raw_json_view` exists because the JSON "is the thing the user
+  might want to hand-edit".
+
+- **Find did not scroll to its match**, in the surface most people use.
+  On a 165-line document, searching for text at line 143 reported `1 of 1`
+  — correct — and left the reader looking at line 1, with the match selected
+  off screen. It affected Find, Find Next and Previous, and opening a
+  cross-file result.
+
+  **Every earlier test of Find used a document that fitted on one screen**,
+  which is why four manual passes and three of the same session's own runs
+  did not see it. It surfaced only because a new feature — clicking a row of
+  the cell outline — jumped to a line a hundred below the fold and visibly
+  did nothing.
+
+  `set-selection-offsets` moves the caret and nothing moves the viewport.
+  Slint exposes `cursor-position-changed` precisely so a scroll container can
+  follow the caret, its own `TextEdit` uses it that way, and this editor was
+  already inside a `Flickable` — so the fix is the toolkit's own pattern,
+  clamps included. **Watched working in both directions**, because it sits on
+  the typing path: the view scrolls to a match a hundred lines down, and
+  typing mid-document leaves the viewport exactly where it was.
+
+- **Research mode, and the last unreachable crate.** `bp-research` had 5,208
+  lines and 161 tests no user could reach. What kept it there was reading two
+  decisions as a contradiction — ADR-0039/0041 say research mode is synthesis
+  over `bp-storage` and *not* built on the bibliography types, while
+  `MENU_MAP.md` names citation metadata and DOI lookup. They are two features
+  sharing a menu: one reads the store and says what you have been writing
+  about, the other reads the document in front of you and says what it cites.
+  [ADR-0044](docs/decisions/ADR-0044.md).
+
+  **"DOI Lookup" is renamed, not implemented**, and that is the substance:
+  finding an identifier and resolving one are different acts, and only the
+  first works offline (ADR-0006). A row called Lookup would be a promise this
+  product cannot keep.
+
+- **The status bar went stale after every jump, in all five places that
+  jump.** Go to Line moved the caret and the view and the readout still said
+  where the caret used to be; so did Find Next and Previous, opening a
+  cross-file result, and stepping a scan of a huge document. `refresh` sets
+  that readout, and every one of those paths deliberately does *not* refresh
+  — they move and then draw the surface directly. Nothing corrected it
+  afterwards either: both background pollers refresh only when they
+  themselves found a change, so it stayed wrong until the next keystroke.
+
+  Fixed in `draw_editor_view` rather than at any of the five call sites,
+  because a sixth would have been wrong too — **drawing the surface and
+  saying where it is are one act, so they are now one function.**
+
+- **Nothing held the keyboard until you clicked, in every `--editor-view`
+  launch and every huge document.** Ctrl+F on a fresh window did nothing;
+  click anywhere in the document first and it worked. Found on 2026-08-21
+  while fixing the defect below, which had been hiding it.
+
+  `AppWindow`'s `forward-focus: editor` names the `TextInput`, and the
+  `TextInput` is `visible: !use-editor-view` — invisible for any document
+  served from disk ([ADR-0030](docs/decisions/ADR-0030.md)) and for *every*
+  document under `--editor-view`. So the window opened with the keyboard held
+  by an element nobody could see.
+
+  **`forward-focus` cannot be made to follow the flag, and that is the part
+  worth writing down.** It takes an element rather than an expression, and
+  `i-slint-compiler`'s `focus_handling` pass resolves it at *compile* time
+  into the component's init code — so it is one fixed element, chosen once,
+  and no binding will ever move it. Checked in the toolkit's source, like the
+  other Slint findings here, rather than inferred from the symptom. The fix is
+  therefore a hand-over rather than a binding: `focus-editor-soon()` gives the
+  caret to whichever surface is drawing, at startup and whenever the surface
+  changes under the active document.
+
+  **The guard on it is the whole difference between a fix and a new defect**,
+  and it is the same lesson as the passphrase leak two entries down: switching
+  to a tab drawn by the other surface must not take the caret out of an open
+  find box. Confirmed by driving the window — with a query typed and the huge
+  tab active, clicking across to a small file leaves the next keystrokes in
+  the find box.
+
+- **A huge document had no keyboard shortcuts at all, and nobody had noticed.**
+  Not Ctrl+F, not Ctrl+S, not Ctrl+O — nothing. Found on 2026-08-21 by
+  building Find for exactly those documents and discovering the feature could
+  not be reached, because Ctrl+F is its only route: there is no Find menu row.
+
+  **The cause is a function saying it handled something it did not.**
+  `apply_editor_command` sends every key in a viewer to `scroll_for_command`,
+  which returned `true` for everything it was given — including the
+  `Command::Ignore` that `bp_editor::keys::command_for` produces for the keys
+  its own comment calls out as belonging to the window: "Ctrl+S, Ctrl+F and
+  the rest." `EditorSurface`'s `FocusScope` accepts whatever that reports as
+  handled, and an accepted key never bubbles to the `KeyBinding` waiting for
+  it. It had been that way since the viewer shipped (ADR-0030).
+
+  **The lesson is about the boolean, not the keyboard.** "Handled" is a claim
+  with a consequence somewhere else, and `scroll_for_command`'s two `return
+  true`s were written to mean "there is nothing to do here" — which is the
+  opposite of what the caller does with it. Its deliberate swallowing of
+  *editing* commands was and is right; it was the catch-all that was too wide.
+
+- **Find works in a document the rope does not hold.** The last piece of the
+  large-file story, and the third of the three things
+  [ADR-0030](docs/decisions/ADR-0030.md) named as deliberately unbuilt.
+  [ADR-0042](docs/decisions/ADR-0042.md) has the design; what is worth
+  repeating here is that the scan is **resumable rather than threaded** —
+  `advance(windows)` does a few megabytes and returns, so cancelling is the
+  absence of the next call rather than a flag another thread has to notice,
+  and a scan cannot outlive its document because it lives on the `HugeView`.
+  Driven against a 213.5 MiB log: `searching 86%` while it ran, `1 of 1` at
+  line 4,800,001 when it finished, the match highlighted on its own
+  characters.
+
+- **A signing passphrase no longer types itself into the document.** The
+  fourth manual pass, on 2026-08-21, found the worst of the four:
+  `Security ▸ Sign Document`, then type the passphrase the bar has just asked
+  for, and every character went **into the open document, in plain text**,
+  while the passphrase field stayed empty. Saving after that would have
+  written the passphrase to disk in the clear. Reproduced against the
+  unfixed binary while confirming the fix: `secret` typed at 1.6 s per
+  keystroke turned `alpha beta gamma` into `siecalpha beta gamma` and marked
+  the tab dirty.
+
+  **The cause was two focus-stealers, both running *after* the callback that
+  asked for the caret**, and the reason `PassphraseBar`, `focus-input()` and
+  the `SIGN_DOCUMENT` arm all read as correct in isolation is that none of
+  them is either one. First, `dispatch` in `ui/app.slint` ends every menu
+  action with `root.focus-editor()`, which is right for every row that is not
+  opening a bar. Second — and this one no amount of reading this repository
+  would have found — **closing a `MenuPopup` restores the focus the popup took
+  when it opened**: `i-slint-core`'s `process_mouse_input` computes which
+  popup to close *before* it dispatches the click, and calls `close_popup`
+  *after* the row's callback has returned, and `close_popup_impl` then hands
+  the caret back to whatever had it before the menu opened. There is no way
+  to opt a popup out of it.
+
+  **The fix is one tick of patience**: `focus-find`, `focus-goto` and
+  `focus-passphrase` now record *which* bar wants the caret and let a 1 ms
+  `Timer` hand it over on the next turn of the event loop, once both
+  focus-stealers have had theirs. `Edit ▸ Go to Line` had the identical
+  defect — confirmed against the same unfixed binary, where a typed `9`
+  landed in the document rather than the box — and the two encrypted-document
+  paths reach `focus-passphrase` the same way. Confirmed by driving the
+  window: the passphrase now arrives as six dots with the document untouched,
+  the confirm step keeps the caret too, and Find still behaves in both
+  surfaces.
+
+- **Find no longer edits the document while you type the query.** The third
+  manual pass, on 2026-08-21, found the worst defect any of the three found:
+  Ctrl+F, then type `replicas`, and the `r` reached the find box correctly
+  (`1 of 3`), but every character after it went **into the document**, over
+  the match the `r` had just selected -- `alpha replicas beta` became
+  `alpha eeplicas beta`, the tab went dirty, and the find box still read `r`.
+  Reproduced with 1.5 seconds between keystrokes, so it was not a race.
+
+  The cause was one line with a comment that said what it was doing.
+  `on_find_changed` ([lib.rs](crates/bp-ui/src/lib.rs)) runs on **every**
+  keystroke in the query box and called `dispatch::select`, which ends in
+  `editor.focus()` -- "Just take the focus back from the find box", says
+  `select-range` in `ui/app.slint`. That is right for Find Next, the other
+  caller, where the user does want the caret in the document afterwards. It
+  was wrong for the preview that runs while they are still typing the query,
+  and the two shared one function.
+
+  **The fix is the split the toolkit's own comment implied it needed**: a
+  second, focus-preserving path -- `dispatch::preview_match` in Rust,
+  `preview-range` in `ui/app.slint` -- used only by the live-typing preview,
+  leaving the three deliberate "jump to it" callers (Find Next/Previous, Go to
+  Line, a cross-file search result) on the original focus-stealing one. Both
+  the `TextInput` and `--editor-view` branches got the same treatment; the
+  first pass's diagnosis of the `--editor-view` half was by reading the code,
+  not by driving it, and driving it afterward found nothing further wrong.
+
+  Two agents built this in parallel with an unrelated fix below, in files
+  that never overlapped; one of them hit the exact file-collision this
+  repository's own working notes warn about mid-run, from the other agent's
+  concurrent edits, and caught it itself with an isolated worktree rather
+  than reporting a false pass. Confirmed by driving the window again
+  afterward: four clean runs against the exact sequence that broke it, at
+  both typing speeds.
+
+- **Crash recovery restores the text now, and the encoding and line ending
+  with it.** Found in the same pass. `AppState::restore` opened the document
+  and inserted the checkpoint's text, but never called `set_line_ending` or
+  `set_encoding` the way `open` does, so a recovered document fell back to
+  `LineEnding::default()` -- CRLF on Windows. An LF file recovered on Windows
+  was rewritten CRLF throughout on the next save, and a UTF-16 document came
+  back as UTF-8 -- silently contradicting a test that was already green,
+  `saving_a_mixed_document_does_not_rewrite_the_minority_line_break`.
+
+  `bp_history::Checkpoint` now carries `encoding` and `line_ending`,
+  `#[serde(default)]` so a journal already on disk still deserializes.
+  Recovery re-detects a missing line ending from the text itself, the way the
+  rest of the codebase guesses when certainty is not available; a missing
+  encoding cannot be recovered the same way, because the checkpoint holds
+  already-decoded text, so it falls back to a documented guess rather than a
+  claim.
+
+- **A 2 GB file opens, and costs 0.8 MiB.** The last piece of phase 4
+  ([ADR-0030](docs/decisions/ADR-0030.md)). A document past the huge threshold
+  is served from disk as you scroll: arrow keys, the page keys, Ctrl+Home and
+  the wheel move the window, the gutter numbers the *document* rather than the
+  screen, and the status bar says which lines are on screen. Measured rather
+  than asserted — a few lines of text peaked at 31.3 MiB and a 192 MiB log at
+  32.1 MiB.
+
+  It draws in the custom surface in **every** build, not only under
+  `--editor-view`. `TextInput` owns its own text and cannot be handed a window
+  of a file it does not have; the flag stays a statement about which surface
+  *edits* a document the rope holds, and the one reason it is opt-in —
+  input-method composition — has nothing to say about a surface that accepts
+  no text.
+
+  Save, Save As, Save a Copy and Reload grey with the reason. That is not
+  politeness: `text_of` such a document is the empty string, so a Ctrl+S that
+  merely did nothing special would write an empty file over two gigabytes and
+  report success. Four paths refuse by name, and a test asserts the file's size
+  is unchanged rather than trusting the return value.
+
+  **Two things are deliberately not built**, and each is a refusal with a
+  reason rather than a gap: Ctrl+End, and a total line count. Both need the
+  whole file indexed, which for these documents means reading two gigabytes to
+  answer one question while the window is frozen.
+
+- **Signing works, and the key is sealed rather than protected.**
+  [ADR-0031](docs/decisions/ADR-0031.md). ADR-0026 had measured a hole it
+  could not close: `0600` on Linux, nothing at all on Windows, where narrowing
+  a DACL needs Win32 and `unsafe` that `bp-platform` forbids — so
+  `is_confirmed_private()` honestly reported "unknown" on half the supported
+  platforms. Putting the key inside the envelope encrypted documents already
+  use protects the *contents* instead, identically on both platforms, and
+  designs nothing new.
+
+  **One ceremony, not one per signature.** The first signature creates the
+  key, because what was asked for was a signature; the second finds it and
+  asks only to unlock it. The row says which the click will do before you
+  click it.
+
+  It still greys, for two reasons that are not about key storage: a signature
+  is over the bytes **on disk**, so a document that has never been saved has
+  nothing to sign, and one with unsaved changes would get a valid signature
+  over the *previous* version — worse than a refusal, because it verifies.
+
+- **Somebody has now typed into the custom editor view, and it works.**
+  `--editor-view` gives Ln/Col, our own undo, and a view that draws only the
+  lines on screen. A person drove it on 2026-08-20: keys arrive, Ctrl+S saves
+  (checked by reading the file back off the disk), and **the caret tracks the
+  pointer** -- a click at the end of `line 30` reported `Ln 30, Col 8`,
+  exactly its length plus one. The wheel direction, drag-to-select and
+  resize behaviour are still unchecked. See [ADR-0018](docs/decisions/ADR-0018.md).
+
+  **That pass found a defect 177 tests could not**, and it is fixed: a tab
+  was drawn as a single glyph while every column in `bp-editor` was computed
+  as though it reached the next tab stop, so the caret on any tab-bearing
+  line sat where the character was not. `view::expand_tabs` and
+  `VisualRow::display_text` close it -- the row keeps its characters for the
+  arithmetic, and the toolkit is handed the appearance.
+
+- **Word wrap now works under `--editor-view`.** A document line can occupy
+  several visual rows: `bp_editor::wrap` decides where they break, the view
+  maps rows to characters, Up and Down move by row rather than by line, and
+  scrolling is anchored to a line *and* a row within it so a line taller than
+  the window can be scrolled through.
+
+- **The crates are tested where they meet, and that is where the defects
+  are.** Eleven files of cross-crate tests join load/rope/atomic save, the
+  `.bpadx` envelope over a real file, the security profile against all three
+  of its dependants, format detection against the parser that then handles
+  the file, search against the buffer, journal recovery, the notebook through
+  the file layer, the audit log, redaction, signing, and the filename grammar
+  against the platform's own rules. Between them they have found seven
+  defects that no unit test did. **All seven are fixed**, and there is no
+  `#[ignore]`d test left anywhere in the tree. The most serious was
+  `bp-naming`, which asked whether a *whole* sanitised title was a Windows
+  device name, while Win32 asks only about the stem before the first dot --
+  so `con.txt`, `aux.log` and `NUL.dat` passed untouched, and on Windows
+  saving to one of those writes **the device**, reports success, and the
+  document is gone. The sanitiser now tests the stem, its list gained
+  `CONIN$` and `CONOUT$`, and a property compares its verdict against
+  `bp-platform`'s stem by stem in both directions so the two lists cannot
+  drift apart quietly.
+
+  **The other half of that hole was a name nobody sanitised.** `bp-naming`
+  defends the name the product *suggests*; the one a user types over the top
+  of it in a Save dialog had never been checked by anything. `bp-files`
+  depends on `bp-platform` now and `atomic_write` refuses a device name
+  outright -- the only refusal in that module that is checked rather than
+  attempted, because attempting it does not fail: the open succeeds, the
+  read-back verifies against the console, and the status bar reports a
+  document that is nowhere. The platform is a parameter rather than a `cfg`,
+  so `con.txt` stays an ordinary file on Linux and both CI legs execute both
+  rule sets.
+
+  **There is no `#[ignore]`d test left anywhere in the tree.** All seven are
+  closed. The last was a decision rather than a defect and is now
+  [ADR-0029](docs/decisions/ADR-0029.md): a line break in this product is
+  `
+` or `
+` and nothing else, so `bp-buffer` builds its rope without
+  ropey's `unicode_lines` -- a break set that was never chosen, only
+  inherited from writing `ropey = "1"`, and that disagreed with
+  `bp-core::LineEnding`, `bp-files::encode`, `bp-search` and two of
+  `bp-buffer`'s own helpers. Find-in-files and the caret now agree on every
+  document this product can save, and the status bar reports one line count
+  rather than a different one per editor view.
+
+[ROADMAP.md](ROADMAP.md) has per-phase status;
+[MENU_MAP.md](docs/product/MENU_MAP.md) says which menu rows are real;
+[ARCHITECTURE.md](docs/architecture/ARCHITECTURE.md) has the crate map and the
+editor-view constraint; [WORK_QUEUE.md](project/WORK_QUEUE.md) lists what is
+ready to take and what cannot run in parallel;
+[NEXT_SESSION.md](project/NEXT_SESSION.md) is the plan for picking this up
+again.
+
+## What the tiers taught
+
+Moved here from `project/WORK_QUEUE.md` on 2026-08-22, for the reason the
+section above was moved out of `README.md`: a queue should say what is ready,
+and a lesson has one home. These three tiers were empty of work and full of
+prose, in the one file an agent reads to find something to do.
+
+## Tier 0.5 — what the cross-crate tests found
+
+Eleven files of cross-crate tests found seven defects. **All seven are fixed,
+the decision behind the last of them is made (ADR-0029), and there is no
+`#[ignore]`d test left anywhere in the tree.** The two latent items that
+remained -- neither wrong today, both wrong the moment anything depended on
+them -- **are fixed too, and this tier is empty.**
+
+| Item | Landed as |
+| --- | --- |
+| The recent-files list, the recovery journal and the security history all roamed on Windows | All three resolve through `DirKind::State`; `bp-config` and `bp-ui` in one change, because splitting it would have scattered the product's files |
+| `Profile::is_data` was true for `Ini` and `Xml` | `Profile::is_data_class` for the class, `Format::has_data_operations` for the menu, `Format::ALL` and a test holding the second against `menus::data` |
+
+What that pair is worth remembering for:
+
+- **A path built by subtracting another path's last component moves when that
+  one does.** The security history was `recovery_dir()` with `with_file_name`.
+  Renaming the recovery folder would have moved it silently, and a history
+  that moves starts again at sequence one.
+- **Separate the rule from the edge that reads the environment.**
+  `recovery_dir_under` and `audit_path_under` take the state directory as an
+  argument, so both are assertable without a real profile -- the same split
+  `bp_config::config_path` and `config_path_in` already made.
+- **A predicate on the wrong type is a trap with no name.** `is_data` was
+  asked of the *profile*, and `Profile::StructuredData` holds six formats of
+  which `bp-data` parses four. The fix was not a better `match`; it was
+  asking the question of the format.
+
+## Tier 1 — pure wiring (the capability exists and is tested)
+
+**All three original Tier 1 items are done** (W4, W6, W7 — see the table
+above). What was learned doing them, for whoever wires the next row:
+
+- `EditorSurface` had **two** constants that had to start following
+  `font-size`, not one: `line-height` and `gutter-width`. Both feed
+  `row-at` / `column-at`, so a constant left behind does not merely look
+  wrong — it moves the caret away from the pointer, and further the further
+  down or across the click is. Anything else that scales has the same trap.
+- `menus::view` now takes the font size, so **every menu builder whose rows
+  depend on a value must be handed that value**; there is no ambient state
+  in `menus.rs` and there should not be.
+- A row that exists but cannot act right now uses `row_enabled(.., false)`,
+  which is deliberately *not* `planned()`. `planned` means "does not exist
+  yet"; greying for a reason the user can act on is a different statement.
+
+## Tier 2 — done
+
+All of it, in one pass. What is worth carrying forward:
+
+- **`Command::Indent` is not `Command::Insert("	")`.** What a soft tab
+  inserts depends on the caret's visual column -- at column 3 with width 4 it
+  is one space, not four -- so `command_for` cannot decide it and
+  `Editor::apply` expands it instead. Any future key whose text depends on
+  where the caret is has the same shape.
+- **Save Copy shares nothing with `save_document` except the encoder.** The
+  three things it must not do -- move the path, clear the dirty flag, touch
+  Open Recent -- are the three that one does. Calling it and subtracting three
+  behaviours is how Save Copy becomes Save As; there is a test for each.
+- **A `PopupWindow`'s `x` cannot be assigned from outside it.** The tab
+  context menu positions itself through a property the popup binds to. The
+  compiler catches this, but only once you try.
+- **`menus::insert` is rebuilt on every refresh**, because its row hints are
+  rendered from the clock. A menu built once at startup would offer this
+  morning's time all afternoon.
+- **The tab menu's target is stored, not passed.** Opening the menu and
+  clicking a row are separate events, and by the second one the pointer has
+  moved.
+
 ## Open items
+
+- **A comment sat above the wrong rule, and a whole chain of correct reasoning
+  hung off it.** `.gitignore` reads:
+
+  ```
+  # Per-run local CI records. Benchmark results under artifacts/benchmarks/ are
+  # deliberately NOT ignored -- they are the evidence behind ADR-0015.
+  artifacts/test-evidence/*.json
+  ```
+
+  The "deliberately NOT ignored" is about `artifacts/benchmarks/`, named one
+  clause earlier. The line underneath carries no `!` and ignores the records
+  outright. Reading the comment as describing the line below it -- which is
+  what a comment above a line normally does -- produced the confident and
+  false conclusion that the gate's run records are tracked, and that
+  conclusion was written into ADR-0047, two code comments and a commit message
+  before `git check-ignore` was run on it. It takes a second.
+
+  **This is trap 3 -- "a claim in a comment is not a property of the code" --
+  sprung inside the ADR that names trap 3**, which is worth keeping precisely
+  because knowing the trap plainly does not prevent it.
+
+  The generalisation, and it is narrower and more useful than trap 3 alone:
+  **when a comment sits above a rule, check which rule it is about.** A
+  comment describing one thing and physically adjacent to another is not a
+  wrong comment -- it is a correct comment in a place that invites a wrong
+  reading, which is why nobody has ever fixed it. The reasoning built on top
+  can be sound end to end and still be about the wrong line.
 
 - **"A flipped bit anywhere in a `.sig` never verifies" is false, correctly.**
   `Sidecar::parse` tolerates trailing whitespace so a signature survives being

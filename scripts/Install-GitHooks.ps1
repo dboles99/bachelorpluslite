@@ -110,5 +110,6 @@ else {
 
 Write-Host ''
 Write-Host "pre-commit runs: Invoke-LocalCI.ps1 -Quick"
-Write-Host "pre-push runs:   Invoke-LocalCI.ps1"
+Write-Host "pre-push runs:   Invoke-LocalCI.ps1 -- unless Test-GateEvidence.ps1"
+Write-Host "                 finds a full gate that already covers this content"
 Write-Host "Bypass either with: BPAD_SKIP_CI=1 git ..."

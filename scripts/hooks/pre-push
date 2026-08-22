@@ -1,8 +1,16 @@
 #!/bin/sh
 # BachelorPad+ pre-push gate.
 #
-# The full local CI pass, including the locked dependency resolve that the
-# pre-commit hook skips for speed.
+# This hook used to re-run the whole Windows gate on every push. For a session
+# that follows the documented rule -- run `Invoke-LocalCI.ps1 -Linux` before
+# calling an item done -- that was the *third* execution of the same work for
+# one change, and roughly seven minutes of it.
+#
+# So it checks before it repeats. Test-GateEvidence.ps1 asks whether a full
+# gate, including its Linux leg, has already passed over exactly this content;
+# if it has, there is nothing here worth doing again. If it has not -- or if
+# anything about the question cannot be answered -- the full gate runs, as it
+# always did. The check fails closed on purpose.
 #
 # Escape hatch:
 #     BPAD_SKIP_CI=1 git push ...
@@ -14,6 +22,7 @@ fi
 
 ROOT="$(git rev-parse --show-toplevel)"
 SCRIPT="$ROOT/scripts/Invoke-LocalCI.ps1"
+EVIDENCE="$ROOT/scripts/Test-GateEvidence.ps1"
 
 if [ ! -f "$SCRIPT" ]; then
   echo "pre-push: $SCRIPT is missing; cannot verify this push" >&2
@@ -24,6 +33,15 @@ if ! command -v pwsh >/dev/null 2>&1; then
   echo "pre-push: pwsh not found on PATH; cannot run the local CI gate" >&2
   echo "          install PowerShell 7, or set BPAD_SKIP_CI=1 to bypass" >&2
   exit 1
+fi
+
+if [ -f "$EVIDENCE" ]; then
+  echo "pre-push: looking for a full gate that already covers this content"
+  if pwsh -NoProfile -File "$EVIDENCE"; then
+    echo "pre-push: nothing to re-run."
+    exit 0
+  fi
+  echo "pre-push: running the full gate."
 fi
 
 exec pwsh -NoProfile -File "$SCRIPT"
