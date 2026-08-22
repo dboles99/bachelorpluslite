@@ -56,6 +56,7 @@ Adding a decision means adding both.
 | BP-ADR-0046 | 2026-08-22 | Research mode's last five planned rows were a paper's structure; two fold into the report, one becomes Open Questions, one becomes What the Store Holds, one is dropped | Accepted, shipped | [ADR-0046](docs/decisions/ADR-0046.md) |
 | BP-ADR-0047 | 2026-08-22 | An agent gets standing authorities; one home per kind of fact; pre-push checks for a full gate rather than repeating it; nextest with a doctest stage | Accepted, shipped | [ADR-0047](docs/decisions/ADR-0047.md) |
 | BP-ADR-0048 | 2026-08-22 | Every menu row either works or is a readout; ten built, eleven deleted, `planned_menu` and `arrives` removed | Accepted, shipped | [ADR-0048](docs/decisions/ADR-0048.md) |
+| BP-ADR-0049 | 2026-08-22 | The window is driven by a script; a clipped menu label is elided and shortened; a temp path a recycled pid can reuse is not unique | Accepted, shipped | [ADR-0049](docs/decisions/ADR-0049.md) |
 
 ## Decisions needed before the work they block
 
@@ -548,6 +549,43 @@ All of it, in one pass. What is worth carrying forward:
   moved.
 
 ## Open items
+
+- **A flake that gets worse the more you run the tests.**
+  `signing_reaches_the_security_history` failed one run in five *in
+  isolation*. The cause was a temp path built from the process id and a
+  counter -- unique within a run, and never cleaned up, so with Windows
+  recycling pids a test process eventually inherited an earlier run's
+  security history or signing key. Measured when found: 5,862 leftover files
+  across 495 distinct pids.
+
+  **The shape is what makes it worth writing down.** The probability of
+  failure rises with the number of times the suite has been run, so the
+  machine that runs the tests most is the one that trusts them least -- and it
+  degrades slowly enough that every individual session reasonably concludes it
+  saw a one-off. Two sessions had.
+
+  The doc comment on the function was not wrong. It said the pid is there "so
+  two runs at once cannot collide", which is true. **It answered the question
+  it had thought of.** The dangerous case was two runs that were *not* at
+  once, and nothing in the comment, the name or the tests pointed at it.
+
+  Fixed in `crate::testpaths`, one home for both callers -- the same trap
+  `bp_platform::paths::reserved_device_name` exists for, in a different
+  costume: two places inventing the same scheme and getting it wrong the same
+  way.
+
+- **A clipped label is not a cosmetic defect when the label is a reason.**
+  `MenuPopup` is a fixed width and clips, so `Sign Document — this document
+  has never b` had been shipping since the row was built. Every label it
+  happened to was a *greyed row's reason* -- the one text on screen whose
+  whole job is to explain why something cannot be clicked.
+
+  Found by driving the window, and it needed both halves of a fix: `overflow:
+  elide` so a truncation looks like one, and shorter wording so it does not
+  happen. **A stylesheet cannot decide what the words should be**, and a
+  shorter word is not a rule anything enforces -- so there is now a test with
+  a deliberately generous budget, which is a smoke alarm rather than a ruler.
+
 
 - **A backlog that was mostly finished work, and nobody had looked.**
   `menus::planned_menu` listed 38 greyed rows across eight menus, each under a

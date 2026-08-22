@@ -1314,14 +1314,14 @@ pub(super) fn default_signing_key_path() -> Option<PathBuf> {
 /// would have them disagree.
 #[cfg(test)]
 pub(super) fn default_signing_key_path() -> Option<PathBuf> {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static NEXT: AtomicU64 = AtomicU64::new(0);
-    let n = NEXT.fetch_add(1, Ordering::Relaxed);
-    Some(std::env::temp_dir().join(format!(
-        "bpad-test-signing-{}-{n}.{}",
-        std::process::id(),
-        bp_integrity::SEALED_KEY_EXTENSION
-    )))
+    // Uniqueness belongs to `crate::testpaths`, which has the story: this
+    // used to build its own pid-and-counter name, and a recycled pid meant
+    // `begin_signing` could find a key sealed under a passphrase the test
+    // did not know.
+    Some(crate::testpaths::unique(
+        "signing",
+        bp_integrity::SEALED_KEY_EXTENSION,
+    ))
 }
 
 #[cfg(test)]

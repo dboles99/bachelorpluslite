@@ -353,7 +353,7 @@ pub fn run(
         // is not one. Saying which kind of file would work is the difference
         // between a limitation and a mystery.
         RunMenu::NotANotebook => items.push(planned(
-            "Nothing to run here: open an .ipynb, or a .md with fenced code blocks",
+            "Nothing to run: open an .ipynb, or a .md with fences",
         )),
         // Distinct from an empty list, deliberately -- see `RunMenu`.
         RunMenu::Unreadable(reason) => {
@@ -954,7 +954,7 @@ pub fn security(
             if has_content {
                 "Redact Found Secrets..."
             } else {
-                "Redact Found Secrets — this document is empty"
+                "Redact Found Secrets — it is empty"
             },
             "",
             action::REDACT_SECRETS,
@@ -994,7 +994,7 @@ pub fn security(
             separator_after: false,
             ..row_enabled(
                 match (has_path, can_sign) {
-                    (false, _) => "Sign Document — this document has never been saved",
+                    (false, _) => "Sign Document — never saved",
                     (true, false) => "Sign Document — save it first",
                     (true, true) => "Sign Document...",
                 },
@@ -1026,7 +1026,7 @@ pub fn security(
                 if has_path {
                     "Verify Signature..."
                 } else {
-                    "Verify Signature — this document has never been saved"
+                    "Verify Signature — never saved"
                 },
                 if has_path { "document.ext.sig" } else { "" },
                 action::VERIFY_SIGNATURE,
@@ -1507,7 +1507,7 @@ mod tests {
         // sentence, which is deliberately loose: the point is to catch a row
         // that *looks* like a command and is not, and "Multi-cursor" or
         // "Rust Scratchpad" would fail it while "Recovery journal: on" and
-        // "Nothing to run here: open an .ipynb..." pass.
+        // "Nothing to run: open an .ipynb..." pass.
         for (menu, items) in every_menu() {
             for item in items {
                 if item.action != action::NONE {
@@ -1517,6 +1517,39 @@ mod tests {
                     item.label.contains(':') || item.label.split_whitespace().count() >= 5,
                     "{menu} ▸ {:?} does nothing and does not read as a readout",
                     item.label
+                );
+            }
+        }
+    }
+
+    /// The widest label that fits `MenuPopup`'s 280px at 13px, measured by
+    /// driving the window rather than computed: "Sign Document — it has never
+    /// bee…" elided at 34 characters, and "Redact Found Secrets — it is
+    /// empty" at 34 did not.
+    ///
+    /// Deliberately generous, because this is a smoke alarm rather than a
+    /// ruler: proportional text has no character count, and a test that
+    /// pretended to know the exact one would fail on a font change for a
+    /// reason nobody could act on.
+    const LABEL_BUDGET: usize = 42;
+
+    #[test]
+    fn no_row_label_is_too_long_for_the_popup_to_show() {
+        // **Found by driving the window** (ADR-0048). The popup is a fixed
+        // width and clips; before `overflow: elide` a label was cut mid-word
+        // with nothing to say it had been, and every label it happened to was
+        // a greyed row's *reason* -- the one text on screen whose whole job
+        // is to explain.
+        //
+        // Eliding makes truncation visible. This keeps the reasons short
+        // enough not to need it, which is the half a stylesheet cannot do.
+        for (menu, items) in every_menu() {
+            for item in items {
+                assert!(
+                    item.label.chars().count() <= LABEL_BUDGET,
+                    "{menu} ▸ {:?} is {} characters and will be elided by the popup",
+                    item.label,
+                    item.label.chars().count()
                 );
             }
         }
@@ -2085,7 +2118,7 @@ mod tests {
             "a real capability with nothing to act on is not a planned row"
         );
         assert!(
-            row.label.contains("never been saved"),
+            row.label.contains("never saved"),
             "the row must say why it is greyed; got '{}'",
             row.label
         );
@@ -2454,7 +2487,7 @@ mod tests {
             never_saved.label, unsaved_changes.label,
             "two different problems must not read as one"
         );
-        assert!(never_saved.label.contains("never been saved"));
+        assert!(never_saved.label.contains("never saved"));
         assert!(unsaved_changes.label.contains("save it first"));
     }
 

@@ -58,7 +58,7 @@ cargo run --release -- --editor-view   # with the custom editor view (ADR-0018)
 
 ## Current state (2026-08-22)
 
-**25 crates, 1,968 tests, green on Windows and Linux.** **Every menu row either does something or is a readout** ([ADR-0048](docs/decisions/ADR-0048.md)) — nothing anywhere says "not implemented yet" any more. The app opens, edits and
+**25 crates, 1,972 tests, green on Windows and Linux.** **Every menu row either does something or is a readout** ([ADR-0048](docs/decisions/ADR-0048.md)) — nothing anywhere says "not implemented yet" any more. The app opens, edits and
 saves atomically, and does rather more than that:
 
 | Area | What works |
@@ -180,6 +180,9 @@ lesson from each is in [DECISIONS.md](DECISIONS.md)**, which is the one
 home for a lesson -- this list is deliberately just the facts, because a
 lesson told in two places is a lesson corrected in one.
 
+- A test suite that got flakier the more it was run: temp paths a recycled process id could reuse.
+- A clipped menu label, found by driving the window; every one it hit was a greyed row's reason.
+- Driving the window is a script now, not plumbing re-derived every session.
 - Every menu row now works or is a readout; a 38-row backlog was mostly finished work nobody had pruned.
 - A doc comment promised something the code had never done.
 - `bp-notebook` and `bp-execution` are reachable.

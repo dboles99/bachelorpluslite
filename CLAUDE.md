@@ -130,6 +130,10 @@ Every commit in this repository has passed it. Keep it that way.
   re-runs `cargo fmt --check` from scratch, so a mid-run edit fails the run
   for a reason that has nothing to do with your change.
 - `cargo fmt --all` before you start it, always.
+- **Never pipe the gate through `tail`, `head` or `Select-Object`.** A
+  failure's detail is *above* the summary, so truncating the output discards
+  the only thing a red run is worth reading. It happened once, and a failing
+  test could not be named afterwards.
 - The hooks run `-Quick` only. **The full `-Linux` leg is yours to run**, and
   authority 2 depends on it — a push whose Linux leg was never run is a push
   that skipped half the gate.

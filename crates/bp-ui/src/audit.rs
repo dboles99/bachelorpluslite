@@ -41,30 +41,21 @@ pub(crate) fn audit_path() -> PathBuf {
 
 /// The same, redirected and made unique under test.
 ///
-/// Both halves of this were learned the hard way. Recording happens inside
-/// `set_security`, `set_privacy`,
+/// Pointed at the real state directory, `cargo test` wrote a live security
+/// history into the user's `%APPDATA%` -- which it did, once, before this
+/// existed. Recording happens inside `set_security`, `set_privacy`,
 /// `scan_for_secrets` and two more, so **every** test that touches a security
-/// operation appends to whatever this returns:
+/// operation appends to whatever this returns.
 ///
-/// * pointed at the real config directory, `cargo test` wrote a live security
-///   history into the user's `%APPDATA%` -- which it did, once, before this
-///   existed;
-/// * pointed at one shared temp file, parallel tests each read the log, each
-///   computed the same next sequence number, and the log then refused to open
-///   as out of order -- so every one of them failed, on a file none of them
-///   was really testing.
-///
-/// A counter rather than a random name, so a failing run names a file that
-/// can be looked at, and the process id so two runs at once cannot collide.
+/// **The uniqueness is `testpaths`' problem, not this one's, and that is the
+/// point of the split.** This function invented its own pid-and-counter
+/// scheme and so did `default_signing_key_path`; both were unique within a
+/// run and neither was unique *across* runs, because nothing deleted the
+/// files and Windows recycles process ids. `crate::testpaths` has the whole
+/// story and the fix.
 #[cfg(test)]
 pub(crate) fn audit_path() -> PathBuf {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static NEXT: AtomicU64 = AtomicU64::new(0);
-    let n = NEXT.fetch_add(1, Ordering::Relaxed);
-    std::env::temp_dir().join(format!(
-        "bpad-test-security-history-{}-{n}.log",
-        std::process::id()
-    ))
+    crate::testpaths::unique("security-history", "log")
 }
 
 /// The report shown by Security ▸ Security History.

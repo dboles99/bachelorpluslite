@@ -68,6 +68,8 @@ mod dispatch;
 mod editor_view;
 mod passphrase;
 mod state;
+#[cfg(test)]
+mod testpaths;
 mod viewer;
 
 /// Crate identity used by workspace smoke tests and diagnostics.
