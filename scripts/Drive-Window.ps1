@@ -26,12 +26,21 @@
     A document to open. Optional.
 
 .PARAMETER Click
-    "x,y" in *window* coordinates. May be given more than once; each click is
-    followed by a capture, so a menu and the row it opens are both recorded.
+    "x,y" in *window* coordinates. Takes a list -- `-Click "12,10","40,60"`,
+    comma-separated, **not** the flag repeated, which PowerShell refuses.
+    Each click is followed by a capture, so a menu and the row it opens are
+    both recorded.
 
 .PARAMETER Keys
     Sent through SendKeys after any clicks. See the SendKeys grammar; `%`
     is Alt, `^` is Ctrl.
+
+    **Takes a list, and usually needs to.** `-Keys "^g","555{ENTER}"`,
+    comma-separated like -Click. Each send is followed by a settle and a
+    capture. A bar takes the caret a tick after the row that opened it
+    (`prompts/rosettas/R011` rule 9), so the two-element form reaches Go to
+    Line while a single `-Keys "^g555{ENTER}"` types the digits into the
+    document instead.
 
 .PARAMETER Out
     Directory for the captures. Defaults to the system temp directory.
@@ -55,12 +64,17 @@
 .EXAMPLE
     ./scripts/Drive-Window.ps1 -Click "300,10" -Out ./shots -Kill
     Open the menu at x=300 and photograph it.
+
+.EXAMPLE
+    ./scripts/Drive-Window.ps1 -File tall.txt -Keys "^g","555{ENTER}" -Kill
+    Jump a document taller than the window to line 555 and photograph both
+    the bar and where it landed.
 #>
 [CmdletBinding()]
 param(
     [string]$File,
     [string[]]$Click = @(),
-    [string]$Keys,
+    [string[]]$Keys = @(),
     [string]$Out = $env:TEMP,
     [int]$Settle = 900,
     [switch]$Screen,
@@ -136,18 +150,6 @@ $arguments = @()
 if ($File) { $arguments += $File }
 $process = Start-Process -FilePath $exe -ArgumentList $arguments -PassThru
 
-# Wait for a window rather than sleeping a guessed amount: a cold start after
-# a rebuild is much slower than a warm one, and a fixed sleep is either a
-# flake or a waste.
-$deadline = [datetime]::UtcNow.AddSeconds(30)
-while ([datetime]::UtcNow -lt $deadline -and $process.MainWindowHandle -eq 0) {
-    Start-Sleep -Milliseconds 200
-    $process.Refresh()
-}
-if ($process.MainWindowHandle -eq 0) {
-    $process | Stop-Process -Force
-    throw 'the window never appeared'
-}
 # **`MainWindowHandle` is not reliably the window**, and trusting it cost an
 # afternoon: for this application it reports a handle that accepts posted
 # clicks but returns nothing from `GetClientRect`, so a capture came back
@@ -155,17 +157,49 @@ if ($process.MainWindowHandle -eq 0) {
 # and take the visible top-level window winit actually created -- its class
 # is `Window Class`, and the 16x16 `Winit Thread Event Target` beside it is
 # the trap that makes "the biggest one" the wrong rule to write down.
-$handle = [IntPtr]::Zero
-foreach ($candidate in [Win]::VisibleWindowsOf($process.Id)) {
-    if ([Win]::ClassOf($candidate) -eq 'Window Class' -and [Win]::TitleOf($candidate)) {
-        $handle = $candidate
-        break
+#
+# **Wait for *that* window, not for `MainWindowHandle`**, and this is the
+# second time the same 1x1 capture has been reported. The first fix knew the
+# handle was untrustworthy and enumerated -- but it still *waited* on
+# `MainWindowHandle -eq 0`, and that condition is satisfied while the handle
+# still names the event target and the real window has no title yet. The
+# enumeration then found nothing titled, fell back to `MainWindowHandle`, and
+# photographed exactly the window the enumeration existed to avoid.
+#
+# So the wait condition and the selection rule have to be **the same
+# question**. A window is usable when it is winit's, visible, titled, and has
+# a client area with area in it; anything else is a window that is not ready,
+# whatever any handle says. Cold start after a rebuild is much slower than a
+# warm one, so this polls to a deadline rather than sleeping a guessed amount.
+function Get-UsableWindow {
+    foreach ($candidate in [Win]::VisibleWindowsOf($process.Id)) {
+        if ([Win]::ClassOf($candidate) -ne 'Window Class') { continue }
+        if (-not [Win]::TitleOf($candidate)) { continue }
+        $rect = New-Object Win+RECT
+        if (-not [Win]::GetClientRect($candidate, [ref]$rect)) { continue }
+        # A zero client area is the event target wearing the right class, and
+        # it is what a 1x1 PNG is made of.
+        if (($rect.R - $rect.L) -le 0 -or ($rect.B - $rect.T) -le 0) { continue }
+        return $candidate
     }
+    return [IntPtr]::Zero
 }
-if ($handle -eq [IntPtr]::Zero) { $handle = $process.MainWindowHandle }
+
+$deadline = [datetime]::UtcNow.AddSeconds(30)
+$handle = [IntPtr]::Zero
+while ([datetime]::UtcNow -lt $deadline) {
+    if ($process.HasExited) { throw "the application exited before a window appeared (code $($process.ExitCode))" }
+    $handle = Get-UsableWindow
+    if ($handle -ne [IntPtr]::Zero) { break }
+    Start-Sleep -Milliseconds 200
+}
 if ($handle -eq [IntPtr]::Zero) {
     $process | Stop-Process -Force
-    throw 'no usable window found'
+    # Deliberately not falling back to `MainWindowHandle`. A capture of the
+    # wrong window is worse than no capture: it reads as "the row did
+    # nothing", which is the one conclusion a capture must never invite by
+    # accident.
+    throw 'no usable window appeared within 30s'
 }
 Write-Host ("window: {0} '{1}' (pid {2})" -f $handle, [Win]::TitleOf($handle), $process.Id)
 
@@ -293,10 +327,15 @@ foreach ($point in $Click) {
     $step++
 }
 
-if ($Keys) {
+# One send per -Keys, each with its own settle and capture. Batching them
+# into one string is what types a Go to Line number into the document: the
+# bar is not focused until a tick after the shortcut that opened it, and
+# SendKeys does not wait for anything.
+foreach ($send in $Keys) {
     Assert-Foreground 'before sending keys'
-    [System.Windows.Forms.SendKeys]::SendWait($Keys)
+    [System.Windows.Forms.SendKeys]::SendWait($send)
     Save-Capture ('{0:d2}-keys' -f $step) | Out-Null
+    $step++
 }
 
 if ($Kill) {

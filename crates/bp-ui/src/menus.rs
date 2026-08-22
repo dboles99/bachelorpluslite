@@ -352,9 +352,24 @@ pub fn run(
         // Not `planned()`: notebook running exists, and this document simply
         // is not one. Saying which kind of file would work is the difference
         // between a limitation and a mystery.
-        RunMenu::NotANotebook => items.push(planned(
-            "Nothing to run: open an .ipynb, or a .md with fences",
-        )),
+        //
+        // **Two readouts, because one of them was false.** This row used to
+        // say "Nothing to run: open an .ipynb, or a .md with fences" whatever
+        // the document was -- and on a `.py` that is contradicted three rows
+        // below by an enabled Run Document that runs the file perfectly.
+        // Found by driving the window. The cell list and the whole-file row
+        // answer different questions, and a readout heading the first must
+        // not make a claim about the second.
+        //
+        // Both are also short enough to survive the popup, which the old one
+        // was not: 52 characters against `LABEL_BUDGET`'s 42, elided in the
+        // window at "open an .ipynb, or …". The actionable half was the half
+        // being thrown away.
+        RunMenu::NotANotebook => items.push(planned(if document_runnable {
+            "No cells here: use Run Document"
+        } else {
+            "Nothing to run: try an .ipynb"
+        })),
         // Distinct from an empty list, deliberately -- see `RunMenu`.
         RunMenu::Unreadable(reason) => {
             items.push(planned(&format!("Cannot read this notebook: {reason}")))
@@ -366,13 +381,17 @@ pub fn run(
         // be true here and would tell the reader nothing they could act on.
         RunMenu::NoKnownLanguage { count, why } => {
             use crate::state::notebook::Unnamed;
+            // Both were around 70 characters and elided mid-clause, which
+            // for a *reason* is the worst text on screen to lose (ADR-0049).
+            // Shortened to keep the reason and drop the hint, because the
+            // popup was dropping the hint anyway and silently.
             items.push(planned(&match why {
-                Unnamed::NotebookWithoutKernelspec => format!(
-                    "{count} code cell(s) of no named language: this notebook has no kernelspec"
-                ),
-                Unnamed::FencesWithoutLanguage => format!(
-                    "{count} fenced block(s) name no language: try ```python, ```sh or ```pwsh"
-                ),
+                Unnamed::NotebookWithoutKernelspec => {
+                    format!("{count} code cell(s): no kernelspec")
+                }
+                Unnamed::FencesWithoutLanguage => {
+                    format!("{count} fence(s) name no language")
+                }
             }));
         }
         RunMenu::Cells(rows) => {
@@ -1476,7 +1495,21 @@ mod tests {
     /// One list so a menu added later cannot quietly escape the check below
     /// -- the failure mode of a hand-written sweep is the menu nobody added
     /// to it.
+    ///
+    /// **That is exactly what happened, and the comment above predicted it
+    /// without preventing it.** The Run menu was absent from this list from
+    /// the day it was written, so neither the readout check nor
+    /// `LABEL_BUDGET` ever saw it -- and it was carrying a 52-character
+    /// readout and two around 70. It is the one menu built from the document
+    /// rather than written down, which is both why it was easy to forget and
+    /// why it most needed the sweep.
+    ///
+    /// It takes arguments, so it appears once per state worth checking rather
+    /// than once. A menu whose rows depend on a value is not covered by
+    /// building it one way.
     fn every_menu() -> Vec<(&'static str, Vec<MenuItem>)> {
+        use crate::state::notebook::{RunMenu, Unnamed};
+
         vec![
             ("File", file(true, true, true, &[])),
             ("Edit", edit(&[], true)),
@@ -1494,7 +1527,70 @@ mod tests {
             ("Tools", tools(true)),
             ("Help", help()),
             ("Security", security_menu()),
+            // The document is not a notebook, and the whole file *can* run:
+            // the case where "Nothing to run" was a false statement.
+            ("Run (script)", run(&RunMenu::NotANotebook, false, true)),
+            // The same, where nothing runs at all.
+            ("Run (inert)", run(&RunMenu::NotANotebook, false, false)),
+            (
+                "Run (unreadable)",
+                run(&RunMenu::Unreadable("not JSON".into()), false, false),
+            ),
+            (
+                "Run (no cells)",
+                run(&RunMenu::Cells(Vec::new()), false, false),
+            ),
+            (
+                "Run (no kernelspec)",
+                run(
+                    &RunMenu::NoKnownLanguage {
+                        count: 99,
+                        why: Unnamed::NotebookWithoutKernelspec,
+                    },
+                    false,
+                    false,
+                ),
+            ),
+            (
+                "Run (unnamed fences)",
+                run(
+                    &RunMenu::NoKnownLanguage {
+                        count: 99,
+                        why: Unnamed::FencesWithoutLanguage,
+                    },
+                    false,
+                    false,
+                ),
+            ),
         ]
+    }
+
+    #[test]
+    fn the_run_menu_never_says_nothing_runs_while_offering_to_run_the_document() {
+        // **Found by driving the window**, on a `.py` whose Run menu said
+        // "Nothing to run: open an .ipynb, or …" above an enabled Run
+        // Document that ran it correctly and printed the right answer.
+        //
+        // The two rows answer different questions -- cells, and the whole
+        // file -- and nothing made the first one say so. A readout that
+        // contradicts a working row three lines below it is worse than no
+        // readout, because a user believes it and stops looking.
+        use crate::state::notebook::RunMenu;
+
+        let items = run(&RunMenu::NotANotebook, false, true);
+
+        let runs_the_document = items
+            .iter()
+            .any(|item| item.label == "Run Document" && item.enabled);
+        assert!(runs_the_document, "the premise of this test has changed");
+
+        for item in &items {
+            assert!(
+                !item.label.starts_with("Nothing to run"),
+                "Run ▸ {:?} denies there is anything to run while Run Document is offered",
+                item.label
+            );
+        }
     }
 
     #[test]

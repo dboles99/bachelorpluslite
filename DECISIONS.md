@@ -58,6 +58,7 @@ Adding a decision means adding both.
 | BP-ADR-0048 | 2026-08-22 | Every menu row either works or is a readout; ten built, eleven deleted, `planned_menu` and `arrives` removed | Accepted, shipped | [ADR-0048](docs/decisions/ADR-0048.md) |
 | BP-ADR-0049 | 2026-08-22 | The window is driven by a script; a clipped menu label is elided and shortened; a temp path a recycled pid can reuse is not unique | Accepted, shipped | [ADR-0049](docs/decisions/ADR-0049.md) |
 | BP-ADR-0050 | 2026-08-22 | D4's envelope review is prepared as a brief; the format had no test that a document written by an earlier build still opens | Accepted, shipped | [ADR-0050](docs/decisions/ADR-0050.md) |
+| BP-ADR-0051 | 2026-08-22 | The Run menu denied there was anything to run while offering to run it; `every_menu()` never held the Run menu; the window driver photographed the wrong window again | Accepted, shipped | [ADR-0051](docs/decisions/ADR-0051.md) |
 
 ## Decisions needed before the work they block
 
@@ -107,6 +108,39 @@ in the fourth.
 Kept rather than deleted, because every one of these went stale the same
 way — a fix landing without the record moving — and because the lesson in each
 is worth more than the fact.
+
+- **A guard's own comment describing its failure mode is not a defence
+  against it.** `menus::tests::every_menu()` exists so that "a menu added
+  later cannot quietly escape the check below", and says so in a doc comment
+  that names the failure mode exactly: *the menu nobody added to it.* The Run
+  menu was missing from that list from the day the sentence was written, so
+  neither the readout sweep nor `LABEL_BUDGET` had ever seen it -- and it was
+  carrying a **52-character** readout, and two around 70, while a test
+  asserting 42 passed on every run.
+
+  What that let through was not cosmetic. On a `.py`, Run's first row read
+  *"Nothing to run: open an .ipynb, or …"* three lines above an **enabled Run
+  Document that ran the file correctly**. A readout contradicting a working
+  row is worse than no readout, because a user believes it and stops looking.
+  The information needed to tell the truth -- `document_runnable` -- was
+  already a parameter of the function and unused.
+
+  The cheapest form of "is this list complete?" is putting a known-bad value
+  in and watching the guard fire. Doing that here printed
+  `Run (inert) ▸ ... is 52 characters`, which is the evidence a passing test
+  could not give. [ADR-0051](docs/decisions/ADR-0051.md).
+
+- **The same 1x1 capture, from the fix that was written for it.** ADR-0049
+  established that `MainWindowHandle` is not reliably this application's
+  window and added an enumeration to avoid it -- but kept *waiting* on
+  `MainWindowHandle -eq 0`, a condition satisfied while the handle still names
+  the 0x0 `Winit Thread Event Target` and the real window has no title yet.
+  The enumeration then matched nothing, fell back to `MainWindowHandle`, and
+  photographed the very window it existed to avoid. **The wait condition and
+  the selection rule have to be the same question**, and there is now no
+  fallback: a capture of the wrong window reads as "the row did nothing",
+  which is the one conclusion a capture must never invite by accident.
+  ADR-0051.
 
 - **A round trip through one build is not evidence about another build.**
   Every round-trip test in this workspace -- `bp-crypto`'s own, the
