@@ -861,11 +861,9 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
             let selection = cell.borrow_mut().find(&query);
             ui.set_find_status(cell.borrow().find_status.as_str().into());
             if let Some(range) = selection {
-                // A preview, not a jump: this fires on every keystroke while
-                // the query is still being typed, so it must not steal focus
-                // back from the find box the way `dispatch::select` does for
-                // Find Next/Previous, Go to Line, and cross-file results.
-                dispatch::preview_match(&ui, &mut cell.borrow_mut(), &range);
+                // Fires on every keystroke while the query is still being
+                // typed, so it must not take the caret out of the find box.
+                dispatch::reveal(&ui, &mut cell.borrow_mut(), &range);
             }
         });
     }
@@ -887,7 +885,12 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
             let selection = cell.borrow_mut().step_match(forward);
             ui.set_find_status(cell.borrow().find_status.as_str().into());
             if let Some(range) = selection {
-                dispatch::select(&ui, &mut cell.borrow_mut(), &range);
+                // **`reveal`, not `select`.** The find bar is still open and
+                // Enter is how the user asks for the next match, so taking
+                // the caret into the document here means the *following*
+                // Enter replaces that match with a line break -- which is
+                // what it did, once per press, silently.
+                dispatch::reveal(&ui, &mut cell.borrow_mut(), &range);
             }
         };
         if forward {
@@ -1017,8 +1020,10 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
             if let Some(range) = moved {
                 // The bar stays open: going to a line is often the first of
                 // several, and closing it would make the second one two
-                // keystrokes further away.
-                dispatch::select(&ui, &mut cell.borrow_mut(), &range);
+                // keystrokes further away. **Which is exactly why the caret
+                // must stay in it** -- a second line number typed into a bar
+                // that no longer holds focus goes into the document.
+                dispatch::reveal(&ui, &mut cell.borrow_mut(), &range);
             }
         });
     }

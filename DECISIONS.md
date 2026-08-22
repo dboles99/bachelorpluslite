@@ -59,6 +59,7 @@ Adding a decision means adding both.
 | BP-ADR-0049 | 2026-08-22 | The window is driven by a script; a clipped menu label is elided and shortened; a temp path a recycled pid can reuse is not unique | Accepted, shipped | [ADR-0049](docs/decisions/ADR-0049.md) |
 | BP-ADR-0050 | 2026-08-22 | D4's envelope review is prepared as a brief; the format had no test that a document written by an earlier build still opens | Accepted, shipped | [ADR-0050](docs/decisions/ADR-0050.md) |
 | BP-ADR-0051 | 2026-08-22 | The Run menu denied there was anything to run while offering to run it; `every_menu()` never held the Run menu; the window driver photographed the wrong window again | Accepted, shipped | [ADR-0051](docs/decisions/ADR-0051.md) |
+| BP-ADR-0052 | 2026-08-22 | Enter twice in the find box replaced the match with a line break; `preview_match` becomes `reveal` and is the default | Accepted, **fix not confirmed in the window** | [ADR-0052](docs/decisions/ADR-0052.md) |
 
 ## Decisions needed before the work they block
 
@@ -108,6 +109,29 @@ in the fourth.
 Kept rather than deleted, because every one of these went stale the same
 way — a fix landing without the record moving — and because the lesson in each
 is worth more than the fact.
+
+- **A comment that enumerates its cases is asserting something about every
+  one of them.** `dispatch::select` said Find Next/Previous, Go to Line and a
+  cross-file result "all move focus into the editor on purpose, because each
+  of those is a single deliberate jump the user makes once". That reads as an
+  explanation and is three claims; one was true. Both bars stay open **on
+  purpose** -- Go to Line's call site says so three lines from the call that
+  contradicted it -- so the caret moved into the document while a box was
+  still on screen.
+
+  **What it cost: pressing Enter twice in the find box replaced the match with
+  a line break**, and went on inserting one per press, announced by nothing
+  but the dirty dot and a line count rising off-screen. Ctrl+S would have
+  saved it. The fix was one function away the whole time: `preview_match`
+  already selected without taking focus, and its comment already explained the
+  hazard -- *for the typing case only*. The same sentence was true of Find
+  Next and had never been asked of it. It is now `reveal`, it is the default,
+  and `select` is the exception for panel clicks.
+
+  A list in prose looks like description rather than specification, which is
+  how it survived; and the call site that disproved it was close enough that
+  anyone reading either had already stopped reading the other.
+  [ADR-0052](docs/decisions/ADR-0052.md).
 
 - **A guard's own comment describing its failure mode is not a defence
   against it.** `menus::tests::every_menu()` exists so that "a menu added

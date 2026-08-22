@@ -186,12 +186,18 @@ pub(crate) fn confirm_replace(plan: &bp_search::ReplacePlan) -> bool {
         == rfd::MessageDialogResult::Ok
 }
 
-/// Select a character range in the editor.
+/// Select a character range in the editor **and take the caret with it**.
 ///
-/// Under the custom surface we own the selection, so this sets it and asks
-/// only for the focus back. Under `TextInput` the widget owns it, and the
-/// offsets are clamped into `i32` because that is what its API takes -- a
-/// document long enough to overflow one would have other problems first.
+/// [`reveal`] does the selecting; this adds the focus, and the focus is the
+/// whole difference between them. Use it when the action came from somewhere
+/// that is not a text box -- a results panel, a cell outline -- so there is
+/// no box the caret can be stolen from.
+///
+/// **Do not use it for anything submitted from a bar.** Find Next and Go to
+/// Line both leave their bar open on purpose, and moving the caret into the
+/// document while a box is still on screen means the user's next keystroke
+/// edits the document. That destroyed text for as long as this function was
+/// used for all five callers; see [`reveal`].
 pub(crate) fn select(ui: &AppWindow, state: &mut AppState, range: &std::ops::Range<usize>) {
     use crate::editor_view::draw_editor_view;
 
@@ -209,18 +215,30 @@ pub(crate) fn select(ui: &AppWindow, state: &mut AppState, range: &std::ops::Ran
     ui.invoke_select_range(start, end);
 }
 
-/// Preview a match in the editor without moving focus.
+/// Select a character range and scroll it into view, **leaving the caret
+/// wherever it already is**.
 ///
-/// `select` is for a completed "jump to this now" action -- Find Next/
-/// Previous, Go to Line, and clicking a cross-file search result all move
-/// focus into the editor on purpose, because each of those is a single
-/// deliberate jump the user makes once. This function is for the opposite
-/// case: the find box fires its `find-changed` callback on every keystroke
-/// as the user is still typing a query, and `select`'s focus-stealing would
-/// send the very next character typed into the document instead of the
-/// box. So this sets the same selection `select` would, but leaves focus
-/// wherever it already is.
-pub(crate) fn preview_match(ui: &AppWindow, state: &mut AppState, range: &std::ops::Range<usize>) {
+/// This is the one to reach for by default, and [`select`] is the exception.
+///
+/// It used to be called `preview_match` and to exist only for the find box's
+/// keystroke-by-keystroke preview, on the premise -- written into `select` --
+/// that Find Next, Go to Line and a cross-file result are each "a single
+/// deliberate jump the user makes once" and may therefore take the caret.
+/// **Two of the three are repeated, from a bar that stays open on purpose.**
+/// Go to Line's call site says so in as many words, three lines from a call
+/// whose comment said the opposite, and neither had been asked which was
+/// right.
+///
+/// What that cost: pressing Enter twice in the find box replaced the match
+/// with a line break and went on inserting one per press, with nothing to
+/// announce it but the dirty dot and a line count going up. Found by driving
+/// the window over a 601-line fixture -- a document that fits on one screen
+/// cannot show it, because the damage is off-screen by the time it happens.
+///
+/// Focus is not lost, only deferred: closing either bar calls
+/// `focus-editor()`, so the caret returns when the user is finished with the
+/// box rather than while they are still typing into it.
+pub(crate) fn reveal(ui: &AppWindow, state: &mut AppState, range: &std::ops::Range<usize>) {
     use crate::editor_view::draw_editor_view;
 
     if state.editor_view {

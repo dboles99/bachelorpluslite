@@ -225,9 +225,31 @@ every other menu here does.
 
 ## Security (the rest)
 
-Lock, decrypt in place, secure clipboard, audit, settings. Planned — phases 15
-and 16. Redaction and the metadata inspector are no longer among them; both are
-rows above.
+**This section said "Lock, decrypt in place, secure clipboard, audit,
+settings. Planned — phases 15 and 16" until 2026-08-22, and every part of that
+was wrong**, 220 lines below a heading that says there are no planned rows
+left. Kept as a correction rather than deleted, because the shape recurs:
+
+- **Lock Document is a live row** (`action::LOCK_DOCUMENT`, ADR-0048), and a
+  test says so by name — *"Lock Document is live now and must have a real
+  action"*. It was still listed as planned here.
+- **Audit is Security ▸ Security History** (id 206, ADR-0024), live since
+  before this sentence was last touched.
+- **Settings is Tools ▸ Configuration** (id 723, ADR-0048).
+- **Decrypt in place** and **secure clipboard** were never menu rows and are
+  not planned as any: opening a `.bpadx` asks for its passphrase, and what the
+  clipboard may retain is a *policy* the profile decides
+  ([ADR-0020](../decisions/ADR-0020.md)), read out three rows up as
+  "Clipboard history: …".
+- **Phases 15 and 16 are both "Started"** in `ROADMAP.md`, which owns phase
+  status, and their crates ship.
+
+So this is a paragraph of roadmap prose that outlived four of its five nouns.
+It is the trap `CLAUDE.md` names — *a name that has sat in a plan long enough
+starts to read like a specification* — arriving in a file whose whole job is
+to say what is real.
+
+Redaction and the metadata inspector are rows above, and were already.
 
 Hash, sign and verify are no longer among them: `bp-crypto`'s hashing half and
 `bp-integrity`'s sidecar are all wired into the rows above, **signing
