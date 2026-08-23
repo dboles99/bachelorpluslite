@@ -53,9 +53,14 @@ checksums both targets, and both archives have been extracted and run.
 ([ADR-0055](docs/decisions/ADR-0055.md)) -- so the archives are unsigned and
 say so, every run, in the same words.
 
+Upgrade testing followed it: `what_an_earlier_build_wrote.rs` holds committed
+literals for the four files this product leaves on a disk -- `config.toml`,
+`recent.toml`, the security history and the recovery journal -- each of which
+had only write-then-read-back coverage, which is trap 7 exactly.
+
 What is left of phase 20 is an icon and a `.desktop` file (a build-time
-resource, so a dependency ADR), upgrade testing against files an *earlier
-build* wrote, and a decision about whether there is an installer at all.
+resource, so a dependency ADR), and a decision about whether there is an
+installer at all.
 
 **Phase 10 was decided on 2026-08-23 without being started, which is a state
 this table needs a word for.** D16 asked what should compute an embedding;

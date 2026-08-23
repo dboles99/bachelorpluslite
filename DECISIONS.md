@@ -134,6 +134,29 @@ is worth more than the fact.
   honest by leaving it alone -- rasterisation still needs a capture rig, and
   the bench prints that rather than letting a green run imply it.
 
+- **Trap 7 was not only about `.bpadx`, and the other four files are the ones
+  a user notices.** ADR-0050 found that nothing tested whether a document
+  sealed by an earlier build still opens, and fixed it for the envelope. The
+  same hole was open for **every other file this product leaves on a disk** --
+  `config.toml`, `recent.toml`, the security history and the recovery journal
+  -- each covered by a write-then-read-back test proving only that one build
+  agrees with itself.
+
+  `tests/integration/tests/what_an_earlier_build_wrote.rs` holds committed
+  literals for all four. **The worst of them is `recent.toml`**, because
+  `Recent::parse` ends in `unwrap_or_default()`: a format change there does
+  not fail, it returns an empty list, and the user opens the product to find
+  their recent files simply gone with nothing said and nothing logged. A
+  silent failure needs a test *more* than a loud one, and gets one less often
+  -- there is no error to notice and therefore nothing to write a test about
+  until somebody goes looking.
+
+  Every guard was watched failing, by mutating all four fixtures at once,
+  before the file was called done. That is ADR-0051's habit -- *put a
+  known-bad value in and watch the guard fire* -- and it is the difference
+  between four passing tests and four tests that pass **for the right
+  reason**.
+
 - **When a quoted string needs a second quoted string inside a third, write a
   file.** The release script's Linux leg was a PowerShell string, passed to
   `bash -c`, containing a bash `$(...)`, containing an `awk '{print $2}'`.
