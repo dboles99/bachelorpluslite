@@ -52,13 +52,14 @@ authoritative gate and runs from `pre-commit` and `pre-push`. See
 
 ```powershell
 cargo run --release            # the app
+cargo run --release -- --help  # every flag it accepts
 cargo run --release -- --editor-view   # with the custom editor view (ADR-0018)
 ./scripts/Measure-Startup.ps1  # startup and idle memory vs specs.md §22
 ```
 
-## Current state (2026-08-22)
+## Current state (2026-08-23)
 
-**25 crates, 1,972 tests, green on Windows and Linux.** **Every menu row either does something or is a readout** ([ADR-0048](docs/decisions/ADR-0048.md)) — nothing anywhere says "not implemented yet" any more. The app opens, edits and
+**25 crates, 1,986 tests, green on Windows and Linux.** **Every menu row either does something or is a readout** ([ADR-0048](docs/decisions/ADR-0048.md)) — nothing anywhere says "not implemented yet" any more. The app opens, edits and
 saves atomically, and does rather more than that:
 
 | Area | What works |
@@ -66,6 +67,7 @@ saves atomically, and does rather more than that:
 | Editing | Tabs, four themes plus Follow System, zoom, indentation (tabs or soft tabs, 2/4/8), honest save state, atomic save, undo/cut/copy/paste, sort / deduplicate / reverse / trim lines, duplicate and move lines, **go to line in either surface** |
 | Storage | A rope buffer holds every document; whole-document operations are one undo step |
 | Safety | Unsaved-changes prompts, external-change detection, crash recovery journal — encrypted and recovered at unlock for encrypted documents ([ADR-0022](docs/decisions/ADR-0022.md)) |
+| Command line | `bachelorpad notes.txt` opens files; `--line=427 server.log` opens one already scrolled to the line, highlighted, in either editor surface; `--help` lists all thirteen flags and `--version` names the product, its version and its licence ([ADR-0054](docs/decisions/ADR-0054.md)). A mistyped flag, a flag missing its value and a switch given one are each reported at startup rather than discarded |
 | Files | Open/Save/Save As/Save All/Save a Copy/Reload, recent files, tab context menu, command-line file opening. A document is classified by size before it is read (ADR-0027): ordinary opens as ever, large opens with the size in the status bar, and a **huge one opens too** — read from disk as you scroll, in the custom surface whichever flag you started with (ADR-0030). A 192 MiB log costs 0.8 MiB more than a small note. UTF-8, UTF-8 with BOM and **UTF-16 LE/BE** all load and save; a truncated or malformed UTF-16 file is refused by name rather than repaired with replacement characters |
 | Search | Find and replace with case-sensitive, whole-word and regex toggles, changes shown before they are applied, recursive cross-file search. **Find works in a document too large to hold too** ([ADR-0042](docs/decisions/ADR-0042.md)): the find bar scans it from disk a window at a time, says `searching 62%` rather than claiming a total it cannot know, then jumps to the hit and highlights it. Measured on a 213.5 MiB log — `1 of 1` at line 4,800,001, and `1 of 500+` when a query matches more than the cap |
 | Data | JSON / JSONL / TOML / **YAML** validate, format, minify, convert; RFC 4180 CSV/TSV shape report, conversion to JSON and JSON Lines, column types. YAML refuses deep nesting, alias bombs and duplicate keys in words that say what to do ([ADR-0023](docs/decisions/ADR-0023.md)) |
@@ -85,12 +87,15 @@ Startup, with the software renderer ([ADR-0017](docs/decisions/ADR-0017.md)):
 Idle memory rose ~2.7 MB this session; `std-widgets` is imported now, for the
 one thing that reports the desktop's light/dark preference.
 
-Configuration precedence: command line (`--theme=`, `--renderer=`, `--log=`,
-`--font-size=`, `--tab-width=`, `--indent-spaces=`),
-environment (`BACHELORPAD_*`), a TOML file
-(`%APPDATA%\bachelorpad\config.toml`, or `$XDG_CONFIG_HOME` on Linux), then
-defaults. Broken config warns and falls back; it never stops the editor
+Configuration precedence: command line, environment (`BACHELORPAD_*`), a TOML
+file (`%APPDATA%\bachelorpad\config.toml`, or `$XDG_CONFIG_HOME` on Linux),
+then defaults. Broken config warns and falls back; it never stops the editor
 starting.
+
+**`bachelorpad --help` lists every flag**, which is why this paragraph no
+longer does ([ADR-0054](docs/decisions/ADR-0054.md)). A flag this product does
+not accept is now reported rather than dropped -- `--font_size=20` says so
+instead of doing nothing.
 
 
 ### Known gaps
@@ -197,6 +202,8 @@ lesson told in two places is a lesson corrected in one.
 - Signing works, and the key is sealed rather than protected.
 - Somebody has now typed into the custom editor view, and it works.
 - Word wrap now works under `--editor-view`.
+- The command line answers `--help` and `--version`, and reports a typo.
+- `--line=427 server.log` opens the file already at the line.
 
 Every one of these went stale the same way before the record caught up:
 a fix landing without the record moving. See [CLAUDE.md](CLAUDE.md) for
@@ -218,3 +225,10 @@ project
 ```
 
 See `docs/governance/WORK_MODEL.md`.
+
+## Licence
+
+Dual-licensed under [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at
+your option — which every crate manifest has claimed since the scaffold
+commit and neither file backed until 2026-08-23
+([ADR-0054](docs/decisions/ADR-0054.md)).

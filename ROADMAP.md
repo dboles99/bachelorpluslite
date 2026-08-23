@@ -2,7 +2,7 @@
 
 This is not an MVP roadmap. Each phase contributes to the full v1 target.
 
-Status as of **2026-08-21**. Three words, meaning three different things:
+Status as of **2026-08-23**. Three words, meaning three different things:
 
 - **Done** — the phase's work is finished.
 - **Started** — a real, tested slice exists *and is reachable from the
@@ -36,7 +36,21 @@ Status as of **2026-08-21**. Three words, meaning three different things:
 | 17 | Themes/personality/accessibility | **Started** | [12-themes-brand](project/tasks/12-themes-brand/) | `bp-theme` |
 | 18 | Windows/Linux platform integration | **Started** | [13-platform](project/tasks/13-platform/) | `bp-platform` |
 | 19 | Hardening, fuzzing and benchmarks | **Started** | [14-hardening](project/tasks/14-hardening/) | `fuzz/` (standalone, and now gated) |
-| 20 | Packaging, signing, release and upgrade testing | Not started | [14-hardening](project/tasks/14-hardening/) | — |
+| 20 | Packaging, signing, release and upgrade testing | **Started** | [14-hardening](project/tasks/14-hardening/) | — |
+
+**Phase 20 started on 2026-08-23, and what it found is worth knowing before
+anybody sizes the rest of it.** The inventory came first, as ADR-0048
+recommends, and turned up four things in a product 1,972 passing tests deep:
+the binary could not say its own version, a mistyped flag was discarded in
+silence, every manifest claimed a licence the repository did not contain, and
+`specs.md` advertised three flags that did not exist -- one of which made
+`bachelorpad --line 427 server.log` try to open a file called `427`.
+
+All four are fixed ([ADR-0054](docs/decisions/ADR-0054.md)). What is left of
+phase 20 is the *artefact* -- an archive, an icon, a `.desktop` file, an
+installer, a signature -- and one row of it needs a human: **signing needs a
+certificate**, which is now the only open question in
+`project/DECISIONS_NEEDED.md`.
 
 ## Two numbering schemes, reconciled
 

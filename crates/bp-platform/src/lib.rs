@@ -117,6 +117,21 @@ pub const APP_DIR: &str = "bachelorpad";
 /// deliberately not.
 pub const APP_ID: &str = "io.github.dboles99.BachelorPadPlus";
 
+/// The product's name as a person reads it.
+///
+/// Neither [`APP_DIR`] nor [`APP_ID`], and it carries no compatibility
+/// promise at all -- this one may be changed freely, which is precisely why
+/// it must not be spelled out at the three places that show it: the desktop
+/// registration, `--version`, and Help ▸ Diagnostics. A rename that reaches
+/// two of the three is worse than no rename.
+pub const DISPLAY_NAME: &str = "BachelorPad+";
+
+/// One line, wherever the product introduces itself.
+///
+/// Short enough for a `.desktop` `Comment=`, which is the tightest of the
+/// places it appears.
+pub const DESCRIPTION: &str = "Text editor for notes, data and logs";
+
 /// One of the two operating systems ADR-0001 names, as a *value*.
 ///
 /// The whole design of this crate rests on this being an argument rather than

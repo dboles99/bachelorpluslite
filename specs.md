@@ -438,11 +438,29 @@ CLI:
 
 ```text
 bachelorpad file.txt
-bpad file.txt
-bachelorpad --line 427 server.log
-bachelorpad --readonly huge.log
-bachelorpad --large-file dataset.jsonl
+bachelorpad --line=427 server.log
+bachelorpad --help
 ```
+
+**`bp_config::cli::FLAGS` is the home for what the command line accepts**, and
+`--help` renders from it, so this block deliberately shows shapes rather than
+a list -- a second list is a list that goes stale (ADR-0054).
+
+Two flags this section used to show are gone, and neither was a decision when
+it was written:
+
+- `--large-file` is **deleted**. ADR-0027 and ADR-0030 make size decide how a
+  document opens, from metadata, before a byte is read; a flag forcing it is
+  either a no-op or a worse answer than the automatic one.
+- `--readonly` is **not a flag**. Read-only is a property of a document, not
+  of an invocation -- the huge-document viewer is already read-only and
+  Security > Lock Document already exists. It wants a design pass, and
+  `project/WORK_QUEUE.md` has it.
+
+The `bpad` short spelling this block also showed is **kept and unbuilt**: it
+is a second name for the same executable, which is something an installer
+creates rather than something the product does. It belongs to phase 20 with
+the rest of the artefact, and is listed there rather than here.
 
 ## 20. Cross-platform architecture
 

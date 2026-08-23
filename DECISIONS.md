@@ -61,6 +61,7 @@ Adding a decision means adding both.
 | BP-ADR-0051 | 2026-08-22 | The Run menu denied there was anything to run while offering to run it; `every_menu()` never held the Run menu; the window driver photographed the wrong window again | Accepted, shipped | [ADR-0051](docs/decisions/ADR-0051.md) |
 | BP-ADR-0052 | 2026-08-22 | Enter twice in the find box replaced the match with a line break; `preview_match` becomes `reveal` and is the default | Accepted, shipped, confirmed at the keyboard | [ADR-0052](docs/decisions/ADR-0052.md) |
 | BP-ADR-0053 | 2026-08-22 | `main` advances by pull request; opening one is an agent's job, merging is not. D13 closed after six sessions | Accepted | [ADR-0053](docs/decisions/ADR-0053.md) |
+| BP-ADR-0054 | 2026-08-23 | The command line becomes an interface: `--help`, `--version`, `--line=N`, a reported typo, and the licences every manifest already claimed | Accepted, shipped, confirmed at the window | [ADR-0054](docs/decisions/ADR-0054.md) |
 | BP-ADR-0017 | amended 2026-08-22 | Half of the renderer revert condition is now a number rather than a feeling: per-frame row building, and its independence from document size | Accepted, amended | [ADR-0017](docs/decisions/ADR-0017.md) |
 
 ## Decisions needed before the work they block
@@ -130,6 +131,37 @@ is worth more than the fact.
   other half of [ADR-0017](docs/decisions/ADR-0017.md)'s revert condition
   honest by leaving it alone -- rasterisation still needs a capture rig, and
   the bench prints that rather than letting a green run imply it.
+
+- **An interface nobody has typed at is not an interface, it is a parser.**
+  Nineteen phases in, `bachelorpad --version` printed nothing and opened a
+  window; `--help` did the same. Twelve flags were accepted and not one was
+  discoverable from the product -- the only inventory was `main.rs` and the
+  middle of a `match`. A thirteenth spelling, `--font_size=20`, was dropped in
+  silence *by the crate that already reported the identical mistake in the
+  config file*: one end of one precedence chain told the user and the other
+  swallowed it, and nobody had chosen that. Three more flags were documented
+  in `specs.md` and absent, one of which made `--line 427 server.log` try to
+  open **a file called `427`**.
+
+  Every one of those is invisible from inside the code, where the arguments
+  are a `Vec<String>` that gets read correctly. They appear the moment
+  somebody asks what a *stranger* typing `--help` would see -- which is the
+  question packaging asks about everything, and is why phase 20's inventory
+  found four defects in a product 1,972 passing tests deep. **Take the
+  inventory before the estimate**, again.
+
+  The fix that generalises is that `bp_config::cli::FLAGS` holds flags the
+  crate does not act on. A list of only the six it applies could not tell a
+  typo from a flag the shell owns, and would have called `--self-check` a
+  mistake on every gate run. [ADR-0054](docs/decisions/ADR-0054.md).
+
+- **A manifest claim is not a file.** Every crate has said
+  `license = "MIT OR Apache-2.0"` since the scaffold commit and the repository
+  contained neither licence text. Nothing checks, because nothing in a build
+  reads it -- `cargo` takes the string on trust and so does everybody reading
+  the manifest. It is trap 3 in its purest form: *what would fail if this
+  stopped being true?* Nothing would, right up until the first release
+  archive shipped a claim with nothing behind it. ADR-0054.
 
 - **An unanswerable question and an unasked one look identical in a queue.**
   D13 sat for six sessions and was neither: it was a question whose *premise*

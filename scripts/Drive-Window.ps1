@@ -25,6 +25,14 @@
 .PARAMETER File
     A document to open. Optional.
 
+.PARAMETER Flag
+    Flags to pass to the executable, ahead of -File. Takes a list, like
+    -Click and -Keys: `-Flag "--line=555","--editor-view"`.
+
+    What it exists for is the half of the product no click can reach: a flag
+    only does its work at startup, so driving it means launching with it and
+    photographing the first frame. `--line` is the first of those.
+
 .PARAMETER Click
     "x,y" in *window* coordinates. Takes a list -- `-Click "12,10","40,60"`,
     comma-separated, **not** the flag repeated, which PowerShell refuses.
@@ -66,6 +74,11 @@
     Open the menu at x=300 and photograph it.
 
 .EXAMPLE
+    ./scripts/Drive-Window.ps1 -File tall.txt -Flag "--line=555" -Out ./shots -Kill
+    Open a document taller than the window already scrolled to line 555, and
+    photograph where it landed. No keys: this is what the first frame shows.
+
+.EXAMPLE
     ./scripts/Drive-Window.ps1 -File tall.txt -Keys "^g","555{ENTER}" -Kill
     Jump a document taller than the window to line 555 and photograph both
     the bar and where it landed.
@@ -73,6 +86,7 @@
 [CmdletBinding()]
 param(
     [string]$File,
+    [string[]]$Flag = @(),
     [string[]]$Click = @(),
     [string[]]$Keys = @(),
     [string]$Out = $env:TEMP,
@@ -147,6 +161,11 @@ public static class Win {
 New-Item -ItemType Directory -Force -Path $Out | Out-Null
 
 $arguments = @()
+# Flags before the file, because the shell reads anything not starting with a
+# dash as a document to open and a flag typed after one still works -- but a
+# capture is read by a person, and the order they expect is the order they
+# would type.
+foreach ($f in $Flag) { $arguments += $f }
 if ($File) { $arguments += $File }
 $process = Start-Process -FilePath $exe -ArgumentList $arguments -PassThru
 

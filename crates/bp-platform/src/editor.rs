@@ -102,8 +102,8 @@ impl AppInfo {
     #[must_use]
     pub fn bachelorpad(executable: impl Into<String>) -> Self {
         Self {
-            display_name: "BachelorPad+".to_owned(),
-            description: "Text editor for notes, data and logs".to_owned(),
+            display_name: crate::DISPLAY_NAME.to_owned(),
+            description: crate::DESCRIPTION.to_owned(),
             executable: executable.into(),
             app_id: crate::APP_ID.to_owned(),
             icon: crate::APP_ID.to_owned(),

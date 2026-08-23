@@ -415,6 +415,15 @@ pub struct RunOptions {
     pub startup_notice: Option<String>,
     /// Files named on the command line, opened at startup (specs.md §19).
     pub files: Vec<PathBuf>,
+    /// Line to put the caret on once the first file is open, from `--line=N`.
+    ///
+    /// The *first* file, because a line number means nothing spread across
+    /// several documents, and the first is the one left active.
+    ///
+    /// Numbered from one, as `bp_editor::Editor::go_to_line` and everything a
+    /// person reads number them. `None` leaves the caret where opening put
+    /// it.
+    pub line: Option<usize>,
     /// Print `BPSPIKE_READY_MS=<f64>` once the first frame has been rendered,
     /// then quit. Drives `scripts/Measure-UiSpike.ps1`.
     ///
@@ -1247,6 +1256,34 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
 
     set_static_menus(&ui);
     refresh(&ui, &mut state.borrow_mut(), state::PushText::Yes);
+
+    // `--line=N`, made of exactly what Ctrl+G does: the same `go_to_line`,
+    // the same `reveal`. One implementation, so the flag cannot drift from
+    // the row.
+    //
+    // **A tick later, and not here**, for the reason R011 rule 9 names on the
+    // other side of the same seam. `reveal` asks the widget to scroll a range
+    // into view, and until `run()` there is no laid-out widget to ask; the
+    // request is dropped rather than refused, so the caret lands and the
+    // viewport does not move -- which looks exactly like `--line` doing
+    // nothing. 1ms is `focus-timer`'s interval and for its reason: not a
+    // delay, just a later turn of the event loop.
+    if let Some(line) = options.line {
+        let cell = Rc::clone(&state);
+        let weak = ui.as_weak();
+        slint::Timer::single_shot(std::time::Duration::from_millis(1), move || {
+            let Some(ui) = weak.upgrade() else { return };
+            // Through the string form because that is the one entry point,
+            // and it is where "past the end lands on the last line" is
+            // already decided. A second numeric door would be a second
+            // answer to the same question.
+            let moved = cell.borrow_mut().go_to_line(&line.to_string());
+            if let Some(range) = moved {
+                dispatch::reveal(&ui, &mut cell.borrow_mut(), &range);
+            }
+        });
+    }
+
     ui.run()?;
     drop(disk_timer);
     Ok(())

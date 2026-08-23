@@ -7,8 +7,38 @@
 use bp_config::RendererPref;
 use bp_theme::ThemeId;
 
+/// What this executable is, for `--version`.
+///
+/// Read here rather than inside `bp-config` so the answer is the *binary's*
+/// -- every crate inherits `[workspace.package]`, so a library reading its
+/// own would give the same string today and quietly stop one day.
+const PACKAGE: bp_config::cli::Package = bp_config::cli::Package {
+    version: env!("CARGO_PKG_VERSION"),
+    license: env!("CARGO_PKG_LICENSE"),
+};
+
 fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().collect();
+
+    // Before configuration, deliberately. `--help` is what somebody reaches
+    // for when the product is not behaving, and a config file broken badly
+    // enough to be the reason is not a reason to withhold it.
+    //
+    // Both print to stdout, as `--self-check` already does. On Windows a
+    // release build is a GUI-subsystem binary, so this reaches a console
+    // when one is attached -- a shell, a pipe, the gate -- and is discarded
+    // when there is none. Launching a text editor from Explorer to read its
+    // `--help` is not a thing anybody does, and the alternative is
+    // `AttachConsole`, which means `unsafe` and a Windows dependency for it.
+    if bp_config::cli::asked_for_help(&args) {
+        print!("{}", bp_config::cli::help(PACKAGE));
+        return Ok(());
+    }
+    if bp_config::cli::asked_for_version(&args) {
+        print!("{}", bp_config::cli::version(PACKAGE));
+        return Ok(());
+    }
+
     let loaded = bp_config::load(&args);
 
     // Logging level comes from configuration, so BACHELORPAD_LOG and the
@@ -36,6 +66,19 @@ fn main() -> anyhow::Result<()> {
         }
         id
     });
+
+    // `--line` is not a setting -- nothing remembers it -- so it is read here
+    // beside the other per-invocation switches rather than through the
+    // precedence chain. What is *not* here is the parsing: `bp_config::cli`
+    // owns that, so the rule about what counts as a line number is testable
+    // without a process.
+    let line = match bp_config::cli::line(&args) {
+        Ok(line) => line,
+        Err(typed) => {
+            notices.push(format!("'{typed}' is not a line number; ignored"));
+            None
+        }
+    };
 
     for notice in &notices {
         tracing::warn!("config: {notice}");
@@ -68,6 +111,7 @@ fn main() -> anyhow::Result<()> {
     tracing::info!("starting BachelorPad+");
     bp_ui::run_with(bp_ui::RunOptions {
         files,
+        line,
         renderer: match loaded.config.renderer {
             RendererPref::Software => bp_ui::Renderer::Software,
             RendererPref::Platform => bp_ui::Renderer::Platform,

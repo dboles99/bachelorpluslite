@@ -32,7 +32,7 @@ and this table carries the intent until then.
 | `bp-naming` | **live** | Semantic filename grammar (ADR-0003), and the date and time formats the Insert menu writes into documents. Pure: no filesystem, no clock. | 1 |
 | `bp-files` | **live** | Atomic save, load, encoding detection, external-change stamps (ADR-0007). | 1, 3 |
 | `bp-theme` | **live** | Palettes as data (ADR-0009). Green is the default. | 1, 17 |
-| `bp-config` | **live** | Settings precedence, config file, recent-files list, recovery from bad input. | 1 |
+| `bp-config` | **live** | Settings precedence, config file, recent-files list, recovery from bad input, and **the inventory of what the command line accepts** (`cli`, which renders `--help` and `--version` from it -- ADR-0054). | 1 |
 | `bp-ui` | **live** | The Slint application shell (ADR-0015). Split into modules — see below. | 1 |
 | `bp-buffer` | **live** | Rope buffer, character indices, line/column maths. Plus the large-file engine (ADR-0027): detection, chunked reading, a sparse line index and line-aligned streaming windows. The open path reads `SizeClass` and `Access` before it reads the file; `LargeFile` itself waits on a view that can show a document the rope does not hold. | 2, 4 |
 | `bp-editor` | **live** | Caret, selection, motion, transaction-based undo/redo, line operations, key-to-command mapping, document-to-screen geometry. The editor's storage — see below. | 2 |
