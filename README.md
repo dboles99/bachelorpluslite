@@ -55,7 +55,15 @@ cargo run --release            # the app
 cargo run --release -- --help  # every flag it accepts
 cargo run --release -- --editor-view   # with the custom editor view (ADR-0018)
 ./scripts/Measure-Startup.ps1  # startup and idle memory vs specs.md §22
+./scripts/New-Release.ps1 -Linux       # archives for both targets, with checksums
 ```
+
+`New-Release.ps1` stages the binary with both licence texts and a `BUILD.txt`
+naming the commit, archives it (`.zip` for Windows, `.tar.gz` for Linux, built
+inside WSL so the executable bit and the `bpad` symlink survive), and writes a
+`SHA256SUMS.txt` that `sha256sum -c` reads. **The archives are unsigned and
+the script says so on every run** — signing is deferred and self-signing
+refused, for the reason in [ADR-0055](docs/decisions/ADR-0055.md).
 
 ## Current state (2026-08-23)
 
@@ -67,6 +75,7 @@ saves atomically, and does rather more than that:
 | Editing | Tabs, four themes plus Follow System, zoom, indentation (tabs or soft tabs, 2/4/8), honest save state, atomic save, undo/cut/copy/paste, sort / deduplicate / reverse / trim lines, duplicate and move lines, **go to line in either surface** |
 | Storage | A rope buffer holds every document; whole-document operations are one undo step |
 | Safety | Unsaved-changes prompts, external-change detection, crash recovery journal — encrypted and recovered at unlock for encrypted documents ([ADR-0022](docs/decisions/ADR-0022.md)) |
+| Releases | `scripts/New-Release.ps1 -Linux` produces a `.zip` and a `.tar.gz` carrying the binary, both licences, a `bpad` short spelling and a `BUILD.txt` naming the commit, plus a `SHA256SUMS.txt`. Unsigned, and it says so ([ADR-0055](docs/decisions/ADR-0055.md)) |
 | Command line | `bachelorpad notes.txt` opens files; `--line=427 server.log` opens one already scrolled to the line, highlighted, in either editor surface; `--help` lists all thirteen flags and `--version` names the product, its version and its licence ([ADR-0054](docs/decisions/ADR-0054.md)). A mistyped flag, a flag missing its value and a switch given one are each reported at startup rather than discarded |
 | Files | Open/Save/Save As/Save All/Save a Copy/Reload, recent files, tab context menu, command-line file opening. A document is classified by size before it is read (ADR-0027): ordinary opens as ever, large opens with the size in the status bar, and a **huge one opens too** — read from disk as you scroll, in the custom surface whichever flag you started with (ADR-0030). A 192 MiB log costs 0.8 MiB more than a small note. UTF-8, UTF-8 with BOM and **UTF-16 LE/BE** all load and save; a truncated or malformed UTF-16 file is refused by name rather than repaired with replacement characters |
 | Search | Find and replace with case-sensitive, whole-word and regex toggles, changes shown before they are applied, recursive cross-file search. **Find works in a document too large to hold too** ([ADR-0042](docs/decisions/ADR-0042.md)): the find bar scans it from disk a window at a time, says `searching 62%` rather than claiming a total it cannot know, then jumps to the hit and highlights it. Measured on a 213.5 MiB log — `1 of 1` at line 4,800,001, and `1 of 500+` when a query matches more than the cap |

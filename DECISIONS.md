@@ -62,6 +62,8 @@ Adding a decision means adding both.
 | BP-ADR-0052 | 2026-08-22 | Enter twice in the find box replaced the match with a line break; `preview_match` becomes `reveal` and is the default | Accepted, shipped, confirmed at the keyboard | [ADR-0052](docs/decisions/ADR-0052.md) |
 | BP-ADR-0053 | 2026-08-22 | `main` advances by pull request; opening one is an agent's job, merging is not. D13 closed after six sessions | Accepted | [ADR-0053](docs/decisions/ADR-0053.md) |
 | BP-ADR-0054 | 2026-08-23 | The command line becomes an interface: `--help`, `--version`, `--line=N`, a reported typo, and the licences every manifest already claimed | Accepted, shipped, confirmed at the window | [ADR-0054](docs/decisions/ADR-0054.md) |
+| BP-ADR-0055 | 2026-08-23 | Signing is deferred and self-signing refused outright; the archive, the checksums and a one-command signing step are built anyway. D15 closed | Accepted | [ADR-0055](docs/decisions/ADR-0055.md) |
+| BP-ADR-0056 | 2026-08-23 | All three embedding sources, as choices, with the profile as a ceiling and `Cloud` behind a per-use gesture — and the axis for them had existed since ADR-0020. D16 closed | Accepted | [ADR-0056](docs/decisions/ADR-0056.md) |
 | BP-ADR-0017 | amended 2026-08-22 | Half of the renderer revert condition is now a number rather than a feeling: per-frame row building, and its independence from document size | Accepted, amended | [ADR-0017](docs/decisions/ADR-0017.md) |
 
 ## Decisions needed before the work they block
@@ -131,6 +133,56 @@ is worth more than the fact.
   other half of [ADR-0017](docs/decisions/ADR-0017.md)'s revert condition
   honest by leaving it alone -- rasterisation still needs a capture rig, and
   the bench prints that rather than letting a green run imply it.
+
+- **When a quoted string needs a second quoted string inside a third, write a
+  file.** The release script's Linux leg was a PowerShell string, passed to
+  `bash -c`, containing a bash `$(...)`, containing an `awk '{print $2}'`.
+  Every layer has its own escape character and one of them is a backtick. What
+  it produced was not a syntax error -- it was a version check that compared
+  an empty string against the real one and reported *"the Linux leg failed"*,
+  with the actual cause invisible because nothing in the chain had printed.
+
+  It is now `scripts/release-linux.sh`, which is readable, runnable on a real
+  Linux box, and debuggable by looking at it. **The tell is countable**: if
+  the nesting depth of quoting reaches three, the cost of a file is already
+  lower than the cost of the next bug.
+
+- **A call that succeeds and changes nothing is worse than one that fails.**
+  Staging the Linux archive on the `/mnt` mount and calling `chmod` produced a
+  tarball with world-writable licence files. DrvFs reports 0777 for everything
+  and **ignores `chmod` silently** -- exit 0, no warning, no change. The fix is
+  to stage in the distro's own filesystem and let only the finished archive
+  cross the mount. The general shape is trap 3 in the shell: *what would fail
+  if this call stopped working?* Nothing did, and nothing would have, until
+  somebody extracted the archive and looked. ADR-0055's script carries both
+  reasons in its own comments.
+
+- **A question can be answered in the repository and open in the queue at the
+  same time.** D16 -- what should compute an embedding -- was described for
+  two sessions as "the largest unasked question in the project" and "the last
+  genuinely large unscoped thing". `bp_security::Embeddings` had carried its
+  three answers since [ADR-0020](docs/decisions/ADR-0020.md), with a mapping
+  for all four named profiles and a doc comment reading *"Phase 10 reads
+  this"*. One `grep` found it; two sessions of describing it did not.
+
+  This is trap 6 pointed the other way. That trap says a claim in the record
+  is not a property of the repository; this is its mirror -- **a decision in
+  the repository is not a row in the record**, and the kind least likely to be
+  re-read is the kind recorded in a *type*, because nothing about a queue of
+  questions suggests looking in `src/`. The habit is one line: **before asking
+  a question, grep for its answer.**
+  [ADR-0056](docs/decisions/ADR-0056.md).
+
+- **A deferred decision and a blocked one look identical until you ask what
+  actually stops.** D15 -- buy a code-signing certificate? -- read like a gate
+  on phase 20 and gated one sentence in a README. Name the thing that cannot
+  proceed; if nothing can be named, the answer is "build it and leave the
+  step". The refusal inside it is worth as much as the deferral: **a
+  self-signed Authenticode certificate is worse than shipping unsigned**,
+  because it is only satisfied once the user installs a root certificate they
+  have no reason to trust -- teaching, in order to run a text editor, exactly
+  the habit that makes signing worth having.
+  [ADR-0055](docs/decisions/ADR-0055.md).
 
 - **An interface nobody has typed at is not an interface, it is a parser.**
   Nineteen phases in, `bachelorpad --version` printed nothing and opened a

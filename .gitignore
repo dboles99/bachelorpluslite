@@ -25,6 +25,14 @@ Thumbs.db
 # deliberately NOT ignored -- they are the evidence behind ADR-0015.
 artifacts/test-evidence/*.json
 
+# Built release archives and their checksums. The *script* that produces them
+# is the artefact worth keeping (scripts/New-Release.ps1); a 21 MB zip
+# reproducible from one commit is not, and a repository that carries its own
+# binaries is one nobody can clone quickly.
+artifacts/releases/*.zip
+artifacts/releases/*.tar.gz
+artifacts/releases/SHA256SUMS.txt
+
 # Documents saved into the checkout by accident. Save As used to default to
 # the process working directory, so testing the app from this directory wrote
 # real notes straight into the repo -- and one commit later they were pushed.

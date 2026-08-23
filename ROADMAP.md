@@ -26,7 +26,7 @@ Status as of **2026-08-23**. Three words, meaning three different things:
 | 7 | Search engine | **Started** | [06-search](project/tasks/06-search/) | `bp-search` |
 | 8 | Semantic foundation and naming | **Started** | [07-semantic](project/tasks/07-semantic/) | `bp-semantic`, `bp-naming` |
 | 9 | Organization and related-note graph | **Started** | [07-semantic](project/tasks/07-semantic/) | `bp-storage` |
-| 10 | Semantic/hybrid search | Not started | [07-semantic](project/tasks/07-semantic/) | — |
+| 10 | Semantic/hybrid search | Not started, **decided** | [07-semantic](project/tasks/07-semantic/) | — |
 | 11 | Clipboard system | **Started** | [08-clipboard](project/tasks/08-clipboard/) | `bp-clipboard` |
 | 12 | Notebook/execution system | **Started** | [09-notebook](project/tasks/09-notebook/) | `bp-notebook`, `bp-execution` |
 | 13 | Research mode | **Started** | [10-research](project/tasks/10-research/) | `bp-research`, `bp-storage`, `bp-semantic` |
@@ -46,11 +46,25 @@ silence, every manifest claimed a licence the repository did not contain, and
 `specs.md` advertised three flags that did not exist -- one of which made
 `bachelorpad --line 427 server.log` try to open a file called `427`.
 
-All four are fixed ([ADR-0054](docs/decisions/ADR-0054.md)). What is left of
-phase 20 is the *artefact* -- an archive, an icon, a `.desktop` file, an
-installer, a signature -- and one row of it needs a human: **signing needs a
-certificate**, which is now the only open question in
-`project/DECISIONS_NEEDED.md`.
+All four are fixed ([ADR-0054](docs/decisions/ADR-0054.md)), and the artefact
+followed the same day: `scripts/New-Release.ps1` builds, stages, archives and
+checksums both targets, and both archives have been extracted and run.
+**Signing is deferred and self-signing refused outright**
+([ADR-0055](docs/decisions/ADR-0055.md)) -- so the archives are unsigned and
+say so, every run, in the same words.
+
+What is left of phase 20 is an icon and a `.desktop` file (a build-time
+resource, so a dependency ADR), upgrade testing against files an *earlier
+build* wrote, and a decision about whether there is an installer at all.
+
+**Phase 10 was decided on 2026-08-23 without being started, which is a state
+this table needs a word for.** D16 asked what should compute an embedding;
+the answer is all three sources as choices, with the profile as a ceiling and
+`Cloud` behind a per-use gesture ([ADR-0056](docs/decisions/ADR-0056.md)) --
+and the axis carrying those three values had existed since ADR-0020. The
+phase is now **three queue items rather than one large thing**, listed in
+`project/WORK_QUEUE.md`, and the first of them needs neither provider to
+exist.
 
 ## Two numbering schemes, reconciled
 
