@@ -37,6 +37,13 @@ Two kinds of greyed row remain, and telling them apart matters:
 Nothing means "does not exist yet" any more, and `menus::planned_menu` and
 `arrives()` were deleted rather than emptied so it cannot start to again.
 
+**Two whole menus have left, and this file no longer has a section for
+either.** [ADR-0057](../decisions/ADR-0057.md) removed Notebook and Run --
+the cell outline, the `.ipynb` export, one row per runnable cell, Stop, Run
+Document and Interpreters. Every one of them was live when it was deleted,
+which is the point: this was a decision about what the product is, not a
+sweep of rows that never worked. The menu bar is twelve menus now.
+
 ## File
 
 | Row | State |
@@ -69,7 +76,7 @@ Nothing means "does not exist yet" any more, and `menus::planned_menu` and
 | Line Numbers, Word Wrap | **live** |
 | Zoom In / Zoom Out / Reset Zoom | **live** — Ctrl+= / Ctrl+- / Ctrl+0, bounded by `bp_config::{MIN,MAX}_FONT_SIZE`; the rows grey at the bound and the reset row names the size in force |
 | Follow System | **live** — `ThemeId::for_system` resolves the desktop's preference to Light or Dark; a desktop that will not say leaves the theme alone and says so |
-| Split / Preview | **Not a row, and this answers D14** ([ADR-0048](../decisions/ADR-0048.md)). Slint 1.17.1 has no rich-text item — no styled runs, no spans — so bold inside a sentence is not representable, and a preview that silently dropped inline formatting would be worse than none. Handing HTML to the system browser means writing the document's text to a temporary file in plaintext, which is what `Policy::temporary_files` exists to forbid for a Confidential document. Most of what a reader wanted is elsewhere: Note ▸ Outline, Notebook ▸ Cell Outline, and Run for the blocks themselves. Revisit if Slint ships styled text; *Split* was never the hard half |
+| Split / Preview | **Not a row, and this answers D14** ([ADR-0048](../decisions/ADR-0048.md)). Slint 1.17.1 has no rich-text item — no styled runs, no spans — so bold inside a sentence is not representable, and a preview that silently dropped inline formatting would be worse than none. Handing HTML to the system browser means writing the document's text to a temporary file in plaintext, which is what `Policy::temporary_files` exists to forbid for a Confidential document. Most of what a reader wanted is elsewhere: Note ▸ Outline. Revisit if Slint ships styled text; *Split* was never the hard half |
 
 ## Insert
 
@@ -78,7 +85,6 @@ Nothing means "does not exist yet" any more, and `menus::planned_menu` and
 | Date, Time, Date and Time, ISO 8601, Filename date | **caret** — each row's hint is the stamp rendered from the clock, so the row shows what it will insert |
 | Bold, Italic, Link, Code Block, Table | **caret** — the Markdown constructs, all live |
 | Citation | Not a row. `bp-research` models citations and nothing in this menu inserts one; it needs a bibliography to insert *from*, which is a decision rather than a row |
-| Notebook cell | Not a row. For a `.md` a cell is a fenced block, which Code Block already writes; ADR-0043 declined a cell-sequence view for `.ipynb` |
 
 ## Format
 
@@ -132,21 +138,6 @@ no data rows rather than a column of greyed ones.
 | Lock Document | **live** — forgets this document's passphrase now, so the next save or reload asks again. The row exists because unlocking is sticky for the life of the tab, which is what makes saving an encrypted document bearable and also means one unlocked an hour ago is still unlocked to whoever is at the keyboard; closing the tab was the only way to undo that. It re-encrypts nothing: the file has been encrypted the whole time and the text on screen is unchanged. Greyed when there is no key to forget, because "locked" and "never encrypted" are the same thing to this row |
 | Audit history | **live**, as Security History above |
 
-## Notebook
-
-| Row | State |
-| --- | --- |
-| Cell Outline | **live** — every cell of the active document, prose included, with a marker on the ones the Run menu would offer. Clicking a row *goes to* the cell; it does not run it ([ADR-0045](../decisions/ADR-0045.md)) |
-| Export as .ipynb... | **live** — the active document written out as a Jupyter notebook. The useful direction is Markdown *out*: ADR-0045 made a `.md` with fenced blocks readable as a notebook, and this is the other end, so a runbook written as prose can leave as something Jupyter opens |
-| Enable notebook mode | Not a row — there is no mode to enable. ADR-0043 made a notebook reachable by opening one |
-| New cell, split/merge cells | Not rows. ADR-0043 declined a cell-sequence view, so a notebook stays its own JSON in the ordinary editor; for a `.md`, a new cell is a fenced block and Insert ▸ Code Block writes one |
-| Run all | **Not a row, and the reason is a promise this product cannot keep** ([ADR-0048](../decisions/ADR-0048.md)). ADR-0038's model is a fresh subprocess per cell with no persistent session, so cell two cannot see cell one's variables. "Run All" means something specific to everyone who has used a notebook, and it is not what this would do |
-
-The outline lists prose as well as code, and that is where it differs from the
-Run menu: the menu offers what can run, an outline is a map of the whole
-document, and a runbook is mostly prose. Notebook content never auto-runs
-(ADR-0011).
-
 ## Organize
 
 `bp-storage` is the foundation ([ADR-0019](../decisions/ADR-0019.md)) and is
@@ -199,29 +190,6 @@ decision.**
   research question became **Open Questions** — because a question has a
   grammar and can be found, while which one you are actually asking is not
   something the document says.
-
-## Run
-
-| Row | State |
-| --- | --- |
-| One row per runnable cell of the active document | **live** — `.ipynb` cells, or fenced code blocks in a `.md` ([ADR-0043](../decisions/ADR-0043.md), [ADR-0045](../decisions/ADR-0045.md)). Numbered by cell for a notebook and by *line* for Markdown, because a `.md` has no cells written in it |
-| Stop | **live** — ends the cell and keeps what it had already printed. Greyed when nothing is running, which is `row_enabled`'s whole subject |
-| Run Document | **live** — a `.py`, `.ps1` or `.sh` run whole, for a file that is a script rather than a notebook. Takes a `UserGesture` by value exactly as running a cell does, so ADR-0011's "never auto-run" is enforced by the type system rather than by everyone remembering. Greyed with the reason for a file with no runner |
-| Interpreters | **live** — which interpreter each language resolves to on this machine, and what it *tried* when none was found. **Not "Choose Interpreter"**, which this file named until 2026-08-22: an interpreter is resolved by a fixed fallback chain, not chosen, and letting a user point the runner at an arbitrary binary is a security decision rather than a menu row. What the row can honestly do is answer *why did my cell not run* ([ADR-0048](../decisions/ADR-0048.md)) |
-| Run selection | Not a row — a third granularity between one cell and the whole file, working in only one of the two editor views because only that one exposes a selection. That is the half-feature `WORK_QUEUE.md` warns about |
-| Rust scratchpad | Not a row. Rust is compiled, and every runner here hands source to an interpreter; this would need cargo, a temporary crate and a build step, which is not ADR-0040's model |
-
-**The rows are the document**, rebuilt the moment before the menu opens rather
-than on every refresh: parsing a notebook is real work and a menu nobody has
-opened is a parse nobody asked for. A row for a language with no runner (Rust,
-SQL — both deferred by name in ADR-0040) is offered and greyed rather than
-hidden.
-
-**Nothing runs without a click.** `UserGesture::from_user_command()` is called
-in exactly one place in `bp-ui`, the arm that handles a Run row's click, and
-both `bp-notebook` and `bp-execution` demand one by value. Listing the cells
-is deliberately not gated — reading a document to say what is in it is what
-every other menu here does.
 
 ## Security (the rest)
 

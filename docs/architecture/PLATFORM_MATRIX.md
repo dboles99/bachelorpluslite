@@ -5,7 +5,6 @@
 | Core editor | Yes | Yes | Yes |
 | Semantic naming | Yes | Yes | Yes |
 | Structured formats | Yes | Yes | Yes |
-| Notebook mode | Yes | Yes | Yes |
 | `.bpadx` encryption | Yes | Yes | Yes |
 | Huge-file mode | Yes | Yes | Yes |
 | Hybrid search | Yes | Yes | Yes |

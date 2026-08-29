@@ -8,7 +8,6 @@ Review a BachelorPad+ feature against:
 - logs
 - temp files
 - cloud/network eligibility
-- notebook execution
 - malformed/untrusted input
 
 Do not propose custom cryptography.

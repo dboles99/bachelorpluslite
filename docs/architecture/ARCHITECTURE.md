@@ -9,7 +9,7 @@ Core Editor
  ↓
 Files / Formats / Search / Storage
  ↓
-Optional Semantic / Research / Notebook Services
+Optional Semantic / Research Services
  ↓
 Security Policy Constraints
 ```
@@ -44,8 +44,6 @@ and this table carries the intent until then.
 | `bp-clipboard` | **live** | Clipboard history, kind detection and format-aware paste transformations (ADR-0010). In memory only. | 11 |
 | `bp-organize` | planned | Projects, topics, tags, related notes, duplicate detection. | 9 |
 | `bp-storage` | **live** | SQLite metadata store and migrations (ADR-0019). Documents, tags. Written to on every successful save and read four ways: Related Notes and duplicate detection (ADR-0037), Research Report's aggregates (ADR-0041), and its own summary (ADR-0046). | 9, 13 |
-| `bp-notebook` | **built, unwired** | Cell model and `.ipynb` interchange (ADR-0025). Eight cell kinds, split/merge/move/duplicate/collapse, outputs as data. A run needs a `UserGesture` no parsed file can produce. Pure. | 12 |
-| `bp-execution` | planned | Runners and execution security. Never auto-runs (ADR-0011). | 12 |
 | `bp-research` | **built, unwired** | BibTeX and CSL JSON in and out, DOI and arXiv identifiers, four reference styles, the research profile. Offline and deterministic; a test forbids a setting that could reach the network (ADR-0006). Pure. | 13 |
 | `bp-security` | **live** | Security profiles resolving to a policy over seven axes, plus Privacy Mode (ADR-0020). Decides policy; performs none of it. Read by the journal, the clipboard and the metadata store. | 14, 16 |
 | `bp-crypto` | **live** | The `.bpadx` envelope (ADR-0021): Argon2id, XChaCha20-Poly1305 and AES-256-GCM, chunked with the header and chunk position authenticated. Plus document hashing and detached Ed25519 signatures (specs §15). Composes primitives, implements none. Reached from Security ▸ Encrypt Document and from opening a `.bpadx`; the signing half is not reached yet. | 15, 16 |
@@ -87,21 +85,30 @@ bachelorpad ──> bp-config
 
 **Every library crate is reachable from the shell.** That count was three
 unreachable for four sessions — `bp-notebook`, `bp-research` and `bp-storage`,
-each a *mode* rather than a menu row — and it is zero: `bp-storage` left under
-ADR-0037, `bp-notebook` and `bp-execution` under ADR-0043, `bp-research`
-under ADR-0044. **Calling any of it a wiring backlog was never accurate**:
+each a *mode* rather than a menu row — and it reached zero: `bp-storage` left
+under ADR-0037, `bp-notebook` and `bp-execution` under ADR-0043, `bp-research`
+under ADR-0044.
+
+**Two of those crates no longer exist.**
+[ADR-0057](../decisions/ADR-0057.md) removed `bp-notebook` and `bp-execution`
+outright, which is a second way to reach zero and a worse one to confuse with
+the first. The history is kept because the lesson below was learned while both
+were still here, and because being reachable is what made removing them a
+decision about the product rather than a sweep of dead code.
+
+**Calling any of it a wiring backlog was never accurate**:
 each was waiting on a decision about what the mode was for, and the last item
 that could honestly be described as wiring — the viewer for a document the
 rope does not hold — turned out to be a feature too. This block is generated
 from the manifests rather than maintained by hand; regenerate it after adding
 an edge, because a dependency diagram that has drifted is worse than none.
 
-**Fourteen crates depend on nothing else in the workspace**: `bp-buffer`,
-`bp-crypto`, `bp-data`, `bp-formats`, `bp-naming`, `bp-notebook`,
-`bp-platform`, `bp-redaction`, `bp-research`, `bp-search`, `bp-secrets`,
-`bp-security`, `bp-semantic` and `bp-theme`. That is what keeps them cheap to
-test and impossible to entangle with the UI toolkit — and it is why all but
-401 of the workspace's 1,972 tests run without a window.
+**Thirteen crates depend on nothing else in the workspace**: `bp-buffer`,
+`bp-crypto`, `bp-data`, `bp-formats`, `bp-naming`, `bp-platform`,
+`bp-redaction`, `bp-research`, `bp-search`, `bp-secrets`, `bp-security`,
+`bp-semantic` and `bp-theme`. That is what keeps them cheap to test and
+impossible to entangle with the UI toolkit — and it is why all but 378 of the
+workspace's 1,865 tests run without a window.
 
 `bp-platform` is on that list for its *real* dependencies and takes
 `bp-formats` as a **dev**-dependency, deliberately and one-directionally: it
@@ -129,27 +136,26 @@ Two deliberate non-dependencies:
 ## Inside `bp-ui`
 
 The shell was one 2,675-line file and the single-writer bottleneck for every
-piece of wiring work. It is now twenty, split along seams the files already
+piece of wiring work. It is now nineteen, split along seams the files already
 had as comment banners:
 
 | Module | Lines | Owns |
 | --- | ---: | --- |
-| `menus.rs` | 3,478 | Menu contents and the action-id map |
-| `state.rs` | 2,961 | `AppState` itself: documents, workspace, opening, saving, reloading, format detection, the gutter and the status labels |
+| `menus.rs` | 3,281 | Menu contents and the action-id map |
+| `state.rs` | 2,942 | `AppState` itself: documents, workspace, opening, saving, reloading, format detection, the gutter and the status labels |
 | `state/security.rs` | 2,824 | Scan, redact, inspect metadata, hash, sign, verify, the security history all six write into, and the profile and Privacy Mode switches that govern them |
-| `lib.rs` | 1,402 | `run_with`, `refresh`, and the Slint callback wiring |
+| `lib.rs` | 1,337 | `run_with`, `refresh`, and the Slint callback wiring |
+| `dispatch.rs` | 1,049 | The menu-action match, and the dialogs its arms share |
 | `editor_view.rs` | 1,003 | The custom surface: key translation, caret placement, what to draw, and the scroll that serves both a rope and a file |
-| `dispatch.rs` | 1,102 | The menu-action match, and the dialogs its arms share |
-| `state/notebook.rs` | 887 | Running one cell of a literate document: the `.ipynb`/Markdown reading, the Run menu's rows, the cell outline (ADR-0043, ADR-0045) |
 | `viewer.rs` | 801 | A document the rope does not hold: where the reader is looking, the window handed to the surface, and the scan of it a find runs (ADR-0030, ADR-0042) |
-| `default_editor.rs` | 754 | File ▸ Set as Default Editor: the report, the consent dialog, the artefacts (ADR-0012) |
-| `state/data.rs` | 498 | The Data menu: which `bp-data` operation a menu id means for the format in front of the user |
-| `state/encryption.rs` | 457 | The `.bpadx` passphrase flow: what the bar is asking, and what a wrong answer does |
 | `state/research.rs` | 758 | Research Report: aggregate reads over `bp-storage`, worded as insights, each naming the documents behind it and closing with the rules it applied (ADR-0041, ADR-0046); and what the store holds |
+| `default_editor.rs` | 754 | File ▸ Set as Default Editor: the report, the consent dialog, the artefacts (ADR-0012) |
 | `state/organize.rs` | 585 | Related Notes, duplicate detection and Suggested Folder, over `bp-storage` (ADR-0037, ADR-0048) |
 | `state/inspectors.rs` | 533 | The Tools menu's readouts: the policy in force on all seven axes, the file on disk, and where each setting came from (ADR-0048) |
+| `state/encryption.rs` | 519 | The `.bpadx` passphrase flow: what the bar is asking, and what a wrong answer does |
+| `state/data.rs` | 498 | The Data menu: which `bp-data` operation a menu id means for the format in front of the user |
 | `state/citations.rs` | 365 | What the document in front of you cites, through `bp-research` — offline, and named for it (ADR-0044) |
-| `audit.rs` | 254 | Which file the security history is, and what a person reading it sees (ADR-0024) |
+| `audit.rs` | 245 | Which file the security history is, and what a person reading it sees (ADR-0024) |
 | `state/find.rs` | 220 | What the find bar is looking for, which match the user is standing on, and driving a scan of a document served from disk |
 | `state/questions.rs` | 175 | What the document in front of you *asks*, through `bp_semantic::questions` (ADR-0046) |
 | `testpaths.rs` | 148 | **Test-only.** One temp path per test that no *earlier* run can have left behind (ADR-0049) |
@@ -220,8 +226,7 @@ files rather than one 1,189-line one:
 | `editor_surface.slint` | `EditorSurface`: the custom view's drawing, measurement and input |
 | `tab.slint` | One tab |
 | `find_bar.slint` | Find and replace, including `focus-query` |
-| `list_panel.slint` | The bottom panel that lists things you can click. **One component, three uses**: cross-file search results, Organize ▸ Related Notes, Notebook ▸ Cell Outline. It was two near-identical files until ADR-0045 — `diff` with the names normalised showed differences in their comments and nothing else |
-| `run_panel.slint` | What a cell printed: `stdout` and `stderr` as two properties, because `bp-execution` keeps them apart and merging them here would throw that away (ADR-0043) |
+| `list_panel.slint` | The bottom panel that lists things you can click. **One component, two uses**: cross-file search results and Organize ▸ Related Notes. It was two near-identical files until ADR-0045 — `diff` with the names normalised showed differences in their comments and nothing else. Its third use, Notebook ▸ Cell Outline, left under ADR-0057 |
 | `status_bar.slint` | Both status rows |
 | `goto_bar.slint` | Go to Line |
 | `passphrase_bar.slint` | The one-field bar every passphrase in this product is typed into — a document's, and a signing key's |

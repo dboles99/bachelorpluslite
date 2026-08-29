@@ -6,10 +6,17 @@ several of its items have since been decided differently, and the value is in
 being able to see that.
 
 **Every decision made since lives in [DECISIONS.md](DECISIONS.md)**, which
-indexes 49 ADRs. Where the two disagree, the ADR is current. The most visible
+indexes 57 ADRs. Where the two disagree, the ADR is current. The most visible
 example is in "Suggested implementation style" below: Slint was "a leading
 candidate to be benchmarked"; it was benchmarked and chosen
 ([ADR-0015](docs/decisions/ADR-0015.md)).
+
+**The sharpest disagreement is now locked decision 7**, "support
+notebook-style execution, including mixed-language cells and run-selection".
+It was built, it shipped, and [ADR-0057](docs/decisions/ADR-0057.md) removed
+it — along with the guardrail "notebook code never auto-runs" below. Both are
+left standing here, because a brief that quietly edits itself to agree with
+what happened stops being evidence of what was asked for.
 
 [CLAUDE.md](CLAUDE.md) is the entry point for working here.
 

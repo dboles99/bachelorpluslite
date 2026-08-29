@@ -91,11 +91,15 @@ verifies forever; nothing new can ever join it. That is a property of the
 decision, and it belongs in front of the user when the key is created rather
 than being discovered later.
 
-## Notebook execution
+## Executing anything
 
-Never auto-run:
-- opened notebook
-- pasted code
-- restored executable cell
+**There is no execution surface, and that is the whole of this section**
+([ADR-0057](../decisions/ADR-0057.md)).
 
-Execution UI must show interpreter, environment and working directory.
+This section used to require that an opened notebook, pasted code and a
+restored executable cell never auto-run, and that any execution UI name its
+interpreter, environment and working directory. Those were enforced -- by a
+`UserGesture` no parsed file could construct -- and they are now removed
+rather than kept, because a threat that has no surface is not mitigated by a
+rule, it is absent. If execution ever returns, this section returns with it
+and the rules above are the ones to restore.

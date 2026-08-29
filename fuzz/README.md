@@ -1,8 +1,15 @@
 # Hostile-input harnesses
 
 Phase 19 asked for "fuzz targets for parsers, encrypted envelopes, notebook
-import and malformed inputs". This is those targets — but read the next
-section before you describe them to anyone, because they are not fuzzing.
+import and malformed inputs". This is those targets, less one: **notebook
+import no longer exists to target.** [ADR-0057](../docs/decisions/ADR-0057.md)
+removed `bp-notebook` and `bp-execution`, so the harness that fed arbitrary
+JSON to `import_ipynb` went with the function it was protecting, and its
+fifteen corpus entries with it — a corpus is evidence about a parser, and
+there is no parser left for it to be evidence about.
+
+Read the next section before you describe any of this to anyone, because they
+are not fuzzing.
 
 ## This is not fuzzing
 
@@ -103,18 +110,18 @@ cargo test --release --test envelope -- --ignored --nocapture
 `BP_FUZZ_CASES` sets how many cases each `proptest` block runs; the default
 is 2,000.
 
-### The gate does not run this yet
+### The gate runs this
 
-`Invoke-LocalCI.ps1`'s `spikes` stage globs `spikes/*/` only, so **nothing in
-the gate reaches this directory** — not fmt, not clippy, not test. Wiring it
-in needs a change to that script, and R008 and the repository's convention
-are explicit that a change to the gate is its own commit and never a
-passenger on someone else's. It is left undone on purpose. Until then, this
-suite runs by hand.
+It did not, for as long as this section said so. `Invoke-LocalCI.ps1`'s
+`spikes` stage globs `spikes/*/` only, so nothing in the gate reached this
+directory — not fmt, not clippy, not test — while `ROADMAP.md` called phase
+19 *Started* on the strength of what lives here.
 
-Whoever wires it in: note that `-IncludeSpikes` currently runs only `fmt` and
-`clippy` over a standalone workspace. This one has tests worth running, which
-is a difference the switch does not currently express.
+Two stages now do, on the full run and both legs, and deliberately **not**
+behind `-IncludeSpikes`: a spike is a prototype the product does not depend
+on, and these are tests of shipped crates against input designed to break
+them. They cost about two and a half minutes per leg, which is why they are
+out of `-Quick` and why pre-push rather than pre-commit is where they land.
 
 ## The targets
 
@@ -154,20 +161,7 @@ itself. Covers `open` under three passphrases (right, wrong, empty),
 - **the three golden vectors**, which are the only assertion anywhere about a
   document this build did not write. See "The corpus", below.
 
-### 3. `tests/notebook.rs` — `bp_notebook::import_ipynb`
-
-Arbitrary JSON through both entry points: `import_ipynb` (a parsed `Value`)
-and `parse_raw_json_view` (text, which is what the raw-JSON editor writes
-into, so it meets input a human has just hand-edited into an invalid state).
-Anything that imports is exported and imported again — a field accepted as
-"missing, warned about" has to be writable back as something.
-
-Object keys are drawn from the `.ipynb` vocabulary nine times in ten. A
-generator producing random keys never writes `"execution_count"`, so the
-branch reading it is never entered; this is the substitute for coverage
-feedback and it is used in every target here.
-
-### 4. `tests/data.rs` — JSON, JSONL, TOML, CSV, and `bp_formats::sniff`
+### 3. `tests/data.rs` — JSON, JSONL, TOML, CSV, and `bp_formats::sniff`
 
 Every `&str` entry point in `bp_data` except the YAML ones, run over the same
 input regardless of what the input looks like — a CSV reader handed JSON is
@@ -182,7 +176,7 @@ quoted field), and a round-trip property: whatever `json_format`,
 never a `Result` — which means a panic is its only possible failure, and it
 runs on every file the editor opens.
 
-### 5. `tests/files.rs` — `bp_files::load`
+### 4. `tests/files.rs` — `bp_files::load`
 
 The first thing that touches a file the user picked. The UTF-16 decoder is
 hand-written, so it is exactly what this is for. Covers arbitrary bytes,
@@ -240,14 +234,15 @@ being invented here:
 
 Plus, in each directory, the ordinary and the merely awkward: empty files,
 comments only, merge keys, complex keys, `.nan`/`.inf`, overlong UTF-8, lone
-surrogate escapes in JSON, ragged and quote-damaged CSV, notebooks with
-duplicate cell ids and outputs of the wrong shape.
+surrogate escapes in JSON, and ragged and quote-damaged CSV.
 
 ## What was found
 
 **No panic. No abort. No hang.** Across the corpus, the exhaustive sweeps and
-several hundred thousand property cases per target, every one of the five
-targets held its invariant. In particular ADR-0023's two caps hold: nothing
+several hundred thousand property cases per target, every one of the targets
+held its invariant. There were five when that was written and there are four
+now, and the notebook target is not among the ones that found something --
+its removal costs this section no finding. In particular ADR-0023's two caps hold: nothing
 between 0 and 100,000 levels of YAML nesting reached a stack overflow on a
 1 MiB stack in a debug build, in either flow or block style, and the alias
 bomb is refused at every size from 2 levels to 100.

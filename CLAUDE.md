@@ -147,7 +147,9 @@ Every commit in this repository has passed it. Keep it that way.
 - Windows 10, Windows 11 and Linux are equal targets ([ADR-0001](docs/decisions/ADR-0001.md))
 - Core editing never depends on cloud or AI services ([ADR-0006](docs/decisions/ADR-0006.md))
 - No custom cryptography — compose vetted primitives ([ADR-0011](docs/decisions/ADR-0011.md))
-- Notebook content never auto-runs (ADR-0011, [ADR-0025](docs/decisions/ADR-0025.md))
+- **This product executes nothing** ([ADR-0057](docs/decisions/ADR-0057.md)).
+  It used to say "notebook content never auto-runs"; there is nothing left to
+  auto-run, and a rule that cannot fail reads as live when it is vacuous
 - File renames and moves need explicit user approval
 - **No new dependency without saying so and giving the reason.** Dependency
   choices are ADR material here.

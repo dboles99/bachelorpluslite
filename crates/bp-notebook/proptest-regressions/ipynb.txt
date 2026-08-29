@@ -1,9 +1,0 @@
-# Seeds for failure cases proptest has generated in the past. It is
-# automatically read and these particular cases re-run before any
-# novel cases are generated.
-#
-# It is recommended to check this file in to source control so that
-# everyone who runs the test benefits from these saved cases.
-cc f3420eb44bcd5c1a30657abafd3bffb4893251614493cfe0df7ee4370fffecf6 # shrinks to value = Object {"cells": Array [Object {"cell_type": String("code"), "execution_count": Null, "id": String("1"), "metadata": Object {}, "outputs": Array [], "source": String("")}, Object {"cell_type": String("code"), "execution_count": Null, "id": String("1"), "metadata": Object {}, "outputs": Array [], "source": String("")}], "metadata": Object {}, "nbformat": Number(4), "nbformat_minor": Number(5)}
-cc f61dea682bd4ffbbc29cfa8825fffeb7af64e19fafc9f6472e1569d5e7c4001a # shrinks to notebook = Notebook { cells: [Cell { id: CellId(1), kind: PlainText, source: "\n\n", collapsed: false, outputs: [], metadata: {} }], metadata: {} }
-cc c431e47b36c0fdc52c9684c58108d3b901f538b45e66edd5bea3735855d43b28 # shrinks to notebook = Notebook { cells: [Cell { id: CellId(1), kind: PlainText, source: "\n\n", collapsed: false, outputs: [], metadata: {} }], metadata: {} }

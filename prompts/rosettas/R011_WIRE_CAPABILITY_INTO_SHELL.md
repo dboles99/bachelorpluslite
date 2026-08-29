@@ -102,7 +102,6 @@ Each of these has already cost somebody a debugging session.
 - Windows 10, Windows 11 and Linux are equal targets (ADR-0001)
 - core editing never depends on cloud or AI services (ADR-0006)
 - no custom cryptography (ADR-0011)
-- notebook content never auto-runs (ADR-0011)
 - physical file renames and moves need explicit user approval
 - **do not add a dependency** without saying so explicitly and giving the
   reason; dependency choices are ADR material here

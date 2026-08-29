@@ -402,9 +402,11 @@ pub fn questions(text: &str) -> Vec<Question> {
 
 /// Whether `trimmed` opens or closes a fenced code block.
 ///
-/// Both fence characters, because `bp-notebook` reads both (ADR-0045) and a
-/// rule that recognised only backticks would let a tilde-fenced block's
-/// contents through as prose.
+/// Both fence characters, because CommonMark defines both and a rule that
+/// recognised only backticks would let a tilde-fenced block's contents
+/// through as prose. The reason used to be that `bp-notebook` read both; that
+/// crate is gone and the rule is unchanged, because it was never really about
+/// notebooks -- a fenced block is not prose whichever character opened it.
 fn is_fence(trimmed: &str) -> bool {
     trimmed.starts_with("```") || trimmed.starts_with("~~~")
 }
@@ -556,7 +558,7 @@ what about this?
 ~~~";
         assert!(
             asked(text).is_empty(),
-            "bp-notebook reads both fence styles"
+            "a tilde fence opens a code block just as a backtick fence does"
         );
     }
 

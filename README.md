@@ -6,21 +6,22 @@ and Linux** — a Notepad clone, and deliberately little more.
 > **Derived from BachelorPad+.** BachelorPlusLite began as a clone of the
 > [BachelorPad+](https://github.com/dboles99/bachelorpadplus_rust) repository,
 > and it keeps that project's whole history, its licences and its attribution.
-> Only the repository's identity has been changed so far. **Everything below
-> still describes BachelorPad+, because the code below still *is* BachelorPad+:
-> no feature has been removed.** Reducing this to a Windows 11 Notepad-style
-> feature set is the next phase, and it has not started.
+> **The reduction has started.** Executing anything, and notebooks with it,
+> were removed on 2026-08-29 ([ADR-0057](docs/decisions/ADR-0057.md)). The
+> target is the feature set of Windows 11 Notepad plus a note-organising
+> layer — semantic filenames, related notes and duplicate detection — which
+> stays on purpose. The list below still describes more than that; each line
+> leaves as the capability behind it does.
 
-## What this repository still contains
+## What this repository contains
 
-It begins as a fast Notepad-like editor and progressively adds:
+It begins as a fast Notepad-like editor and adds:
 
 - semantic filenames using `Title_DDMMMYYYY.ext`
 - full-path and last-save visibility
 - rope-based editing and huge-file / memory-mapped modes
 - Markdown, YAML, JSON, JSONL/NDJSON, TOML, CSV/TSV, XML and source-code awareness
 - semantic organization, related notes, duplicate detection and hybrid search
-- Jupyter-compatible notebook behavior and mixed-language execution
 - clipboard history and format-aware paste operations
 - Light, Dark, Organic and Green themes
 - strong local security, encrypted `.bpadx` notes, secure recovery, privacy profiles and secret scanning
@@ -101,7 +102,6 @@ saves atomically, and does rather more than that:
 | Organize | Related Notes, a collapsible panel of documents sharing tags with the active one; Duplicate Detection, automatic at save and on-demand ([ADR-0037](docs/decisions/ADR-0037.md)) |
 | Research | Research Report, reading `bp-storage` into dominant themes, stale clusters, under-connected documents and consolidation candidates ([ADR-0041](docs/decisions/ADR-0041.md)) — each insight now **naming the documents it is drawn from**, and closing with a section that states every threshold it applied and every number it applied them over, including the truncation it used to leave silent ([ADR-0046](docs/decisions/ADR-0046.md)). Plus four rows that read the document in front of you: **Citation Metadata**, **Find Identifiers** — every DOI and arXiv id with its `line:column` and the address it points to, nothing resolved — **Check Bibliography** ([ADR-0044](docs/decisions/ADR-0044.md)) and **Open Questions**, every question the document asks, at the line it begins on. And **What the Store Holds**, which says what the store has recorded about you and that it never holds the text of a document |
 | Tools | **Document Inspector** (what is in the document), **Security Inspector** (the policy in force on all seven axes — the Security menu shows three), **File Analysis** (the file, which is a different object from the document) and **Configuration**, which is read-only and says so ([ADR-0048](docs/decisions/ADR-0048.md)) |
-| Notebook | **Open an `.ipynb` *or a `.md` with fenced code blocks* and the Run menu lists what can run** ([ADR-0045](docs/decisions/ADR-0045.md) reads a Markdown file as a notebook, so consent and the prose-cell refusal carry over untouched); **Notebook ▸ Cell Outline** maps the whole document, prose included, and clicking a row goes to it; choosing one runs it as a fresh subprocess and shows `stdout`, `stderr`, the exit code and the duration in a panel, with a Stop that keeps what the cell had already printed ([ADR-0043](docs/decisions/ADR-0043.md)). Aimed at a literate document — a runbook whose examples are verified rather than asserted — because that is the use ADR-0038's no-persistent-session model actually fits. There is no cell-sequence view, deliberately |
 | Encryption | `.bpadx` documents — Security ▸ Encrypt Document, unlock on open, and saves stay encrypted. Argon2id, XChaCha20-Poly1305 or AES-256-GCM, chunked with position authenticated ([ADR-0021](docs/decisions/ADR-0021.md)) |
 | Security | Per-document profiles (Standard / Private / Confidential / Maximum) governing the recovery journal, clipboard history and metadata store ([ADR-0020](docs/decisions/ADR-0020.md)) |
 | Security (phase 16) | Privacy Mode, a session override that can only tighten; Scan for Secrets, which reports where a credential is and never what it is; Redact Found Secrets, as an undoable edit with a consent step; Inspect Metadata; Hash Document; Verify Signature; Sign Document, whose key is sealed in a `.bpadx` envelope under a passphrase rather than protected by file permissions Windows cannot narrow ([ADR-0031](docs/decisions/ADR-0031.md)); Security History, which every row above it writes into (ADR-0024) |
@@ -160,8 +160,11 @@ should spend an afternoon on these before checking the version changed.
 - **No crate is unreachable.** This list was three crates long four sessions
   ago and is now empty: `bp-notebook` and `bp-execution` left it under
   [ADR-0043](docs/decisions/ADR-0043.md), `bp-research` under
-  [ADR-0044](docs/decisions/ADR-0044.md). Kept as a heading because the count
-  is worth being able to check rather than remember.
+  [ADR-0044](docs/decisions/ADR-0044.md). Two of the three have since left the
+  workspace altogether ([ADR-0057](docs/decisions/ADR-0057.md)), which is a
+  second way for the count to reach zero and not the same claim — the heading
+  is kept because the count is worth being able to check rather than remember,
+  and because *deleted* and *wired in* have to stay tellable apart.
 - **A plaintext document under Private or Confidential gets no crash
   recovery.** The journal for those profiles is sealed with the document's
   own passphrase ([ADR-0022](docs/decisions/ADR-0022.md)), so a document
@@ -210,6 +213,7 @@ lesson from each is in [DECISIONS.md](DECISIONS.md)**, which is the one
 home for a lesson -- this list is deliberately just the facts, because a
 lesson told in two places is a lesson corrected in one.
 
+- Executing anything is removed, and notebooks with it ([ADR-0057](docs/decisions/ADR-0057.md)). Two crates, two menus and one shell module; the first capability to leave.
 - A test suite that got flakier the more it was run: temp paths a recycled process id could reuse.
 - A clipped menu label, found by driving the window; every one it hit was a greyed row's reason.
 - Driving the window is a script now, not plumbing re-derived every session.

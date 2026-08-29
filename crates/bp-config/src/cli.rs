@@ -266,7 +266,7 @@ fn asked_for(args: &[String], long_name: &str) -> bool {
 /// the user can act on.
 ///
 /// **Zero is not a line.** This product numbers lines from one everywhere a
-/// person sees one -- the status bar, Go to Line, the cell outline -- so
+/// person sees one -- the status bar, Go to Line, a find result -- so
 /// `--line=0` is a fencepost mistake rather than a request for the line
 /// before the first.
 ///

@@ -37,7 +37,6 @@ bp-formats = { path = "../../crates/bp-formats" }
 bp-history = { path = "../../crates/bp-history" }
 bp-integrity = { path = "../../crates/bp-integrity" }
 bp-naming = { path = "../../crates/bp-naming" }
-bp-notebook = { path = "../../crates/bp-notebook" }
 bp-platform = { path = "../../crates/bp-platform" }
 bp-redaction = { path = "../../crates/bp-redaction" }
 bp-search = { path = "../../crates/bp-search" }

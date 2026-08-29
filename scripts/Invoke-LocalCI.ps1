@@ -190,13 +190,20 @@ try {
     # about shared state -- and it makes the doctest split mandatory rather
     # than optional, which is the trap:
     #
-    # **nextest cannot run doctests at all**, and this workspace has six that
-    # matter. Five are `compile_fail` proving a `UserGesture` cannot be
-    # constructed outside the crate that defines it -- which is ADR-0011 and
-    # ADR-0025's "notebook content never auto-runs", enforced by the type
-    # system and checked nowhere else. Swapping the runner without adding the
-    # `--doc` stage would have retired that guarantee silently, which is
-    # exactly the kind of quiet loss this gate exists to prevent.
+    # **nextest cannot run doctests at all**, and this workspace has one.
+    #
+    # It had six when this stage was written, and five of them were the whole
+    # argument: `compile_fail` doctests proving a `UserGesture` could not be
+    # constructed outside the crate defining it -- ADR-0011 and ADR-0025's
+    # "notebook content never auto-runs", enforced by the type system and
+    # checked nowhere else. ADR-0057 removed execution, so those five went
+    # with the crates that held them.
+    #
+    # The stage stays, and the reason it stays is now the general one rather
+    # than that specific guarantee: **a runner that silently skips a category
+    # of test is a runner that retires it.** One doctest is enough for that to
+    # be true, and the day somebody writes the seventh is not the day anybody
+    # would remember to add the stage back.
     #
     # Not a required tool: a clone without it runs `cargo test --workspace`,
     # which covers both halves in one slower command. The gate must not stop
@@ -294,14 +301,14 @@ try {
     # --- fuzz ----------------------------------------------------------
     # `fuzz/` declares its own `[workspace]`, so every `--workspace` command
     # above walks straight past it. Nothing formatted it, linted it or ran it
-    # until this stage existed -- five harnesses feeding hostile input to
-    # shipped crates, outside the gate that validates everything else, while
-    # ROADMAP called phase 19 *Started* on the strength of them.
+    # until this stage existed -- harnesses feeding hostile input to shipped
+    # crates, outside the gate that validates everything else, while ROADMAP
+    # called phase 19 *Started* on the strength of them.
     #
     # Deliberately **not** behind -IncludeSpikes. A spike is a prototype the
     # product does not depend on; these are tests of `bp-crypto`, `bp-data`,
-    # `bp-files`, `bp-formats` and `bp-notebook` against input designed to
-    # break them, which is the one thing a gate is most for.
+    # `bp-files` and `bp-formats` against input designed to break them, which
+    # is the one thing a gate is most for.
     #
     # It costs about two and a half minutes, which is most of why it belongs
     # in the full run and not in -Quick. Where a single harness is too

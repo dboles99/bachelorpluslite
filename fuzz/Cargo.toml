@@ -27,7 +27,6 @@ bp-crypto = { path = "../crates/bp-crypto" }
 bp-data = { path = "../crates/bp-data" }
 bp-files = { path = "../crates/bp-files" }
 bp-formats = { path = "../crates/bp-formats" }
-bp-notebook = { path = "../crates/bp-notebook" }
 
 proptest = "1"
 serde_json = "1"

@@ -64,6 +64,7 @@ Adding a decision means adding both.
 | BP-ADR-0054 | 2026-08-23 | The command line becomes an interface: `--help`, `--version`, `--line=N`, a reported typo, and the licences every manifest already claimed | Accepted, shipped, confirmed at the window | [ADR-0054](docs/decisions/ADR-0054.md) |
 | BP-ADR-0055 | 2026-08-23 | Signing is deferred and self-signing refused outright; the archive, the checksums and a one-command signing step are built anyway. D15 closed | Accepted | [ADR-0055](docs/decisions/ADR-0055.md) |
 | BP-ADR-0056 | 2026-08-23 | All three embedding sources, as choices, with the profile as a ceiling and `Cloud` behind a per-use gesture — and the axis for them had existed since ADR-0020. D16 closed | Accepted | [ADR-0056](docs/decisions/ADR-0056.md) |
+| BP-ADR-0057 | 2026-08-29 | Executing anything is removed, and notebooks with it. Neither crate depended on the other; one shell module was the whole seam. ADR-0011's "never auto-runs" becomes vacuous rather than enforced | Accepted | [ADR-0057](docs/decisions/ADR-0057.md) |
 | BP-ADR-0017 | amended 2026-08-22 | Half of the renderer revert condition is now a number rather than a feeling: per-frame row building, and its independence from document size | Accepted, amended | [ADR-0017](docs/decisions/ADR-0017.md) |
 
 ## Decisions needed before the work they block
@@ -114,6 +115,43 @@ in the fourth.
 Kept rather than deleted, because every one of these went stale the same
 way — a fix landing without the record moving — and because the lesson in each
 is worth more than the fact.
+
+- **A constraint that cannot fail is worth removing, not keeping.**
+  ADR-0011 and ADR-0025 required that notebook content never auto-runs, and
+  the mechanism was a good one: a `UserGesture` no parsed file could
+  construct, demanded by value, called in exactly one place in the whole
+  shell. [ADR-0057](docs/decisions/ADR-0057.md) removed execution, and the
+  rule survived the thing it constrained -- it was still written in
+  `specs.md`, in `R011`'s constraint list and in `R001`'s, reading like a live
+  guarantee about a product that now runs nothing.
+
+  **A vacuous constraint is trap 3 in its most convincing form**, because it
+  is *true*. Nothing would fail if it stopped being enforced, and nothing
+  would fail if it were enforced twice; it costs a reader a paragraph and
+  costs the next person to touch consent a false sense that a pattern is
+  still in the tree. `project/WORK_QUEUE.md`'s E3 said as much until this
+  session: it planned to unify two `UserGesture` types that no longer exist.
+  Where the pattern was worth keeping, it is now described rather than
+  pointed at.
+
+- **Removing a capability is mostly a documentation change, and the ratio is
+  the surprising part.** ADR-0057 deleted two crates, two menus, a shell
+  module, a Slint panel, an integration test and a fuzz target -- about 7,100
+  lines -- and the code came out in one pass because neither crate depended on
+  the other and one file was the whole seam. What took the rest of the session
+  was **nineteen files of record that still described it**: a phase table, a
+  spec section, a data model listing two tables that had never been migrated
+  into existence, a rosetta for runners, a fuzz README numbering its targets,
+  a gate comment justifying a stage by five doctests that had gone with the
+  crates, a dormant GitHub workflow whose own header promises it is kept
+  correct, and a manual checklist telling a person to drive two rows that no
+  longer exist.
+
+  None of that would have failed a build. **The count that matters is not how
+  entangled the code was, it is how many places had made a claim about it** --
+  and this repository already knew that: it is why `CLAUDE.md` gives each kind
+  of fact one home. The homes held; what drifted was every file that had
+  quoted one.
 
 - **A performance claim in a comment is trap 3 with worse consequences.**
   `bp_editor::view::Anchor` explains itself by saying a global row index

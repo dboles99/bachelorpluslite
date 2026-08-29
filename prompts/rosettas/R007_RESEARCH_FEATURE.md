@@ -9,7 +9,7 @@ Priorities:
 - semantic search
 - cognition/external memory
 - digital annotation
-- computational notebooks
+- long-lived note collections
 - secure note systems
 
 Record:

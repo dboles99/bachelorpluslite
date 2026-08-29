@@ -20,7 +20,7 @@ where useful.
 - do not introduce cloud dependency into core editing
 - do not bypass document security policy
 - do not silently rename/move user files
-- do not auto-run executable notebook content
+- nothing in this product executes anything (ADR-0057); a feature that would is a decision, not a task
 - do not invent cryptography
 - keep UI thread non-blocking
 - prefer typed interfaces and testable crates

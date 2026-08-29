@@ -2,7 +2,7 @@
 
 This is not an MVP roadmap. Each phase contributes to the full v1 target.
 
-Status as of **2026-08-23**. Three words, meaning three different things:
+Status as of **2026-08-29**. Four words, meaning four different things:
 
 - **Done** — the phase's work is finished.
 - **Started** — a real, tested slice exists *and is reachable from the
@@ -14,6 +14,11 @@ Status as of **2026-08-23**. Three words, meaning three different things:
   state is a real one and will recur, and because the count of phases in it —
   three, for four sessions — was this project's most useful single number
   while it was not zero.
+- **Removed** — the phase's capability was built, shipped, and then taken out
+  again, with an ADR saying why. One phase carries it: 12, under
+  [ADR-0057](docs/decisions/ADR-0057.md). It is a status rather than a deleted
+  row because a phase number is what `specs.md` and every ADR refer to, and a
+  table that renumbers around a removal breaks all of them.
 
 | # | Phase | Status | Tasks | Crates |
 | --- | --- | --- | --- | --- |
@@ -28,7 +33,7 @@ Status as of **2026-08-23**. Three words, meaning three different things:
 | 9 | Organization and related-note graph | **Started** | [07-semantic](project/tasks/07-semantic/) | `bp-storage` |
 | 10 | Semantic/hybrid search | Not started, **decided** | [07-semantic](project/tasks/07-semantic/) | — |
 | 11 | Clipboard system | **Started** | [08-clipboard](project/tasks/08-clipboard/) | `bp-clipboard` |
-| 12 | Notebook/execution system | **Started** | [09-notebook](project/tasks/09-notebook/) | `bp-notebook`, `bp-execution` |
+| 12 | Notebook/execution system | **Removed** | [ADR-0057](docs/decisions/ADR-0057.md) | — |
 | 13 | Research mode | **Started** | [10-research](project/tasks/10-research/) | `bp-research`, `bp-storage`, `bp-semantic` |
 | 14 | Security foundation | **Started** | [11-security](project/tasks/11-security/) | `bp-security` |
 | 15 | Encrypted `.bpadx` documents | **Started** | [11-security](project/tasks/11-security/) | `bp-crypto` |
@@ -90,9 +95,13 @@ that points at them for no gain.
 
 ## Where the work actually is
 
-Phases 1, 3 and 4 are complete. **Every other phase now has a tested slice
+Phases 1, 3 and 4 are complete. **Every remaining phase now has a tested slice
 reachable in the product**, and phases 9, 12 and 13 — the three that were
 "built with no way in" for four sessions — joined them across 2026-08-21/22.
+Phase 12 has since left altogether ([ADR-0057](docs/decisions/ADR-0057.md)),
+which does not undo that: it was reachable for a week before it was removed,
+and being reachable is what made the removal a decision about the product
+rather than a tidy-up of dead code.
 
 **No crate in this workspace is unreachable.** That sentence has been the
 headline of this section since the fourth session, when it was three crates,
@@ -174,8 +183,10 @@ read again.
 input to `bp-crypto`, `bp-data`, `bp-files`, `bp-formats` and `bp-notebook`,
 formatted, linted and run by nobody, while this table called the phase
 *Started* on the strength of them. Two stages now run them, on both legs,
-and they are green -- 42 tests, one `#[ignore]`d for cost with the reason on
-it. The gate is about two and a half minutes per leg longer, which is what
+and they are green -- 39 tests, one `#[ignore]`d for cost with the reason on
+it. There are four harnesses rather than five: the notebook target went with
+the crate it protected ([ADR-0057](docs/decisions/ADR-0057.md)), and it is
+named above because it is part of why this stage exists. The gate is about two and a half minutes per leg longer, which is what
 that assurance costs.
 
 **The item that gated three sessions is no longer gating.** The rope is the

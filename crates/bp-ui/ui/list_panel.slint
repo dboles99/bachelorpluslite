@@ -1,11 +1,14 @@
 // The bottom panel that lists things you can click (ADR-0045).
 //
-// **One component, three uses**: cross-file search results, Organize ▸ Related
-// Notes, and Notebook ▸ Cell Outline. The first two were separate files whose
-// only differences were their comments -- `diff` on them, with the names
-// normalised, showed nothing structural at all -- and ADR-0044 said adding a
-// third copy would prejudge a question worth answering once. This is the
-// answer.
+// **One component, two uses**: cross-file search results and Organize ▸
+// Related Notes. Those two were separate files whose only differences were
+// their comments -- `diff` on them, with the names normalised, showed nothing
+// structural at all -- and ADR-0044 said adding a third copy would prejudge a
+// question worth answering once. This is the answer.
+//
+// The third use was Notebook ▸ Cell Outline, and ADR-0057 removed it. The
+// merge is not undone by that: the argument for one component was never the
+// count of callers, it was that two of them had already been written twice.
 //
 // Collapsed rather than conditional, like every other bottom panel here: an
 // element inside a Slint `if` cannot be referred to from outside it, and

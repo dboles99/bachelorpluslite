@@ -190,8 +190,8 @@ pub(crate) fn confirm_replace(plan: &bp_search::ReplacePlan) -> bool {
 ///
 /// [`reveal`] does the selecting; this adds the focus, and the focus is the
 /// whole difference between them. Use it when the action came from somewhere
-/// that is not a text box -- a results panel, a cell outline -- so there is
-/// no box the caret can be stolen from.
+/// that is not a text box -- a results panel, a list of related notes -- so
+/// there is no box the caret can be stolen from.
 ///
 /// **Do not use it for anything submitted from a bar.** Find Next and Go to
 /// Line both leave their bar open on purpose, and moving the caret into the
@@ -468,27 +468,6 @@ pub fn handle_menu_action(
                     .borrow_mut()
                     .set_security(bp_security::Security::Named(profile));
             }
-            push = PushText::No;
-        }
-
-        action::RUN_STOP => {
-            state.borrow_mut().stop_run();
-            push = PushText::No;
-        }
-
-        id if (action::RUN_CELL_BASE..crate::menus::run_cell_end()).contains(&id) => {
-            // **The one place in this product where a run is consented to.**
-            // specs.md section 15 says never auto-run an opened or pasted
-            // notebook, and both crates demand a gesture by value for that
-            // reason. This arm is reached only from a click on a Run menu
-            // row, which is what `from_user_command` is documented to mean --
-            // "somewhere a human's action is on the stack".
-            let index = usize::try_from(id - action::RUN_CELL_BASE).unwrap_or(0);
-            state.borrow_mut().run_cell(
-                index,
-                bp_notebook::UserGesture::from_user_command(),
-                bp_execution::UserGesture::from_user_command(),
-            );
             push = PushText::No;
         }
 
@@ -782,25 +761,6 @@ pub fn handle_menu_action(
                 std::env::var("SLINT_BACKEND").unwrap_or_else(|_| "software".to_owned()),
             ),
         ),
-        // What the application thinks its environment is, not a file
-        // browser: no document content, no passphrase, no listing of what is
-        // in the directories it names -- only where it resolved them to.
-        // Run ▸ the whole document as a script, and what will run it
-        // (ADR-0048).
-        action::RUN_DOCUMENT => {
-            // The same consent this product demands of a cell: a gesture only
-            // a click can produce (ADR-0011, specs.md section 15).
-            push = PushText::No;
-            state
-                .borrow_mut()
-                .run_document(bp_execution::UserGesture::from_user_command());
-        }
-        action::RUN_INTERPRETERS => {
-            let report = state.borrow().interpreters_report();
-            push = PushText::No;
-            show_info("Interpreters", &report);
-        }
-
         // Organize ▸ where documents sharing this one's tags already live.
         action::ORGANIZE_SUGGESTED_FOLDER => {
             let report = state.borrow().suggested_folder_report();
@@ -813,34 +773,6 @@ pub fn handle_menu_action(
             let said = state.borrow_mut().lock_document();
             show_info("Lock Document", &said);
             push = PushText::No;
-        }
-
-        // Notebook ▸ Export as .ipynb (ADR-0048). The borrow ends before the
-        // file dialog opens, for the reason every arm here gives.
-        action::EXPORT_IPYNB => {
-            push = PushText::No;
-            match state.borrow().export_ipynb() {
-                Ok(json) => {
-                    let suggested = state.borrow().suggested_ipynb_name();
-                    let chosen = rfd::FileDialog::new()
-                        .set_directory(state.borrow().dialog_directory())
-                        .set_file_name(suggested)
-                        .save_file();
-                    if let Some(path) = chosen {
-                        // Not `atomic_write`'s document path: this is an
-                        // export to somewhere the user chose, and it must not
-                        // touch the tab, its dirty flag or Open Recent -- the
-                        // three things Save a Copy is careful not to do.
-                        if let Err(error) = std::fs::write(&path, json) {
-                            show_info(
-                                "Export as .ipynb",
-                                &format!("The notebook could not be written: {error}"),
-                            );
-                        }
-                    }
-                }
-                Err(reason) => show_info("Export as .ipynb", &reason),
-            }
         }
 
         // Note ▸ the store's view of this document, and the journal's
@@ -875,6 +807,9 @@ pub fn handle_menu_action(
             show_info("Configuration", &report);
         }
 
+        // What the application thinks its environment is, not a file
+        // browser: no document content, no passphrase, no listing of what is
+        // in the directories it names -- only where it resolved them to.
         action::DIAGNOSTICS => {
             show_info("Diagnostics", &crate::state::diagnostics_report());
             push = PushText::No;
@@ -1032,14 +967,6 @@ pub fn handle_menu_action(
             let report = state.borrow().research_report();
             push = PushText::No;
             show_info("Research Report", &report);
-        }
-
-        // Notebook ▸ Cell Outline (ADR-0045). Toggles, like every other
-        // bottom panel: the row that opened it closes it again.
-        action::CELL_OUTLINE => {
-            let mut s = state.borrow_mut();
-            s.outline_open = !s.outline_open;
-            push = PushText::No;
         }
 
         // Research ▸ what the active document cites (ADR-0044). Each borrow

@@ -273,14 +273,6 @@ pub mod action {
     pub const PASTE: i32 = 104;
     pub const SELECT_ALL: i32 = 105;
 
-    /// Notebook ▸ Cell Outline (ADR-0045).
-    pub const CELL_OUTLINE: i32 = 744;
-
-    /// Notebook ▸ Export as .ipynb (ADR-0048). In the Research block's
-    /// range because the Notebook menu has only ever had rows here; 749 is
-    /// the last one free.
-    pub const EXPORT_IPYNB: i32 = 747;
-
     /// Research ▸ what the active document cites (ADR-0044).
     pub const CITATION_METADATA: i32 = 741;
     pub const FIND_IDENTIFIERS: i32 = 742;
@@ -296,141 +288,14 @@ pub mod action {
     /// Research ▸ What the Store Holds (ADR-0046).
     pub const STORE_CONTENTS: i32 = 746;
 
-    /// End the cell that is running (ADR-0043).
-    pub const RUN_STOP: i32 = 750;
-
-    /// Run ▸ the whole document, and which interpreters exist (ADR-0048).
-    /// 753-759 free.
-    pub const RUN_DOCUMENT: i32 = 751;
-    pub const RUN_INTERPRETERS: i32 = 752;
-
     /// Organize ▸ Suggested Folder (ADR-0048). 703-709 free.
     pub const ORGANIZE_SUGGESTED_FOLDER: i32 = 702;
 
     /// Security ▸ Lock Document (ADR-0048).
     pub const LOCK_DOCUMENT: i32 = 212;
 
-    /// One runnable cell of the active notebook occupies
-    /// `RUN_CELL_BASE + i`, bounded by [`super::MAX_LISTED_CELLS`].
-    ///
-    /// Bounded for the reason `RECENT_BASE`'s window is: a notebook may have
-    /// thousands of cells, and an unbounded range here would silently swallow
-    /// whatever block is allocated above it next -- which is exactly how the
-    /// recent-files arm once claimed everything from 60 to 100.
-    pub const RUN_CELL_BASE: i32 = 800;
-
     /// Rows that do nothing yet.
     pub const NONE: i32 = 0;
-}
-
-/// How many of a notebook's cells the Run menu will list.
-///
-/// A menu nobody can scroll to the end of is the same as no menu, and
-/// `MenuPopup` already scrolls past `menu-max-height`. Generous enough that a
-/// literate document will never reach it, and finite so the id window is.
-pub const MAX_LISTED_CELLS: usize = 200;
-
-/// One past the last id `RUN_CELL_BASE` can produce.
-pub(crate) fn run_cell_end() -> i32 {
-    action::RUN_CELL_BASE + i32::try_from(MAX_LISTED_CELLS).unwrap_or(0)
-}
-
-/// The Run menu: what the active document offers to run (ADR-0043).
-///
-/// Built from the document rather than written down, like the Edit menu's
-/// clipboard history and the Insert menu's timestamps. A menu built once at
-/// startup would list the last notebook's cells for the rest of the session.
-pub fn run(
-    menu: &crate::state::notebook::RunMenu,
-    running: bool,
-    document_runnable: bool,
-) -> Vec<MenuItem> {
-    use crate::state::notebook::RunMenu;
-
-    let mut items = Vec::new();
-    match menu {
-        // Not `planned()`: notebook running exists, and this document simply
-        // is not one. Saying which kind of file would work is the difference
-        // between a limitation and a mystery.
-        //
-        // **Two readouts, because one of them was false.** This row used to
-        // say "Nothing to run: open an .ipynb, or a .md with fences" whatever
-        // the document was -- and on a `.py` that is contradicted three rows
-        // below by an enabled Run Document that runs the file perfectly.
-        // Found by driving the window. The cell list and the whole-file row
-        // answer different questions, and a readout heading the first must
-        // not make a claim about the second.
-        //
-        // Both are also short enough to survive the popup, which the old one
-        // was not: 52 characters against `LABEL_BUDGET`'s 42, elided in the
-        // window at "open an .ipynb, or …". The actionable half was the half
-        // being thrown away.
-        RunMenu::NotANotebook => items.push(planned(if document_runnable {
-            "No cells here: use Run Document"
-        } else {
-            "Nothing to run: try an .ipynb"
-        })),
-        // Distinct from an empty list, deliberately -- see `RunMenu`.
-        RunMenu::Unreadable(reason) => {
-            items.push(planned(&format!("Cannot read this notebook: {reason}")))
-        }
-        RunMenu::Cells(rows) if rows.is_empty() => {
-            items.push(planned("This notebook has no cells that can run"));
-        }
-        // The reason, rather than the symptom. "No cells that can run" would
-        // be true here and would tell the reader nothing they could act on.
-        RunMenu::NoKnownLanguage { count, why } => {
-            use crate::state::notebook::Unnamed;
-            // Both were around 70 characters and elided mid-clause, which
-            // for a *reason* is the worst text on screen to lose (ADR-0049).
-            // Shortened to keep the reason and drop the hint, because the
-            // popup was dropping the hint anyway and silently.
-            items.push(planned(&match why {
-                Unnamed::NotebookWithoutKernelspec => {
-                    format!("{count} code cell(s): no kernelspec")
-                }
-                Unnamed::FencesWithoutLanguage => {
-                    format!("{count} fence(s) name no language")
-                }
-            }));
-        }
-        RunMenu::Cells(rows) => {
-            for (index, row) in rows.iter().take(MAX_LISTED_CELLS).enumerate() {
-                let id = action::RUN_CELL_BASE + i32::try_from(index).unwrap_or(0);
-                items.push(row_enabled(&row.label, "", id, row.enabled && !running));
-            }
-            if rows.len() > MAX_LISTED_CELLS {
-                items.push(planned(&format!(
-                    "… and {} more, not listed",
-                    rows.len() - MAX_LISTED_CELLS
-                )));
-            }
-        }
-    }
-    if let Some(last) = items.last_mut() {
-        last.separator_after = true;
-    }
-    // Real but not always available, which is `row_enabled`'s whole subject:
-    // Stop exists, and there is nothing to stop until something is running.
-    items.push(MenuItem {
-        separator_after: true,
-        ..row_enabled("Stop", "", action::RUN_STOP, running)
-    });
-
-    // The whole file rather than a cell, for a `.py`/`.ps1`/`.sh` that is a
-    // script rather than a notebook. Greyed with the reason rather than
-    // hidden: a user with a `.txt` open should learn *why* it is not offered.
-    items.push(row_enabled(
-        "Run Document",
-        "",
-        action::RUN_DOCUMENT,
-        document_runnable && !running,
-    ));
-    // **Not "Choose Interpreter"** (ADR-0048). An interpreter is resolved by
-    // a fixed fallback chain, not chosen; what this answers is the question
-    // the chain makes unanswerable from outside -- why a cell did not run.
-    items.push(row_end("Interpreters", "", action::RUN_INTERPRETERS));
-    items
 }
 
 fn row(label: &str, shortcut: &str, action: i32) -> MenuItem {
@@ -469,8 +334,8 @@ fn row_end(label: &str, shortcut: &str, action: i32) -> MenuItem {
 /// **It used to mean "not built yet" and it does not any more** (ADR-0048).
 /// `arrives()` and `planned_menu()` went with the last unbuilt row, so every
 /// remaining caller is a *readout* -- the Security menu's three policy lines,
-/// the Data menu's "nothing to convert here", the Run menu's sentence about
-/// why a document has nothing to run. Those are answers, not promises.
+/// the Data menu's "nothing to convert here", the Tools menu's account of
+/// where each setting came from. Those are answers, not promises.
 ///
 /// The name is kept because the rendering is the same and renaming it would
 /// touch every call site to say nothing new. What changed is what it is
@@ -838,9 +703,11 @@ pub fn view(
         // what `Policy::temporary_files` exists to forbid for a Confidential
         // document.
         //
-        // What a reader actually wanted from it mostly exists: Note ▸ Outline
-        // for structure, Notebook ▸ Cell Outline for a `.md` with fenced
-        // blocks, and Run for the blocks themselves (ADR-0045).
+        // What a reader actually wanted from it partly exists: Note ▸ Outline
+        // gives the structure. Two of the three answers this comment used to
+        // give were Notebook ▸ Cell Outline and Run, and ADR-0057 removed
+        // both -- so the case for a preview is *stronger* than it was, not
+        // weaker, and it is still blocked on the same toolkit gap.
         //
         // Revisit if Slint ships styled text. *Split* -- two panes over one
         // document -- is a separate feature and was never the hard half.
@@ -1453,39 +1320,6 @@ pub fn research(has_content: bool) -> Vec<MenuItem> {
     items
 }
 
-/// The Notebook menu (ADR-0045).
-///
-/// One real row so far. The outline reads whatever the active document is --
-/// a `.ipynb`'s cells or a `.md`'s fenced blocks -- so it greys when there is
-/// nothing to read rather than when the document is the wrong kind: an empty
-/// outline is an honest answer about a document with no cells in it.
-pub fn notebook(has_content: bool) -> Vec<MenuItem> {
-    vec![
-        MenuItem {
-            separator_after: true,
-            ..row_enabled("Cell Outline", "", action::CELL_OUTLINE, has_content)
-        },
-        // Markdown out as Jupyter, which is the direction that earns the row:
-        // ADR-0045 made a `.md` with fenced blocks readable as a notebook,
-        // and this is the other end of it.
-        row_enabled("Export as .ipynb...", "", action::EXPORT_IPYNB, has_content),
-    ]
-    // **Four rows left this menu on 2026-08-22 and none was built**
-    // (ADR-0048). Each named something that had already happened, already
-    // existed elsewhere, or could not honestly be done:
-    //
-    // - *Enable Notebook Mode* -- there is no mode to enable. ADR-0043 made a
-    //   notebook reachable by opening one; the menu is the surface.
-    // - *New Cell* -- ADR-0043 declined a cell-sequence view, so a notebook
-    //   stays its own JSON in the ordinary editor. For a `.md`, a new cell is
-    //   a fenced block, which Insert ▸ Code Block already writes.
-    // - *Run Cell* -- a live row in the Run menu, which lists one per cell.
-    // - *Run All* -- ADR-0038's model is a fresh subprocess per cell with no
-    //   persistent session, so cell two cannot see cell one's variables.
-    //   "Run All" means something specific to everyone who has used a
-    //   notebook, and it is not what this would do.
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1508,8 +1342,6 @@ mod tests {
     /// than once. A menu whose rows depend on a value is not covered by
     /// building it one way.
     fn every_menu() -> Vec<(&'static str, Vec<MenuItem>)> {
-        use crate::state::notebook::{RunMenu, Unnamed};
-
         vec![
             ("File", file(true, true, true, &[])),
             ("Edit", edit(&[], true)),
@@ -1521,76 +1353,12 @@ mod tests {
             ("Insert", insert(time::OffsetDateTime::UNIX_EPOCH, true)),
             ("Data", data(Format::Json)),
             ("Note", note(true)),
-            ("Notebook", notebook(true)),
             ("Organize", organize(true)),
             ("Research", research(true)),
             ("Tools", tools(true)),
             ("Help", help()),
             ("Security", security_menu()),
-            // The document is not a notebook, and the whole file *can* run:
-            // the case where "Nothing to run" was a false statement.
-            ("Run (script)", run(&RunMenu::NotANotebook, false, true)),
-            // The same, where nothing runs at all.
-            ("Run (inert)", run(&RunMenu::NotANotebook, false, false)),
-            (
-                "Run (unreadable)",
-                run(&RunMenu::Unreadable("not JSON".into()), false, false),
-            ),
-            (
-                "Run (no cells)",
-                run(&RunMenu::Cells(Vec::new()), false, false),
-            ),
-            (
-                "Run (no kernelspec)",
-                run(
-                    &RunMenu::NoKnownLanguage {
-                        count: 99,
-                        why: Unnamed::NotebookWithoutKernelspec,
-                    },
-                    false,
-                    false,
-                ),
-            ),
-            (
-                "Run (unnamed fences)",
-                run(
-                    &RunMenu::NoKnownLanguage {
-                        count: 99,
-                        why: Unnamed::FencesWithoutLanguage,
-                    },
-                    false,
-                    false,
-                ),
-            ),
         ]
-    }
-
-    #[test]
-    fn the_run_menu_never_says_nothing_runs_while_offering_to_run_the_document() {
-        // **Found by driving the window**, on a `.py` whose Run menu said
-        // "Nothing to run: open an .ipynb, or …" above an enabled Run
-        // Document that ran it correctly and printed the right answer.
-        //
-        // The two rows answer different questions -- cells, and the whole
-        // file -- and nothing made the first one say so. A readout that
-        // contradicts a working row three lines below it is worse than no
-        // readout, because a user believes it and stops looking.
-        use crate::state::notebook::RunMenu;
-
-        let items = run(&RunMenu::NotANotebook, false, true);
-
-        let runs_the_document = items
-            .iter()
-            .any(|item| item.label == "Run Document" && item.enabled);
-        assert!(runs_the_document, "the premise of this test has changed");
-
-        for item in &items {
-            assert!(
-                !item.label.starts_with("Nothing to run"),
-                "Run ▸ {:?} denies there is anything to run while Run Document is offered",
-                item.label
-            );
-        }
     }
 
     #[test]
@@ -1603,7 +1371,7 @@ mod tests {
         // sentence, which is deliberately loose: the point is to catch a row
         // that *looks* like a command and is not, and "Multi-cursor" or
         // "Rust Scratchpad" would fail it while "Recovery journal: on" and
-        // "Nothing to run: open an .ipynb..." pass.
+        // "Nothing to convert in a plain-text document." pass.
         for (menu, items) in every_menu() {
             for item in items {
                 if item.action != action::NONE {
@@ -1938,11 +1706,6 @@ mod tests {
                 "caret line edits",
                 action::DUPLICATE_LINE..action::MOVE_LINE_DOWN + 1,
             ),
-            // ADR-0043. Added here in the same change that added the arm --
-            // which is the whole point of this list being a second copy
-            // written by hand: it was *not* added in that change, and the
-            // test below is what said so.
-            ("notebook cells", action::RUN_CELL_BASE..run_cell_end()),
         ]
     }
 
@@ -1959,29 +1722,6 @@ mod tests {
                     "the {left_name} window {left:?} overlaps the {right_name} window {right:?}"
                 );
             }
-        }
-    }
-
-    #[test]
-    fn the_notebook_cell_window_is_bounded_and_sits_above_everything_else() {
-        // Bounded, because an open-ended range above the highest block would
-        // swallow whatever is allocated next -- and there *is* nothing above
-        // it today, which is exactly when an unbounded range looks harmless.
-        let end = run_cell_end();
-        assert!(end > action::RUN_CELL_BASE, "the window must contain ids");
-        assert_eq!(
-            end,
-            action::RUN_CELL_BASE + i32::try_from(MAX_LISTED_CELLS).unwrap(),
-            "the window is sized by the cap the menu actually applies"
-        );
-        for (name, window) in range_dispatch_windows() {
-            if name == "notebook cells" {
-                continue;
-            }
-            assert!(
-                window.end <= action::RUN_CELL_BASE,
-                "the {name} window reaches into the notebook-cell block"
-            );
         }
     }
 
@@ -2048,7 +1788,6 @@ mod tests {
             action::DIAGNOSTICS,
             action::RESEARCH_REPORT,
             // ADR-0043 and ADR-0044.
-            action::RUN_STOP,
             action::CITATION_METADATA,
             action::FIND_IDENTIFIERS,
             action::CHECK_BIBLIOGRAPHY,
@@ -2056,9 +1795,6 @@ mod tests {
             action::OPEN_QUESTIONS,
             action::STORE_CONTENTS,
             // ADR-0048.
-            action::EXPORT_IPYNB,
-            action::RUN_DOCUMENT,
-            action::RUN_INTERPRETERS,
             action::ORGANIZE_SUGGESTED_FOLDER,
             action::LOCK_DOCUMENT,
             action::NOTE_TAGS,
@@ -2933,35 +2669,6 @@ mod tests {
                 "{absent} is back in the Research menu"
             );
         }
-    }
-
-    #[test]
-    fn the_notebook_menu_has_nothing_planned_left_in_it() {
-        assert!(
-            notebook(true).iter().all(|i| i.action != action::NONE),
-            "ADR-0048 resolved all five"
-        );
-    }
-
-    #[test]
-    fn the_notebook_menu_offers_no_run_all() {
-        // ADR-0038's model is a fresh subprocess per cell with no persistent
-        // session, so cell two cannot see cell one's variables. "Run All"
-        // means something specific to everyone who has used a notebook, and
-        // it is not what this would do.
-        assert!(
-            !notebook(true).iter().any(|i| i.label.contains("Run All")),
-            "Run All is back, and this product cannot honestly offer it"
-        );
-    }
-
-    #[test]
-    fn running_a_cell_lives_in_exactly_one_menu() {
-        assert!(
-            !notebook(true).iter().any(|i| i.label.contains("Run Cell")),
-            "the Run menu lists one row per cell; a second entry point would \
-             go stale"
-        );
     }
 
     #[test]
