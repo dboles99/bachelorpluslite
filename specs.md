@@ -8,7 +8,7 @@ BachelorPad+ is a cross-platform Rust-native semantic text-processing appliance 
 - Windows 11
 - Linux
 
-It must remain usable as a very fast plain-text editor when all semantic, research, clipboard-history, and cloud-connected features are disabled.
+It must remain usable as a very fast plain-text editor when all semantic, research and cloud-connected features are disabled.
 
 Canonical positioning:
 
@@ -308,30 +308,20 @@ BachelorPad+ remains a text appliance, not a full IDE.
 
 ## 14. Clipboard
 
-Context menu includes:
+**Deleted, less one row.** [ADR-0061](docs/decisions/ADR-0061.md) removed
+`bp-clipboard` -- the history, pinning, kind detection and the format-aware
+paste transformations -- along with the `Clipboard` policy axis that decided
+whether a history could persist. Windows Notepad has no clipboard history and
+neither does a note-organising layer.
 
-- Paste
-- Paste Special
-- Clipboard History
-- Windows native clipboard history where available
-- BachelorPad+ local clipboard panel
-- pinned items
-- search
-- type detection
-- format-aware paste transformations
+**Cut, Copy and Paste survive and always did**, as `bp_editor::Command` values
+over the OS clipboard. They shared a word with the history and nothing else.
+*Paste Special* was this section's name for the transformations and goes with
+them.
 
-Potential types:
-
-- plain text
-- Markdown
-- JSON
-- YAML
-- URL
-- path
-- code
-- structured data
-
-Persistent clipboard history is opt-in.
+The rule this section ended on -- *persistent clipboard history is opt-in* --
+is removed rather than kept, by ADR-0057's rule: there is no history to make
+opt-in, and a constraint that cannot fail reads as live when it is vacuous.
 
 ## 15. Security and cryptography
 
@@ -350,8 +340,6 @@ Required security concepts:
 - encrypted recovery
 - encrypted edit journals
 - encrypted revision history
-- secure clipboard
-- timed clipboard clearing
 - secret scanning
 - auto-lock
 - document hashing
@@ -395,7 +383,6 @@ The optional BachelorPad+ personality mode may use original appliance terminolog
 - Semantic Filing Apparatus
 - Automatic Document Identification
 - Recall Engine
-- Clipboard Retention Chamber
 - Emergency Recovery System
 - Cryptographic Containment
 - Heavy-Duty Text Intake
@@ -494,7 +481,6 @@ SQLite recommended for:
 - filename candidates
 - file events
 - recovery sessions
-- clipboard items
 - artifacts
 - security events
 - signatures
@@ -552,7 +538,6 @@ Required:
 - stolen device
 - malicious files
 - local-user exposure
-- clipboard leakage
 - plaintext recovery
 - cloud transmission
 - secret persistence

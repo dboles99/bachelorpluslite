@@ -1,8 +1,11 @@
-//! Seam: `bp-security`'s `Policy` against the three things ADR-0020 says it
-//! governs -- `bp-history`'s recovery journal, `bp-clipboard`'s history and
-//! `bp-storage`'s `record_document`.
+//! Seam: `bp-security`'s `Policy` against the two things it still governs --
+//! `bp-history`'s recovery journal and `bp-storage`'s `record_document`.
 //!
-//! `bp-security` decides and performs nothing; the other three perform and
+//! **It was three until ADR-0061**, which removed `bp-clipboard` and the
+//! `Clipboard` axis with it. An axis whose subject has left governs nothing,
+//! and a test asserting that it does would pass while meaning nothing.
+//!
+//! `bp-security` decides and performs nothing; the other two perform and
 //! decide nothing. Every one of them is tested alone, which means the join --
 //! *does the decision actually reach the thing that acts on it* -- is tested
 //! nowhere. ADR-0020's own consequence section is explicit that the failure
@@ -22,10 +25,9 @@ use common::{Pass, no_files};
 
 use std::path::{Path, PathBuf};
 
-use bp_clipboard::History;
 use bp_history::{Checkpoint, Journal, Refusal, Written};
 use bp_security::{
-    Clipboard, Metadata, Policy, Privacy, Profile, Recovery, Security, TemporaryFiles, Zeroise,
+    Metadata, Policy, Privacy, Profile, Recovery, Security, TemporaryFiles, Zeroise,
 };
 use bp_storage::Store;
 use proptest::prelude::*;
@@ -312,64 +314,6 @@ fn an_encrypted_profile_refuses_a_document_that_has_never_been_saved() {
     ));
 }
 
-// --- the clipboard -------------------------------------------------------
-
-#[test]
-fn the_clipboard_records_only_where_the_policy_permits_a_history() {
-    for (profile, privacy) in every_case() {
-        let policy = policy_of(profile, privacy);
-        let case = format!("{} under privacy {:?}", profile.name(), privacy);
-        let mut history = History::new();
-
-        let accepted = history.push(SENTINEL, policy.clipboard);
-
-        match policy.clipboard {
-            Clipboard::Disabled => {
-                assert!(!accepted, "{case}: copied text was recorded");
-                assert!(history.is_empty(), "{case}");
-            }
-            Clipboard::InMemory | Clipboard::Persistent => {
-                assert!(accepted, "{case}: copied text was not recorded");
-                assert_eq!(history.entries().len(), 1, "{case}");
-            }
-        }
-
-        assert_eq!(
-            history.entries().iter().any(|e| e.text.contains(SENTINEL)),
-            policy.clipboard != Clipboard::Disabled,
-            "{case}: the history's contents disagree with the policy"
-        );
-    }
-}
-
-#[test]
-fn switching_to_a_stricter_document_clears_a_history_gathered_under_a_looser_one() {
-    // Retention is a separate decision from recording, and this is the one
-    // that leaks: the text was copied legitimately, and then the user opened
-    // a Confidential document in another tab.
-    for (profile, privacy) in every_case() {
-        let policy = policy_of(profile, privacy);
-        let mut history = History::new();
-        history.push(SENTINEL, Clipboard::InMemory);
-        // Pinned, because a pin is a request and not an exemption from
-        // policy -- and a pinned entry is the one most likely to matter.
-        history.toggle_pin(0);
-        assert_eq!(history.entries().len(), 1);
-
-        history.enforce(policy.clipboard);
-
-        let case = format!("{} under privacy {:?}", profile.name(), privacy);
-        if policy.clipboard == Clipboard::Disabled {
-            assert!(
-                !history.entries().iter().any(|e| e.text.contains(SENTINEL)),
-                "{case}: copied text survived a profile that forbids a history"
-            );
-        } else {
-            assert_eq!(history.entries().len(), 1, "{case}: cleared needlessly");
-        }
-    }
-}
-
 // --- the metadata store --------------------------------------------------
 
 #[test]
@@ -448,19 +392,13 @@ fn any_policy() -> impl Strategy<Value = Policy> {
             Just(Recovery::Disabled)
         ],
         prop_oneof![
-            Just(Clipboard::Persistent),
-            Just(Clipboard::InMemory),
-            Just(Clipboard::Disabled)
-        ],
-        prop_oneof![
             Just(Metadata::Summary),
             Just(Metadata::PathOnly),
             Just(Metadata::Disabled)
         ],
     )
-        .prop_map(|(recovery, clipboard, metadata)| Policy {
+        .prop_map(|(recovery, metadata)| Policy {
             recovery,
-            clipboard,
             metadata,
             embeddings: bp_security::Embeddings::Local,
             network: bp_security::Network::Allowed,
@@ -491,10 +429,6 @@ proptest! {
             .expect("checkpoint");
         prop_assert_eq!(written, Written::Refused(Refusal::ProfileForbidsIt));
         prop_assert!(!contains(&all_bytes_under(fixture.journal.location()), SENTINEL));
-
-        let mut history = History::new();
-        prop_assert!(!history.push(SENTINEL, in_force.clipboard));
-        prop_assert!(history.is_empty());
 
         let store = Store::in_memory().expect("store");
         let document = PathBuf::from(format!("/tmp/{SENTINEL}.txt"));

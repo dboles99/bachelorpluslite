@@ -8,8 +8,6 @@
 | `.bpadx` encryption | Yes | Yes | Yes |
 | Huge-file mode | Yes | Yes | Yes |
 | Hybrid search | Yes | Yes | Yes |
-| Native Windows clipboard history | Yes | Yes | No |
-| BachelorPad+ clipboard history | Yes | Yes | Yes |
 | DPAPI | Yes | Yes | No |
 | Windows Hello | OS-dependent | Yes | No |
 | Linux keyring | No | No | Desktop-dependent |

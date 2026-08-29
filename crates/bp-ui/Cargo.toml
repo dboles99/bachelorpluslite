@@ -9,7 +9,6 @@ workspace = true
 
 [dependencies]
 bp-buffer = { path = "../bp-buffer" }
-bp-clipboard = { path = "../bp-clipboard" }
 bp-config = { path = "../bp-config" }
 bp-core = { path = "../bp-core" }
 bp-data = { path = "../bp-data" }

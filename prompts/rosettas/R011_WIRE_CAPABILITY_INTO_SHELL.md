@@ -50,8 +50,9 @@ Each of these has already cost somebody a debugging session.
 3. **There are two editor views. A wiring change usually needs both.**
    Anything touching the caret, the selection or the clipboard behaves
    differently under `TextInput` (Slint owns them) and under `EditorSurface`
-   (we do). Look at how `select()` and the clipboard-history menu rows handle
-   this and follow the same shape. Missing one path produces a feature that
+   (we do). Look at how `select()` and `reveal()` handle this and follow the
+   same shape -- the clipboard-history rows were the other worked example
+   until ADR-0061 removed them. Missing one path produces a feature that
    works for you and not for the user, depending on a flag.
 
 4. **An element inside a Slint `if` is out of scope for anything outside it.**

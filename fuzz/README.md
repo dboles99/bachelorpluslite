@@ -387,7 +387,7 @@ mature parser written by somebody else that does not have them.
 - **`bp_files::save`**, `atomic_write` and `resolve_in_dir` — the write half.
   Hostile *paths* rather than hostile bytes, which is a different target with
   different setup, and it is missing.
-- **`bp-config`, `bp-history`, `bp-clipboard`, `bp-search`, `bp-redaction`,
+- **`bp-config`, `bp-history`, `bp-search`, `bp-redaction`,
   `bp-integrity`.** Not surveyed at all. Several read files.
 - **Concurrency.** Every probe is single-threaded. Nothing here would find a
   race, and `bp-files`' watch/reload path has one to be found or ruled out.

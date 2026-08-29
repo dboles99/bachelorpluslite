@@ -249,7 +249,7 @@ fn refresh(ui: &AppWindow, state: &mut state::AppState, push_text: state::PushTe
     // for the same reason: the rows grey when there is nothing to read, and
     // that changes with every keystroke.
     ui.set_research_items(model(menus::research(state.active_has_content())));
-    ui.set_edit_items(model(menus::edit(state.clips.entries(), state.editor_view)));
+    ui.set_edit_items(model(menus::edit(state.editor_view)));
     // Rebuilt rather than set once: it shows the *active* document's profile
     // and what that profile permits, both of which change with the tab.
     let encrypted = state
@@ -1070,44 +1070,6 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
                 // repaint -- but a checkpoint is not a save and the save
                 // state must not move.
                 if let Some(ui) = weak.upgrade() {
-                    refresh(&ui, &mut cell.borrow_mut(), state::PushText::No);
-                }
-            },
-        );
-    }
-
-    // Capture clipboard changes. Polling, because neither platform offers a
-    // portable change notification and a missed clip is a minor loss.
-    //
-    // History is in memory only: the clipboard carries passwords and tokens
-    // constantly, and specs.md section 14 makes persistence opt-in.
-    let clipboard_timer = slint::Timer::default();
-    {
-        let cell = Rc::clone(&state);
-        let weak = ui.as_weak();
-        clipboard_timer.start(
-            slint::TimerMode::Repeated,
-            std::time::Duration::from_millis(1200),
-            move || {
-                let Some(text) = read_os_clipboard() else {
-                    return;
-                };
-                // The active document's policy, because you copy out of the
-                // document you are looking at and an OS clipboard read says
-                // nothing about where the text came from.
-                let changed = {
-                    let mut s = cell.borrow_mut();
-                    let policy = s.policy().clipboard;
-                    // Enforce first: a document whose profile forbids a
-                    // history must not keep one gathered a moment ago under a
-                    // looser profile, and the poll is the soonest reliable
-                    // point at which that is noticed.
-                    let cleared = s.clips.enforce(policy);
-                    let added = s.clips.push(&text, policy);
-                    cleared || added
-                };
-                // Only rebuild the menus when the history actually changed.
-                if changed && let Some(ui) = weak.upgrade() {
                     refresh(&ui, &mut cell.borrow_mut(), state::PushText::No);
                 }
             },

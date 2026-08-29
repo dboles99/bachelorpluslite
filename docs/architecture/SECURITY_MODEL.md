@@ -21,7 +21,6 @@ If a document is protected, the policy must cover:
 - autosave
 - recovery journal
 - revision history
-- clipboard persistence
 - semantic metadata
 - embeddings
 - temporary files

@@ -230,7 +230,6 @@ pub struct AppState {
     pub(crate) passphrase_status: String,
     /// Cross-file search results, indexed by the row the user clicks.
     pub(crate) file_hits: Vec<bp_search::FileHit>,
-    pub(crate) clips: bp_clipboard::History,
     /// Where this machine's signing key is, if the environment says where
     /// the user's profile is.
     ///
@@ -327,7 +326,6 @@ impl AppState {
             passphrase_status: String::new(),
             tab_context: None,
             file_hits: Vec::new(),
-            clips: bp_clipboard::History::new(),
             signing_key: default_signing_key_path(),
             drawn_rows: 0,
             surface_shown: None,

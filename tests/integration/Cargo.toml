@@ -26,7 +26,6 @@ path = "src/lib.rs"
 [dev-dependencies]
 bp-audit = { path = "../../crates/bp-audit" }
 bp-buffer = { path = "../../crates/bp-buffer" }
-bp-clipboard = { path = "../../crates/bp-clipboard" }
 bp-config = { path = "../../crates/bp-config" }
 bp-core = { path = "../../crates/bp-core" }
 bp-crypto = { path = "../../crates/bp-crypto" }

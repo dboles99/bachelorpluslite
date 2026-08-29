@@ -35,7 +35,7 @@ Status as of **2026-08-29**. Four words, meaning four different things:
 | 8 | Semantic foundation and naming | **Started** | [07-semantic](project/tasks/07-semantic/) | `bp-semantic`, `bp-naming` |
 | 9 | Organization and related-note graph | **Started** | [07-semantic](project/tasks/07-semantic/) | `bp-storage` |
 | 10 | Semantic/hybrid search | Not started, **decided** | [07-semantic](project/tasks/07-semantic/) | — |
-| 11 | Clipboard system | **Started** | [08-clipboard](project/tasks/08-clipboard/) | `bp-clipboard` |
+| 11 | Clipboard system | **Removed** | [ADR-0061](docs/decisions/ADR-0061.md) | — |
 | 12 | Notebook/execution system | **Removed** | [ADR-0057](docs/decisions/ADR-0057.md) | — |
 | 13 | Research mode | **Removed**, in part | [ADR-0060](docs/decisions/ADR-0060.md) | `bp-storage`, `bp-semantic` |
 | 14 | Security foundation | **Started** | [11-security](project/tasks/11-security/) | `bp-security` |
@@ -221,13 +221,16 @@ closes the Windows/Linux asymmetry ADR-0026 measured and could not fix. Sign
 Document acts; Verify Signature already did.
 
 **Security profiles (phase 14) are wired.** ADR-0020 defines what each of
-Standard, Private, Confidential and Maximum permits across seven axes, and the
+Standard, Private, Confidential and Maximum permits across six axes, and the
 named profiles are checked to be monotonic — each at least as restrictive as
-the one before, on every axis. All three dependants now read the policy: the
-recovery journal refuses rather than writing plaintext (and deletes what a
-looser profile already wrote), clipboard history stops recording and is
-cleared, and `bp-storage`'s `record_document` drops the title under `PathOnly`
-and records nothing under `Disabled`. The Security menu sets the profile and
+the one before, on every axis. **Two of the six have a dependant that reads
+them**, and both do: the recovery journal refuses rather than writing
+plaintext (and deletes what a looser profile already wrote), and
+`bp-storage`'s `record_document` drops the title under `PathOnly` and records
+nothing under `Disabled`. There were seven axes and three dependants until
+[ADR-0061](docs/decisions/ADR-0061.md) removed the clipboard and its axis
+together; the other four axes are reported by the Tools inspector and
+consulted by nothing ([ADR-0059](docs/decisions/ADR-0059.md) §4). The Security menu sets the profile and
 states what it permits; the status bar shows anything other than the default.
 
 Two limits are deliberate and visible. Profiles requiring an encrypted journal

@@ -61,8 +61,7 @@ sweep of rows that never worked. The menu bar is twelve menus now.
 | --- | --- |
 | Undo, Redo, Cut, Copy, Paste, Select All | **live** (both editor views) |
 | Double-click a word, triple-click a line | **live** — native under `TextInput`, `bp_editor::{select_word_at, select_line_at}` under `--editor-view` |
-| Clipboard History | **live** |
-| Paste transformations | **live** — offered per entry kind, and only where the result would differ |
+| Clipboard History, Paste transformations | **Removed** ([ADR-0061](../decisions/ADR-0061.md)). Both were live. Cut, Copy and Paste above are the OS clipboard and are untouched — the history shared a word with them and nothing else |
 | Sort / Deduplicate / Reverse / Trim lines | **live** |
 | Duplicate Line, Move Line Up / Down | **caret** |
 | Go to Line | **live** in both surfaces — it needs the caret *moved*, never read |
@@ -125,7 +124,7 @@ no data rows rather than a column of greyed ones.
 | Row | State |
 | --- | --- |
 | Standard / Private / Confidential / Maximum | **live** — the active document's profile; exactly one ticks, and a Custom policy ticks none. Private and Confidential seal the recovery journal with the document's passphrase, so they need the document encrypted |
-| What the profile permits (recovery, clipboard, network) | **live** — a readout, greyed because it is not clickable. A profile is a promise about invisible behaviour, and a promise nobody can see is not one |
+| What the profile permits (recovery, network) | **live** — a readout, greyed because it is not clickable. A profile is a promise about invisible behaviour, and a promise nobody can see is not one. It named the clipboard until [ADR-0061](../decisions/ADR-0061.md) removed that axis with the crate it governed |
 | Encrypt Document... | **live** — asks for a passphrase twice, writes a `.bpadx` beside the original, and the tab adopts it so later saves stay encrypted. Reads "Encrypted (.bpadx)" and greys once the document is |
 | Privacy Mode | **live** — a session-wide override that can only tighten |
 | Scan for Secrets | **live** — `bp_secrets::scan` over the active document. The status bar gives the count, the kinds and the first three positions; the full listing is a dialog, one line per finding. **Neither ever prints the matched text**: a `Finding` deliberately carries a position and a classification and nothing else, and the shell must not undo that by reaching back into the document to quote it |
@@ -207,9 +206,11 @@ left. Kept as a correction rather than deleted, because the shape recurs:
 - **Settings is Tools ▸ Configuration** (id 723, ADR-0048).
 - **Decrypt in place** and **secure clipboard** were never menu rows and are
   not planned as any: opening a `.bpadx` asks for its passphrase, and what the
-  clipboard may retain is a *policy* the profile decides
-  ([ADR-0020](../decisions/ADR-0020.md)), read out three rows up as
-  "Clipboard history: …".
+  clipboard could retain was a *policy* the profile decided
+  ([ADR-0020](../decisions/ADR-0020.md)), read out three rows up. **Both sides
+  of that sentence are now gone** — [ADR-0061](../decisions/ADR-0061.md)
+  removed the history and its policy axis together, because an axis outlives
+  its subject by nothing.
 - **Phases 15 and 16 are both "Started"** in `ROADMAP.md`, which owns phase
   status, and their crates ship.
 
@@ -230,12 +231,11 @@ rather than its permissions, so nothing new had to be designed, reviewed or
 fuzzed: it is the envelope encrypted documents and the recovery journal
 already use.
 
-The three things that were waiting on profiles now read them: the recovery
-journal refuses rather than writing plaintext under a profile that forbids it,
-clipboard history is cleared and stops recording, and `bp-storage`'s
-`record_document` honours `Metadata`. `bp-storage` is still not called by the
-application — that is ADR-0019's product decision, not a security one any
-more.
+The things that were waiting on profiles now read them: the recovery journal
+refuses rather than writing plaintext under a profile that forbids it, and
+`bp-storage`'s `record_document` honours `Metadata`. **There were three and
+there are two**, since ADR-0061 took the clipboard — and two is now the whole
+count of policy axes anything enforces (ADR-0059 §4).
 
 ## Tools
 

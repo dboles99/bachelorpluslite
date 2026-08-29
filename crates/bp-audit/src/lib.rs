@@ -1097,7 +1097,7 @@ fn hex_decode(text: &str) -> Option<Vec<u8>> {
 mod tests {
     use super::*;
 
-    use bp_security::{Clipboard, Embeddings, Network, Profile, TemporaryFiles, Zeroise};
+    use bp_security::{Embeddings, Network, Profile, TemporaryFiles, Zeroise};
     use proptest::prelude::*;
 
     // -- helpers -----------------------------------------------------------
@@ -1226,11 +1226,6 @@ mod tests {
                 Just(Recovery::Disabled)
             ],
             prop_oneof![
-                Just(Clipboard::Persistent),
-                Just(Clipboard::InMemory),
-                Just(Clipboard::Disabled)
-            ],
-            prop_oneof![
                 Just(Metadata::Summary),
                 Just(Metadata::PathOnly),
                 Just(Metadata::Disabled)
@@ -1245,16 +1240,13 @@ mod tests {
             prop_oneof![Just(Zeroise::Off), Just(Zeroise::On)],
         )
             .prop_map(
-                |(recovery, clipboard, metadata, embeddings, network, temporary_files, zeroise)| {
-                    Policy {
-                        recovery,
-                        clipboard,
-                        metadata,
-                        embeddings,
-                        network,
-                        temporary_files,
-                        zeroise,
-                    }
+                |(recovery, metadata, embeddings, network, temporary_files, zeroise)| Policy {
+                    recovery,
+                    metadata,
+                    embeddings,
+                    network,
+                    temporary_files,
+                    zeroise,
                 },
             )
     }

@@ -771,13 +771,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bp-clipboard"
-version = "0.1.0"
-dependencies = [
- "bp-security",
-]
-
-[[package]]
 name = "bp-config"
 version = "0.1.0"
 dependencies = [
@@ -866,7 +859,6 @@ version = "0.1.0"
 dependencies = [
  "bp-audit",
  "bp-buffer",
- "bp-clipboard",
  "bp-config",
  "bp-core",
  "bp-crypto",
@@ -983,7 +975,6 @@ dependencies = [
  "arboard",
  "bp-audit",
  "bp-buffer",
- "bp-clipboard",
  "bp-config",
  "bp-core",
  "bp-crypto",

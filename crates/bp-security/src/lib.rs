@@ -1,7 +1,7 @@
 //! Security profiles and the policy they resolve to (ADR-0020).
 //!
 //! ADR-0011 says a document's security policy propagates to every artefact
-//! derived from it -- the recovery journal, clipboard history, semantic
+//! derived from it -- the recovery journal, semantic
 //! metadata, embeddings, temporary files and network eligibility. This crate
 //! is where that policy is decided. It is decided here and performed
 //! elsewhere: nothing in this crate writes a file, holds a secret or
@@ -44,19 +44,6 @@ use serde::{Deserialize, Serialize};
 pub enum Recovery {
     Plaintext,
     Encrypted,
-    Disabled,
-}
-
-/// Whether copied text may outlive the moment it was copied.
-///
-/// `bp-clipboard` reads this. `InMemory` is today's behaviour: history is
-/// kept for the session and never written down. `Persistent` is what
-/// specs.md section 14 makes opt-in, and it is not reachable from any
-/// profile below Standard.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub enum Clipboard {
-    Persistent,
-    InMemory,
     Disabled,
 }
 
@@ -126,7 +113,6 @@ pub enum Zeroise {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Policy {
     pub recovery: Recovery,
-    pub clipboard: Clipboard,
     pub metadata: Metadata,
     pub embeddings: Embeddings,
     pub network: Network,
@@ -144,7 +130,6 @@ impl Policy {
     #[must_use]
     pub fn is_at_least_as_strict_as(&self, other: &Self) -> bool {
         self.recovery >= other.recovery
-            && self.clipboard >= other.clipboard
             && self.metadata >= other.metadata
             && self.embeddings >= other.embeddings
             && self.network >= other.network
@@ -217,13 +202,11 @@ impl Profile {
     pub const fn policy(self) -> Policy {
         match self {
             // Today's product, described. Recovery writes plaintext,
-            // clipboard history is in memory, the metadata store is unwired
             // (ADR-0019) so nothing is recorded yet -- but Standard is what
             // permits it to be, which is what makes ADR-0019 revisitable
             // rather than reversible by hand.
             Self::Standard => Policy {
                 recovery: Recovery::Plaintext,
-                clipboard: Clipboard::InMemory,
                 metadata: Metadata::Summary,
                 embeddings: Embeddings::Local,
                 network: Network::Allowed,
@@ -236,7 +219,6 @@ impl Profile {
             // the journal is refused rather than silently written in clear.
             Self::Private => Policy {
                 recovery: Recovery::Encrypted,
-                clipboard: Clipboard::InMemory,
                 metadata: Metadata::PathOnly,
                 embeddings: Embeddings::Local,
                 network: Network::Denied,
@@ -249,7 +231,6 @@ impl Profile {
             // through from any other tab.
             Self::Confidential => Policy {
                 recovery: Recovery::Encrypted,
-                clipboard: Clipboard::Disabled,
                 metadata: Metadata::Disabled,
                 embeddings: Embeddings::None,
                 network: Network::Denied,
@@ -261,7 +242,6 @@ impl Profile {
             // making: a crash loses unsaved work, and that is the point.
             Self::Maximum => Policy {
                 recovery: Recovery::Disabled,
-                clipboard: Clipboard::Disabled,
                 metadata: Metadata::Disabled,
                 embeddings: Embeddings::None,
                 network: Network::Denied,
@@ -307,7 +287,6 @@ impl Privacy {
             Self::Off => policy,
             Self::On => Policy {
                 recovery: policy.recovery.max(Recovery::Disabled),
-                clipboard: policy.clipboard.max(Clipboard::Disabled),
                 metadata: policy.metadata.max(Metadata::Disabled),
                 embeddings: policy.embeddings.max(Embeddings::None),
                 network: policy.network.max(Network::Denied),
@@ -411,7 +390,6 @@ mod tests {
                     s.recovery >= l.recovery,
                     "recovery: {stricter:?} vs {looser:?}"
                 );
-                assert!(s.clipboard >= l.clipboard, "clipboard");
                 assert!(s.metadata >= l.metadata, "metadata");
                 assert!(s.embeddings >= l.embeddings, "embeddings");
                 assert!(s.network >= l.network, "network");
@@ -425,8 +403,8 @@ mod tests {
     fn standard_is_the_default_and_describes_todays_product() {
         // If this row and the product ever disagree, one of them is a bug.
         // The behaviours pinned here are the ones that exist right now:
-        // bp-history writes plaintext, bp-clipboard keeps history in memory
-        // only, and nothing is forbidden that currently happens.
+        // bp-history writes plaintext, and nothing is forbidden that
+        // currently happens.
         let policy = Security::default().policy();
 
         assert_eq!(Profile::default(), Profile::Standard);
@@ -436,7 +414,6 @@ mod tests {
             "bp-history writes plaintext today; the model must say so rather \
              than quietly promising otherwise"
         );
-        assert_eq!(policy.clipboard, Clipboard::InMemory);
         assert_eq!(policy.temporary_files, TemporaryFiles::Allowed);
         assert!(
             !policy.needs_encryption(),
@@ -479,7 +456,6 @@ mod tests {
         // what it is handed is not one.
         let policy = Policy {
             recovery: Recovery::Disabled,
-            clipboard: Clipboard::Persistent,
             metadata: Metadata::Disabled,
             embeddings: Embeddings::Cloud,
             network: Network::Allowed,
@@ -499,8 +475,14 @@ mod tests {
         let mixed = Policy {
             // Stricter than Standard on recovery...
             recovery: Recovery::Disabled,
-            // ...and more permissive on the clipboard.
-            clipboard: Clipboard::Persistent,
+            // ...and more permissive on embeddings, which is what makes the
+            // two genuinely incomparable rather than merely different. It
+            // used to be the clipboard axis, until ADR-0061 removed it with
+            // the crate it governed -- and the axis had to be *replaced*
+            // rather than dropped, because with only one difference left this
+            // policy would be strictly stricter and the test would pass
+            // while asserting nothing.
+            embeddings: Embeddings::Cloud,
             ..Profile::Standard.policy()
         };
         let standard = Profile::Standard.policy();
@@ -519,7 +501,6 @@ mod tests {
         // monotonic chain and is where an unclamped axis would hide.
         policies.push(Policy {
             recovery: Recovery::Disabled,
-            clipboard: Clipboard::Persistent,
             metadata: Metadata::Disabled,
             embeddings: Embeddings::Cloud,
             network: Network::Allowed,
@@ -564,7 +545,6 @@ mod tests {
         let clamped = Privacy::On.clamp(Profile::Standard.policy());
 
         assert_eq!(clamped.recovery, Recovery::Disabled);
-        assert_eq!(clamped.clipboard, Clipboard::Disabled);
         assert_eq!(clamped.metadata, Metadata::Disabled);
         assert_eq!(clamped.embeddings, Embeddings::None);
         assert_eq!(clamped.network, Network::Denied);
@@ -609,8 +589,6 @@ mod tests {
         // axis and silently break every check above.
         assert!(Recovery::Plaintext < Recovery::Encrypted);
         assert!(Recovery::Encrypted < Recovery::Disabled);
-        assert!(Clipboard::Persistent < Clipboard::InMemory);
-        assert!(Clipboard::InMemory < Clipboard::Disabled);
         assert!(Metadata::Summary < Metadata::PathOnly);
         assert!(Metadata::PathOnly < Metadata::Disabled);
         assert!(Embeddings::Cloud < Embeddings::Local);

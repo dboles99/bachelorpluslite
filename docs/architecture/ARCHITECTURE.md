@@ -41,10 +41,9 @@ and this table carries the intent until then.
 | `bp-data` | **live** | Structured-data operations: validate, format, minify, convert, report. | 6 |
 | `bp-search` | **live** | Literal and regex find/replace, plus recursive cross-file search. | 7 |
 | `bp-semantic` | **live** | Deterministic extraction: titles, keywords, summaries, outlines, document statistics, and the questions a document asks (ADR-0046). Layer one only. | 8, 13 |
-| `bp-clipboard` | **live** | Clipboard history, kind detection and format-aware paste transformations (ADR-0010). In memory only. | 11 |
 | `bp-organize` | planned | Projects, topics, tags, related notes, duplicate detection. | 9 |
 | `bp-storage` | **live** | SQLite metadata store and migrations (ADR-0019). Documents, tags. Written to on every successful save and read four ways: Related Notes and duplicate detection (ADR-0037), Research Report's aggregates (ADR-0041), and its own summary (ADR-0046). | 9, 13 |
-| `bp-security` | **live** | Security profiles resolving to a policy over seven axes, plus Privacy Mode (ADR-0020). Decides policy; performs none of it. Read by the journal, the clipboard and the metadata store. | 14, 16 |
+| `bp-security` | **live** | Security profiles resolving to a policy over **six** axes, plus Privacy Mode (ADR-0020). Decides policy; performs none of it. **Two axes have an enforcing reader** — the journal and the metadata store; the other four are reported by the Tools inspector and consulted by nothing (ADR-0059 §4, and they leave under R5). | 14, 16 |
 | `bp-crypto` | **live** | The `.bpadx` envelope (ADR-0021): Argon2id, XChaCha20-Poly1305 and AES-256-GCM, chunked with the header and chunk position authenticated. Plus document hashing and detached Ed25519 signatures (specs §15). Composes primitives, implements none. Reached from Security ▸ Encrypt Document and from opening a `.bpadx`; the signing half is not reached yet. | 15, 16 |
 | `bp-secrets` | **built, unwired** | Secret scanning (specs §15): AWS/GitHub/GitLab/Slack tokens, PEM blocks, JWTs, connection strings, high-entropy assignments. Reports where a secret is, never what it is. No dependencies. Platform key protection is still planned. | 16 |
 | `bp-integrity` | **built, unwired** | `.sig` sidecars, signing-key files and hash manifests over `bp-crypto` (ADR-0026). Says what it cannot enforce per platform rather than implying it did. | 16 |
@@ -61,7 +60,6 @@ bachelorpad ──> bp-config
             ├──> bp-theme
             └──> bp-ui ──┬─> bp-audit      ──> bp-crypto, bp-security
                          ├─> bp-buffer     (the latency probe, and the size classes)
-                         ├─> bp-clipboard  ──> bp-security
                          ├─> bp-config     ──> bp-platform
                          ├─> bp-core       ──> bp-security
                          ├─> bp-crypto
@@ -109,8 +107,8 @@ an edge, because a dependency diagram that has drifted is worse than none.
 `bp-crypto`, `bp-data`, `bp-formats`, `bp-naming`, `bp-platform`,
 `bp-redaction`, `bp-search`, `bp-secrets`, `bp-security`,
 `bp-semantic` and `bp-theme`. That is what keeps them cheap to test and
-impossible to entangle with the UI toolkit — and it is why all but 368 of the
-workspace's 1,694 tests run without a window.
+impossible to entangle with the UI toolkit — and it is why all but 360 of the
+workspace's 1,642 tests run without a window.
 
 `bp-platform` is on that list for its *real* dependencies and takes
 `bp-formats` as a **dev**-dependency, deliberately and one-directionally: it
@@ -121,7 +119,7 @@ shape, and the two answer different questions about the same extension — "how
 do I read this" against "what does the OS call it".
 
 `bp-security` is the one that acquired dependants rather than dependencies:
-`bp-core`, `bp-clipboard`, `bp-storage`, `bp-history` and `bp-audit` all read
+`bp-core`, `bp-storage`, `bp-history` and `bp-audit` all read
 a policy from it (ADR-0020). A crate everything defers to and that defers to
 nothing is the right shape for that, and it is why the list above shrank from
 an earlier count of eleven without anything going wrong.
@@ -138,17 +136,17 @@ Two deliberate non-dependencies:
 ## Inside `bp-ui`
 
 The shell was one 2,675-line file and the single-writer bottleneck for every
-piece of wiring work. It is now eighteen, split along seams the files already
+piece of wiring work. It is now seventeen, split along seams the files already
 had as comment banners:
 
 | Module | Lines | Owns |
 | --- | ---: | --- |
-| `menus.rs` | 3,281 | Menu contents and the action-id map |
-| `state.rs` | 2,942 | `AppState` itself: documents, workspace, opening, saving, reloading, format detection, the gutter and the status labels |
-| `state/security.rs` | 2,824 | Scan, redact, inspect metadata, hash, sign, verify, the security history all six write into, and the profile and Privacy Mode switches that govern them |
-| `lib.rs` | 1,337 | `run_with`, `refresh`, and the Slint callback wiring |
-| `dispatch.rs` | 1,049 | The menu-action match, and the dialogs its arms share |
+| `menus.rs` | 2,977 | Menu contents and the action-id map |
+| `state.rs` | 2,938 | `AppState` itself: documents, workspace, opening, saving, reloading, format detection, the gutter and the status labels |
+| `state/security.rs` | 2,774 | Scan, redact, inspect metadata, hash, sign, verify, the security history all six write into, and the profile and Privacy Mode switches that govern them |
+| `lib.rs` | 1,299 | `run_with`, `refresh`, and the Slint callback wiring |
 | `editor_view.rs` | 1,003 | The custom surface: key translation, caret placement, what to draw, and the scroll that serves both a rope and a file |
+| `dispatch.rs` | 965 | The menu-action match, and the dialogs its arms share |
 | `viewer.rs` | 801 | A document the rope does not hold: where the reader is looking, the window handed to the surface, and the scan of it a find runs (ADR-0030, ADR-0042) |
 | `state/research.rs` | 758 | Research Report: aggregate reads over `bp-storage`, worded as insights, each naming the documents behind it and closing with the rules it applied (ADR-0041, ADR-0046); and what the store holds |
 | `default_editor.rs` | 754 | File ▸ Set as Default Editor: the report, the consent dialog, the artefacts (ADR-0012) |
@@ -158,7 +156,7 @@ had as comment banners:
 | `state/data.rs` | 498 | The Data menu: which `bp-data` operation a menu id means for the format in front of the user |
 | `audit.rs` | 245 | Which file the security history is, and what a person reading it sees (ADR-0024) |
 | `state/find.rs` | 220 | What the find bar is looking for, which match the user is standing on, and driving a scan of a document served from disk |
-| `state/questions.rs` | 175 | What the document in front of you *asks*, through `bp_semantic::questions` (ADR-0046) |
+| `state/questions.rs` | 176 | What the document in front of you *asks*, through `bp_semantic::questions` (ADR-0046) |
 | `testpaths.rs` | 148 | **Test-only.** One temp path per test that no *earlier* run can have left behind (ADR-0049) |
 | `passphrase.rs` | 141 | What the one-field passphrase bar is currently asking, as a state machine |
 

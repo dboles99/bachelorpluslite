@@ -101,10 +101,10 @@ pub mod action {
     /// rows do not fit in two, and splitting one family across two blocks is
     /// how the fifth row later lands inside the recent-files window at 60.
     ///
-    /// Above 100 for the same reason `CLIP_BASE` is: Slint's `dispatch`
-    /// routes exactly `UNDO..=SELECT_ALL` to the widget and everything else
-    /// to Rust, so a block only has to avoid that window rather than sit
-    /// below it. 207-209 are free.
+    /// Above 100 because Slint's `dispatch` routes exactly
+    /// `UNDO..=SELECT_ALL` to the widget and everything else to Rust, so a
+    /// block only has to avoid that window rather than sit below it.
+    /// 207-209 are free.
     pub const SCAN_SECRETS: i32 = 200;
     pub const HASH_DOCUMENT: i32 = 201;
     pub const SIGN_DOCUMENT: i32 = 202;
@@ -157,29 +157,6 @@ pub mod action {
     /// File ▸ New Window: a second, independent instance of this process.
     /// 222-229 are still free.
     pub const NEW_WINDOW: i32 = 221;
-
-    /// Clipboard history occupies `CLIP_BASE ..` (bounded by [`super::clip_end`]).
-    ///
-    /// Slint's `dispatch` routes exactly `UNDO..=SELECT_ALL` to the widget and
-    /// everything else to Rust, so this range only has to avoid that window —
-    /// not sit below it.
-    pub const CLIP_BASE: i32 = 300;
-
-    /// How many transform rows are reserved per clipboard entry.
-    ///
-    /// `transforms_for` currently offers at most three for any one
-    /// `ClipKind` (`PlainText` and `Json`); one spare slot is headroom.
-    /// `no_clip_kind_offers_more_transforms_than_the_reserved_slots` fails
-    /// loudly if that ever stops being true, rather than letting a fourth
-    /// transform silently share an id with the next entry's first one.
-    pub const CLIP_TRANSFORM_SLOTS: i32 = 4;
-    /// Paste-transformation rows: entry `i`'s transforms occupy
-    /// `CLIP_TRANSFORM_BASE + i * CLIP_TRANSFORM_SLOTS ..` (bounded by
-    /// [`super::clip_transform_end`]). A block per entry, in a range of its
-    /// own above `CLIP_BASE`'s, rather than interleaved with it -- so the
-    /// plain-paste arm's `id - CLIP_BASE` arithmetic never has to know
-    /// transform rows exist.
-    pub const CLIP_TRANSFORM_BASE: i32 = 500;
 
     /// Organize, ADR-0037. A block of its own -- 700-709, 702-709 free.
     pub const ORGANIZE_RELATED_NOTES: i32 = 700;
@@ -356,17 +333,6 @@ fn toggle(label: &str, on: bool, action: i32) -> MenuItem {
     )
 }
 
-/// One past the last plain-paste clipboard id `CLIP_BASE` can produce.
-///
-/// Bounded the same way `RECENT_BASE`'s window is bounded by `MAX_RECENT`:
-/// dispatch used to match `id >= CLIP_BASE` with no upper edge at all, which
-/// is the same shape of mistake that once let the recent-files arm claim
-/// everything up to 100. A function rather than a `const` because
-/// `i32::try_from` is not usable in a const initialiser.
-pub(crate) fn clip_end() -> i32 {
-    action::CLIP_BASE + i32::try_from(bp_clipboard::MAX_ENTRIES).unwrap_or(0)
-}
-
 /// One past the last id `PROFILE_BASE` can produce.
 ///
 /// Sized from `Profile::all()` rather than written down, so a fifth named
@@ -381,73 +347,6 @@ pub(crate) fn profile_end() -> i32 {
 /// stamp cannot leave the dispatch matching five and silently ignoring it.
 pub(crate) fn stamp_end() -> i32 {
     action::STAMP_BASE + i32::try_from(bp_naming::Stamp::all().len()).unwrap_or(0)
-}
-
-/// One past the last paste-transformation id.
-pub(crate) fn clip_transform_end() -> i32 {
-    action::CLIP_TRANSFORM_BASE
-        + action::CLIP_TRANSFORM_SLOTS * i32::try_from(bp_clipboard::MAX_ENTRIES).unwrap_or(0)
-}
-
-/// A menu label for a paste transformation.
-///
-/// Presentation only -- what each `Transform` actually does lives in
-/// `bp_clipboard` and, for the two JSON ones, `bp_data`; this just names the
-/// row for a menu built in Rust.
-fn transform_label(transform: bp_clipboard::Transform) -> &'static str {
-    use bp_clipboard::Transform;
-    match transform {
-        Transform::JoinLines => "Join Lines",
-        Transform::PlainText => "Strip Markdown",
-        Transform::PrettyJson => "Pretty-Print JSON",
-        Transform::MinifyJson => "Minify JSON",
-        Transform::ForwardSlashes => "Forward Slashes",
-        Transform::BulletList => "As Bullet List",
-        Transform::CodeBlock => "As Code Block",
-    }
-}
-
-/// Apply a paste transformation, routing JSON reformatting to `bp-data`.
-///
-/// `bp_clipboard::apply` deliberately returns `None` for `PrettyJson` and
-/// `MinifyJson` -- its doc comment explains why: `bp-data` already owns JSON
-/// formatting through `serde_json`, and a second implementation here would
-/// give the same document two different answers depending on which menu
-/// reached for it. `None` still means what it means for every other
-/// transform -- nothing would change, so no row should offer it -- which is
-/// why the JSON branches are also checked against the input rather than
-/// trusted to always differ.
-pub(crate) fn apply_transform(transform: bp_clipboard::Transform, text: &str) -> Option<String> {
-    use bp_clipboard::Transform;
-    let result = match transform {
-        Transform::PrettyJson => bp_data::json_format(text).ok(),
-        Transform::MinifyJson => bp_data::json_minify(text).ok(),
-        other => bp_clipboard::apply(other, text),
-    }?;
-    (result != text).then_some(result)
-}
-
-/// Decode a `CLIP_TRANSFORM_BASE`-range id back to which entry and
-/// transform it means.
-///
-/// `None` covers a stale id the same way as an unknown one: the range is
-/// wrong, the entry is no longer there (the history moved between the menu
-/// being built and the click landing), or the slot is past however many
-/// transforms that entry's kind actually offers. All three are "do nothing"
-/// as far as the caller is concerned.
-pub(crate) fn decode_transform(
-    id: i32,
-    clips: &[bp_clipboard::Entry],
-) -> Option<(usize, bp_clipboard::Transform)> {
-    if !(action::CLIP_TRANSFORM_BASE..clip_transform_end()).contains(&id) {
-        return None;
-    }
-    let offset = id - action::CLIP_TRANSFORM_BASE;
-    let entry_index = usize::try_from(offset / action::CLIP_TRANSFORM_SLOTS).ok()?;
-    let slot = usize::try_from(offset % action::CLIP_TRANSFORM_SLOTS).ok()?;
-    let entry = clips.get(entry_index)?;
-    let transform = *bp_clipboard::transforms_for(entry.kind).get(slot)?;
-    Some((entry_index, transform))
 }
 
 pub fn file(
@@ -552,7 +451,7 @@ fn shorten(text: &str, max: usize) -> String {
 /// never exposes where the caret is, so those rows stay present but greyed
 /// rather than vanishing, per this module's convention for a feature that
 /// exists but is not usable right now.
-pub fn edit(clips: &[bp_clipboard::Entry], editor_view: bool) -> Vec<MenuItem> {
+pub fn edit(editor_view: bool) -> Vec<MenuItem> {
     let mut items = vec![
         row("Undo", "Ctrl+Z", action::UNDO),
         row_end("Redo", "Ctrl+Y", action::REDO),
@@ -561,41 +460,6 @@ pub fn edit(clips: &[bp_clipboard::Entry], editor_view: bool) -> Vec<MenuItem> {
         row_end("Paste", "Ctrl+V", action::PASTE),
         row_end("Select All", "Ctrl+A", action::SELECT_ALL),
     ];
-
-    // Clipboard history. Each row shows a preview and what the entry looks
-    // like, so a column of similar-looking clips is still distinguishable.
-    if clips.is_empty() {
-        items.push(planned("Clipboard History — nothing copied yet"));
-    } else {
-        for (index, entry) in clips.iter().take(bp_clipboard::MAX_ENTRIES).enumerate() {
-            let pin = if entry.pinned { "📌 " } else { "" };
-            items.push(row(
-                &format!("{pin}{}", entry.preview(44)),
-                entry.kind.label(),
-                action::CLIP_BASE + i32::try_from(index).unwrap_or(0),
-            ));
-
-            // Format-aware paste transformations (specs.md section 14) --
-            // only the ones that would actually change this entry's text.
-            // A row that does nothing when clicked is worse than no row.
-            for (slot, &transform) in bp_clipboard::transforms_for(entry.kind).iter().enumerate() {
-                if apply_transform(transform, &entry.text).is_none() {
-                    continue;
-                }
-                let id = action::CLIP_TRANSFORM_BASE
-                    + i32::try_from(index).unwrap_or(0) * action::CLIP_TRANSFORM_SLOTS
-                    + i32::try_from(slot).unwrap_or(0);
-                items.push(row(
-                    &format!("    ↳ {}", transform_label(transform)),
-                    "",
-                    id,
-                ));
-            }
-        }
-    }
-    if let Some(last) = items.last_mut() {
-        last.separator_after = true;
-    }
 
     items.extend([
         row("Sort Lines A → Z", "", action::LINES_SORT_ASC),
@@ -790,10 +654,6 @@ pub fn security(
             "Recovery journal: {}",
             describe_recovery(policy.recovery)
         )),
-        planned(&format!(
-            "Clipboard history: {}",
-            describe_clipboard(policy.clipboard)
-        )),
         MenuItem {
             separator_after: true,
             ..planned(&format!(
@@ -943,14 +803,6 @@ fn describe_recovery(recovery: bp_security::Recovery) -> &'static str {
         // silently plaintext.
         bp_security::Recovery::Encrypted => "off until encryption ships (phase 15)",
         bp_security::Recovery::Disabled => "off",
-    }
-}
-
-fn describe_clipboard(clipboard: bp_security::Clipboard) -> &'static str {
-    match clipboard {
-        bp_security::Clipboard::Persistent => "kept, including on disk",
-        bp_security::Clipboard::InMemory => "kept in memory only",
-        bp_security::Clipboard::Disabled => "not kept",
     }
 }
 
@@ -1315,7 +1167,7 @@ mod tests {
     fn every_menu() -> Vec<(&'static str, Vec<MenuItem>)> {
         vec![
             ("File", file(true, true, true, &[])),
-            ("Edit", edit(&[], true)),
+            ("Edit", edit(true)),
             ("View", view(ThemeId::Dark, false, true, false, 14)),
             (
                 "Format",
@@ -1594,8 +1446,12 @@ mod tests {
         assert!(
             maximum
                 .iter()
-                .any(|i| i.label.contains("Clipboard history") && i.label.contains("not kept"))
+                .any(|i| i.label.contains("Recovery journal") && i.label.contains("off"))
         );
+        // The clipboard readout was the third assertion here until ADR-0061.
+        // It is replaced rather than dropped: this test's subject is that the
+        // menu *states* what a profile does, and two readouts checked is what
+        // makes that a claim about the menu rather than about one row.
     }
 
     #[test]
@@ -1652,11 +1508,6 @@ mod tests {
             ),
             ("profiles", action::PROFILE_BASE..profile_end()),
             ("stamps", action::STAMP_BASE..stamp_end()),
-            ("clipboard history", action::CLIP_BASE..clip_end()),
-            (
-                "paste transformations",
-                action::CLIP_TRANSFORM_BASE..clip_transform_end(),
-            ),
             // Inclusive in dispatch; written as a half-open range one past
             // the last so the two spellings cannot disagree.
             ("editor commands", action::UNDO..action::SELECT_ALL + 1),
@@ -2750,7 +2601,7 @@ mod tests {
         all.extend(file(true, true, false, &[]));
         // `true` so the caret-dependent rows are enabled here too -- the
         // stronger check, since a disabled row is exempt below regardless.
-        all.extend(edit(&[], true));
+        all.extend(edit(true));
         all.extend(view(
             ThemeId::Organic,
             false,
@@ -2853,7 +2704,6 @@ mod tests {
         // would catch.
         let editor_window = action::UNDO..=action::SELECT_ALL;
 
-        let clips = [bp_clipboard::Entry::new("copied")];
         let mut rust_side = Vec::new();
         rust_side.extend(file(
             true,
@@ -2912,7 +2762,7 @@ mod tests {
         // `true` so Duplicate Line and Move Line Up/Down are enabled here
         // too -- they are outside the editor window either way, but a
         // disabled row would skip the check below and prove nothing.
-        for item in edit(&clips, true).iter().filter(|i| i.enabled) {
+        for item in edit(true).iter().filter(|i| i.enabled) {
             if widget_rows.contains(&item.action) {
                 continue;
             }
@@ -2926,138 +2776,8 @@ mod tests {
     }
 
     #[test]
-    fn clipboard_rows_are_indexed_from_the_base() {
-        let clips = [
-            bp_clipboard::Entry::new("first"),
-            bp_clipboard::Entry::new("second"),
-        ];
-        let items = edit(&clips, false);
-        // Bounded above by `clip_end()`: both entries are plain text and
-        // single words, so each also offers transform rows (As Bullet
-        // List, As Code Block) whose ids live past `clip_end()` -- an
-        // unbounded `>= CLIP_BASE` filter here would count those too.
-        let rows: Vec<&MenuItem> = items
-            .iter()
-            .filter(|i| i.action >= action::CLIP_BASE && i.action < clip_end())
-            .collect();
-
-        assert_eq!(rows.len(), 2);
-        assert_eq!(rows[0].action, action::CLIP_BASE);
-        assert!(rows[0].label.contains("first"));
-        assert_eq!(rows[1].action, action::CLIP_BASE + 1);
-    }
-
-    #[test]
-    fn a_full_clipboard_history_makes_the_edit_menu_taller_than_any_window() {
-        // The Edit menu's height is user data, not a constant: one row per
-        // clipboard entry plus up to three for the transformations it offers,
-        // and the line operations sit *after* that block. At capacity the menu
-        // wants more rows than a screen has.
-        //
-        // This is the reason `MenuPopup` caps its height and scrolls instead
-        // of binding to `content.preferred-height`. Without the cap the rows
-        // that fall off the bottom are simply unreachable, and observed on a
-        // 719px window, five copied clips were already enough to hide every
-        // row below them.
-        let clips: Vec<bp_clipboard::Entry> = (0..bp_clipboard::MAX_ENTRIES)
-            .map(|i| bp_clipboard::Entry::new(&format!("first line {i}\nsecond line {i}")))
-            .collect();
-        let items = edit(&clips, true);
-
-        // A row is 28px. Against the 680px client area the window starts with,
-        // and menus opening 28px down, about 23 rows is all that fits.
-        assert!(
-            items.len() > 60,
-            "a full history should ask for far more rows than a window can \
-             show, so that the cap is doing something; got {}",
-            items.len()
-        );
-        // The rows most worth reaching are the ones furthest down, and five of
-        // these have no keyboard shortcut at all.
-        for action in [
-            action::LINES_SORT_ASC,
-            action::LINES_DEDUPE,
-            action::LINES_TRIM,
-            action::MOVE_LINE_DOWN,
-        ] {
-            assert!(
-                items.iter().any(|i| i.action == action),
-                "action {action} must still be in the menu -- scrolling is \
-                 what puts it back in reach"
-            );
-        }
-    }
-
-    #[test]
-    fn an_entry_with_only_rejected_transforms_offers_no_transform_row() {
-        // A path with no backslashes: `transforms_for(Path)` offers only
-        // `ForwardSlashes`, and `apply` refuses because nothing would
-        // change. The plain-paste row must still be there; nothing beyond
-        // it should be.
-        let clips = [bp_clipboard::Entry::new("/usr/local/bin")];
-        let items = edit(&clips, false);
-
-        assert!(
-            items.iter().any(|i| i.action == action::CLIP_BASE),
-            "the plain paste row must still be offered"
-        );
-        assert!(
-            items.iter().all(|i| i.action < action::CLIP_TRANSFORM_BASE),
-            "a transform that changes nothing must not get a row"
-        );
-    }
-
-    #[test]
-    fn a_json_entry_offers_pretty_print_and_minify_routed_through_bp_data() {
-        // `bp_clipboard::apply` always returns `None` for these two -- the
-        // shell is supposed to route them to `bp-data` instead, and the
-        // menu row is the proof that routing actually happens.
-        let clips = [bp_clipboard::Entry::new(r#"{"b":1,"a":2}"#)];
-        let items = edit(&clips, false);
-
-        assert!(
-            items.iter().any(|i| i.label.contains("Pretty-Print JSON")),
-            "unsorted, compact JSON should offer to be pretty-printed"
-        );
-        assert!(
-            items.iter().any(|i| i.label.contains("Minify JSON")),
-            "unsorted JSON minifies to a different (sorted) string"
-        );
-    }
-
-    #[test]
-    fn plain_clipboard_ids_and_transform_ids_never_overlap() {
-        assert!(
-            clip_end() <= action::CLIP_TRANSFORM_BASE,
-            "a full clipboard history would run into the transform-row ids"
-        );
-    }
-
-    #[test]
-    fn no_clip_kind_offers_more_transforms_than_the_reserved_slots() {
-        // The id scheme assumes a fixed number of slots per entry. A kind
-        // that grows past it would make two transforms share an id instead
-        // of failing to compile or panicking -- exactly the silent failure
-        // this codebase cares most about catching.
-        for kind in [
-            bp_clipboard::ClipKind::PlainText,
-            bp_clipboard::ClipKind::Json,
-            bp_clipboard::ClipKind::Url,
-            bp_clipboard::ClipKind::Path,
-            bp_clipboard::ClipKind::Code,
-            bp_clipboard::ClipKind::Markdown,
-        ] {
-            let offered = bp_clipboard::transforms_for(kind).len();
-            assert!(
-                i32::try_from(offered).unwrap_or(i32::MAX) <= action::CLIP_TRANSFORM_SLOTS,
-                "{kind:?} offers {offered} transforms, more than CLIP_TRANSFORM_SLOTS reserves"
-            );
-        }
-    }
-
-    #[test]
     fn duplicate_and_move_line_rows_are_present_but_disabled_without_the_custom_editor_view() {
-        let items = edit(&[], false);
+        let items = edit(false);
         for id in [
             action::DUPLICATE_LINE,
             action::MOVE_LINE_UP,
@@ -3077,7 +2797,7 @@ mod tests {
 
     #[test]
     fn duplicate_and_move_line_rows_are_enabled_under_the_custom_editor_view() {
-        let items = edit(&[], true);
+        let items = edit(true);
         for id in [
             action::DUPLICATE_LINE,
             action::MOVE_LINE_UP,
@@ -3238,11 +2958,20 @@ mod tests {
     }
 
     #[test]
-    fn an_empty_clipboard_history_says_so_rather_than_showing_nothing() {
-        let items = edit(&[], false);
+    fn the_edit_menu_offers_no_clipboard_history() {
+        // ADR-0061 removed `bp-clipboard`. This replaces the test that
+        // asserted the empty history explained itself -- kept as an assertion
+        // of *absence* rather than deleted, because the readout row and the
+        // history rows shared a code path and a partial removal would leave
+        // the row saying "nothing copied yet" forever.
+        let items = edit(false);
         assert!(
-            items.iter().any(|i| i.label.contains("nothing copied yet")),
-            "an empty section with no explanation reads as broken"
+            !items.iter().any(|i| i.label.contains("copied")),
+            "the Edit menu still mentions a clipboard history"
+        );
+        assert!(
+            items.iter().any(|i| i.label == "Paste"),
+            "Paste is the OS clipboard and stays"
         );
     }
 }

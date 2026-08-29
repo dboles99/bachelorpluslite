@@ -586,11 +586,7 @@ impl AppState {
         }
         let encoding = doc.encoding();
         let line_ending = doc.line_ending();
-
         let policy = security.policy_under(self.privacy);
-        if self.clips.enforce(policy.clipboard) {
-            self.error = Some("clipboard history cleared to match this profile".to_owned());
-        }
 
         // Recorded against the *new* profile, which is the one that decides
         // whether it may be kept. Recording a tightening under the old, looser
@@ -648,16 +644,11 @@ impl AppState {
         }
         self.record_security_event(bp_audit::Event::PrivacyModeEntered);
 
-        let cleared = self.clips.enforce(self.policy().clipboard);
         // Every document, not only the active one: the mode is session-wide,
         // and a journal left behind for a background tab is exactly what it
         // was switched on to prevent.
         self.checkpoint_all();
-        self.error = Some(if cleared {
-            "Privacy Mode on -- clipboard history cleared and journals removed".to_owned()
-        } else {
-            "Privacy Mode on".to_owned()
-        });
+        self.error = Some("Privacy Mode on -- journals removed".to_owned());
     }
 }
 
@@ -1694,48 +1685,10 @@ mod tests {
 
         state.workspace.set_active(strict);
         assert_eq!(
-            state.policy().clipboard,
-            bp_security::Clipboard::Disabled,
+            state.policy().metadata,
+            bp_security::Metadata::Disabled,
             "switching back restores the stricter document's policy"
         );
-    }
-
-    #[test]
-    fn tightening_a_profile_clears_the_clipboard_history() {
-        // The history is one list for the whole application, so it is the
-        // only dependant the profile change has to deal with directly -- the
-        // journal is handled by the checkpoint the change triggers.
-        let mut state = AppState::new();
-        state
-            .clips
-            .push("copied earlier", bp_security::Clipboard::InMemory);
-        assert!(!state.clips.is_empty());
-
-        state.set_security(bp_security::Security::Named(
-            bp_security::Profile::Confidential,
-        ));
-
-        assert!(
-            state.clips.is_empty(),
-            "a profile that forbids a clipboard history must not leave one \
-             gathered under a looser profile sitting in the menu"
-        );
-        assert!(
-            state.error.is_some(),
-            "and the user is told why it vanished"
-        );
-    }
-
-    #[test]
-    fn setting_the_same_profile_again_changes_nothing() {
-        // Refresh rebuilds menus constantly; a no-op that cleared the
-        // clipboard would empty it whenever the menu was opened.
-        let mut state = AppState::new();
-        state.clips.push("keep", bp_security::Clipboard::InMemory);
-
-        state.set_security(bp_security::Security::default());
-
-        assert_eq!(state.clips.entries().len(), 1);
     }
 
     #[test]
@@ -1748,10 +1701,7 @@ mod tests {
         state.set_security(bp_security::Security::Named(bp_security::Profile::Private));
 
         let message = state.error.expect("a capability gap reaches the user");
-        assert!(
-            message.contains("encrypt") || message.contains("clipboard"),
-            "got {message}"
-        );
+        assert!(message.contains("encrypt"), "got {message}");
     }
 
     #[test]
@@ -1859,25 +1809,25 @@ mod tests {
     // --- privacy mode -----------------------------------------------------
 
     #[test]
-    fn privacy_mode_clears_the_clipboard_and_removes_journals() {
+    fn privacy_mode_removes_journals_already_written() {
         // Switching it on has to *act*, not merely be recorded. A mode that
         // only governed future writes would leave everything gathered a
         // moment ago exactly where it was, which is the opposite of what
         // somebody switching it on wants.
+        //
+        // The clipboard history was the other half of this test until
+        // ADR-0061 removed it. The journal is now the only thing Privacy Mode
+        // has already-written state to clear -- which makes this test more
+        // load-bearing than it was, not less.
         let dir = tempfile::tempdir().unwrap();
         let mut state = AppState::new();
         state.journal = bp_history::Journal::new(dir.path().to_path_buf());
         state.edit("unsaved work".to_owned());
-        state
-            .clips
-            .push("copied earlier", bp_security::Clipboard::InMemory);
         state.checkpoint_all();
         assert_eq!(state.journal.pending().len(), 1);
-        assert!(!state.clips.is_empty());
 
         state.set_privacy(bp_security::Privacy::On);
 
-        assert!(state.clips.is_empty(), "clipboard history survived");
         assert!(state.journal.pending().is_empty(), "the journal survived");
     }
 

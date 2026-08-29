@@ -9,7 +9,6 @@ members = [
     "apps/bachelorpad",
     "crates/bp-audit",
     "crates/bp-buffer",
-    "crates/bp-clipboard",
     "crates/bp-config",
     "crates/bp-core",
     "crates/bp-crypto",

@@ -21,7 +21,7 @@
 //! config file, four environment variables and a command line make worth
 //! asking. Configuration reads; it does not write, and it says so.
 
-use bp_security::{Clipboard, Embeddings, Metadata, Network, Recovery, TemporaryFiles, Zeroise};
+use bp_security::{Embeddings, Metadata, Network, Recovery, TemporaryFiles, Zeroise};
 
 use super::AppState;
 
@@ -29,15 +29,22 @@ impl AppState {
     /// Tools ▸ Security Inspector: the policy actually in force, axis by
     /// axis.
     ///
-    /// **The Security menu shows three of these seven and the rest are
-    /// invisible**, which is the gap this fills: `Policy` has seven axes,
-    /// the menu had room for recovery, clipboard and network, and a user had
-    /// no way to discover that embeddings, temporary files and zeroising are
-    /// governed at all.
+    /// **The Security menu shows two of these six and the rest are
+    /// invisible**, which is the gap this fills: the menu has room for
+    /// recovery and network, and a user has no way to discover that
+    /// embeddings, temporary files and zeroising are governed at all.
+    ///
+    /// **Three of the six govern nothing**, which ADR-0059 found by counting
+    /// enforcing readers and this readout is why it matters: a line here
+    /// reads as *the policy in force*, and for `embeddings`, `temporary_files`
+    /// and `zeroise` nothing consults the value before acting. They leave
+    /// under ADR-0059's R5 with the rest of the stack; until then this
+    /// comment is the honest label, because a readout that reports an
+    /// unenforced axis is a claim the code does not keep.
     ///
     /// Reports the policy *under Privacy Mode*, not the document's own, for
     /// the reason `menus::security` gives about its own readouts: showing the
-    /// unclamped policy would tell somebody their clipboard is kept while
+    /// unclamped policy would tell somebody their journal is kept while
     /// Privacy Mode is discarding it. Both are named, so a clamped axis shows
     /// its own answer as well as the one that overrode it.
     pub(crate) fn security_inspector_report(&self) -> String {
@@ -70,11 +77,6 @@ impl AppState {
             "Recovery journal",
             recovery(policy.recovery),
             recovery(unclamped.recovery),
-        );
-        axis(
-            "Clipboard history",
-            clipboard(policy.clipboard),
-            clipboard(unclamped.clipboard),
         );
         axis(
             "Metadata store",
@@ -361,15 +363,6 @@ fn recovery(value: Recovery) -> String {
     .to_owned()
 }
 
-fn clipboard(value: Clipboard) -> String {
-    match value {
-        Clipboard::Persistent => "kept between sessions",
-        Clipboard::InMemory => "kept in memory only",
-        Clipboard::Disabled => "not kept",
-    }
-    .to_owned()
-}
-
 fn metadata(value: Metadata) -> String {
     match value {
         Metadata::Summary => "a summary recorded: path, title and tags",
@@ -417,11 +410,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_security_inspector_names_all_seven_axes() {
+    fn the_security_inspector_names_every_axis_the_policy_has() {
+        // Seven until ADR-0061 removed the clipboard axis with the crate it
+        // governed. The list is written out rather than derived from `Policy`
+        // on purpose: this test exists to catch an axis that exists and is
+        // never shown, and a list generated from the same type could not.
         let report = AppState::new().security_inspector_report();
         for axis in [
             "Recovery journal",
-            "Clipboard history",
             "Metadata store",
             "Embeddings",
             "Leaves this machine",
@@ -430,6 +426,10 @@ mod tests {
         ] {
             assert!(report.contains(axis), "{axis} is missing from {report}");
         }
+        assert!(
+            !report.contains("Clipboard"),
+            "the inspector still reports an axis the policy no longer has: {report}"
+        );
     }
 
     #[test]

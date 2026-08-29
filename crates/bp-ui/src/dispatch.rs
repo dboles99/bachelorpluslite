@@ -11,9 +11,9 @@ use bp_core::{Document, DocumentId, Encoding, LineEnding};
 use bp_platform::editor::{Consent, InstallRefusal, RegistrationPlan};
 use bp_theme::ThemeId;
 
+use crate::AppWindow;
 use crate::menus::{self, action};
 use crate::state::{AppState, NoteOutcome, PushText, SaveResult, secret_scan_report};
-use crate::{AppWindow, set_os_clipboard};
 
 const SHORTCUTS: &str = "\
 Ctrl+N          New
@@ -829,69 +829,6 @@ pub fn handle_menu_action(
             };
             apply_editor_command(&mut state.borrow_mut(), &command);
             push = PushText::No;
-        }
-
-        // Bounded above by `clip_end()` -- an unbounded `>=` here is exactly
-        // what let the recent-files arm swallow everything up to 100 before
-        // it had a real range, and the paste-transformation ids just below
-        // would have fallen into this arm the same way.
-        id if (action::CLIP_BASE..menus::clip_end()).contains(&id) => {
-            let index = usize::try_from(id - action::CLIP_BASE).unwrap_or(0);
-            let text = state.borrow().clips.get(index).map(|e| e.text.clone())?;
-            set_os_clipboard(&text);
-
-            let owns_caret = state.borrow().editor_view;
-            if owns_caret {
-                {
-                    let mut s = state.borrow_mut();
-                    if let Some(editor) = s.active_editor_mut() {
-                        editor.insert(&text);
-                    }
-                    s.mark_edited();
-                }
-                refresh(ui, &mut state.borrow_mut(), PushText::No);
-                ui.invoke_focus_editor();
-            } else {
-                // The OS clipboard now holds the entry, so the
-                // widget's own paste puts it at the caret -- the one
-                // way to insert there without caret access.
-                ui.invoke_paste_from_clipboard();
-            }
-            return None;
-        }
-
-        // A paste transformation. Same two-path shape as the plain
-        // clipboard rows just above -- the caret is reached differently
-        // under each editor view, and missing one path is how a feature
-        // works for whoever tested it and does nothing for whoever did not.
-        id if (action::CLIP_TRANSFORM_BASE..menus::clip_transform_end()).contains(&id) => {
-            let (entry_index, transform) = {
-                let s = state.borrow();
-                menus::decode_transform(id, s.clips.entries())?
-            };
-            let source = state
-                .borrow()
-                .clips
-                .get(entry_index)
-                .map(|e| e.text.clone())?;
-            let text = menus::apply_transform(transform, &source)?;
-            set_os_clipboard(&text);
-
-            let owns_caret = state.borrow().editor_view;
-            if owns_caret {
-                {
-                    let mut s = state.borrow_mut();
-                    if let Some(editor) = s.active_editor_mut() {
-                        editor.insert(&text);
-                    }
-                    s.mark_edited();
-                }
-                refresh(ui, &mut state.borrow_mut(), PushText::No);
-                ui.invoke_focus_editor();
-            } else {
-                ui.invoke_paste_from_clipboard();
-            }
-            return None;
         }
 
         id if (action::NOTE_TITLE..=action::NOTE_OUTLINE).contains(&id) => {

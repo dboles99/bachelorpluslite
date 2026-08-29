@@ -49,8 +49,7 @@ use bp_audit::{
     ProfileLabel, Sealer,
 };
 use bp_security::{
-    Clipboard, Embeddings, Metadata, Network, Privacy, Profile, Recovery, Security, TemporaryFiles,
-    Zeroise,
+    Embeddings, Metadata, Network, Privacy, Profile, Recovery, Security, TemporaryFiles, Zeroise,
 };
 use tempfile::{TempDir, tempdir};
 use time::OffsetDateTime;
@@ -180,7 +179,6 @@ fn append_everything(
 fn custom(metadata: Metadata, recovery: Recovery) -> Security {
     Security::Custom(bp_security::Policy {
         recovery,
-        clipboard: Clipboard::InMemory,
         metadata,
         embeddings: Embeddings::Local,
         network: Network::Denied,
