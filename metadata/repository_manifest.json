@@ -1,7 +1,7 @@
 {
-  "project": "BachelorPad+",
+  "project": "BachelorPlusLite",
   "generated_at": "2026-08-16T20:20:00+07:00",
-  "target_path": "G:\\dev2\\bachelorpadplus_rust",
+  "target_path": "G:\\dev2\\bachelorpluslite",
   "files": [
     {
       "path": ".env.example",

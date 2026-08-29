@@ -1741,7 +1741,7 @@ pub(crate) fn diagnostics_report() -> String {
         dir.map_or_else(|| "not available".to_owned(), |p| p.display().to_string())
     };
     format!(
-        "BachelorPad+ {}\n\nRenderer: {}\n\nConfig file: {}\nState directory: {}\nData directory: {}",
+        "BachelorPlusLite {}\n\nRenderer: {}\n\nConfig file: {}\nState directory: {}\nData directory: {}",
         env!("CARGO_PKG_VERSION"),
         std::env::var("SLINT_BACKEND").unwrap_or_else(|_| "software".to_owned()),
         named(bp_config::config_path()),

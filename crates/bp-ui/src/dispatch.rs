@@ -774,9 +774,9 @@ pub fn handle_menu_action(
 
         action::SHORTCUTS => show_info("Keyboard shortcuts", SHORTCUTS),
         action::ABOUT => show_info(
-            "About BachelorPad+",
+            "About BachelorPlusLite",
             &format!(
-                "BachelorPad+ {}\n\nNotepad when you want it. More when you need it.\n\n\
+                "BachelorPlusLite {}\n\nNotepad when you want it. More when you need it.\n\n\
                  Renderer: {}\nLicence: MIT OR Apache-2.0",
                 env!("CARGO_PKG_VERSION"),
                 std::env::var("SLINT_BACKEND").unwrap_or_else(|_| "software".to_owned()),

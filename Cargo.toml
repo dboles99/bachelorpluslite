@@ -64,7 +64,11 @@ unimplemented = "warn"
 version = "0.1.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
-authors = ["BachelorPad+ contributors"]
+# Both lines, because this is a derived work: BachelorPlusLite is a clone of
+# BachelorPad+ and inherits its authorship rather than replacing it.
+authors = ["BachelorPlusLite contributors", "BachelorPad+ contributors"]
+description = "BachelorPlusLite -- a lightweight Notepad-style text editor, derived from BachelorPad+."
+repository = "https://github.com/dboles99/bachelorpluslite"
 
 [workspace.dependencies]
 anyhow = "1"

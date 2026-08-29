@@ -1,4 +1,4 @@
-//! The BachelorPad+ application shell.
+//! The BachelorPlusLite application shell.
 //!
 //! This crate owns the window and nothing else. Document state lives in
 //! `bp-core`, saving in `bp-files`, naming in `bp-naming`, colours in
@@ -446,7 +446,7 @@ pub struct RunOptions {
     pub font_size: Option<u8>,
 }
 
-/// Run the BachelorPad+ shell.
+/// Run the BachelorPlusLite shell.
 pub fn run() -> Result<(), UiError> {
     run_with(RunOptions::default())
 }
@@ -512,7 +512,7 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
             .set_level(rfd::MessageLevel::Warning)
             .set_title("Unsaved work recovered")
             .set_description(format!(
-                "BachelorPad+ closed with {} unsaved document(s):\n\n{}\n\nRestore them?",
+                "BachelorPlusLite closed with {} unsaved document(s):\n\n{}\n\nRestore them?",
                 pending.len(),
                 names.join("\n")
             ))

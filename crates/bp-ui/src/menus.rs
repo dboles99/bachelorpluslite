@@ -1341,7 +1341,7 @@ pub fn tools(has_content: bool) -> Vec<MenuItem> {
 pub fn help() -> Vec<MenuItem> {
     vec![
         row("Keyboard Shortcuts", "", action::SHORTCUTS),
-        row("About BachelorPad+", "", action::ABOUT),
+        row("About BachelorPlusLite", "", action::ABOUT),
         row_end("Diagnostics", "", action::DIAGNOSTICS),
     ]
 }

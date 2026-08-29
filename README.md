@@ -1,6 +1,17 @@
-# BachelorPad+
+# BachelorPlusLite
 
-**BachelorPad+** is a Rust-native semantic text-processing appliance for **Windows 10, Windows 11, and Linux**.
+**BachelorPlusLite** is a lightweight text editor for **Windows 10, Windows 11
+and Linux** — a Notepad clone, and deliberately little more.
+
+> **Derived from BachelorPad+.** BachelorPlusLite began as a clone of the
+> [BachelorPad+](https://github.com/dboles99/bachelorpadplus_rust) repository,
+> and it keeps that project's whole history, its licences and its attribution.
+> Only the repository's identity has been changed so far. **Everything below
+> still describes BachelorPad+, because the code below still *is* BachelorPad+:
+> no feature has been removed.** Reducing this to a Windows 11 Notepad-style
+> feature set is the next phase, and it has not started.
+
+## What this repository still contains
 
 It begins as a fast Notepad-like editor and progressively adds:
 
@@ -22,6 +33,10 @@ The product philosophy is:
 
 ## Install the repository scaffold
 
+Inherited from BachelorPad+, and kept because the scaffold is the same one.
+The installer ships with a BachelorPad+ release; to work on BachelorPlusLite
+you clone this repository instead.
+
 1. Put the release ZIP and `Install-BachelorPadPlusRepo.ps1` in your Windows Downloads folder.
 2. Open PowerShell 7.
 3. Run:
@@ -34,7 +49,7 @@ Set-ExecutionPolicy -Scope Process Bypass
 Default destination:
 
 ```text
-G:\dev2\bachelorpadplus_rust
+G:\dev2\bachelorpluslite
 ```
 
 The installer is conservative: it will not silently overwrite an existing repository. It creates a timestamped backup if you explicitly use `-BackupExisting`.

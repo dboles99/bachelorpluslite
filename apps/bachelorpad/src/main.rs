@@ -1,4 +1,4 @@
-//! BachelorPad+ — Notepad when you want it. More when you need it.
+//! BachelorPlusLite — Notepad when you want it. More when you need it.
 
 // No console window on Windows for a release build. Kept for debug builds so
 // `tracing` output stays visible while developing.
@@ -108,7 +108,7 @@ fn main() -> anyhow::Result<()> {
         .map(std::path::PathBuf::from)
         .collect();
 
-    tracing::info!("starting BachelorPad+");
+    tracing::info!("starting BachelorPlusLite");
     bp_ui::run_with(bp_ui::RunOptions {
         files,
         line,
