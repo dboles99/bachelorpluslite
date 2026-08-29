@@ -15,9 +15,11 @@ Status as of **2026-08-29**. Four words, meaning four different things:
   three, for four sessions — was this project's most useful single number
   while it was not zero.
 - **Removed** — the phase's capability was built, shipped, and then taken out
-  again, with an ADR saying why. Two phases carry it: 12 entire, under
-  [ADR-0057](docs/decisions/ADR-0057.md), and 13 in part, under
-  [ADR-0060](docs/decisions/ADR-0060.md) — research mode's citation half left
+  again, with an ADR saying why. Four phases carry it: 12 entire, under
+  [ADR-0057](docs/decisions/ADR-0057.md), 13 in part, under
+  [ADR-0060](docs/decisions/ADR-0060.md), 11 under
+  [ADR-0061](docs/decisions/ADR-0061.md) and 6 under
+  [ADR-0062](docs/decisions/ADR-0062.md) — research mode's citation half left
   and its synthesis half stayed, which is why the row reads *in part* and
   names the crates that remain. It is a status rather than a deleted
   row because a phase number is what `specs.md` and every ADR refer to, and a
@@ -30,7 +32,7 @@ Status as of **2026-08-29**. Four words, meaning four different things:
 | 3 | File safety and recovery | **Done** | [03-file-safety](project/tasks/03-file-safety/) | `bp-files`, `bp-history` |
 | 4 | Large-file engine | **Done** | [04-large-files](project/tasks/04-large-files/) | `bp-buffer` |
 | 5 | Format registry and parser framework | **Started** | [05-formats](project/tasks/05-formats/) | `bp-formats` |
-| 6 | Structured formats | **Started** | [05-formats](project/tasks/05-formats/) | `bp-data` |
+| 6 | Structured formats | **Removed** | [ADR-0062](docs/decisions/ADR-0062.md) | — |
 | 7 | Search engine | **Started** | [06-search](project/tasks/06-search/) | `bp-search` |
 | 8 | Semantic foundation and naming | **Started** | [07-semantic](project/tasks/07-semantic/) | `bp-semantic`, `bp-naming` |
 | 9 | Organization and related-note graph | **Started** | [07-semantic](project/tasks/07-semantic/) | `bp-storage` |

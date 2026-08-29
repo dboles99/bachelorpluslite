@@ -24,7 +24,6 @@ publish = false
 # application.
 bp-core = { path = "../crates/bp-core" }
 bp-crypto = { path = "../crates/bp-crypto" }
-bp-data = { path = "../crates/bp-data" }
 bp-files = { path = "../crates/bp-files" }
 bp-formats = { path = "../crates/bp-formats" }
 

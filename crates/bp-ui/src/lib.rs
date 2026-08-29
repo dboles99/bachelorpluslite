@@ -234,7 +234,6 @@ fn refresh(ui: &AppWindow, state: &mut state::AppState, push_text: state::PushTe
     // the clock: a menu built at startup would still be offering this
     // morning's time this afternoon.
     ui.set_insert_items(model(menus::insert(state::now(), state.editor_view)));
-    ui.set_data_items(model(menus::data(format)));
     ui.set_note_items(model(menus::note(state.active_has_content())));
     // Rebuilt rather than set once, for the same reason `note_items` is not
     // static: the Document Inspector row greys on `has_content`, which

@@ -2,9 +2,11 @@
 //!
 //! specs.md section 7 lists the formats BachelorPad+ handles first-class and
 //! the profiles they group into. This crate answers two questions and nothing
-//! else: *what is this file*, and *what class of thing is it*. It parses
-//! nothing -- `bp-data` does that -- so detection stays cheap enough to run
-//! on every open and every Save As.
+//! else: *what is this file*, and *what class of thing is it*. **It parses
+//! nothing, and nothing in this product parses these formats any more**
+//! (ADR-0062): the answer reaches a status-bar label, a syntax profile and
+//! `bp-platform`'s registration table. Detection stays cheap enough to run on
+//! every open and every Save As.
 //!
 //! Extension first, content second. An extension is the user's stated
 //! intent and is right nearly always; content sniffing exists for the file
@@ -110,25 +112,6 @@ impl Format {
         Format::Log,
         Format::Notebook,
     ];
-
-    /// Whether the Data menu has anything to offer for this format.
-    ///
-    /// **A question about this format, not about its profile**, and that is
-    /// the whole point of it existing. `Profile::StructuredData` holds six
-    /// formats and `bp-data` parses four of them: INI and XML are structured
-    /// data by any reasonable reading and there is no parser for either, so a
-    /// menu gated on the profile would offer Validate, Format and Minify on
-    /// an `.ini` file and fail on all three.
-    ///
-    /// Kept in step with `bp_ui::menus::data` by a test that walks
-    /// [`Self::ALL`] and compares the two, because the failure mode is a new
-    /// format added to one and not the other.
-    pub const fn has_data_operations(self) -> bool {
-        matches!(
-            self,
-            Self::Json | Self::JsonLines | Self::Yaml | Self::Toml | Self::Csv | Self::Tsv
-        )
-    }
 
     /// Short label for the status bar.
     pub const fn label(self) -> &'static str {
@@ -321,6 +304,12 @@ pub fn sniff(content: &str) -> Format {
 /// shape JSON comes in -- has one such line per element, so
 /// `[\n  {"id": 1},\n  {"id": 2}\n]` counted three, was reported as JSONL,
 /// and was then refused by `bp-data` record by record.
+///
+/// **That defect was found by a cross-crate test that can no longer exist**
+/// (ADR-0062): `bp-data` is gone, so nothing consumes this verdict in a way
+/// that could contradict it. The rule below is kept exactly as it was, and a
+/// mistake in it is now cosmetic rather than a syntax error on a valid file --
+/// which is a smaller consequence and a quieter one.
 ///
 /// Only the first line is inspected for completeness, deliberately: the head
 /// is a fixed [`SNIFF_BYTES`] prefix, so a file of long records would
@@ -760,32 +749,6 @@ mod tests {
                 Format::from_extension(format.default_extension()),
                 Some(format),
                 "{} does not come back from its own default extension",
-                format.label()
-            );
-        }
-    }
-
-    #[test]
-    fn a_format_with_data_operations_is_always_in_a_data_class() {
-        // One direction holds and the other deliberately does not, which is
-        // the entire reason both predicates exist. Nothing outside the data
-        // classes may claim data operations; INI and XML are inside one and
-        // have none.
-        for &format in Format::ALL {
-            if format.has_data_operations() {
-                assert!(
-                    format.profile().is_data_class(),
-                    "{} offers data operations from outside a data profile",
-                    format.label()
-                );
-            }
-        }
-        for format in [Format::Ini, Format::Xml] {
-            assert!(format.profile().is_data_class());
-            assert!(
-                !format.has_data_operations(),
-                "{} has no parser in bp-data; a menu gated on it fails on \
-                 every row",
                 format.label()
             );
         }

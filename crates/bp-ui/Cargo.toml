@@ -11,7 +11,6 @@ workspace = true
 bp-buffer = { path = "../bp-buffer" }
 bp-config = { path = "../bp-config" }
 bp-core = { path = "../bp-core" }
-bp-data = { path = "../bp-data" }
 bp-editor = { path = "../bp-editor" }
 bp-formats = { path = "../bp-formats" }
 bp-history = { path = "../bp-history" }

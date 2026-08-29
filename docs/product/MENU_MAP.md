@@ -37,12 +37,14 @@ Two kinds of greyed row remain, and telling them apart matters:
 Nothing means "does not exist yet" any more, and `menus::planned_menu` and
 `arrives()` were deleted rather than emptied so it cannot start to again.
 
-**Two whole menus have left, and this file no longer has a section for
-either.** [ADR-0057](../decisions/ADR-0057.md) removed Notebook and Run --
+**Three whole menus have left, and this file no longer has a section for
+any of them.** [ADR-0062](../decisions/ADR-0062.md) removed **Data** -- eight
+rows over JSON, JSON Lines, TOML, YAML and delimited text, all of them live.
+And [ADR-0057](../decisions/ADR-0057.md) removed Notebook and Run --
 the cell outline, the `.ipynb` export, one row per runnable cell, Stop, Run
 Document and Interpreters. Every one of them was live when it was deleted,
-which is the point: this was a decision about what the product is, not a
-sweep of rows that never worked. The menu bar is twelve menus now.
+which is the point: these were decisions about what the product is, not a
+sweep of rows that never worked. **The menu bar is eleven menus now.**
 
 ## File
 
@@ -91,22 +93,6 @@ sweep of rows that never worked. The menu bar is twelve menus now.
 | --- | --- |
 | LF / CRLF, UTF-8 / UTF-8 with BOM | **live** |
 | Indent with Tabs / Spaces, Tab Width 2 / 4 / 8 | **live** — one width serves both the Tab key and how wide a tab is drawn; a soft tab goes to the next stop, not a fixed count |
-
-## Data
-
-Context-sensitive: the menu is built from the detected format, so a note gets
-no data rows rather than a column of greyed ones.
-
-| Row | State |
-| --- | --- |
-| JSON: validate, format, minify, sort keys, to JSON Lines | **live** |
-| JSON Lines: validate, to JSON | **live** |
-| TOML: validate, format | **live** |
-| CSV/TSV: shape report, to JSON, to JSON Lines, column types | **live** |
-| YAML: validate, format, minify, to JSON | **live** — `saphyr`, per ADR-0023. Validate names how many documents the file holds, because Format writes all of them back and Convert to JSON refuses more than one. The Format and Minify rows carry "comments not kept" as their hint and say it again in the status bar: a tree round trip has nothing to put a comment back from and resolves aliases into copies, and ADR-0023 names a row that offers this silently as a trap. Three refusals are the feature and not a failure mode — nesting past 128 levels (a 200-byte paste would otherwise overflow the stack and abort the process), alias expansion past 1,000,000 nodes, and a duplicate mapping key, which is refused rather than merged because formatting such a file would delete a line and report success. Each names its limit and where it was hit, and says the document was left unchanged. Sort Keys is not offered: there is no ordering over YAML nodes yet |
-| JSON: to YAML | **live** — the direction that cannot lose anything, so it is the one with no warning on the row |
-| A format with no data operations | **A readout, not six greyed rows.** Until 2026-08-22 this menu said "nothing for TXT documents" and then listed Validate, Format / Minify, Sort Keys, Filter / Query, Statistics and Convert under a "phase 6" banner — every one already built for the formats that have them, none of which will ever apply to plain text. It read as a backlog and was a contradiction ([ADR-0048](../decisions/ADR-0048.md)) |
-| Filter, query, schema | Not rows. Each needs a query language, which is a design decision rather than a menu item |
 
 ## Note
 
@@ -246,7 +232,7 @@ count of policy axes anything enforces (ADR-0059 §4).
 | File Analysis | **live** — the *file*, which is a different object from the document: size, size class and what it implies, read-only, and whether it changed on disk since it was opened |
 | Configuration | **live**, and **read-only, which it says.** Every setting is already editable in the menu it belongs to; what none of them answers is where a value came from when the user did not pick it this session |
 | Benchmarks | Not a row. `benches/` holds a README and no benchmark, and a row named for a suite that does not exist is the promise "DOI Lookup" was ([ADR-0048](../decisions/ADR-0048.md)) |
-| Conversions | Not a row — the Data menu owns format conversion, per format |
+| Conversions | Not a row, and no longer possible — the Data menu owned format conversion and left under [ADR-0062](../decisions/ADR-0062.md) |
 
 ## Help
 

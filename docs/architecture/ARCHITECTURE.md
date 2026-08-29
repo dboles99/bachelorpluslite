@@ -38,7 +38,6 @@ and this table carries the intent until then.
 | `bp-editor` | **live** | Caret, selection, motion, transaction-based undo/redo, line operations, key-to-command mapping, document-to-screen geometry. The editor's storage — see below. | 2 |
 | `bp-history` | **live** | Crash-safe recovery journal and autosave checkpoints. | 3 |
 | `bp-formats` | **live** | Format detection and profiles (ADR-0008). | 5 |
-| `bp-data` | **live** | Structured-data operations: validate, format, minify, convert, report. | 6 |
 | `bp-search` | **live** | Literal and regex find/replace, plus recursive cross-file search. | 7 |
 | `bp-semantic` | **live** | Deterministic extraction: titles, keywords, summaries, outlines, document statistics, and the questions a document asks (ADR-0046). Layer one only. | 8, 13 |
 | `bp-organize` | planned | Projects, topics, tags, related notes, duplicate detection. | 9 |
@@ -63,7 +62,6 @@ bachelorpad ──> bp-config
                          ├─> bp-config     ──> bp-platform
                          ├─> bp-core       ──> bp-security
                          ├─> bp-crypto
-                         ├─> bp-data
                          ├─> bp-editor     ──> bp-buffer
                          ├─> bp-files      ──> bp-core, bp-naming, bp-platform
                          ├─> bp-formats
@@ -103,12 +101,12 @@ rope does not hold — turned out to be a feature too. This block is generated
 from the manifests rather than maintained by hand; regenerate it after adding
 an edge, because a dependency diagram that has drifted is worse than none.
 
-**Twelve crates depend on nothing else in the workspace**: `bp-buffer`,
-`bp-crypto`, `bp-data`, `bp-formats`, `bp-naming`, `bp-platform`,
+**Eleven crates depend on nothing else in the workspace**: `bp-buffer`,
+`bp-crypto`, `bp-formats`, `bp-naming`, `bp-platform`,
 `bp-redaction`, `bp-search`, `bp-secrets`, `bp-security`,
 `bp-semantic` and `bp-theme`. That is what keeps them cheap to test and
-impossible to entangle with the UI toolkit — and it is why all but 360 of the
-workspace's 1,642 tests run without a window.
+impossible to entangle with the UI toolkit — and it is why all but 332 of the
+workspace's 1,550 tests run without a window.
 
 `bp-platform` is on that list for its *real* dependencies and takes
 `bp-formats` as a **dev**-dependency, deliberately and one-directionally: it
@@ -136,24 +134,23 @@ Two deliberate non-dependencies:
 ## Inside `bp-ui`
 
 The shell was one 2,675-line file and the single-writer bottleneck for every
-piece of wiring work. It is now seventeen, split along seams the files already
+piece of wiring work. It is now sixteen, split along seams the files already
 had as comment banners:
 
 | Module | Lines | Owns |
 | --- | ---: | --- |
-| `menus.rs` | 2,977 | Menu contents and the action-id map |
-| `state.rs` | 2,938 | `AppState` itself: documents, workspace, opening, saving, reloading, format detection, the gutter and the status labels |
+| `state.rs` | 2,931 | `AppState` itself: documents, workspace, opening, saving, reloading, format detection, the gutter and the status labels |
 | `state/security.rs` | 2,774 | Scan, redact, inspect metadata, hash, sign, verify, the security history all six write into, and the profile and Privacy Mode switches that govern them |
-| `lib.rs` | 1,299 | `run_with`, `refresh`, and the Slint callback wiring |
+| `menus.rs` | 2,591 | Menu contents and the action-id map |
+| `lib.rs` | 1,298 | `run_with`, `refresh`, and the Slint callback wiring |
 | `editor_view.rs` | 1,003 | The custom surface: key translation, caret placement, what to draw, and the scroll that serves both a rope and a file |
-| `dispatch.rs` | 965 | The menu-action match, and the dialogs its arms share |
+| `dispatch.rs` | 955 | The menu-action match, and the dialogs its arms share |
 | `viewer.rs` | 801 | A document the rope does not hold: where the reader is looking, the window handed to the surface, and the scan of it a find runs (ADR-0030, ADR-0042) |
 | `state/research.rs` | 758 | Research Report: aggregate reads over `bp-storage`, worded as insights, each naming the documents behind it and closing with the rules it applied (ADR-0041, ADR-0046); and what the store holds |
 | `default_editor.rs` | 754 | File ▸ Set as Default Editor: the report, the consent dialog, the artefacts (ADR-0012) |
 | `state/organize.rs` | 585 | Related Notes, duplicate detection and Suggested Folder, over `bp-storage` (ADR-0037, ADR-0048) |
 | `state/inspectors.rs` | 533 | The Tools menu's readouts: the policy in force on all seven axes, the file on disk, and where each setting came from (ADR-0048) |
 | `state/encryption.rs` | 519 | The `.bpadx` passphrase flow: what the bar is asking, and what a wrong answer does |
-| `state/data.rs` | 498 | The Data menu: which `bp-data` operation a menu id means for the format in front of the user |
 | `audit.rs` | 245 | Which file the security history is, and what a person reading it sees (ADR-0024) |
 | `state/find.rs` | 220 | What the find bar is looking for, which match the user is standing on, and driving a scan of a document served from disk |
 | `state/questions.rs` | 176 | What the document in front of you *asks*, through `bp_semantic::questions` (ADR-0046) |

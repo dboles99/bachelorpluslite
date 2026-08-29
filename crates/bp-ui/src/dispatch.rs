@@ -919,16 +919,6 @@ pub fn handle_menu_action(
             show_info("What the Store Holds", &report);
         }
 
-        // Two ranges rather than one, because the Data block at 70-79 had a
-        // single id left when YAML needed two. Both reach the same place; the
-        // arm that decides which library function a click meant is
-        // `run_data_action`, where the format is in scope.
-        id if (action::DATA_VALIDATE..=action::DATA_COLUMN_TYPES).contains(&id)
-            || (action::DATA_YAML_TO_JSON..=action::DATA_JSON_TO_YAML).contains(&id) =>
-        {
-            state.borrow_mut().run_data_action(id);
-        }
-
         id if (action::LINES_SORT_ASC..=action::LINES_TRIM).contains(&id) => {
             state.borrow_mut().run_line_action(id);
         }

@@ -11,7 +11,6 @@
 
 use bp_core::{Encoding, LineEnding};
 use bp_editor::Indent;
-use bp_formats::Format;
 use bp_theme::ThemeId;
 
 use crate::MenuItem;
@@ -124,22 +123,6 @@ pub mod action {
     /// end. 207-209 are free.
     pub const SECURITY_HISTORY: i32 = 206;
 
-    /// The YAML conversions (ADR-0023), in a block of their own rather than
-    /// in the Data block at 70-79.
-    ///
-    /// 79 was the only id left there and these are two, and splitting a pair
-    /// across two blocks is precisely the mistake `SCAN_SECRETS`' comment
-    /// describes. They get their own ids rather than sharing `DATA_TO_JSON`
-    /// for the same reason `DATA_CSV_TO_JSON` does: a different library
-    /// function behind an identically worded row, and sharing an id would
-    /// make `run_data_action`'s match depend on the format to know which one
-    /// a click meant.
-    ///
-    /// Above 100, so outside Slint's window, on the same argument as the
-    /// block above. 212-219 are free.
-    pub const DATA_YAML_TO_JSON: i32 = 210;
-    pub const DATA_JSON_TO_YAML: i32 = 211;
-
     /// File ▸ Set as Default Editor (ADR-0012), opening a block of its own at
     /// 220-229 for platform integration. 222-229 are free.
     ///
@@ -220,22 +203,6 @@ pub mod action {
     pub const DUPLICATE_LINE: i32 = 95;
     pub const MOVE_LINE_UP: i32 = 96;
     pub const MOVE_LINE_DOWN: i32 = 97;
-
-    pub const DATA_VALIDATE: i32 = 70;
-    pub const DATA_FORMAT: i32 = 71;
-    pub const DATA_MINIFY: i32 = 72;
-    pub const DATA_TO_JSONL: i32 = 73;
-    pub const DATA_TO_JSON: i32 = 74;
-    pub const DATA_REPORT: i32 = 75;
-    /// CSV/TSV only. Kept apart from `DATA_TO_JSON`/`DATA_TO_JSONL`, which
-    /// convert between JSON and JSON Lines -- a delimited table becoming
-    /// JSON is a different operation behind a different library function,
-    /// and sharing an id would make `run_data_action`'s match depend on the
-    /// format to know which one a click meant.
-    pub const DATA_CSV_TO_JSON: i32 = 76;
-    pub const DATA_CSV_TO_JSONL: i32 = 77;
-    pub const DATA_COLUMN_TYPES: i32 = 78;
-    // 79 is free.
 
     /// Recently-opened files occupy `RECENT_BASE .. RECENT_BASE + MAX_RECENT`.
     /// The range is sized to the list so a longer list cannot silently run
@@ -891,80 +858,6 @@ pub fn insert(at: time::OffsetDateTime, editor_view: bool) -> Vec<MenuItem> {
 /// Offering "Minify" on a note would be noise, and offering it greyed on
 /// every note would be worse. A format that has no data operations gets the
 /// planned list instead.
-pub fn data(format: Format) -> Vec<MenuItem> {
-    match format {
-        Format::Json => vec![
-            row_end("Validate", "", action::DATA_VALIDATE),
-            row("Format", "", action::DATA_FORMAT),
-            row("Minify", "", action::DATA_MINIFY),
-            row_end("Sort Keys", "", action::DATA_FORMAT),
-            row("Convert to JSON Lines", "", action::DATA_TO_JSONL),
-            // No warning on this one, and the asymmetry is the point:
-            // every JSON value has a YAML spelling, so this is the
-            // direction that cannot lose anything (ADR-0023).
-            row("Convert to YAML", "", action::DATA_JSON_TO_YAML),
-        ],
-        // The same shape as JSON above, minus Sort Keys: sorting a YAML
-        // mapping needs an ordering over YAML nodes that ADR-0023 says does
-        // not exist yet, and an unimplemented row is not offered.
-        //
-        // The hints are not decoration. `saphyr` parses YAML into data, and a
-        // comment is not data, so a round trip has nothing to put a comment
-        // back from; an alias is resolved on the way in, so the output
-        // repeats a value rather than referring to it. ADR-0023 names a
-        // Format row that does not say so as a trap, and the row is the last
-        // place to say it before the document changes.
-        Format::Yaml => vec![
-            row_end("Validate", "", action::DATA_VALIDATE),
-            row("Format", "comments not kept", action::DATA_FORMAT),
-            row_end("Minify", "comments not kept", action::DATA_MINIFY),
-            // Not greyed for a file holding several documents, even though
-            // the conversion refuses one: knowing how many there are means
-            // parsing the whole document, and the Data menu is rebuilt on
-            // every refresh. The refusal names the count instead.
-            row(
-                "Convert to JSON",
-                "comments not kept",
-                action::DATA_YAML_TO_JSON,
-            ),
-        ],
-        Format::JsonLines => vec![
-            row_end("Validate", "", action::DATA_VALIDATE),
-            row("Convert to JSON", "", action::DATA_TO_JSON),
-        ],
-        Format::Toml => vec![
-            row_end("Validate", "", action::DATA_VALIDATE),
-            row("Format", "", action::DATA_FORMAT),
-        ],
-        Format::Csv | Format::Tsv => vec![
-            row("Report Shape", "", action::DATA_REPORT),
-            row_end("Column Types", "", action::DATA_COLUMN_TYPES),
-            row("Convert to JSON", "", action::DATA_CSV_TO_JSON),
-            row_end("Convert to JSON Lines", "", action::DATA_CSV_TO_JSONL),
-        ],
-        // **One honest line, not a menu of six things that will not happen**
-        // (ADR-0048). This branch used to say "nothing for TXT documents" and
-        // then list Validate, Format / Minify, Sort Keys, Filter / Query,
-        // Statistics and Convert under a "phase 6" banner -- every one of
-        // which is *already built* for the formats that have them, and none
-        // of which will ever apply to plain text. It read as a backlog and
-        // was a contradiction.
-        //
-        // `Format::has_data_operations` is the question, and it is asked of
-        // the format rather than of its class -- see `bp-formats`, and the
-        // Tier 0.5 note in `DECISIONS.md` about the predicate that was asked
-        // of the wrong type.
-        _ => vec![planned(&format!(
-            "Nothing to validate or convert in a {} document",
-            format.label()
-        ))],
-    }
-}
-
-/// The Note menu: what the document says about itself.
-///
-/// Everything here is deterministic extraction (specs.md section 10, layer
-/// one). Nothing needs a model or a network, per ADR-0006.
 pub fn note(has_content: bool) -> Vec<MenuItem> {
     vec![
         MenuItem {
@@ -1174,7 +1067,6 @@ mod tests {
                 format(Encoding::Utf8, LineEnding::Lf, Indent::default()),
             ),
             ("Insert", insert(time::OffsetDateTime::UNIX_EPOCH, true)),
-            ("Data", data(Format::Json)),
             ("Note", note(true)),
             ("Organize", organize(true)),
             ("Research", research(true)),
@@ -1513,14 +1405,6 @@ mod tests {
             ("editor commands", action::UNDO..action::SELECT_ALL + 1),
             ("note actions", action::NOTE_TITLE..action::NOTE_OUTLINE + 1),
             (
-                "data operations",
-                action::DATA_VALIDATE..action::DATA_COLUMN_TYPES + 1,
-            ),
-            (
-                "YAML conversions",
-                action::DATA_YAML_TO_JSON..action::DATA_JSON_TO_YAML + 1,
-            ),
-            (
                 "line operations",
                 action::LINES_SORT_ASC..action::LINES_TRIM + 1,
             ),
@@ -1790,106 +1674,6 @@ mod tests {
             "the sidecar convention belongs on the row; got '{}'",
             row.shortcut
         );
-    }
-
-    #[test]
-    fn the_yaml_conversions_sit_outside_every_other_range_dispatch_matches() {
-        // Same failure, from the other side. These two *are* a dispatch
-        // window, so they are checked against all the others -- an id that
-        // strayed into the recent-files window would open a file instead of
-        // converting a document, and neither the menu nor the compiler would
-        // notice.
-        for id in [action::DATA_YAML_TO_JSON, action::DATA_JSON_TO_YAML] {
-            for (name, window) in range_dispatch_windows() {
-                if name == "YAML conversions" {
-                    continue;
-                }
-                assert!(
-                    !window.contains(&id),
-                    "id {id} falls inside the {name} window and would be dispatched as one"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn yaml_offers_the_shape_json_offers_next_door() {
-        // Deliberately the same idiom rather than a second one: the two rows
-        // a user reaches for on a data file are Validate and Format, and a
-        // menu where YAML spells them differently from JSON is a menu the
-        // user has to read twice.
-        let items = data(Format::Yaml);
-        for id in [
-            action::DATA_VALIDATE,
-            action::DATA_FORMAT,
-            action::DATA_MINIFY,
-            action::DATA_YAML_TO_JSON,
-        ] {
-            let row = items
-                .iter()
-                .find(|i| i.action == id)
-                .unwrap_or_else(|| panic!("YAML is missing action {id}"));
-            assert!(
-                row.enabled,
-                "'{}' should not be offered disabled",
-                row.label
-            );
-        }
-    }
-
-    #[test]
-    fn the_yaml_rewriting_rows_say_what_they_will_lose_before_they_are_clicked() {
-        // ADR-0023 names this exactly: a Format row that does not say
-        // comments will go is a trap. The row is the last place to say it
-        // while the document is still intact.
-        let items = data(Format::Yaml);
-        for id in [
-            action::DATA_FORMAT,
-            action::DATA_MINIFY,
-            action::DATA_YAML_TO_JSON,
-        ] {
-            let row = items.iter().find(|i| i.action == id).unwrap();
-            assert!(
-                row.shortcut.contains("comments"),
-                "'{}' rewrites through a tree and must say so; got hint '{}'",
-                row.label,
-                row.shortcut
-            );
-        }
-    }
-
-    #[test]
-    fn yaml_is_not_offered_sort_keys() {
-        // `bp-data` has no ordering over YAML nodes (ADR-0023), so there is
-        // nothing behind the row. A row that did nothing would read as broken,
-        // and a greyed one would claim the feature exists.
-        let items = data(Format::Yaml);
-        assert!(
-            items.iter().all(|i| !i.label.contains("Sort")),
-            "sorting a YAML mapping is not implemented"
-        );
-    }
-
-    #[test]
-    fn converting_json_to_yaml_carries_no_warning_and_yaml_to_json_does() {
-        // The asymmetry is the feature. Every JSON value has a YAML spelling,
-        // so that direction loses nothing; the reverse goes through a tree
-        // that has nowhere to keep a comment.
-        let to_yaml = data(Format::Json)
-            .into_iter()
-            .find(|i| i.action == action::DATA_JSON_TO_YAML)
-            .expect("JSON offers a conversion to YAML");
-        assert!(
-            to_yaml.shortcut.is_empty(),
-            "nothing is lost converting JSON to YAML; got hint '{}'",
-            to_yaml.shortcut
-        );
-
-        let to_json = data(Format::Yaml)
-            .into_iter()
-            .find(|i| i.action == action::DATA_YAML_TO_JSON)
-            .expect("YAML offers a conversion to JSON");
-        assert!(!to_json.shortcut.is_empty());
     }
 
     #[test]
@@ -2502,25 +2286,6 @@ mod tests {
     }
 
     #[test]
-    fn a_format_with_no_data_operations_says_so_once() {
-        let items = data(Format::PlainText);
-        assert_eq!(
-            items.len(),
-            1,
-            "one honest line, not a list of six things that will not happen:              {items:?}"
-        );
-        assert!(items[0].label.contains("Nothing to validate"), "{items:?}");
-    }
-
-    #[test]
-    fn a_format_with_data_operations_still_offers_them() {
-        assert!(
-            data(Format::Json).iter().all(|i| i.action != action::NONE),
-            "collapsing the fallback must not have touched the real rows"
-        );
-    }
-
-    #[test]
     fn the_note_menu_has_nothing_planned_left_in_it() {
         assert!(
             note(true).iter().all(|i| i.action != action::NONE),
@@ -2610,8 +2375,6 @@ mod tests {
             bp_config::DEFAULT_FONT_SIZE,
         ));
         all.extend(format(Encoding::Utf8, LineEnding::Lf, Indent::default()));
-        all.extend(data(Format::Csv));
-        all.extend(data(Format::Yaml));
         all.extend(insert(STAMP_CLOCK, true));
         all.extend(tools(true));
         all.extend(help());
@@ -2720,9 +2483,6 @@ mod tests {
         ));
         rust_side.extend(format(Encoding::Utf8, LineEnding::Lf, Indent::default()));
         rust_side.extend(note(true));
-        rust_side.extend(data(Format::Json));
-        rust_side.extend(data(Format::Csv));
-        rust_side.extend(data(Format::Yaml));
         rust_side.extend(help());
         rust_side.extend(insert(STAMP_CLOCK, true));
         rust_side.extend(tools(true));
@@ -2808,152 +2568,6 @@ mod tests {
                 .find(|i| i.action == id)
                 .unwrap_or_else(|| panic!("row for action {id} is missing"));
             assert!(row.enabled, "'{}' should be usable here", row.label);
-        }
-    }
-
-    #[test]
-    fn csv_and_tsv_offer_conversions_and_column_types() {
-        for fmt in [Format::Csv, Format::Tsv] {
-            let items = data(fmt);
-            for id in [
-                action::DATA_REPORT,
-                action::DATA_COLUMN_TYPES,
-                action::DATA_CSV_TO_JSON,
-                action::DATA_CSV_TO_JSONL,
-            ] {
-                let row = items
-                    .iter()
-                    .find(|i| i.action == id)
-                    .unwrap_or_else(|| panic!("{fmt:?} is missing action {id}"));
-                assert!(
-                    row.enabled,
-                    "'{}' should not be offered disabled",
-                    row.label
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn a_document_served_from_disk_greys_every_row_that_would_write_or_reload_it() {
-        // ADR-0030. `AppState` refuses all four by name -- a save would write
-        // an empty file over two gigabytes, and a reload would load a
-        // document that was deliberately never loaded -- and these grey so
-        // the refusal is not the first the user hears of it.
-        //
-        // `row_enabled(.., false)` rather than `planned`: the rows exist and
-        // cannot act right now, which is a different statement from "does not
-        // exist yet", and the greying is the only thing on screen that
-        // explains why Ctrl+S stopped responding.
-        let served = file(false, true, true, &[]);
-        for id in [
-            action::SAVE,
-            action::SAVE_AS,
-            action::SAVE_COPY,
-            action::RELOAD,
-        ] {
-            let row = served
-                .iter()
-                .find(|i| i.action == id)
-                .unwrap_or_else(|| panic!("the File menu lost action {id}"));
-            assert!(
-                !row.enabled,
-                "'{}' would act on a document that is never held whole",
-                row.label
-            );
-        }
-
-        // And the same menu for an ordinary document, so this is a test of
-        // the flag rather than of the rows always being off.
-        let ordinary = file(false, true, false, &[]);
-        for id in [action::SAVE, action::SAVE_AS, action::SAVE_COPY] {
-            assert!(
-                ordinary
-                    .iter()
-                    .find(|i| i.action == id)
-                    .is_some_and(|row| row.enabled),
-                "action {id} is greyed for an ordinary document"
-            );
-        }
-    }
-
-    #[test]
-    fn save_all_is_not_greyed_by_the_active_document_being_a_viewer() {
-        // It acts on whichever *other* tabs are dirty. A viewer is never
-        // dirty, so it is already excluded -- and greying the row would stop
-        // somebody saving the note in the next tab because a log is in front.
-        let items = file(true, true, true, &[]);
-        assert!(
-            items
-                .iter()
-                .find(|i| i.action == action::SAVE_ALL)
-                .is_some_and(|row| row.enabled),
-            "Save All must still reach the other tabs"
-        );
-    }
-
-    #[test]
-    fn the_data_menu_and_bp_formats_agree_on_which_documents_have_one() {
-        // Two answers to one question, kept in step here because there is
-        // nowhere else they meet. `Format::has_data_operations` is what a
-        // caller outside this crate asks -- a keyboard shortcut, a toolbar, a
-        // future command palette -- and this `match` is what the menu itself
-        // does. A format added to one and not the other is a row that exists
-        // and a shortcut that says it does not, or the reverse.
-        //
-        // The trap this replaced was the same question asked of the
-        // *profile*: `Profile::StructuredData` covers INI and XML, neither of
-        // which `bp-data` can parse, so a menu gated on the profile failed on
-        // every row it offered.
-        for &format in Format::ALL {
-            let items = data(format);
-            let acts = items.iter().any(|i| i.action != action::NONE);
-            assert_eq!(
-                acts,
-                format.has_data_operations(),
-                "{}: the Data menu {} rows that do something, and \
-                 has_data_operations says {}",
-                format.label(),
-                if acts { "has" } else { "has no" },
-                format.has_data_operations()
-            );
-            assert!(
-                !items.is_empty(),
-                "{}: a menu with no rows at all reads as broken; a format \
-                 with nothing to offer says so instead",
-                format.label()
-            );
-        }
-    }
-
-    #[test]
-    fn a_format_without_data_operations_names_itself_in_the_refusal() {
-        // Offering an empty menu, or one that says only "not implemented",
-        // leaves the user guessing which of the two it is. INI is the case
-        // worth pinning: it is structured data, so the answer is genuinely
-        // surprising.
-        for format in [Format::Ini, Format::Xml, Format::PlainText] {
-            let items = data(format);
-            assert!(
-                items.iter().any(|i| i.label.contains(format.label())),
-                "{} documents get a Data menu that does not say so",
-                format.label()
-            );
-        }
-    }
-
-    #[test]
-    fn only_csv_and_tsv_offer_the_csv_specific_data_rows() {
-        let items = data(Format::Json);
-        for id in [
-            action::DATA_COLUMN_TYPES,
-            action::DATA_CSV_TO_JSON,
-            action::DATA_CSV_TO_JSONL,
-        ] {
-            assert!(
-                items.iter().all(|i| i.action != id),
-                "JSON has no delimited table to convert or type-check"
-            );
         }
     }
 

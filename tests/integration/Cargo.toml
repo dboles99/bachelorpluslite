@@ -29,7 +29,6 @@ bp-buffer = { path = "../../crates/bp-buffer" }
 bp-config = { path = "../../crates/bp-config" }
 bp-core = { path = "../../crates/bp-core" }
 bp-crypto = { path = "../../crates/bp-crypto" }
-bp-data = { path = "../../crates/bp-data" }
 bp-editor = { path = "../../crates/bp-editor" }
 bp-files = { path = "../../crates/bp-files" }
 bp-formats = { path = "../../crates/bp-formats" }

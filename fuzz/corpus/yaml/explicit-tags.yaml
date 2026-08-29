@@ -1,3 +1,0 @@
-a: !!binary |
-  R0lG
-b: !custom {c: 1}

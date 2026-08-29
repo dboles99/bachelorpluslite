@@ -14,7 +14,6 @@
 //! | Module | What it owns |
 //! | --- | --- |
 //! | [`security`] | Scan, redact, inspect, hash, sign, verify, the history they write into, and the profile and Privacy Mode switches that govern them |
-//! | [`data`] | The Data menu: which `bp-data` operation a menu id means for the format in front of the user |
 //! | [`encryption`] | The `.bpadx` passphrase flow: what the bar is asking, and what a wrong answer does |
 //! | [`find`] | What the find bar is looking for, and which match the user is standing on |
 //! | [`organize`] | The local metadata store (ADR-0037): recording and tagging a document as it saves, Related Notes, and Duplicate Detection |
@@ -46,7 +45,6 @@ use time::OffsetDateTime;
 
 use crate::menus::action;
 
-mod data;
 mod encryption;
 mod find;
 mod inspectors;
@@ -2165,11 +2163,6 @@ mod tests {
             action::DUPLICATE_LINE,
             action::MOVE_LINE_UP,
             action::MOVE_LINE_DOWN,
-            action::DATA_VALIDATE,
-            action::DATA_REPORT,
-            action::DATA_CSV_TO_JSON,
-            action::DATA_CSV_TO_JSONL,
-            action::DATA_COLUMN_TYPES,
             action::NOTE_TITLE,
             action::NOTE_OUTLINE,
             action::SCAN_SECRETS,

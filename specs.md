@@ -175,43 +175,23 @@ than left to read as planned.
 
 ## 9. Structured data
 
-### YAML
-- validate
-- format
-- sort keys
-- duplicate-key detection
-- outline/folding
-- JSON/TOML conversion
+**Deleted, in full.** [ADR-0062](docs/decisions/ADR-0062.md) removed `bp-data`
+and the Data menu -- validate, format, minify and convert for JSON, JSON
+Lines, TOML, YAML and delimited text, plus the CSV shape report and column
+types. Windows Notepad does none of it.
 
-### JSON
-- raw/tree/split
-- validate
-- pretty/minify
-- sort keys
-- structural selection
-- JSONPath-like copying
+What this section asked for that **survives**: *recognition*. `bp-formats`
+still identifies every format this section listed, and the status bar still
+names it. [ADR-0008](docs/decisions/ADR-0008.md)'s distinction between what a
+format *is* and what can be *done* with it is what made that separable -- the
+predicate naming a capability (`has_data_operations`) went, the one naming a
+kind (`Profile`) stayed.
 
-### JSONL / NDJSON
-- streaming validation
-- record count
-- malformed-record detection
-- field extraction
-- schema inference
-- deduplication
-- statistics
-- filter/sort/query
-- table view
-- JSON/CSV conversion
-
-### CSV / TSV
-- delimiter detection
-- table/raw views
-- column typing
-- filtering/sorting
-- statistics
-- missing values
-- duplicate rows
-- JSON/JSONL conversion
+[ADR-0023](docs/decisions/ADR-0023.md)'s YAML safety rules go with the parser
+they guarded: the 128-level nesting cap, the million-node alias-expansion
+ceiling and the refusal of duplicate mapping keys. They were correct, they
+held under every probe in `fuzz/`, and they existed to let this product parse
+a YAML file -- which it no longer does.
 
 ## 10. Semantic layer
 

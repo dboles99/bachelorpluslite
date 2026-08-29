@@ -12,7 +12,6 @@ members = [
     "crates/bp-config",
     "crates/bp-core",
     "crates/bp-crypto",
-    "crates/bp-data",
     "crates/bp-editor",
     "crates/bp-formats",
     "crates/bp-history",
@@ -98,12 +97,3 @@ ed25519-dalek = { version = "2", features = ["rand_core"] }
 rand_core = { version = "0.6", features = ["getrandom"] }
 zeroize = { version = "1", features = ["zeroize_derive"] }
 
-# YAML (phase 6). `serde_yaml` is deprecated and `yaml-rust2` is superseded;
-# `saphyr` is the maintained successor and the only one of the three that is
-# YAML 1.2 compliant. `saphyr-parser` is its own event-level half, taken
-# directly because `bp-data` must measure a document's nesting depth *before*
-# a tree is built for it -- see `yaml_nesting_depth`. `default-features =
-# false` drops `encoding_rs`: every caller here hands us a `&str`, so the
-# encoding-sniffing half of `saphyr` is weight with no reader.
-saphyr = { version = "0.0.12", default-features = false }
-saphyr-parser = "0.0.12"

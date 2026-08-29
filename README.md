@@ -30,7 +30,7 @@ It begins as a fast Notepad-like editor and adds:
 - semantic filenames using `Title_DDMMMYYYY.ext`
 - full-path and last-save visibility
 - rope-based editing and huge-file / memory-mapped modes
-- Markdown, YAML, JSON, JSONL/NDJSON, TOML, CSV/TSV, XML and source-code awareness
+- Markdown, YAML, JSON, JSONL/NDJSON, TOML, CSV/TSV, XML and source-code *recognition* — the operations over them left under [ADR-0062](docs/decisions/ADR-0062.md)
 - semantic organization, related notes, duplicate detection and hybrid search
 - Light, Dark, Organic and Green themes
 - strong local security, encrypted `.bpadx` notes, secure recovery, privacy profiles and secret scanning
@@ -104,7 +104,6 @@ saves atomically, and does rather more than that:
 | Command line | `bachelorpad notes.txt` opens files; `--line=427 server.log` opens one already scrolled to the line, highlighted, in either editor surface; `--help` lists all thirteen flags and `--version` names the product, its version and its licence ([ADR-0054](docs/decisions/ADR-0054.md)). A mistyped flag, a flag missing its value and a switch given one are each reported at startup rather than discarded |
 | Files | Open/Save/Save As/Save All/Save a Copy/Reload, recent files, tab context menu, command-line file opening. A document is classified by size before it is read (ADR-0027): ordinary opens as ever, large opens with the size in the status bar, and a **huge one opens too** — read from disk as you scroll, in the custom surface whichever flag you started with (ADR-0030). A 192 MiB log costs 0.8 MiB more than a small note. UTF-8, UTF-8 with BOM and **UTF-16 LE/BE** all load and save; a truncated or malformed UTF-16 file is refused by name rather than repaired with replacement characters |
 | Search | Find and replace with case-sensitive, whole-word and regex toggles, changes shown before they are applied, recursive cross-file search. **Find works in a document too large to hold too** ([ADR-0042](docs/decisions/ADR-0042.md)): the find bar scans it from disk a window at a time, says `searching 62%` rather than claiming a total it cannot know, then jumps to the hit and highlights it. Measured on a 213.5 MiB log — `1 of 1` at line 4,800,001, and `1 of 500+` when a query matches more than the cap |
-| Data | JSON / JSONL / TOML / **YAML** validate, format, minify, convert; RFC 4180 CSV/TSV shape report, conversion to JSON and JSON Lines, column types. YAML refuses deep nesting, alias bombs and duplicate keys in words that say what to do ([ADR-0023](docs/decisions/ADR-0023.md)) |
 | Semantic | Title, keywords, summary and outline extracted from the document; document statistics; date and time insertion |
 | Metadata | A SQLite store with migrations, written to on every save ([ADR-0019](docs/decisions/ADR-0019.md)) |
 | Organize | Related Notes, a collapsible panel of documents sharing tags with the active one; Duplicate Detection, automatic at save and on-demand ([ADR-0037](docs/decisions/ADR-0037.md)) |

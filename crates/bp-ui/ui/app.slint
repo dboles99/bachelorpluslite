@@ -99,7 +99,6 @@ export component AppWindow inherits Window {
     in property <[MenuItem]> view-items;
     in property <[MenuItem]> insert-items;
     in property <[MenuItem]> format-items;
-    in property <[MenuItem]> data-items;
     in property <[MenuItem]> note-items;
     in property <[MenuItem]> organize-items;
     in property <[MenuItem]> research-items;
@@ -571,12 +570,6 @@ export component AppWindow inherits Window {
                             format-menu.show();
                         }
                     }
-                    data-label := MenuLabel {
-                        label: "Data";
-                        clicked => {
-                            data-menu.show();
-                        }
-                    }
                     note-label := MenuLabel {
                         label: "Note";
                         clicked => {
@@ -931,15 +924,6 @@ export component AppWindow inherits Window {
         y: 28px;
         menu-max-height: root.menu-max-height;
         items: root.format-items;
-        chosen(a) => {
-            root.dispatch(a);
-        }
-    }
-    data-menu := MenuPopup {
-        x: data-label.x + 4px;
-        y: 28px;
-        menu-max-height: root.menu-max-height;
-        items: root.data-items;
         chosen(a) => {
             root.dispatch(a);
         }
