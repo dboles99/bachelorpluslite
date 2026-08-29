@@ -65,6 +65,7 @@ Adding a decision means adding both.
 | BP-ADR-0055 | 2026-08-23 | Signing is deferred and self-signing refused outright; the archive, the checksums and a one-command signing step are built anyway. D15 closed | Accepted | [ADR-0055](docs/decisions/ADR-0055.md) |
 | BP-ADR-0056 | 2026-08-23 | All three embedding sources, as choices, with the profile as a ceiling and `Cloud` behind a per-use gesture — and the axis for them had existed since ADR-0020. D16 closed | Accepted | [ADR-0056](docs/decisions/ADR-0056.md) |
 | BP-ADR-0057 | 2026-08-29 | Executing anything is removed, and notebooks with it. Neither crate depended on the other; one shell module was the whole seam. ADR-0011's "never auto-runs" becomes vacuous rather than enforced | Accepted | [ADR-0057](docs/decisions/ADR-0057.md) |
+| BP-ADR-0058 | 2026-08-29 | `metadata/repository_manifest.json` is deleted rather than regenerated: 102 of its 181 hashes were wrong, 275 tracked files were never in it, and nothing read it. Git already content-addresses the tree | Accepted | [ADR-0058](docs/decisions/ADR-0058.md) |
 | BP-ADR-0017 | amended 2026-08-22 | Half of the renderer revert condition is now a number rather than a feeling: per-frame row building, and its independence from document size | Accepted, amended | [ADR-0017](docs/decisions/ADR-0017.md) |
 
 ## Decisions needed before the work they block
@@ -115,6 +116,32 @@ in the fourth.
 Kept rather than deleted, because every one of these went stale the same
 way — a fix landing without the record moving — and because the lesson in each
 is worth more than the fact.
+
+- **A record that is 44% right is more dangerous than one that is wholly
+  stale.** `metadata/repository_manifest.json` sat in this repository from the
+  scaffold commit: 181 paths with byte counts and sha256 hashes, no producer,
+  no reader, and no script that could rebuild it. Measured before deleting it
+  ([ADR-0058](docs/decisions/ADR-0058.md)): 79 hashes still matched, 86 were
+  wrong, 16 named files that no longer exist, and 275 of the repository's 456
+  tracked files were never listed at all.
+
+  **The 79 correct rows are what made it a hazard.** A manifest that was
+  wholly wrong would be dismissed at a glance; one that is nearly half right
+  reads as a record with some drift, and invites somebody to trust a row
+  rather than the tree. That is trap 3 with an artefact in place of a comment
+  -- 181 checkable claims, nothing checking any of them.
+
+  **Regeneration was the tempting wrong fix**, and naming why is the
+  transferable part: a script plus a gate stage would have made the file true
+  and left it answering no question, at a cost on every run. Compare
+  ADR-0050's golden vectors, which earn their cost precisely because the bytes
+  were committed *before* the change they guard against. **A hash of a file,
+  stored in the same commit as the file, is evidence of nothing.**
+
+  It was found only because ADR-0057's sweep gave somebody a reason to open
+  it, which is the same way ADR-0054 found four manifests claiming a licence
+  the repository did not contain. Both are the same shape: **a claim nothing
+  reads survives until something makes a person read it.**
 
 - **A constraint that cannot fail is worth removing, not keeping.**
   ADR-0011 and ADR-0025 required that notebook content never auto-runs, and

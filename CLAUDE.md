@@ -48,10 +48,17 @@ the record moving is how every stale sentence in this repository got there.
 Green on **both legs** is the whole of the permission. Commit on the current
 feature branch, push, and report. Do not ask first.
 
+**Opening a pull request into `main` is covered too**, and this file said
+otherwise for six sessions. D13 asked whether `main` gets the work and by what
+route; [ADR-0053](docs/decisions/ADR-0053.md) answered it on 2026-08-22 --
+**yes, by pull request, and an agent may open it.** This section went on
+citing D13 as open, which is trap 4 exactly: two claims about the same act,
+coexisting because nothing asked.
+
 Two things this authority does *not* cover, and both need a human:
 
-- merging to `main`, or opening a pull request into it — that is decision
-  **D13**;
+- **clicking merge.** It is the one act in this project that changes what a
+  fresh clone gets, and ADR-0053 keeps it deliberately;
 - `git push --force`, a rebase of pushed history, or anything that rewrites a
   commit somebody may already have.
 
