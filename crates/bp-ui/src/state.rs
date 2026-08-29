@@ -19,7 +19,6 @@
 //! | [`find`] | What the find bar is looking for, and which match the user is standing on |
 //! | [`organize`] | The local metadata store (ADR-0037): recording and tagging a document as it saves, Related Notes, and Duplicate Detection |
 //! | [`research`] | Research mode's synthesis half (ADR-0041, ADR-0046): what the *store* says the user has been writing about, and what the store holds |
-//! | [`citations`] | What the active document *cites* (ADR-0044) |
 //! | [`questions`] | What the active document *asks* (ADR-0046) |
 //! | [`inspectors`] | The Tools menu's three readouts: the policy in force, the file on disk, and where each setting came from (ADR-0048) |
 //!
@@ -47,7 +46,6 @@ use time::OffsetDateTime;
 
 use crate::menus::action;
 
-mod citations;
 mod data;
 mod encryption;
 mod find;

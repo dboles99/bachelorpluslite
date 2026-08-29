@@ -84,7 +84,7 @@ sweep of rows that never worked. The menu bar is twelve menus now.
 | --- | --- |
 | Date, Time, Date and Time, ISO 8601, Filename date | **caret** — each row's hint is the stamp rendered from the clock, so the row shows what it will insert |
 | Bold, Italic, Link, Code Block, Table | **caret** — the Markdown constructs, all live |
-| Citation | Not a row. `bp-research` models citations and nothing in this menu inserts one; it needs a bibliography to insert *from*, which is a decision rather than a row |
+| Citation | Not a row, and now not possible either. `bp-research` modelled citations and left under [ADR-0060](../decisions/ADR-0060.md); there is nothing to insert *from* |
 
 ## Format
 
@@ -158,9 +158,7 @@ wired ([ADR-0037](../decisions/ADR-0037.md)).
 | Row | State |
 | --- | --- |
 | Research Report | **live** — dominant themes, stale clusters, under-connected documents, consolidation candidates, each naming the documents behind it, and a closing section stating every threshold it applied ([ADR-0041](../decisions/ADR-0041.md), [ADR-0046](../decisions/ADR-0046.md)) |
-| Citation Metadata | **live** — what the active document says about itself ([ADR-0044](../decisions/ADR-0044.md)) |
-| Find Identifiers | **live** — every DOI and arXiv id, with `line:column` and the address it points to |
-| Check Bibliography | **live** — the document read as BibTeX: entry counts by kind, or the failure with its position |
+| Citation Metadata, Find Identifiers, Check Bibliography | **Removed** ([ADR-0060](../decisions/ADR-0060.md)). All three were live and all three read the document through `bp-research`, which has left. The three rows below read the *store*, which is why they stay |
 | Open Questions | **live** — every question the document asks, at the line it begins on; code inside a fence is skipped ([ADR-0046](../decisions/ADR-0046.md)) |
 | What the Store Holds | **live** — the store's own contents, and the statement that it never holds the text of a document ([ADR-0046](../decisions/ADR-0046.md)) |
 
@@ -177,9 +175,12 @@ is the store talking about itself.
 decision.**
 
 - **"DOI Lookup"**, until 2026-08-22. Finding an identifier and resolving one
-  are different acts, and only the first is available under ADR-0006 —
-  `bp-research` has no HTTP client and a test whose job is to notice if that
-  changes. A row called Lookup would be a promise the product cannot keep.
+  are different acts, and only the first was available under ADR-0006 —
+  `bp-research` had no HTTP client and a test whose job was to notice if that
+  changed. A row called Lookup would have been a promise the product could not
+  keep. **Finding one is gone too now**
+  ([ADR-0060](../decisions/ADR-0060.md)), so the distinction this row was
+  refused over no longer has a live side.
 - **"Research question, evidence, findings, methods, datasets"**, until
   2026-08-22. Those five are the structure of a research *paper* (IMRaD),
   written into this file by the scaffold commit and never elaborated;

@@ -930,17 +930,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bp-research"
-version = "0.1.0"
-dependencies = [
- "proptest",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.20",
-]
-
-[[package]]
 name = "bp-search"
 version = "0.1.0"
 dependencies = [
@@ -1007,7 +996,6 @@ dependencies = [
  "bp-naming",
  "bp-platform",
  "bp-redaction",
- "bp-research",
  "bp-search",
  "bp-secrets",
  "bp-security",

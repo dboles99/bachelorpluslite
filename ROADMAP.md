@@ -15,8 +15,11 @@ Status as of **2026-08-29**. Four words, meaning four different things:
   three, for four sessions — was this project's most useful single number
   while it was not zero.
 - **Removed** — the phase's capability was built, shipped, and then taken out
-  again, with an ADR saying why. One phase carries it: 12, under
-  [ADR-0057](docs/decisions/ADR-0057.md). It is a status rather than a deleted
+  again, with an ADR saying why. Two phases carry it: 12 entire, under
+  [ADR-0057](docs/decisions/ADR-0057.md), and 13 in part, under
+  [ADR-0060](docs/decisions/ADR-0060.md) — research mode's citation half left
+  and its synthesis half stayed, which is why the row reads *in part* and
+  names the crates that remain. It is a status rather than a deleted
   row because a phase number is what `specs.md` and every ADR refer to, and a
   table that renumbers around a removal breaks all of them.
 
@@ -34,7 +37,7 @@ Status as of **2026-08-29**. Four words, meaning four different things:
 | 10 | Semantic/hybrid search | Not started, **decided** | [07-semantic](project/tasks/07-semantic/) | — |
 | 11 | Clipboard system | **Started** | [08-clipboard](project/tasks/08-clipboard/) | `bp-clipboard` |
 | 12 | Notebook/execution system | **Removed** | [ADR-0057](docs/decisions/ADR-0057.md) | — |
-| 13 | Research mode | **Started** | [10-research](project/tasks/10-research/) | `bp-research`, `bp-storage`, `bp-semantic` |
+| 13 | Research mode | **Removed**, in part | [ADR-0060](docs/decisions/ADR-0060.md) | `bp-storage`, `bp-semantic` |
 | 14 | Security foundation | **Started** | [11-security](project/tasks/11-security/) | `bp-security` |
 | 15 | Encrypted `.bpadx` documents | **Started** | [11-security](project/tasks/11-security/) | `bp-crypto` |
 | 16 | Advanced security | **Started** | [11-security](project/tasks/11-security/) | `bp-secrets`, `bp-redaction`, `bp-audit`, `bp-integrity` |
@@ -109,6 +112,13 @@ headline of this section since the fourth session, when it was three crates,
 left under [ADR-0037](docs/decisions/ADR-0037.md), `bp-notebook` and
 `bp-execution` under [ADR-0043](docs/decisions/ADR-0043.md), and
 `bp-research` under [ADR-0044](docs/decisions/ADR-0044.md).
+
+**Three of those four crates have since been deleted** — `bp-notebook` and
+`bp-execution` under [ADR-0057](docs/decisions/ADR-0057.md), `bp-research`
+under [ADR-0060](docs/decisions/ADR-0060.md). The sentence still holds and
+means less than it did: reaching zero by wiring and reaching it by deletion
+are different achievements, and only `bp-storage` reached it the first way and
+stayed.
 
 **What actually unblocked the last three was not effort.** Each had been sized
 as a *mode* -- a large, unscoped thing -- and each turned out to be waiting on

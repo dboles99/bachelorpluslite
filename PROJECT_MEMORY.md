@@ -6,7 +6,7 @@ several of its items have since been decided differently, and the value is in
 being able to see that.
 
 **Every decision made since lives in [DECISIONS.md](DECISIONS.md)**, which
-indexes 59 ADRs. Where the two disagree, the ADR is current. The most visible
+indexes 60 ADRs. Where the two disagree, the ADR is current. The most visible
 example is in "Suggested implementation style" below: Slint was "a leading
 candidate to be benchmarked"; it was benchmarked and chosen
 ([ADR-0015](docs/decisions/ADR-0015.md)).

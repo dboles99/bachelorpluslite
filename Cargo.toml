@@ -21,7 +21,6 @@ members = [
     "crates/bp-integrity",
     "crates/bp-platform",
     "crates/bp-redaction",
-    "crates/bp-research",
     "crates/bp-search",
     "crates/bp-secrets",
     "crates/bp-security",

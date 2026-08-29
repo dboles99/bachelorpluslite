@@ -156,7 +156,11 @@ Format profiles:
 - Source Code
 - Notebook
 - Log
-- Research Note
+
+*Research Note* was on this list and was never built -- no `Profile` in
+`bp-formats` ever carried it -- and the capability it would have grouped
+formats for left under [ADR-0060](docs/decisions/ADR-0060.md). Removed rather
+than left to read as planned.
 
 ## 8. Markdown
 

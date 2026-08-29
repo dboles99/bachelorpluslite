@@ -273,11 +273,6 @@ pub mod action {
     pub const PASTE: i32 = 104;
     pub const SELECT_ALL: i32 = 105;
 
-    /// Research ▸ what the active document cites (ADR-0044).
-    pub const CITATION_METADATA: i32 = 741;
-    pub const FIND_IDENTIFIERS: i32 = 742;
-    pub const CHECK_BIBLIOGRAPHY: i32 = 743;
-
     /// Research ▸ what the active document asks (ADR-0046). In the Research
     /// block with the rest of the menu rather than beside `DOCUMENT_STATS`,
     /// whose crate it shares: an id block follows the menu a row is in,
@@ -1273,30 +1268,6 @@ pub fn research(has_content: bool) -> Vec<MenuItem> {
     // front of them* cites.
     let mut items = vec![row_end("Research Report", "", action::RESEARCH_REPORT)];
 
-    // Each of the three reads the active document, so each is greyed when
-    // there is nothing to read -- `row_enabled`, not `planned`: they exist.
-    items.push(row_enabled(
-        "Citation Metadata",
-        "",
-        action::CITATION_METADATA,
-        has_content,
-    ));
-    // **Not "DOI Lookup", which `MENU_MAP.md` used to name.** Finding an
-    // identifier and resolving one are different acts, and only the first is
-    // available offline (ADR-0006). A row named Lookup would be a promise
-    // this product cannot keep.
-    items.push(row_enabled(
-        "Find Identifiers",
-        "",
-        action::FIND_IDENTIFIERS,
-        has_content,
-    ));
-    items.push(row_enabled(
-        "Check Bibliography",
-        "",
-        action::CHECK_BIBLIOGRAPHY,
-        has_content,
-    ));
     // **Not "Research Question", which `MENU_MAP.md` named until 2026-08-22**
     // -- ADR-0046, and the same correction "DOI Lookup" got one row up.
     // A question has a grammar and can be found; which one you are actually
@@ -1787,10 +1758,6 @@ mod tests {
             action::TOOLS_INSPECTOR,
             action::DIAGNOSTICS,
             action::RESEARCH_REPORT,
-            // ADR-0043 and ADR-0044.
-            action::CITATION_METADATA,
-            action::FIND_IDENTIFIERS,
-            action::CHECK_BIBLIOGRAPHY,
             // ADR-0046.
             action::OPEN_QUESTIONS,
             action::STORE_CONTENTS,

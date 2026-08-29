@@ -67,6 +67,7 @@ Adding a decision means adding both.
 | BP-ADR-0057 | 2026-08-29 | Executing anything is removed, and notebooks with it. Neither crate depended on the other; one shell module was the whole seam. ADR-0011's "never auto-runs" becomes vacuous rather than enforced | Accepted | [ADR-0057](docs/decisions/ADR-0057.md) |
 | BP-ADR-0058 | 2026-08-29 | `metadata/repository_manifest.json` is deleted rather than regenerated: 102 of its 181 hashes were wrong, 275 tracked files were never in it, and nothing read it. Git already content-addresses the tree | Accepted | [ADR-0058](docs/decisions/ADR-0058.md) |
 | BP-ADR-0059 | 2026-08-29 | The reduction is scoped: eight crates and huge-file mode leave in five ADRs, least-entangled first, 67,316 lines to ~40,000. `bp-security` is **kept and narrowed** -- it is the store's off switch, and four of its seven policy axes turned out to have no enforcing reader at all | Accepted | [ADR-0059](docs/decisions/ADR-0059.md) |
+| BP-ADR-0060 | 2026-08-29 | R1: `bp-research` leaves with the three Research rows that read the document. The menu keeps its name and its three store-reading rows -- ADR-0044's refusal to merge them is what made this a deletion rather than a rewrite | Accepted | [ADR-0060](docs/decisions/ADR-0060.md) |
 | BP-ADR-0017 | amended 2026-08-22 | Half of the renderer revert condition is now a number rather than a feeling: per-frame row building, and its independence from document size | Accepted, amended | [ADR-0017](docs/decisions/ADR-0017.md) |
 
 ## Decisions needed before the work they block
@@ -117,6 +118,40 @@ in the fourth.
 Kept rather than deleted, because every one of these went stale the same
 way — a fix landing without the record moving — and because the lesson in each
 is worth more than the fact.
+
+- **A decision not to unify two things is worth as much as a decision to
+  unify them, and it is only visible when one of them leaves.**
+  [ADR-0044](docs/decisions/ADR-0044.md) declined to merge citation reading
+  with the store's synthesis, on the grounds that they answer different
+  questions about different subjects -- one reads the document in front of
+  you, the other reads what you have written over time. At the time that read
+  as a refusal to tidy up two things that shared a menu.
+
+  It is what made [ADR-0060](docs/decisions/ADR-0060.md) a deletion instead of
+  a rewrite. `bp-research` was 5,208 lines with **one dependant and one file
+  in it** -- the seam was a `mod` line and a `use`. Had "research mode" been
+  built as one thing, removing citations would have meant unpicking it from
+  the survivor.
+
+  **The general form:** a refusal to merge is a cheap thing to argue against
+  and an expensive thing to undo, and its payoff arrives only if one half is
+  ever removed. That payoff is invisible while both halves are alive, which is
+  why the argument for merging always sounds better than it is.
+
+- **The same crate borrowed a caller's reason twice, in two consecutive
+  removals.** `bp_semantic::is_fence` said it recognised both fence characters
+  *"because `bp-notebook` reads both"* (ADR-0057). `bp_semantic::questions`
+  explained itself by citing *"the same split `bp-research` draws between
+  finding a DOI and resolving one"* (ADR-0060). Both rules were correct and
+  unchanged; both justifications named a crate that had just been deleted.
+
+  **Twice in the same crate is a pattern, and the pattern has a cause.**
+  `bp-semantic` is a crate of *rules*, and a rule is most tempting to justify
+  by naming the caller that wanted it -- which is the weakest reason
+  available, because the caller is the one thing guaranteed to change. A rule
+  worth keeping has a reason that survives its callers; if the only reason to
+  hand is "X needs it", that is worth noticing before X leaves rather than
+  after.
 
 - **A record that is 44% right is more dangerous than one that is wholly
   stale.** `metadata/repository_manifest.json` sat in this repository from the

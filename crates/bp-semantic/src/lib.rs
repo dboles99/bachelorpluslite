@@ -333,10 +333,13 @@ pub struct Question {
 ///
 /// **A question has a grammar, so it can be recognised locally; whether it is
 /// the question you are asking is not something the document says.** That is
-/// the same split `bp-research` draws between finding a DOI and resolving
-/// one, and it is why this is not called "research questions": this reports
-/// what was written, and the reader decides which of them they are actually
-/// working on.
+/// why this is not called "research questions": it reports what was written,
+/// and the reader decides which of them they are actually working on.
+///
+/// The same split used to be drawn one crate over, between finding a DOI and
+/// resolving one; `bp-research` is gone (ADR-0060) and the split is not,
+/// because it was never that crate's -- it is the difference between
+/// recognising a form and knowing what it means, which this crate is made of.
 ///
 /// The rule, in full, because every rule in this crate is meant to be
 /// inspectable:

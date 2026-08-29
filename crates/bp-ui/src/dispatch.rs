@@ -969,25 +969,6 @@ pub fn handle_menu_action(
             show_info("Research Report", &report);
         }
 
-        // Research ▸ what the active document cites (ADR-0044). Each borrow
-        // ends with its statement, before the dialog opens, for the reason
-        // `RESEARCH_REPORT` gives just above.
-        action::CITATION_METADATA => {
-            let report = state.borrow().citation_metadata_report();
-            push = PushText::No;
-            show_info("Citation Metadata", &report);
-        }
-        action::FIND_IDENTIFIERS => {
-            let report = state.borrow().identifiers_report();
-            push = PushText::No;
-            show_info("Identifiers", &report);
-        }
-        action::CHECK_BIBLIOGRAPHY => {
-            let report = state.borrow().bibliography_report();
-            push = PushText::No;
-            show_info("Bibliography", &report);
-        }
-
         // Research ▸ what the active document asks, and what the store holds
         // (ADR-0046). Same borrow discipline as every arm above.
         action::OPEN_QUESTIONS => {

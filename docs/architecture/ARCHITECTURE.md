@@ -44,7 +44,6 @@ and this table carries the intent until then.
 | `bp-clipboard` | **live** | Clipboard history, kind detection and format-aware paste transformations (ADR-0010). In memory only. | 11 |
 | `bp-organize` | planned | Projects, topics, tags, related notes, duplicate detection. | 9 |
 | `bp-storage` | **live** | SQLite metadata store and migrations (ADR-0019). Documents, tags. Written to on every successful save and read four ways: Related Notes and duplicate detection (ADR-0037), Research Report's aggregates (ADR-0041), and its own summary (ADR-0046). | 9, 13 |
-| `bp-research` | **built, unwired** | BibTeX and CSL JSON in and out, DOI and arXiv identifiers, four reference styles, the research profile. Offline and deterministic; a test forbids a setting that could reach the network (ADR-0006). Pure. | 13 |
 | `bp-security` | **live** | Security profiles resolving to a policy over seven axes, plus Privacy Mode (ADR-0020). Decides policy; performs none of it. Read by the journal, the clipboard and the metadata store. | 14, 16 |
 | `bp-crypto` | **live** | The `.bpadx` envelope (ADR-0021): Argon2id, XChaCha20-Poly1305 and AES-256-GCM, chunked with the header and chunk position authenticated. Plus document hashing and detached Ed25519 signatures (specs §15). Composes primitives, implements none. Reached from Security ▸ Encrypt Document and from opening a `.bpadx`; the signing half is not reached yet. | 15, 16 |
 | `bp-secrets` | **built, unwired** | Secret scanning (specs §15): AWS/GitHub/GitLab/Slack tokens, PEM blocks, JWTs, connection strings, high-entropy assignments. Reports where a secret is, never what it is. No dependencies. Platform key protection is still planned. | 16 |
@@ -89,12 +88,15 @@ each a *mode* rather than a menu row — and it reached zero: `bp-storage` left
 under ADR-0037, `bp-notebook` and `bp-execution` under ADR-0043, `bp-research`
 under ADR-0044.
 
-**Two of those crates no longer exist.**
+**Three of those crates no longer exist.**
 [ADR-0057](../decisions/ADR-0057.md) removed `bp-notebook` and `bp-execution`
-outright, which is a second way to reach zero and a worse one to confuse with
-the first. The history is kept because the lesson below was learned while both
-were still here, and because being reachable is what made removing them a
-decision about the product rather than a sweep of dead code.
+outright and [ADR-0060](../decisions/ADR-0060.md) removed `bp-research`, which
+is a second way to reach zero and a worse one to confuse with the first. Of
+the four crates named above, **only `bp-storage` reached it by being wired
+in and stayed.** The history is kept because the lesson below was learned
+while all of them were still here, and because being reachable is what made
+removing them a decision about the product rather than a sweep of dead
+code.
 
 **Calling any of it a wiring backlog was never accurate**:
 each was waiting on a decision about what the mode was for, and the last item
@@ -103,12 +105,12 @@ rope does not hold — turned out to be a feature too. This block is generated
 from the manifests rather than maintained by hand; regenerate it after adding
 an edge, because a dependency diagram that has drifted is worse than none.
 
-**Thirteen crates depend on nothing else in the workspace**: `bp-buffer`,
+**Twelve crates depend on nothing else in the workspace**: `bp-buffer`,
 `bp-crypto`, `bp-data`, `bp-formats`, `bp-naming`, `bp-platform`,
-`bp-redaction`, `bp-research`, `bp-search`, `bp-secrets`, `bp-security`,
+`bp-redaction`, `bp-search`, `bp-secrets`, `bp-security`,
 `bp-semantic` and `bp-theme`. That is what keeps them cheap to test and
-impossible to entangle with the UI toolkit — and it is why all but 378 of the
-workspace's 1,865 tests run without a window.
+impossible to entangle with the UI toolkit — and it is why all but 368 of the
+workspace's 1,694 tests run without a window.
 
 `bp-platform` is on that list for its *real* dependencies and takes
 `bp-formats` as a **dev**-dependency, deliberately and one-directionally: it
@@ -136,7 +138,7 @@ Two deliberate non-dependencies:
 ## Inside `bp-ui`
 
 The shell was one 2,675-line file and the single-writer bottleneck for every
-piece of wiring work. It is now nineteen, split along seams the files already
+piece of wiring work. It is now eighteen, split along seams the files already
 had as comment banners:
 
 | Module | Lines | Owns |
@@ -154,7 +156,6 @@ had as comment banners:
 | `state/inspectors.rs` | 533 | The Tools menu's readouts: the policy in force on all seven axes, the file on disk, and where each setting came from (ADR-0048) |
 | `state/encryption.rs` | 519 | The `.bpadx` passphrase flow: what the bar is asking, and what a wrong answer does |
 | `state/data.rs` | 498 | The Data menu: which `bp-data` operation a menu id means for the format in front of the user |
-| `state/citations.rs` | 365 | What the document in front of you cites, through `bp-research` — offline, and named for it (ADR-0044) |
 | `audit.rs` | 245 | Which file the security history is, and what a person reading it sees (ADR-0024) |
 | `state/find.rs` | 220 | What the find bar is looking for, which match the user is standing on, and driving a scan of a document served from disk |
 | `state/questions.rs` | 175 | What the document in front of you *asks*, through `bp_semantic::questions` (ADR-0046) |
