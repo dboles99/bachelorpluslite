@@ -1,4 +1,20 @@
 {
   "rust-analyzer.check.command": "clippy",
-  "editor.formatOnSave": true
+  "editor.formatOnSave": true,
+
+  // fuzz/corpus holds inputs built to defeat a parser -- billion-laughs.yaml is
+  // an alias-expansion bomb and nesting-flow-100000.yaml is 100k deep. Any
+  // language server that parses workspace YAML on startup dies here, and the
+  // Cloud Code YAML client did: OOM at 4 GB, restart, repeat. Hide the corpus
+  // from the file listings extensions scan.
+  "files.exclude": {
+    "**/fuzz/corpus/**": true
+  },
+  "search.exclude": {
+    "**/fuzz/corpus/**": true
+  },
+  "files.watcherExclude": {
+    "**/fuzz/corpus/**": true
+  },
+  "yaml.validate": false
 }
