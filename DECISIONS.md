@@ -66,6 +66,7 @@ Adding a decision means adding both.
 | BP-ADR-0056 | 2026-08-23 | All three embedding sources, as choices, with the profile as a ceiling and `Cloud` behind a per-use gesture — and the axis for them had existed since ADR-0020. D16 closed | Accepted | [ADR-0056](docs/decisions/ADR-0056.md) |
 | BP-ADR-0057 | 2026-08-29 | Executing anything is removed, and notebooks with it. Neither crate depended on the other; one shell module was the whole seam. ADR-0011's "never auto-runs" becomes vacuous rather than enforced | Accepted | [ADR-0057](docs/decisions/ADR-0057.md) |
 | BP-ADR-0058 | 2026-08-29 | `metadata/repository_manifest.json` is deleted rather than regenerated: 102 of its 181 hashes were wrong, 275 tracked files were never in it, and nothing read it. Git already content-addresses the tree | Accepted | [ADR-0058](docs/decisions/ADR-0058.md) |
+| BP-ADR-0059 | 2026-08-29 | The reduction is scoped: eight crates and huge-file mode leave in five ADRs, least-entangled first, 67,316 lines to ~40,000. `bp-security` is **kept and narrowed** -- it is the store's off switch, and four of its seven policy axes turned out to have no enforcing reader at all | Accepted | [ADR-0059](docs/decisions/ADR-0059.md) |
 | BP-ADR-0017 | amended 2026-08-22 | Half of the renderer revert condition is now a number rather than a feeling: per-frame row building, and its independence from document size | Accepted, amended | [ADR-0017](docs/decisions/ADR-0017.md) |
 
 ## Decisions needed before the work they block

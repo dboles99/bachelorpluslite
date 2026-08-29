@@ -6,12 +6,22 @@ and Linux** — a Notepad clone, and deliberately little more.
 > **Derived from BachelorPad+.** BachelorPlusLite began as a clone of the
 > [BachelorPad+](https://github.com/dboles99/bachelorpadplus_rust) repository,
 > and it keeps that project's whole history, its licences and its attribution.
-> **The reduction has started.** Executing anything, and notebooks with it,
-> were removed on 2026-08-29 ([ADR-0057](docs/decisions/ADR-0057.md)). The
-> target is the feature set of Windows 11 Notepad plus a note-organising
-> layer — semantic filenames, related notes and duplicate detection — which
-> stays on purpose. The list below still describes more than that; each line
-> leaves as the capability behind it does.
+> **The reduction has started, and it is scoped.** Executing anything, and
+> notebooks with it, were removed on 2026-08-29
+> ([ADR-0057](docs/decisions/ADR-0057.md)). The target is the feature set of
+> Windows 11 Notepad plus a note-organising layer — semantic filenames,
+> related notes, duplicate detection and what the store knows — which stays
+> on purpose.
+>
+> [ADR-0059](docs/decisions/ADR-0059.md) says what else leaves and in what
+> order: research and citations, clipboard history, the structured-data
+> operations, huge-file mode, and the security stack — eight crates, taking
+> this from 67,316 lines of Rust to roughly 40,000. **What stays is the
+> profile model**, narrowed to the two axes that govern something: whether a
+> recovery journal is written, and whether anything is recorded about a
+> document at all. A smaller editor should not know more about you than the
+> larger one did. **The list below still describes more than the target**;
+> each line leaves as the capability behind it does.
 
 ## What this repository contains
 
