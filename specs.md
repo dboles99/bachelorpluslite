@@ -96,13 +96,19 @@ Required:
 
 ## 5. Large files and Rust-specific performance
 
-Required:
+**The large-file half is deleted.** [ADR-0063](docs/decisions/ADR-0063.md)
+removed large-file detection, the memory-mapped read-only mode, streaming
+search and the read-only handling for very large files. A document is loaded
+whole into the rope or fails trying, which is what Notepad does.
 
-- large-file detection
-- memory-mapped read-only mode
-- streaming search
+**The performance half survives and is the reason this section stays.**
+`bp-buffer`'s rope, incremental rendering and non-blocking background work are
+untouched, and `bp-editor/benches/scroll.rs` still holds ADR-0017's revert
+condition: a document a thousand times larger costs 1.19x per frame.
+
+Required, of what is left:
+
 - incremental rendering
-- read-only initial handling for very large files
 - parallel multi-file analysis
 - non-blocking background operations
 - high-performance recursive search
@@ -422,12 +428,15 @@ a list -- a second list is a list that goes stale (ADR-0054).
 Two flags this section used to show are gone, and neither was a decision when
 it was written:
 
-- `--large-file` is **deleted**. ADR-0027 and ADR-0030 make size decide how a
-  document opens, from metadata, before a byte is read; a flag forcing it is
-  either a no-op or a worse answer than the automatic one.
+- `--large-file` is **deleted**. ADR-0027 and ADR-0030 made size decide how a
+  document opens, from metadata, before a byte was read, so a flag forcing it
+  was either a no-op or a worse answer. Both of those ADRs have since been
+  superseded by [ADR-0063](docs/decisions/ADR-0063.md), which removes the
+  choice the flag would have forced: the flag stays deleted for a second
+  reason now.
 - `--readonly` is **not a flag**. Read-only is a property of a document, not
-  of an invocation -- the huge-document viewer is already read-only and
-  Security > Lock Document already exists. It wants a design pass, and
+  of an invocation -- `bp_buffer::Access` carries it and Security > Lock
+  Document already exists. It wants a design pass, and
   `project/WORK_QUEUE.md` has it.
 
 The `bpad` short spelling this block also showed is **kept and unbuilt**: it
@@ -491,7 +500,7 @@ Throughput and responsiveness:
 - 1 MB text: effectively instant
 - 10 MB: near-instant
 - 100 MB: comfortably usable
-- multi-GB: usable in large-file mode
+- multi-GB: **no longer a target** (ADR-0063)
 - typing latency: imperceptible
 - background save: non-blocking
 - core network requirement: none
@@ -510,7 +519,6 @@ Required:
 - malformed parser inputs
 - corrupted ciphertext
 - wrong-passphrase and authentication-failure tests
-- large-file tests
 - default-association integration tests
 
 ## 24. Threat-model categories

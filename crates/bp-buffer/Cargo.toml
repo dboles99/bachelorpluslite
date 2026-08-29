@@ -38,6 +38,3 @@ proptest.workspace = true
 # writes into the working tree has caused a real incident here.
 tempfile.workspace = true
 
-[[bench]]
-name = "large_file"
-harness = false

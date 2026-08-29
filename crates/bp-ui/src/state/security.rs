@@ -261,9 +261,6 @@ impl AppState {
         let Some(id) = self.workspace.active_id() else {
             return false;
         };
-        if self.refuse_on_viewer(id, "Signing") {
-            return false;
-        }
         if self.workspace.active().and_then(Document::path).is_none() {
             self.error = Some(
                 "cannot sign — this document has never been saved, and a signature is over \

@@ -6,7 +6,6 @@
 | Semantic naming | Yes | Yes | Yes |
 | Structured formats | Yes | Yes | Yes |
 | `.bpadx` encryption | Yes | Yes | Yes |
-| Huge-file mode | Yes | Yes | Yes |
 | Hybrid search | Yes | Yes | Yes |
 | DPAPI | Yes | Yes | No |
 | Windows Hello | OS-dependent | Yes | No |

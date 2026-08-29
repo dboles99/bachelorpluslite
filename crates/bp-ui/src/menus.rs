@@ -316,12 +316,7 @@ pub(crate) fn stamp_end() -> i32 {
     action::STAMP_BASE + i32::try_from(bp_naming::Stamp::all().len()).unwrap_or(0)
 }
 
-pub fn file(
-    any_dirty: bool,
-    has_path: bool,
-    served_from_disk: bool,
-    recent: &[std::path::PathBuf],
-) -> Vec<MenuItem> {
+pub fn file(any_dirty: bool, has_path: bool, recent: &[std::path::PathBuf]) -> Vec<MenuItem> {
     let mut items = vec![
         row("New", "Ctrl+N", action::NEW),
         row_end("Open...", "Ctrl+O", action::OPEN),
@@ -352,32 +347,26 @@ pub fn file(
     }
 
     // A document served from disk in chunks (ADR-0030) has no text to write
-    // and must not be re-read whole. `AppState` refuses all four by name, and
-    // this greys them so the refusal is not the first the user hears of it --
-    // `row_enabled(.., false)` and deliberately not `planned`, because these
-    // rows exist and cannot act right now, which is a different statement
-    // from "does not exist yet".
-    //
-    // Save All is not among them: it acts on whichever *other* tabs are
-    // dirty, and a viewer is never dirty, so it is already correct.
-    let writable = !served_from_disk;
+    // Four of these were greyed for a document served from disk, which could
+    // not be written and must not be re-read whole. ADR-0063 removed that
+    // document, so `writable` is gone rather than pinned to `true` -- a gate
+    // that is always open is a gate a reader has to check.
     items.extend([
-        row_enabled("Save", "Ctrl+S", action::SAVE, writable),
-        row_enabled("Save As...", "Ctrl+Shift+S", action::SAVE_AS, writable),
+        row("Save", "Ctrl+S", action::SAVE),
+        row("Save As...", "Ctrl+Shift+S", action::SAVE_AS),
         MenuItem {
             enabled: any_dirty,
             ..row_end("Save All", "", action::SAVE_ALL)
         },
         MenuItem {
             // Reload means "discard my edits and re-read the file", which
-            // needs a file to re-read -- and, for a document that was
-            // deliberately never loaded, would load it.
-            enabled: has_path && writable,
+            // needs a file to re-read.
+            enabled: has_path,
             ..row_end("Reload from Disk", "", action::RELOAD)
         },
         MenuItem {
             separator_after: true,
-            ..row_enabled("Save a Copy...", "", action::SAVE_COPY, writable)
+            ..row("Save a Copy...", "", action::SAVE_COPY)
         },
         row_end("Close Tab", "Ctrl+W", action::CLOSE_TAB),
         // Live on both platforms, and it is not the same amount of work on
@@ -1059,7 +1048,7 @@ mod tests {
     /// building it one way.
     fn every_menu() -> Vec<(&'static str, Vec<MenuItem>)> {
         vec![
-            ("File", file(true, true, true, &[])),
+            ("File", file(true, true, &[])),
             ("Edit", edit(true)),
             ("View", view(ThemeId::Dark, false, true, false, 14)),
             (
@@ -1516,7 +1505,7 @@ mod tests {
 
     #[test]
     fn the_file_menu_offers_a_new_window() {
-        let row = file(false, true, false, &[])
+        let row = file(false, true, &[])
             .into_iter()
             .find(|i| i.action == action::NEW_WINDOW)
             .expect("a New Window row");
@@ -1608,7 +1597,7 @@ mod tests {
         // the row is what keeps it from being made out of sight -- and the
         // ellipsis is the house convention for a row that asks first, which
         // this one does, because registration writes files.
-        let row = file(false, true, false, &[])
+        let row = file(false, true, &[])
             .into_iter()
             .find(|i| i.action == action::SET_DEFAULT_EDITOR)
             .expect("a default-editor row");
@@ -2004,21 +1993,21 @@ mod tests {
 
     #[test]
     fn save_all_is_disabled_when_nothing_is_unsaved() {
-        let items = file(false, true, false, &[]);
+        let items = file(false, true, &[]);
         let save_all = items
             .iter()
             .find(|i| i.action == action::SAVE_ALL)
             .expect("Save All");
         assert!(!save_all.enabled);
 
-        let items = file(true, true, false, &[]);
+        let items = file(true, true, &[]);
         let save_all = items.iter().find(|i| i.action == action::SAVE_ALL).unwrap();
         assert!(save_all.enabled);
     }
 
     #[test]
     fn reload_needs_a_file_to_reload_from() {
-        let items = file(false, false, false, &[]);
+        let items = file(false, false, &[]);
         let reload = items
             .iter()
             .find(|i| i.action == action::RELOAD)
@@ -2363,7 +2352,7 @@ mod tests {
     #[test]
     fn every_working_row_has_an_action() {
         let mut all = Vec::new();
-        all.extend(file(true, true, false, &[]));
+        all.extend(file(true, true, &[]));
         // `true` so the caret-dependent rows are enabled here too -- the
         // stronger check, since a disabled row is exempt below regardless.
         all.extend(edit(true));
@@ -2396,7 +2385,7 @@ mod tests {
             std::path::PathBuf::from("/notes/a/Report_17AUG2026.txt"),
             std::path::PathBuf::from("/notes/b/Report_17AUG2026.txt"),
         ];
-        let items = file(false, true, false, &recent);
+        let items = file(false, true, &recent);
 
         let rows: Vec<&MenuItem> = items
             .iter()
@@ -2415,7 +2404,7 @@ mod tests {
 
     #[test]
     fn no_recent_files_means_no_recent_rows() {
-        let items = file(false, true, false, &[]);
+        let items = file(false, true, &[]);
         assert!(
             items
                 .iter()
@@ -2430,7 +2419,7 @@ mod tests {
         let recent: Vec<std::path::PathBuf> = (0..bp_config::MAX_RECENT + 5)
             .map(|i| std::path::PathBuf::from(format!("/f{i}.txt")))
             .collect();
-        let items = file(false, true, false, &recent);
+        let items = file(false, true, &recent);
 
         // The recent rows, picked out by their labels rather than by the id
         // range under test -- a filter written from `RECENT_BASE` would agree
@@ -2468,12 +2457,7 @@ mod tests {
         let editor_window = action::UNDO..=action::SELECT_ALL;
 
         let mut rust_side = Vec::new();
-        rust_side.extend(file(
-            true,
-            true,
-            false,
-            &[std::path::PathBuf::from("/a.txt")],
-        ));
+        rust_side.extend(file(true, true, &[std::path::PathBuf::from("/a.txt")]));
         rust_side.extend(view(
             ThemeId::Green,
             false,

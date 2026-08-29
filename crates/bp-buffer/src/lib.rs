@@ -23,21 +23,6 @@ use std::ops::Range;
 
 use ropey::Rope;
 
-pub mod large;
-pub mod line_index;
-pub mod stream;
-
-pub use large::{
-    Access, CHUNK_BYTES, DisplayLine, HUGE_FILE_BYTES, INDEX_BUDGET_BYTES, IndexProgress,
-    LARGE_FILE_BYTES, LargeFile, LargeFileError, MAX_DISPLAY_BYTES, MAX_DISPLAY_LINE_BYTES,
-    MAX_DISPLAY_LINES, SizeClass,
-};
-pub use line_index::{LineIndex, LineLocation, MAX_ANCHORS, MAX_INDEX_HEAP_BYTES};
-pub use stream::{
-    DEFAULT_OVERLAP_BYTES, DEFAULT_WINDOW_BYTES, MAX_OVERLAP_BYTES, MIN_WINDOW_BYTES, StreamWindow,
-    WindowReader,
-};
-
 /// Crate identity used by workspace smoke tests and diagnostics.
 pub const CRATE_NAME: &str = "bp-buffer";
 
@@ -65,6 +50,59 @@ impl Position {
 
     pub const fn new(line: usize, column: usize) -> Self {
         Self { line, column }
+    }
+}
+
+/// Whether a document accepts edits, and if not, why not.
+///
+/// **Two variants, not a boolean**, and that survived the removal of the third
+/// (ADR-0063). A file that is read-only on disk becomes editable when its
+/// permissions change, and Save As is the way out; saying only "read-only"
+/// leaves somebody clicking at whichever cause was not theirs. The variant
+/// that went was `ReadOnlyBySize`, whose way out was a different tool -- and
+/// it was the reason this type is an enum. **It is kept as an enum anyway**:
+/// `project/WORK_QUEUE.md`'s read-only design pass asks whether Lock Document
+/// belongs here, and collapsing to a `bool` now would have to be undone to
+/// answer it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Access {
+    /// Edits are accepted. The default, so that every buffer built before
+    /// anyone thought about access is editable rather than mysteriously
+    /// inert.
+    #[default]
+    Editable,
+    /// The file on disk forbids writing: permissions, a read-only volume, or
+    /// another process holding it.
+    ReadOnlyFile,
+}
+
+impl Access {
+    /// Decide access from the file's own permissions.
+    ///
+    /// Took a size as well until ADR-0063, and size won when both applied --
+    /// because size refused edits *while typing* and permissions only surface
+    /// at save time. Nothing is refused by size now.
+    pub const fn of(file_is_read_only: bool) -> Self {
+        if file_is_read_only {
+            Self::ReadOnlyFile
+        } else {
+            Self::Editable
+        }
+    }
+
+    /// Whether edits must be refused.
+    pub const fn is_read_only(self) -> bool {
+        !matches!(self, Self::Editable)
+    }
+
+    /// What to tell the user, in one line.
+    ///
+    /// Phrased as a fact about the document rather than an apology.
+    pub fn message(self) -> String {
+        match self {
+            Self::Editable => String::new(),
+            Self::ReadOnlyFile => "Read-only: the file cannot be written.".to_owned(),
+        }
     }
 }
 
@@ -421,15 +459,17 @@ mod tests {
 
     #[test]
     fn a_read_only_buffer_refuses_every_edit_whatever_the_reason() {
-        // Both reasons must stop the edit. Only the message differs -- if
-        // one of them let a keystroke through, the difference between them
-        // would have become a correctness bug rather than a wording one.
-        for access in [
-            Access::ReadOnlyFile,
-            Access::ReadOnlyBySize {
-                bytes: HUGE_FILE_BYTES + 1,
-            },
-        ] {
+        // Written as a loop over every non-editable variant, and kept that
+        // way with one left. ADR-0063 removed `ReadOnlyBySize`; the point of
+        // the loop was that a reason which only changed the *message* must
+        // never become one that changes whether the edit lands, and a second
+        // reason is exactly what the read-only design pass may add back.
+        // One element today, and written as a loop on purpose: the point was
+        // that a reason which only changes the *message* must never become
+        // one that changes whether the edit lands, and the read-only design
+        // pass may add the second reason back.
+        #[allow(clippy::single_element_loop)]
+        for access in [Access::ReadOnlyFile] {
             let mut b = Buffer::from_text("hello").with_access(access);
             assert!(b.is_read_only(), "{access:?}");
             b.insert(0, "X");

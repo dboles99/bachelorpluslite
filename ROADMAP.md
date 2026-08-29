@@ -15,7 +15,8 @@ Status as of **2026-08-29**. Four words, meaning four different things:
   three, for four sessions — was this project's most useful single number
   while it was not zero.
 - **Removed** — the phase's capability was built, shipped, and then taken out
-  again, with an ADR saying why. Four phases carry it: 12 entire, under
+  again, with an ADR saying why. Five phases carry it: 4 under
+  [ADR-0063](docs/decisions/ADR-0063.md), 12 entire, under
   [ADR-0057](docs/decisions/ADR-0057.md), 13 in part, under
   [ADR-0060](docs/decisions/ADR-0060.md), 11 under
   [ADR-0061](docs/decisions/ADR-0061.md) and 6 under
@@ -30,7 +31,7 @@ Status as of **2026-08-29**. Four words, meaning four different things:
 | 1 | Foundation and workspace | **Done** | [01-foundation](project/tasks/01-foundation/) | `bp-core`, `bp-config`, `bp-theme`, `bp-ui` |
 | 2 | Core editor | **Started** | [02-core-editor](project/tasks/02-core-editor/) | `bp-buffer`, `bp-editor` |
 | 3 | File safety and recovery | **Done** | [03-file-safety](project/tasks/03-file-safety/) | `bp-files`, `bp-history` |
-| 4 | Large-file engine | **Done** | [04-large-files](project/tasks/04-large-files/) | `bp-buffer` |
+| 4 | Large-file engine | **Removed** | [ADR-0063](docs/decisions/ADR-0063.md) | — |
 | 5 | Format registry and parser framework | **Started** | [05-formats](project/tasks/05-formats/) | `bp-formats` |
 | 6 | Structured formats | **Removed** | [ADR-0062](docs/decisions/ADR-0062.md) | — |
 | 7 | Search engine | **Started** | [06-search](project/tasks/06-search/) | `bp-search` |

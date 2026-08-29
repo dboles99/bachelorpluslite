@@ -70,6 +70,7 @@ Adding a decision means adding both.
 | BP-ADR-0060 | 2026-08-29 | R1: `bp-research` leaves with the three Research rows that read the document. The menu keeps its name and its three store-reading rows -- ADR-0044's refusal to merge them is what made this a deletion rather than a rewrite | Accepted | [ADR-0060](docs/decisions/ADR-0060.md) |
 | BP-ADR-0061 | 2026-08-29 | R2: `bp-clipboard` leaves, and the `Clipboard` policy axis goes with it rather than waiting for R5 -- an axis outlives its subject by nothing. Four tests rewritten; one would have passed while asserting nothing | Accepted | [ADR-0061](docs/decisions/ADR-0061.md) |
 | BP-ADR-0062 | 2026-08-29 | R3: `bp-data` and the Data menu leave, superseding ADR-0023. `sniff` survives and loses the only thing that could contradict it -- the cross-crate agreement test that once caught it calling a pretty-printed array "JSON Lines" | Accepted | [ADR-0062](docs/decisions/ADR-0062.md) |
+| BP-ADR-0063 | 2026-08-30 | R4: huge-file mode leaves -- the engine, the viewer and `StreamSearch`, superseding ADR-0027, ADR-0030 and ADR-0042. No directory and no id block: a *mode* comes out as branches. D11 becomes inert and D2's own re-ask metric moves | Accepted | [ADR-0063](docs/decisions/ADR-0063.md) |
 | BP-ADR-0017 | amended 2026-08-22 | Half of the renderer revert condition is now a number rather than a feeling: per-frame row building, and its independence from document size | Accepted, amended | [ADR-0017](docs/decisions/ADR-0017.md) |
 
 ## Decisions needed before the work they block
@@ -120,6 +121,39 @@ in the fourth.
 Kept rather than deleted, because every one of these went stale the same
 way — a fix landing without the record moving — and because the lesson in each
 is worth more than the fact.
+
+- **A capability with no directory of its own is removed by deleting
+  *branches*, and a gate that is always open is a gate a reader has to
+  check.** [ADR-0063](docs/decisions/ADR-0063.md) took out huge-file mode:
+  2,391 of `bp-buffer`'s 2,854 lines, `bp-search`'s `StreamSearch`, and nine
+  files in `bp-ui`. Unlike R1 to R3 there was no crate to `git rm` and no
+  action-id block to free -- it was reached by *opening a file*, so every
+  trace of it was a condition inside code that stays.
+
+  Every one of those nine files had the same shape: **`if this document is
+  served from disk, do the other thing`.** Deleting the other thing is easy.
+  The risk is the `if`, because a condition pinned to `true` and a condition
+  deleted compile identically and read differently to everyone afterwards. The
+  File menu is the clearest case: `let writable = !served_from_disk` gated four
+  rows, and setting it to `true` would have left them all asking a question
+  with one possible answer forever.
+
+  **The tell that you have pinned rather than removed** is a local variable, a
+  parameter or a field whose value is now a constant. `menus::file` lost a
+  `bool` parameter, `AppState` lost `drawn_rows`, and `uses_custom_surface`
+  lost a term -- each found by the compiler only because the thing behind it
+  was deleted first. Delete the callee before simplifying the caller and the
+  compiler does the audit; simplify first and it cannot.
+
+- **A test that asserted the branch you did not change becomes the whole
+  statement when you delete the other one.**
+  `an_ordinary_document_still_follows_the_flag` existed because ADR-0030 made
+  `uses_custom_surface` two-branched, and something had to hold the branch that
+  ADR *did not* touch. With the huge-document branch gone it is the whole of
+  that function, so it was renamed rather than deleted -- and it is now
+  load-bearing in a way it never was, because a flag that started claiming
+  every document would retire `TextInput` by accident and take input-method
+  composition with it.
 
 - **A decision not to unify two things is worth as much as a decision to
   unify them, and it is only visible when one of them leaves.**

@@ -136,19 +136,6 @@ impl AppState {
         match std::fs::metadata(path) {
             Ok(meta) => {
                 lines.push(format!("Size on disk: {}", super::human_bytes(meta.len())));
-                // The size class is a real behavioural fork rather than a
-                // statistic: it decides whether the rope holds the document
-                // or the viewer streams it (ADR-0027, ADR-0030).
-                let class = bp_buffer::SizeClass::of(meta.len());
-                lines.push(format!(
-                    "Size class: {} — {}",
-                    class.label(),
-                    if class.must_stream() {
-                        "read from disk as you scroll, read-only"
-                    } else {
-                        "held in memory and editable"
-                    }
-                ));
                 lines.push(format!(
                     "Read-only on disk: {}",
                     if meta.permissions().readonly() {

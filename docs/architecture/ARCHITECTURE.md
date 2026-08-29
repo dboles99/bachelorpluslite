@@ -34,7 +34,7 @@ and this table carries the intent until then.
 | `bp-theme` | **live** | Palettes as data (ADR-0009). Green is the default. | 1, 17 |
 | `bp-config` | **live** | Settings precedence, config file, recent-files list, recovery from bad input, and **the inventory of what the command line accepts** (`cli`, which renders `--help` and `--version` from it -- ADR-0054). | 1 |
 | `bp-ui` | **live** | The Slint application shell (ADR-0015). Split into modules — see below. | 1 |
-| `bp-buffer` | **live** | Rope buffer, character indices, line/column maths. Plus the large-file engine (ADR-0027): detection, chunked reading, a sparse line index and line-aligned streaming windows. The open path reads `SizeClass` and `Access` before it reads the file; `LargeFile` itself waits on a view that can show a document the rope does not hold. | 2, 4 |
+| `bp-buffer` | **live** | Rope buffer, character indices, line/column maths, and `Access` — whether a document accepts edits and why not. The large-file engine (ADR-0027) was 2,391 of its lines and left under [ADR-0063](../decisions/ADR-0063.md). | 2 |
 | `bp-editor` | **live** | Caret, selection, motion, transaction-based undo/redo, line operations, key-to-command mapping, document-to-screen geometry. The editor's storage — see below. | 2 |
 | `bp-history` | **live** | Crash-safe recovery journal and autosave checkpoints. | 3 |
 | `bp-formats` | **live** | Format detection and profiles (ADR-0008). | 5 |
@@ -97,7 +97,9 @@ code.
 **Calling any of it a wiring backlog was never accurate**:
 each was waiting on a decision about what the mode was for, and the last item
 that could honestly be described as wiring — the viewer for a document the
-rope does not hold — turned out to be a feature too. This block is generated
+rope does not hold — turned out to be a feature too. (That viewer has since
+been removed outright, [ADR-0063](../decisions/ADR-0063.md); the point it
+illustrates is about how the work was *sized*, and survives it.) This block is generated
 from the manifests rather than maintained by hand; regenerate it after adding
 an edge, because a dependency diagram that has drifted is worse than none.
 
@@ -105,8 +107,8 @@ an edge, because a dependency diagram that has drifted is worse than none.
 `bp-crypto`, `bp-formats`, `bp-naming`, `bp-platform`,
 `bp-redaction`, `bp-search`, `bp-secrets`, `bp-security`,
 `bp-semantic` and `bp-theme`. That is what keeps them cheap to test and
-impossible to entangle with the UI toolkit — and it is why all but 332 of the
-workspace's 1,550 tests run without a window.
+impossible to entangle with the UI toolkit — and it is why all but 292 of the
+workspace's 1,446 tests run without a window.
 
 `bp-platform` is on that list for its *real* dependencies and takes
 `bp-formats` as a **dev**-dependency, deliberately and one-directionally: it
@@ -134,28 +136,27 @@ Two deliberate non-dependencies:
 ## Inside `bp-ui`
 
 The shell was one 2,675-line file and the single-writer bottleneck for every
-piece of wiring work. It is now sixteen, split along seams the files already
+piece of wiring work. It is now fifteen, split along seams the files already
 had as comment banners:
 
 | Module | Lines | Owns |
 | --- | ---: | --- |
-| `state.rs` | 2,931 | `AppState` itself: documents, workspace, opening, saving, reloading, format detection, the gutter and the status labels |
-| `state/security.rs` | 2,774 | Scan, redact, inspect metadata, hash, sign, verify, the security history all six write into, and the profile and Privacy Mode switches that govern them |
-| `menus.rs` | 2,591 | Menu contents and the action-id map |
-| `lib.rs` | 1,298 | `run_with`, `refresh`, and the Slint callback wiring |
-| `editor_view.rs` | 1,003 | The custom surface: key translation, caret placement, what to draw, and the scroll that serves both a rope and a file |
+| `state/security.rs` | 2,771 | Scan, redact, inspect metadata, hash, sign, verify, the security history all six write into, and the profile and Privacy Mode switches that govern them |
+| `menus.rs` | 2,575 | Menu contents and the action-id map |
+| `state.rs` | 2,500 | `AppState` itself: documents, workspace, opening, saving, reloading, format detection, the gutter and the status labels |
+| `lib.rs` | 1,255 | `run_with`, `refresh`, and the Slint callback wiring |
 | `dispatch.rs` | 955 | The menu-action match, and the dialogs its arms share |
-| `viewer.rs` | 801 | A document the rope does not hold: where the reader is looking, the window handed to the surface, and the scan of it a find runs (ADR-0030, ADR-0042) |
 | `state/research.rs` | 758 | Research Report: aggregate reads over `bp-storage`, worded as insights, each naming the documents behind it and closing with the rules it applied (ADR-0041, ADR-0046); and what the store holds |
 | `default_editor.rs` | 754 | File ▸ Set as Default Editor: the report, the consent dialog, the artefacts (ADR-0012) |
 | `state/organize.rs` | 585 | Related Notes, duplicate detection and Suggested Folder, over `bp-storage` (ADR-0037, ADR-0048) |
-| `state/inspectors.rs` | 533 | The Tools menu's readouts: the policy in force on all seven axes, the file on disk, and where each setting came from (ADR-0048) |
+| `editor_view.rs` | 577 | The custom surface: key translation, caret placement, what to draw, and the scroll that serves both a rope and a file |
+| `state/inspectors.rs` | 520 | The Tools menu's readouts: the policy in force on all seven axes, the file on disk, and where each setting came from (ADR-0048) |
 | `state/encryption.rs` | 519 | The `.bpadx` passphrase flow: what the bar is asking, and what a wrong answer does |
 | `audit.rs` | 245 | Which file the security history is, and what a person reading it sees (ADR-0024) |
-| `state/find.rs` | 220 | What the find bar is looking for, which match the user is standing on, and driving a scan of a document served from disk |
 | `state/questions.rs` | 176 | What the document in front of you *asks*, through `bp_semantic::questions` (ADR-0046) |
 | `testpaths.rs` | 148 | **Test-only.** One temp path per test that no *earlier* run can have left behind (ADR-0049) |
 | `passphrase.rs` | 141 | What the one-field passphrase bar is currently asking, as a state machine |
+| `state/find.rs` | 139 | What the find bar is looking for, which match the user is standing on, and driving a scan of a document served from disk |
 
 **Three modules meet in the Research menu and none knows the other two**,
 which is worth knowing before adding to any of them:
@@ -261,32 +262,28 @@ the change ADR-0018 made, and it is what unblocked phase 2.
 | 100 KB | 55.8 µs | 0.3 µs |
 | 1 MB | 563.7 µs | 0.3 µs |
 
-There are two views over it, and **one more surface that is over no rope at
-all**:
+There are two views over it:
 
-| | `TextInput` (default) | `EditorSurface` (`--editor-view`) | `EditorSurface` as viewer |
-| --- | --- | --- | --- |
-| Storage | the rope | the rope | **a file, read in chunks** |
-| Caret and selection | Slint's, unreadable | `bp-editor`'s | none — a caret is a position in a buffer |
-| Undo | Slint's | `bp-editor`'s transactions | nothing to undo |
-| Status bar | line count | **Ln/Col** | **which lines are on screen** |
-| Word wrap | yes | yes | no |
-| Input-method composition | yes | **no, and cannot be** | not applicable — it accepts no text |
-| Lines drawn | all of them | only the visible ones | only the visible ones |
+| | `TextInput` (default) | `EditorSurface` (`--editor-view`) |
+| --- | --- | --- |
+| Storage | the rope | the rope |
+| Caret and selection | Slint's, unreadable | `bp-editor`'s |
+| Undo | Slint's | `bp-editor`'s transactions |
+| Status bar | line count | **Ln/Col** |
+| Word wrap | yes | yes |
+| Input-method composition | yes | **no, and cannot be** |
+| Lines drawn | all of them | only the visible ones |
 
-The third column is not a third view. It is the same `EditorSurface`, handed
-different rows, which is the whole argument for reusing it: the gutter, the
-fonts, the click-to-row arithmetic and the wheel stay one implementation, so a
-defect fixed in one is fixed in all. What decides which surface draws is one
-function with a name — `AppState::uses_custom_surface` — recomputed per
-refresh, because ADR-0030 makes the answer depend on the active document
-rather than on the flag. An `if` in the open path and another in `refresh` is
-how two views come to disagree about which sizes they claim.
+**There was a third column until [ADR-0063](../decisions/ADR-0063.md)** — the
+same `EditorSurface` handed a window of a file rather than rows of a rope, for
+a document the rope did not hold. `AppState::uses_custom_surface` was the
+function that chose, and it had two terms because ADR-0030 made the answer
+depend on the active document as well as on the flag. It has one term now, and
+the flag decides alone.
 
 **`--editor-view` therefore means something precise**: it selects the surface
-that *edits* a document the rope holds. It is not a switch between two
-products, and there is no build in which a huge file opens for one user and is
-refused for another.
+that draws a document. It is not a switch between two products, and no
+document opens for one user and is refused for another.
 
 `TextInput` owns its own text, caret and undo stack and exposes the caret only
 through a property marked *"internal, undocumented, only exposed for tests"*,

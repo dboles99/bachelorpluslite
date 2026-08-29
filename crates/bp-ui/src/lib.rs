@@ -70,7 +70,6 @@ mod passphrase;
 mod state;
 #[cfg(test)]
 mod testpaths;
-mod viewer;
 
 /// Crate identity used by workspace smoke tests and diagnostics.
 pub const CRATE_NAME: &str = "bp-ui";
@@ -178,7 +177,6 @@ fn refresh(ui: &AppWindow, state: &mut state::AppState, push_text: state::PushTe
     // Privacy Mode outranks the profile name here: it is the session-wide
     // fact, and it is the thing somebody switches on precisely because they
     // want to be able to see that it is on.
-    ui.set_size_label(state.size_label().into());
 
     ui.set_security_profile(
         if state.privacy.is_on() {
@@ -213,7 +211,6 @@ fn refresh(ui: &AppWindow, state: &mut state::AppState, push_text: state::PushTe
     ui.set_file_items(model(menus::file(
         any_dirty,
         has_path,
-        state.active_is_viewer(),
         state.recent.paths(),
     )));
     ui.set_view_items(model(menus::view(
@@ -473,10 +470,6 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
     // what is in the active tab rather than on the flag alone. It runs before
     // the window is shown, so the first frame is already right.
     ui.set_use_editor_view(options.editor_view);
-    // The scan rate ADR-0042 chose, handed to Slint rather than written there
-    // as a literal: `WINDOWS_PER_TICK` and this interval only mean something
-    // together, and they must not be a file apart.
-    ui.set_scan_tick_ms(i32::try_from(bp_search::STREAM_TICK.as_millis()).unwrap_or(16));
 
     let mut reported = false;
     let measure_exit = options.measure_exit;
@@ -795,16 +788,6 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
         ui.on_find_changed(move || {
             let Some(ui) = weak.upgrade() else { return };
             let query = ui_query(&ui);
-            // A document served from disk is searched by scanning it, not by
-            // asking a rope that does not exist (ADR-0042). The scan reports
-            // itself through the same `find_status` the bar already reads.
-            if cell.borrow().active_is_viewer() {
-                let running = cell.borrow_mut().begin_scan(&query);
-                ui.set_scanning(running);
-                ui.set_find_status(cell.borrow().find_status.as_str().into());
-                editor_view::draw_editor_view(&ui, &mut cell.borrow_mut());
-                return;
-            }
             let selection = cell.borrow_mut().find(&query);
             ui.set_find_status(cell.borrow().find_status.as_str().into());
             if let Some(range) = selection {
@@ -820,15 +803,6 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
         let weak = ui.as_weak();
         let step = move || {
             let Some(ui) = weak.upgrade() else { return };
-            if cell.borrow().active_is_viewer() {
-                // Stepping a scan moves the *view*, not a caret, and it wraps
-                // over what has been found so far rather than waiting for the
-                // scan to finish.
-                cell.borrow_mut().step_scan_hit(forward);
-                ui.set_find_status(cell.borrow().find_status.as_str().into());
-                editor_view::draw_editor_view(&ui, &mut cell.borrow_mut());
-                return;
-            }
             let selection = cell.borrow_mut().step_match(forward);
             ui.set_find_status(cell.borrow().find_status.as_str().into());
             if let Some(range) = selection {
@@ -885,23 +859,6 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
             }
             ui.set_find_status(cell.borrow().find_status.as_str().into());
             refresh(&ui, &mut cell.borrow_mut(), state::PushText::Yes);
-        });
-    }
-
-    {
-        let cell = Rc::clone(&state);
-        let weak = ui.as_weak();
-        // One tick of a scan of a document served from disk (ADR-0042). The
-        // budget is what keeps the window responsive: this returns after a
-        // few megabytes rather than after the file, and Slint redraws in
-        // between. Stopping is the timer not firing again -- there is no
-        // thread to signal and nothing to join.
-        ui.on_scan_tick(move || {
-            let Some(ui) = weak.upgrade() else { return };
-            let running = cell.borrow_mut().advance_scan(bp_search::WINDOWS_PER_TICK);
-            ui.set_scanning(running);
-            ui.set_find_status(cell.borrow().find_status.as_str().into());
-            editor_view::draw_editor_view(&ui, &mut cell.borrow_mut());
         });
     }
 
