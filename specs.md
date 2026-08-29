@@ -335,10 +335,12 @@ Two consequences worth stating plainly rather than leaving to be discovered:
 
 - **A `.bpadx` document already on a disk cannot be opened by this build**,
   and there is no migration.
-- **Only Standard keeps a recovery journal.** Private and Confidential asked
-  for an encrypted one; with no implementation left, the variant was *deleted*
-  rather than pointed at plaintext. ADR-0020's rule is that a control which
-  quietly weakens itself is worse than an absent one.
+- **Confidential and Maximum keep no recovery journal.** Standard and Private
+  keep a plaintext one, and the Privacy menu names it as unencrypted on a row
+  of its own. The encrypted variant was *deleted* rather than pointed silently
+  at plaintext (ADR-0064), and Private then kept an honestly-labelled journal
+  ([ADR-0065](docs/decisions/ADR-0065.md)) -- ADR-0020 forbids a control that
+  **quietly** weakens itself, and a printed readout is not quiet.
 
 [ADR-0011](docs/decisions/ADR-0011.md)'s "no custom cryptography -- compose
 vetted primitives" is **removed rather than kept**: there is no cryptography

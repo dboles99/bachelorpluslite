@@ -305,11 +305,13 @@ pub fn sniff(content: &str) -> Format {
 /// `[\n  {"id": 1},\n  {"id": 2}\n]` counted three, was reported as JSONL,
 /// and was then refused by `bp-data` record by record.
 ///
-/// **That defect was found by a cross-crate test that can no longer exist**
-/// (ADR-0062): `bp-data` is gone, so nothing consumes this verdict in a way
-/// that could contradict it. The rule below is kept exactly as it was, and a
-/// mistake in it is now cosmetic rather than a syntax error on a valid file --
-/// which is a smaller consequence and a quieter one.
+/// **That defect was found by a cross-crate test, and the test is back**
+/// (ADR-0065). `bp-data` is gone, so nothing in the *product* consumes this
+/// verdict in a way that could contradict it -- but
+/// `tests/integration/tests/sniffing_agrees_with_a_parser.rs` borrows
+/// `serde_json` to say the same thing: whatever this calls a valid JSON
+/// document, a parser must accept as that. Watched failing against the old
+/// rule before it was called done.
 ///
 /// Only the first line is inspected for completeness, deliberately: the head
 /// is a fixed [`SNIFF_BYTES`] prefix, so a file of long records would
@@ -356,8 +358,11 @@ fn looks_like_json_lines(head: &str) -> bool {
 /// inner line of a pretty-printed array.
 ///
 /// This is not validation. `{"a" "b"}` closes what it opens and is not JSON;
-/// telling those apart needs a parser, and the caller's answer for a line that
-/// is well-shaped but malformed is `JsonLines`, whose parser will say so.
+/// telling those apart needs a parser, and this product no longer ships one
+/// (ADR-0062). The verdict for a well-shaped but malformed line is still
+/// `JsonLines`, and nothing downstream will now disagree -- which is why
+/// `sniffing_agrees_with_a_parser.rs` exists (ADR-0065): it borrows
+/// `serde_json` in a *test* to keep this rule falsifiable.
 fn closes_what_it_opens(line: &str) -> bool {
     let line = line.trim();
     if !(line.starts_with('{') || line.starts_with('[')) || line.ends_with(',') {

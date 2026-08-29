@@ -118,7 +118,7 @@ profiles and a toggle is a label that reads as a promise.
 | Row | State |
 | --- | --- |
 | Standard / Private / Confidential / Maximum | **live** — the active document's profile; exactly one ticks, and a Custom policy ticks none |
-| Recovery journal: … | **live** — a readout, greyed because it is not clickable. Standard journals unsaved work in plaintext; every stricter profile journals nothing at all. **Not "encrypted"** — ADR-0064 deleted that variant rather than pointing it at plaintext, which is ADR-0020's rule about a control that quietly weakens itself |
+| Recovery journal: … | **live** — a readout, greyed because it is not clickable. Standard and Private journal unsaved work in plaintext and this row says *"on, unencrypted"*; Confidential and Maximum journal nothing. **Not "encrypted"** — ADR-0064 deleted that variant rather than pointing it at plaintext. **This row is load-bearing** ([ADR-0065](../decisions/ADR-0065.md)): Private keeps a journal *because* the row names its form, and a test says that if the row stops doing so, Private goes back to no journal |
 | Recorded: … | **live** — a readout: what the metadata store may keep about this document. Path, title and tags under Standard; the path only under Private; nothing under Confidential and Maximum |
 | Privacy Mode | **live** — a session-wide override that can only tighten, and it *acts*: journals already written are removed |
 | Encrypt Document, Scan for Secrets, Redact, Inspect Metadata, Hash, Sign, Verify, Security History, Lock Document | **Removed** ([ADR-0064](../decisions/ADR-0064.md)). All nine were live. `.bpadx` documents already on a disk cannot be opened by this build, and there is no migration — the ADR says why |

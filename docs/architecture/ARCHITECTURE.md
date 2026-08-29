@@ -97,7 +97,7 @@ an edge, because a dependency diagram that has drifted is worse than none.
 `bp-formats`, `bp-naming`, `bp-platform`, `bp-search`, `bp-security`,
 `bp-semantic` and `bp-theme`. That is what keeps them cheap to test and
 impossible to entangle with the UI toolkit — and it is why all but 189 of the
-workspace's 970 tests run without a window.
+workspace's 974 tests run without a window.
 
 `bp-platform` is on that list for its *real* dependencies and takes
 `bp-formats` as a **dev**-dependency, deliberately and one-directionally: it

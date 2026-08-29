@@ -71,7 +71,8 @@ Adding a decision means adding both.
 | BP-ADR-0061 | 2026-08-29 | R2: `bp-clipboard` leaves, and the `Clipboard` policy axis goes with it rather than waiting for R5 -- an axis outlives its subject by nothing. Four tests rewritten; one would have passed while asserting nothing | Accepted | [ADR-0061](docs/decisions/ADR-0061.md) |
 | BP-ADR-0062 | 2026-08-29 | R3: `bp-data` and the Data menu leave, superseding ADR-0023. `sniff` survives and loses the only thing that could contradict it -- the cross-crate agreement test that once caught it calling a pretty-printed array "JSON Lines" | Accepted | [ADR-0062](docs/decisions/ADR-0062.md) |
 | BP-ADR-0063 | 2026-08-30 | R4: huge-file mode leaves -- the engine, the viewer and `StreamSearch`, superseding ADR-0027, ADR-0030 and ADR-0042. No directory and no id block: a *mode* comes out as branches. D11 becomes inert and D2's own re-ask metric moves | Accepted | [ADR-0063](docs/decisions/ADR-0063.md) |
-| BP-ADR-0064 | 2026-08-30 | R5, the last: five security crates leave and `bp-security` stays as Privacy. `Recovery::Encrypted` is deleted rather than degraded to plaintext; `.bpadx` documents become unopenable with no migration; the Security menu is renamed for what four profiles and a toggle actually are | Accepted | [ADR-0064](docs/decisions/ADR-0064.md) |
+| BP-ADR-0064 | 2026-08-30 | R5, the last: five security crates leave and `bp-security` stays as Privacy. `Recovery::Encrypted` is deleted rather than degraded to plaintext; `.bpadx` documents become unopenable with no migration; the Security menu is renamed for what four profiles and a toggle actually are | Accepted, amended | [ADR-0064](docs/decisions/ADR-0064.md) |
+| BP-ADR-0065 | 2026-08-30 | Two of the reduction's three costs were *concurrent* rather than inherent, and are repaired: `sniff` gets a test-only parser that can contradict it again, and Private keeps an honestly-labelled plaintext journal. The third -- ADR-0050's golden vectors -- is inherent and stays paid | Accepted | [ADR-0065](docs/decisions/ADR-0065.md) |
 | BP-ADR-0017 | amended 2026-08-22 | Half of the renderer revert condition is now a number rather than a feeling: per-frame row building, and its independence from document size | Accepted, amended | [ADR-0017](docs/decisions/ADR-0017.md) |
 
 ## Decisions needed before the work they block
@@ -122,6 +123,37 @@ in the fourth.
 Kept rather than deleted, because every one of these went stale the same
 way — a fix landing without the record moving — and because the lesson in each
 is worth more than the fact.
+
+- **Ask whether a cost is *inherent* to a change or merely *concurrent* with
+  it.** [ADR-0059](docs/decisions/ADR-0059.md)'s five removals reported three
+  things as materially weaker, and all three were recorded honestly as
+  consequences. [ADR-0065](docs/decisions/ADR-0065.md) found that only one of
+  them had to be paid.
+
+  - **Inherent**: ADR-0050's golden envelope vectors. No format, no vector.
+    Nothing can restore them and pretending otherwise would be worse.
+  - **Concurrent**: `bp_formats::sniff` lost the only thing that could
+    contradict it -- but a *test* does not need a menu, and `serde_json` was
+    already in the tree, so the claim came back for the price of one file and
+    no dependency.
+  - **Concurrent**: Private lost its recovery journal, on ADR-0020's rule that
+    a control which quietly weakens itself is worse than an absent one. **The
+    qualifier was doing more work than it got credit for**: the Privacy menu
+    has always printed what the journal actually is, so the failure that rule
+    forbids could not occur. Private keeps a plaintext journal and the row
+    says "on, unencrypted".
+
+  **Recording a cost is not the same as accepting it**, and a sequence with
+  momentum will file both the same way. The check is cheap and belongs after
+  the change lands rather than during it: *would this still be true if the
+  removal had happened on its own?*
+
+- **A rule with a qualifier should be read with the qualifier.** ADR-0020 says
+  a control that **quietly** weakens itself is worse than an absent one.
+  ADR-0064 read that as "weakens itself" and disabled the journal; ADR-0065
+  read the whole sentence and kept it, with the readout as the licence -- and
+  a test that says in as many words that if the readout stops naming the
+  journal's form, the journal goes away again.
 
 - **The last removal in a sequence is the one that changes what stays.**
   R1 to R4 of [ADR-0059](docs/decisions/ADR-0059.md) were deletions: a crate

@@ -1156,23 +1156,46 @@ mod tests {
     }
 
     #[test]
-    fn a_profile_wanting_encryption_says_recovery_is_off_not_encrypted() {
-        // The honest readout while `bp-crypto` does not exist. Saying
-        // "encrypted" here would be the exact lie ADR-0020 forbids.
+    fn the_recovery_row_says_unencrypted_where_the_journal_is_unencrypted() {
+        // **This is the whole licence for Private keeping a journal**
+        // (ADR-0065). ADR-0064 set Private to `Disabled` on ADR-0020's rule
+        // that a control which quietly weakens itself is worse than an absent
+        // one -- and the word carrying that rule is *quietly*. A plaintext
+        // journal under a profile that says "on, unencrypted" is not quiet.
+        //
+        // So this test is not decoration: if the readout ever stops naming
+        // the journal's actual form, Private must go back to `Disabled`.
+        for profile in [
+            bp_security::Profile::Standard,
+            bp_security::Profile::Private,
+        ] {
+            let items = privacy_menu(
+                bp_security::Security::Named(profile),
+                bp_security::Privacy::Off,
+            );
+            let row = items
+                .iter()
+                .find(|i| i.label.contains("Recovery journal"))
+                .expect("a recovery row");
+
+            assert!(
+                row.label.contains("unencrypted"),
+                "{} keeps a plaintext journal and the row must say so; got {:?}",
+                profile.name(),
+                row.label
+            );
+        }
+
+        // And where there is no journal, it says so rather than nothing.
         let items = privacy_menu(
-            bp_security::Security::Named(bp_security::Profile::Private),
+            bp_security::Security::Named(bp_security::Profile::Confidential),
             bp_security::Privacy::Off,
         );
         let row = items
             .iter()
             .find(|i| i.label.contains("Recovery journal"))
             .expect("a recovery row");
-
-        assert!(
-            row.label.contains("off"),
-            "the journal is not being written; got {:?}",
-            row.label
-        );
+        assert!(row.label.contains("off"), "got {:?}", row.label);
     }
 
     /// The Privacy menu as the shell builds it for an ordinary document.

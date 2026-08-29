@@ -207,14 +207,22 @@ impl Profile {
                 zeroise: Zeroise::Off,
             },
             // The step that stops content leaving the machine. **Recovery is
-            // off rather than encrypted** -- ADR-0064 removed the sealed
-            // journal with `bp-crypto`, and a profile that asked for one now
-            // asks for none. Losing unsaved work is a real harm and this
-            // accepts it knowingly, which is the trade ADR-0020 demands: a
-            // control that quietly weakened itself to plaintext would be
-            // worse, because the user has been told it is on.
+            // plaintext, and the menu says so** (ADR-0065).
+            //
+            // It asked for an encrypted journal until ADR-0064 removed the
+            // sealed form, and that ADR set it to `Disabled` -- no journal --
+            // on ADR-0020's rule that a control which quietly weakens itself
+            // is worse than an absent one. The word doing the work there is
+            // **quietly**: this menu has always printed what the journal
+            // actually is, and it now prints "on, unencrypted".
+            //
+            // A journal on the local disk does not contradict what Private is
+            // for, which is stopping content leaving the machine. Losing a
+            // session's unsaved work to protect against an attacker who
+            // already has the disk is the wrong trade, and it is the one
+            // Confidential exists to make instead.
             Self::Private => Policy {
-                recovery: Recovery::Disabled,
+                recovery: Recovery::Plaintext,
                 metadata: Metadata::PathOnly,
                 embeddings: Embeddings::Local,
                 network: Network::Denied,
@@ -222,7 +230,10 @@ impl Profile {
                 zeroise: Zeroise::On,
             },
             // Nothing is recorded about the document and nothing derived
-            // from it is computed.
+            // from it is computed -- and that includes the recovery journal,
+            // which is a copy of unsaved work sitting outside the file. This
+            // is where "no journal" belongs, because it is the profile whose
+            // whole subject is what touches the disk.
             Self::Confidential => Policy {
                 recovery: Recovery::Disabled,
                 metadata: Metadata::Disabled,
@@ -231,9 +242,8 @@ impl Profile {
                 temporary_files: TemporaryFiles::Denied,
                 zeroise: Zeroise::On,
             },
-            // The disk holds the file and nothing else. Recovery is disabled
-            // rather than encrypted, which is a real trade the user is
-            // making: a crash loses unsaved work, and that is the point.
+            // The disk holds the file and nothing else. A crash loses
+            // unsaved work, and that is the point rather than a gap.
             Self::Maximum => Policy {
                 recovery: Recovery::Disabled,
                 metadata: Metadata::Disabled,
@@ -426,14 +436,26 @@ mod tests {
     }
 
     #[test]
-    fn only_standard_journals_anything() {
-        // This asked which profiles *needed cryptography* until ADR-0064.
-        // The answer is now simpler and worth pinning for the same reason:
-        // getting it wrong in one direction disables recovery for no reason,
-        // and in the other writes unsaved work to disk for somebody who asked
-        // for it not to be.
-        assert_eq!(Profile::Standard.policy().recovery, Recovery::Plaintext);
-        for profile in &Profile::all()[1..] {
+    fn the_journal_stops_at_confidential_and_not_before() {
+        // This asked which profiles *needed cryptography* until ADR-0064, and
+        // then whether any but Standard journalled at all. Both answers moved;
+        // the reason for pinning it has not. Getting it wrong in one direction
+        // disables recovery for no reason, and in the other writes unsaved
+        // work to disk for somebody who asked for it not to be.
+        //
+        // **The line is between Private and Confidential**, and that is the
+        // decision ADR-0065 took: a local journal does not contradict "stop
+        // content leaving the machine", and it does contradict "nothing is
+        // recorded about this document".
+        for profile in [Profile::Standard, Profile::Private] {
+            assert_eq!(
+                profile.policy().recovery,
+                Recovery::Plaintext,
+                "{} keeps a journal, and the menu says it is unencrypted",
+                profile.name()
+            );
+        }
+        for profile in [Profile::Confidential, Profile::Maximum] {
             assert_eq!(
                 profile.policy().recovery,
                 Recovery::Disabled,

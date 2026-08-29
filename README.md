@@ -171,11 +171,13 @@ should spend an afternoon on these before checking the version changed.
   second way for the count to reach zero and not the same claim — the heading
   is kept because the count is worth being able to check rather than remember,
   and because *deleted* and *wired in* have to stay tellable apart.
-- **Only Standard gets crash recovery.** Private, Confidential and Maximum
-  journal nothing at all. The sealed journal that used to cover the middle two
-  went with `bp-crypto` ([ADR-0064](docs/decisions/ADR-0064.md)), and the
-  variant asking for it was deleted rather than pointed at plaintext — a
-  journal somebody was told was encrypted is worse than none.
+- **Confidential and Maximum get no crash recovery.** Standard and Private
+  keep a plaintext journal and the Privacy menu says so on a row of its own:
+  *"Recovery journal: on, unencrypted"*. The sealed form went with `bp-crypto`
+  ([ADR-0064](docs/decisions/ADR-0064.md)); Private keeps an honestly-labelled
+  plaintext one ([ADR-0065](docs/decisions/ADR-0065.md)) because a journal on
+  the local disk does not contradict what Private is for, and because the
+  failure the rule forbids is a *quiet* one.
 
 - **Used in anger four times, and it paid every time.** The first pass found a
   menu bar where twelve of fourteen menus swallowed clicks, and Save As
