@@ -31,7 +31,13 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Whether unsaved work may be written to the recovery journal, and how.
+/// Whether unsaved work may be written to the recovery journal.
+///
+/// **There was an `Encrypted` between the two until ADR-0064**, and it was
+/// deleted rather than quietly re-pointed at `Plaintext`. A profile that
+/// asked for an encrypted journal now asks for `Disabled`: *no journal*
+/// rather than *a journal somebody was told was encrypted*, which is the
+/// failure ADR-0020 exists to prevent.
 ///
 /// `bp-history` reads this. Today it writes plaintext into the user's config
 /// directory, which is [`Recovery::Plaintext`] -- named rather than hidden,
@@ -43,7 +49,6 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum Recovery {
     Plaintext,
-    Encrypted,
     Disabled,
 }
 
@@ -136,18 +141,6 @@ impl Policy {
             && self.temporary_files >= other.temporary_files
             && self.zeroise >= other.zeroise
     }
-
-    /// Whether this policy needs cryptography that does not exist yet.
-    ///
-    /// `bp-crypto` arrives in phase 15. Until it does, a profile asking for
-    /// an encrypted journal cannot be honoured -- and ADR-0020 requires that
-    /// to fail loudly rather than degrade to plaintext. A security control
-    /// that quietly weakens itself is worse than an absent one, because the
-    /// user has been told it is on.
-    #[must_use]
-    pub const fn needs_encryption(&self) -> bool {
-        matches!(self.recovery, Recovery::Encrypted)
-    }
 }
 
 /// A named security profile (specs.md section 15).
@@ -213,24 +206,25 @@ impl Profile {
                 temporary_files: TemporaryFiles::Allowed,
                 zeroise: Zeroise::Off,
             },
-            // The step that stops content leaving the machine. Recovery is
-            // still kept, because losing unsaved work is its own harm -- but
-            // it has to be encrypted, and until bp-crypto exists that means
-            // the journal is refused rather than silently written in clear.
+            // The step that stops content leaving the machine. **Recovery is
+            // off rather than encrypted** -- ADR-0064 removed the sealed
+            // journal with `bp-crypto`, and a profile that asked for one now
+            // asks for none. Losing unsaved work is a real harm and this
+            // accepts it knowingly, which is the trade ADR-0020 demands: a
+            // control that quietly weakened itself to plaintext would be
+            // worse, because the user has been told it is on.
             Self::Private => Policy {
-                recovery: Recovery::Encrypted,
+                recovery: Recovery::Disabled,
                 metadata: Metadata::PathOnly,
                 embeddings: Embeddings::Local,
                 network: Network::Denied,
                 temporary_files: TemporaryFiles::Allowed,
                 zeroise: Zeroise::On,
             },
-            // Nothing is recorded about the document and nothing derived from
-            // it is computed. Clipboard history is off: a document at this
-            // level should not leave fragments in a list the user can page
-            // through from any other tab.
+            // Nothing is recorded about the document and nothing derived
+            // from it is computed.
             Self::Confidential => Policy {
-                recovery: Recovery::Encrypted,
+                recovery: Recovery::Disabled,
                 metadata: Metadata::Disabled,
                 embeddings: Embeddings::None,
                 network: Network::Denied,
@@ -415,10 +409,6 @@ mod tests {
              than quietly promising otherwise"
         );
         assert_eq!(policy.temporary_files, TemporaryFiles::Allowed);
-        assert!(
-            !policy.needs_encryption(),
-            "the default must not require cryptography that does not exist yet"
-        );
     }
 
     #[test]
@@ -436,18 +426,21 @@ mod tests {
     }
 
     #[test]
-    fn the_profiles_that_need_cryptography_are_the_ones_that_ask_for_it() {
-        // `needs_encryption` is what the journal checks before deciding
-        // whether it can honour a profile at all. Getting it wrong in one
-        // direction disables recovery for no reason; in the other it writes
-        // plaintext for a user who was told it was encrypted.
-        assert!(!Profile::Standard.policy().needs_encryption());
-        assert!(Profile::Private.policy().needs_encryption());
-        assert!(Profile::Confidential.policy().needs_encryption());
-        assert!(
-            !Profile::Maximum.policy().needs_encryption(),
-            "Maximum disables recovery outright, so there is nothing to encrypt"
-        );
+    fn only_standard_journals_anything() {
+        // This asked which profiles *needed cryptography* until ADR-0064.
+        // The answer is now simpler and worth pinning for the same reason:
+        // getting it wrong in one direction disables recovery for no reason,
+        // and in the other writes unsaved work to disk for somebody who asked
+        // for it not to be.
+        assert_eq!(Profile::Standard.policy().recovery, Recovery::Plaintext);
+        for profile in &Profile::all()[1..] {
+            assert_eq!(
+                profile.policy().recovery,
+                Recovery::Disabled,
+                "{} journals work its user asked not to have written down",
+                profile.name()
+            );
+        }
     }
 
     #[test]
@@ -587,8 +580,7 @@ mod tests {
         // The ordering is what `is_at_least_as_strict_as` means. A variant
         // added in the wrong position would invert the comparison for that
         // axis and silently break every check above.
-        assert!(Recovery::Plaintext < Recovery::Encrypted);
-        assert!(Recovery::Encrypted < Recovery::Disabled);
+        assert!(Recovery::Plaintext < Recovery::Disabled);
         assert!(Metadata::Summary < Metadata::PathOnly);
         assert!(Metadata::PathOnly < Metadata::Disabled);
         assert!(Embeddings::Cloud < Embeddings::Local);

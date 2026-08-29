@@ -13,8 +13,7 @@
 //!
 //! | Module | What it owns |
 //! | --- | --- |
-//! | [`security`] | Scan, redact, inspect, hash, sign, verify, the history they write into, and the profile and Privacy Mode switches that govern them |
-//! | [`encryption`] | The `.bpadx` passphrase flow: what the bar is asking, and what a wrong answer does |
+//! | [`privacy`] | The profile a document carries and the session override above it — what is left of `security` after ADR-0064 |
 //! | [`find`] | What the find bar is looking for, and which match the user is standing on |
 //! | [`organize`] | The local metadata store (ADR-0037): recording and tagging a document as it saves, Related Notes, and Duplicate Detection |
 //! | [`research`] | Research mode's synthesis half (ADR-0041, ADR-0046): what the *store* says the user has been writing about, and what the store holds |
@@ -45,25 +44,22 @@ use time::OffsetDateTime;
 
 use crate::menus::action;
 
-mod encryption;
 mod find;
 mod inspectors;
 mod organize;
+mod privacy;
 mod questions;
 mod research;
-mod security;
 
 // The names the rest of the shell knows this module by. `dispatch` asks for a
 // redaction plan and a scan report by way of `crate::state`, and moving the
 // code that produces them is not a reason to move the path that names them.
 pub(crate) use find::find_query;
-pub(crate) use security::{RedactionPlan, secret_scan_report};
 // Not `pub(crate)`: `AppState::new` is the only caller and the path is
 // deliberately not reachable from outside `state`, because a second place
 // deciding where the signing key lives is the defect this field exists to
 // prevent. `default_store` is the same shape, for the same reason.
 use organize::default_store;
-use security::default_signing_key_path;
 
 /// How much of a document is enough to answer a question about its start.
 ///
@@ -186,12 +182,6 @@ pub struct AppState {
     /// from the box it is about.
     pub(crate) goto_status: String,
     pub(crate) journal: bp_history::Journal,
-    /// Where the security history is appended and read back.
-    ///
-    /// A field rather than a call to `audit::audit_path()` at each use, so a
-    /// test gets its own file. It is not configurable from outside: the
-    /// production value is set once, here, and nothing changes it.
-    pub(crate) audit_path: PathBuf,
     /// Size on disk of each open document, as `load` reported it.
     ///
     /// Kept so the status bar can say "Large file" without asking the
@@ -206,41 +196,14 @@ pub struct AppState {
     /// one. `None` means the menu is not open, in which case the rows fall
     /// back to the active tab.
     pub(crate) tab_context: Option<DocumentId>,
-    /// Passphrases for the encrypted documents open right now.
-    ///
-    /// Held for the session so that saving a `.bpadx` does not ask again on
-    /// every Ctrl+S -- which would train the user to type it reflexively,
-    /// which is worse than holding it. `Zeroizing` because these are wiped
-    /// when a document closes rather than left in freed memory.
-    ///
-    /// A document with an entry here is encrypted; one without is not. That
-    /// is the whole test, so there is no second flag to fall out of step.
-    pub(crate) passphrases: HashMap<DocumentId, zeroize::Zeroizing<String>>,
     /// Privacy Mode: a session-wide override that can only tighten.
     ///
     /// On `AppState` rather than on a document, because that is what it is
     /// for -- one switch when you are about to share a screen, instead of
     /// auditing every open tab.
     pub(crate) privacy: bp_security::Privacy,
-    /// What the passphrase bar is currently asking, if anything.
-    pub(crate) ask: Option<crate::passphrase::Ask>,
-    /// What the passphrase bar is reporting.
-    pub(crate) passphrase_status: String,
     /// Cross-file search results, indexed by the row the user clicks.
     pub(crate) file_hits: Vec<bp_search::FileHit>,
-    /// Where this machine's signing key is, if the environment says where
-    /// the user's profile is.
-    ///
-    /// **A field and not a function**, which is the third time this shape has
-    /// been needed in this crate and the second time it was learned the hard
-    /// way. A function reading the real profile directory means `cargo test`
-    /// writes there -- the security history did it once, and
-    /// `AppState::new()` built its recovery journal from the real path until
-    /// this session. The difference here is that a `cfg(test)` redirect on
-    /// the *function* would not have been enough: `has_signing_key` and the
-    /// signing that follows it must agree on one path, and a function
-    /// returning a fresh unique path per call would have them disagree.
-    pub(crate) signing_key: Option<PathBuf>,
     /// Which surface `refresh` last told the window to draw with.
     ///
     /// Kept so a *change* can be noticed, which is the only moment the caret
@@ -302,15 +265,10 @@ impl AppState {
             find_status: String::new(),
             goto_status: String::new(),
             journal: bp_history::Journal::new(recovery_dir()),
-            audit_path: crate::audit::audit_path(),
             sizes: HashMap::new(),
-            passphrases: HashMap::new(),
             privacy: bp_security::Privacy::default(),
-            ask: None,
-            passphrase_status: String::new(),
             tab_context: None,
             file_hits: Vec::new(),
-            signing_key: default_signing_key_path(),
             surface_shown: None,
             store: default_store(),
             related_notes: Vec::new(),
@@ -350,14 +308,7 @@ impl AppState {
             // open side by side can be governed differently, and the
             // stricter one must not be relaxed by the other being open.
             let recovery = doc.security().policy_under(self.privacy).recovery;
-            // Its own passphrase, if it has one. A sealed journal is
-            // encrypted with the document's key so that it can be recovered
-            // at unlock time and never needs a prompt of its own (ADR-0022).
-            let passphrase = self.passphrases.get(&id).map(|p| p.to_string());
-            match self
-                .journal
-                .checkpoint(id.get(), &entry, recovery, passphrase.as_deref())
-            {
+            match self.journal.checkpoint(id.get(), &entry, recovery) {
                 Ok(bp_history::Written::Yes) => {
                     if let Some(doc) = self.workspace.get_mut(id) {
                         doc.record_checkpoint(at);
@@ -793,26 +744,6 @@ impl AppState {
             LineEndingPolicy::Preserve,
         );
 
-        // An encrypted document stays encrypted. The passphrase is held for
-        // the session precisely so this does not ask again on every save --
-        // a prompt on every Ctrl+S trains the user to type it without
-        // reading, which is worse than holding it in memory.
-        let bytes = match self.passphrases.get(&id) {
-            None => bytes,
-            Some(passphrase) => {
-                match bp_crypto::seal(&bytes, passphrase, bp_crypto::SealOptions::default()) {
-                    Ok(sealed) => sealed,
-                    Err(e) => {
-                        // Refused rather than falling back to plaintext. A
-                        // save that silently wrote the document in clear
-                        // would be the worst failure this program has.
-                        self.error = Some(format!("not saved -- {e}"));
-                        return SaveResult::Failed;
-                    }
-                }
-            }
-        };
-
         match atomic_write(&target, &bytes, SaveOptions::default()) {
             Ok(_) => {
                 if let Some(doc) = self.workspace.get_mut(id) {
@@ -820,11 +751,8 @@ impl AppState {
                     // Only now, after a verified write, is the document clean.
                     doc.record_disk_save(now());
                 }
-                // Both forms of journal go once the work is on disk. The
-                // sealed one is keyed by path rather than by session id, so
-                // it has to be discarded by path.
+                // The journal goes once the work is on disk.
                 let _ = self.journal.discard(id.get());
-                let _ = self.journal.discard_sealed_for(&target);
                 // Re-stamp from what we just wrote, or our own save would
                 // look like somebody else's change on the next poll.
                 self.mark_in_step(id, &target);
@@ -945,44 +873,6 @@ impl AppState {
         ))
     }
 
-    /// The active document as the bytes it would be written to disk as.
-    ///
-    /// The encoded form rather than the buffer, because a digest is a claim
-    /// about a *file*: hashing the buffer would print a digest that
-    /// `sha256sum` disagrees with for every document carrying a byte-order
-    /// mark, and a user comparing the two would conclude their file had been
-    /// tampered with.
-    ///
-    /// [`LineEndingPolicy::Preserve`], the same policy `save_document` uses,
-    /// and the two have to agree: a digest taken under one policy and a file
-    /// written under the other would differ for exactly the mixed-ending
-    /// documents somebody takes a digest to settle.
-    ///
-    /// A one-off on a menu click, like `report_statistics` -- it copies the
-    /// whole document twice over and must never move onto the typing path.
-    pub(crate) fn active_bytes(&self) -> Result<Vec<u8>, String> {
-        let Some(doc) = self.workspace.active() else {
-            return Err("there is no document to read".to_owned());
-        };
-        Ok(encode(
-            &self.active_text(),
-            doc.encoding(),
-            LineEndingPolicy::Preserve,
-        ))
-    }
-
-    /// Whether the active document differs from whatever is on disk.
-    ///
-    /// A never-saved document counts, which is why this is not simply
-    /// `is_dirty` at the call site: "there is no file on disk" and "the file
-    /// on disk is older than this" are the same fact as far as a digest or a
-    /// signature over these bytes is concerned.
-    pub(crate) fn active_differs_from_disk(&self) -> bool {
-        self.workspace
-            .active()
-            .is_some_and(|doc| doc.is_dirty() || doc.path().is_none())
-    }
-
     /// Insert a date or time stamp at the caret.
     ///
     /// The clock is read here rather than in `bp-naming`, which is pure and
@@ -1030,20 +920,6 @@ impl AppState {
         }
         self.mark_edited();
         true
-    }
-
-    /// Say something only if nothing more important is already being said.
-    ///
-    /// Every caller of `record_security_event` has just finished an operation
-    /// that put its own result in the status bar, and that result is what the
-    /// user asked for. A notice about the *history* of the operation must not
-    /// take the place of the operation's own answer -- "3 possible
-    /// credentials" is the thing somebody clicked for, and losing it to a
-    /// line about sealing would be the log making the product worse.
-    fn note_quietly(&mut self, message: String) {
-        if self.error.is_none() {
-            self.error = Some(message);
-        }
     }
 
     /// Which document the tab context menu's rows should act on.
@@ -1165,9 +1041,6 @@ impl AppState {
         self.error = None;
         if self.workspace.close(id).is_some() {
             self.editors.remove(&id);
-            // Holding a passphrase for the session is a deliberate trade;
-            // holding it past the document's life is just a leak.
-            self.forget_passphrase(id);
         }
         // Never leave the user staring at an empty frame with no way back.
         if self.workspace.is_empty() {
@@ -1425,34 +1298,6 @@ fn human_bytes(bytes: u64) -> String {
     }
 }
 
-/// The first few bytes of `path`, for deciding whether it is a `.bpadx`.
-///
-/// **A header, not a file.** This existed as `std::fs::read(&path)`, which
-/// answered a six-byte question by holding the whole document in memory --
-/// and then `bp_files::load` read it a second time. On a 2 GB file that was
-/// 4 GB of I/O and 2 GB resident before anything reached the screen, on the
-/// path taken by *every* open.
-///
-/// A short file is not an error. Fewer than `MAGIC_LEN` bytes cannot be the
-/// magic, and `is_bpadx` says so about whatever it is given.
-fn read_header(path: &Path) -> std::io::Result<Vec<u8>> {
-    use std::io::Read as _;
-
-    let mut header = vec![0_u8; bp_crypto::MAGIC_LEN];
-    let mut file = std::fs::File::open(path)?;
-    // Not `read` -- one call may return fewer bytes than asked for without
-    // being at the end, and a short read would report an encrypted document
-    // as plaintext and show the user its ciphertext.
-    let read = match file.read_exact(&mut header) {
-        Ok(()) => bp_crypto::MAGIC_LEN,
-        // A file shorter than the magic is a real file and a valid answer.
-        Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => 0,
-        Err(e) => return Err(e),
-    };
-    header.truncate(read);
-    Ok(header)
-}
-
 /// A document's path, if it has one.
 ///
 /// A free function so `set_security` can read it without holding a borrow of
@@ -1553,47 +1398,23 @@ mod tests {
     // --- where this machine's own state goes ---------------------------
 
     #[test]
-    fn the_journal_and_the_history_share_the_state_directory_and_not_a_name() {
+    fn the_journal_lives_in_the_state_directory() {
         // The rule, asserted against a fabricated state directory so it needs
-        // no real profile and both legs of CI check the same thing. They must
-        // be inside it -- neither is configuration, and the configuration
-        // directory roams on Windows while every path they hold is
-        // machine-specific -- and they must not be the same path.
+        // no real profile and both legs of CI check the same thing. It must
+        // be inside it -- a journal is not configuration, and the
+        // configuration directory roams on Windows while every path the
+        // journal holds is machine-specific.
+        //
+        // The security history was the other half of this until ADR-0064,
+        // and the pair is why the assertion was written: two paths derived
+        // from one another move together, silently. Only one is left.
         let state = PathBuf::from("/state/bachelorpad");
         let journal = recovery_dir_under(Some(&state));
-        let history = crate::audit::audit_path_under(Some(&state));
 
         assert!(journal.starts_with(&state), "{}", journal.display());
-        assert!(history.starts_with(&state), "{}", history.display());
-        assert_ne!(journal, history);
         assert_eq!(
             journal.file_name().and_then(|n| n.to_str()),
             Some(RECOVERY_DIR_NAME)
-        );
-        assert_ne!(
-            history.parent(),
-            Some(journal.as_path()),
-            "the history must not be inside the journal, where discarding \
-             every checkpoint would take it with them"
-        );
-    }
-
-    #[test]
-    fn neither_is_derived_from_the_others_last_component() {
-        // What this replaced: the history was `recovery_dir()` with its last
-        // component swapped. Renaming the recovery folder would have moved
-        // the security history with it, silently, and a history that moves is
-        // a history that starts again at sequence one.
-        let a = PathBuf::from("/state/one");
-        let b = PathBuf::from("/state/two");
-        assert_ne!(
-            crate::audit::audit_path_under(Some(&a)),
-            crate::audit::audit_path_under(Some(&b))
-        );
-        assert_eq!(
-            crate::audit::audit_path_under(Some(&a)).parent(),
-            Some(a.as_path()),
-            "the history sits directly in the state directory"
         );
     }
 
@@ -1672,34 +1493,6 @@ mod tests {
             std::fs::read(&path).unwrap(),
             b"crlf\r\nlf\nend",
             "both conventions survive a save exactly as the user left them"
-        );
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn the_digest_is_taken_over_the_same_bytes_a_save_would_write() {
-        // `active_bytes` and `save_document` have to agree on the policy, or
-        // a digest taken to settle a question about a file describes bytes
-        // that file does not contain -- and a mixed-ending document is
-        // exactly the kind somebody takes a digest to settle.
-        let dir = std::env::temp_dir().join(format!("bpad-ui-digest-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("mixed.txt");
-
-        let mut state = AppState::new();
-        let id = state.workspace.active_id().unwrap();
-        state.edit("crlf\r\nlf\nend".to_owned());
-
-        let hashed = state.active_bytes().expect("a document is open");
-        assert_eq!(
-            state.save_document(id, Some(path.clone())),
-            SaveResult::Saved
-        );
-        assert_eq!(
-            hashed,
-            std::fs::read(&path).unwrap(),
-            "the digest describes the file that was actually written"
         );
 
         let _ = std::fs::remove_dir_all(&dir);
@@ -1989,10 +1782,6 @@ mod tests {
             action::MOVE_LINE_DOWN,
             action::NOTE_TITLE,
             action::NOTE_OUTLINE,
-            action::SCAN_SECRETS,
-            action::HASH_DOCUMENT,
-            action::SIGN_DOCUMENT,
-            action::VERIFY_SIGNATURE,
             // In the File menu, and therefore in the same *menu* as the
             // recent rows -- which is where an id landing in that window
             // would be least visible and most confusing.
@@ -2414,59 +2203,6 @@ mod tests {
     }
 
     // --- opening reads a header, not a file --------------------------------
-
-    #[test]
-    fn an_encrypted_document_is_recognised_from_its_header_alone() {
-        let dir = tempfile::tempdir().expect("temp dir");
-        let path = dir.path().join("secret.bpadx");
-        let sealed = bp_crypto::seal(
-            b"a document\n",
-            "correct horse",
-            bp_crypto::SealOptions::default(),
-        )
-        .expect("seal");
-        std::fs::write(&path, &sealed).expect("write");
-
-        let header = read_header(&path).expect("header");
-        assert_eq!(
-            header.len(),
-            bp_crypto::MAGIC_LEN,
-            "a header is read, not a file"
-        );
-        assert!(
-            bp_crypto::is_bpadx(&header),
-            "the magic must be recognisable from the header alone, or the user \
-             is shown their own ciphertext"
-        );
-    }
-
-    #[test]
-    fn a_file_shorter_than_the_magic_is_plaintext_and_not_an_error() {
-        // The short-read trap. `read` may return fewer bytes than asked for
-        // without being at the end, so this uses `read_exact` -- and a file
-        // genuinely shorter than the magic must still open, as the ordinary
-        // small text file it is.
-        let dir = tempfile::tempdir().expect("temp dir");
-        for (name, contents) in [("empty.txt", ""), ("tiny.txt", "hi")] {
-            let path = dir.path().join(name);
-            std::fs::write(&path, contents).expect("write");
-            let header = read_header(&path).expect("a short file is not an error");
-            assert!(
-                !bp_crypto::is_bpadx(&header),
-                "{name} is not encrypted and must not be treated as though it were"
-            );
-        }
-    }
-
-    #[test]
-    fn a_plaintext_document_that_starts_like_text_is_not_taken_for_a_bpadx() {
-        let dir = tempfile::tempdir().expect("temp dir");
-        let path = dir.path().join("notes.txt");
-        std::fs::write(&path, "BPAD is not BPADX\0 and this is prose").expect("write");
-        assert!(!bp_crypto::is_bpadx(&read_header(&path).expect("header")));
-    }
-
-    // --- new window, diagnostics -----------------------------------------
 
     #[test]
     fn a_new_window_launches_the_same_executable_with_no_arguments() {

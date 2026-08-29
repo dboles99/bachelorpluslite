@@ -13,15 +13,16 @@ and Linux** — a Notepad clone, and deliberately little more.
 > related notes, duplicate detection and what the store knows — which stays
 > on purpose.
 >
-> [ADR-0059](docs/decisions/ADR-0059.md) says what else leaves and in what
-> order: research and citations, clipboard history, the structured-data
-> operations, huge-file mode, and the security stack — eight crates, taking
-> this from 67,316 lines of Rust to roughly 40,000. **What stays is the
-> profile model**, narrowed to the two axes that govern something: whether a
-> recovery journal is written, and whether anything is recorded about a
-> document at all. A smaller editor should not know more about you than the
-> larger one did. **The list below still describes more than the target**;
-> each line leaves as the capability behind it does.
+> [ADR-0059](docs/decisions/ADR-0059.md) scoped the rest and **all five
+> removals are done**: research and citations, clipboard history, the
+> structured-data operations, huge-file mode, and the security stack. Eight
+> crates, and the workspace went from 67,316 lines of Rust to **33,388** —
+> under the ~40,000 that ADR estimated.
+>
+> **What stays is the profile model**, narrowed to the two axes that govern
+> something: whether a recovery journal is written, and whether anything is
+> recorded about a document at all. A smaller editor should not know more
+> about you than the larger one did.
 
 ## What this repository contains
 
@@ -33,7 +34,7 @@ It begins as a fast Notepad-like editor and adds:
 - Markdown, YAML, JSON, JSONL/NDJSON, TOML, CSV/TSV, XML and source-code *recognition* — the operations over them left under [ADR-0062](docs/decisions/ADR-0062.md)
 - semantic organization, related notes, duplicate detection and hybrid search
 - Light, Dark, Organic and Green themes
-- strong local security, encrypted `.bpadx` notes, secure recovery, privacy profiles and secret scanning
+- per-document privacy profiles governing what is written down about a document
 - Windows/Linux default-editor integration
 - original retro-futurist "text appliance" branding
 
@@ -99,7 +100,7 @@ saves atomically, and does rather more than that:
 | --- | --- |
 | Editing | Tabs, four themes plus Follow System, zoom, indentation (tabs or soft tabs, 2/4/8), honest save state, atomic save, undo/cut/copy/paste, sort / deduplicate / reverse / trim lines, duplicate and move lines, **go to line in either surface** |
 | Storage | A rope buffer holds every document; whole-document operations are one undo step |
-| Safety | Unsaved-changes prompts, external-change detection, crash recovery journal — encrypted and recovered at unlock for encrypted documents ([ADR-0022](docs/decisions/ADR-0022.md)) |
+| Safety | Unsaved-changes prompts, external-change detection, a plaintext crash recovery journal under Standard. Stricter profiles journal nothing at all — ADR-0064 removed the sealed form rather than quietly writing it in clear |
 | Releases | `scripts/New-Release.ps1 -Linux` produces a `.zip` and a `.tar.gz` carrying the binary, both licences, a `bpad` short spelling and a `BUILD.txt` naming the commit, plus a `SHA256SUMS.txt`. Unsigned, and it says so ([ADR-0055](docs/decisions/ADR-0055.md)) |
 | Command line | `bachelorpad notes.txt` opens files; `--line=427 server.log` opens one already scrolled to the line, highlighted, in either editor surface; `--help` lists all thirteen flags and `--version` names the product, its version and its licence ([ADR-0054](docs/decisions/ADR-0054.md)). A mistyped flag, a flag missing its value and a switch given one are each reported at startup rather than discarded |
 | Files | Open/Save/Save As/Save All/Save a Copy/Reload, recent files, tab context menu, command-line file opening. Every document is loaded whole — the size classes and the read-from-disk viewer left under [ADR-0063](docs/decisions/ADR-0063.md). UTF-8, UTF-8 with BOM and **UTF-16 LE/BE** all load and save; a truncated or malformed UTF-16 file is refused by name rather than repaired with replacement characters |
@@ -108,10 +109,8 @@ saves atomically, and does rather more than that:
 | Metadata | A SQLite store with migrations, written to on every save ([ADR-0019](docs/decisions/ADR-0019.md)) |
 | Organize | Related Notes, a collapsible panel of documents sharing tags with the active one; Duplicate Detection, automatic at save and on-demand ([ADR-0037](docs/decisions/ADR-0037.md)) |
 | Research | Research Report, reading `bp-storage` into dominant themes, stale clusters, under-connected documents and consolidation candidates ([ADR-0041](docs/decisions/ADR-0041.md)) — each insight **naming the documents it is drawn from**, and closing with a section that states every threshold it applied and every number it applied them over, including the truncation it used to leave silent ([ADR-0046](docs/decisions/ADR-0046.md)). Plus **Open Questions**, every question the document asks, at the line it begins on. And **What the Store Holds**, which says what the store has recorded about you and that it never holds the text of a document. The three citation rows that used to sit here left with `bp-research` ([ADR-0060](docs/decisions/ADR-0060.md)) |
-| Tools | **Document Inspector** (what is in the document), **Security Inspector** (the policy in force on all seven axes — the Security menu shows three), **File Analysis** (the file, which is a different object from the document) and **Configuration**, which is read-only and says so ([ADR-0048](docs/decisions/ADR-0048.md)) |
-| Encryption | `.bpadx` documents — Security ▸ Encrypt Document, unlock on open, and saves stay encrypted. Argon2id, XChaCha20-Poly1305 or AES-256-GCM, chunked with position authenticated ([ADR-0021](docs/decisions/ADR-0021.md)) |
-| Security | Per-document profiles (Standard / Private / Confidential / Maximum) governing the recovery journal, clipboard history and metadata store ([ADR-0020](docs/decisions/ADR-0020.md)) |
-| Security (phase 16) | Privacy Mode, a session override that can only tighten; Scan for Secrets, which reports where a credential is and never what it is; Redact Found Secrets, as an undoable edit with a consent step; Inspect Metadata; Hash Document; Verify Signature; Sign Document, whose key is sealed in a `.bpadx` envelope under a passphrase rather than protected by file permissions Windows cannot narrow ([ADR-0031](docs/decisions/ADR-0031.md)); Security History, which every row above it writes into (ADR-0024) |
+| Tools | **Document Inspector** (what is in the document), **Security Inspector** (the policy in force on all six axes — the Privacy menu shows the two that anything enforces), **File Analysis** (the file, which is a different object from the document) and **Configuration**, which is read-only and says so ([ADR-0048](docs/decisions/ADR-0048.md)) |
+| Privacy | Per-document profiles (Standard / Private / Confidential / Maximum) governing the recovery journal and the metadata store, plus Privacy Mode — a session override that can only tighten, and that removes journals already written ([ADR-0020](docs/decisions/ADR-0020.md)). **Encryption, signing, secret scanning, redaction and the security history all left under [ADR-0064](docs/decisions/ADR-0064.md)**, and a `.bpadx` document already on a disk cannot be opened by this build |
 
 Startup, with the software renderer ([ADR-0017](docs/decisions/ADR-0017.md)):
 **35.7 ms to window, 21.9 MB idle**, against targets of 150 ms and 50 MB.
@@ -172,15 +171,11 @@ should spend an afternoon on these before checking the version changed.
   second way for the count to reach zero and not the same claim — the heading
   is kept because the count is worth being able to check rather than remember,
   and because *deleted* and *wired in* have to stay tellable apart.
-- **A plaintext document under Private or Confidential gets no crash
-  recovery.** The journal for those profiles is sealed with the document's
-  own passphrase ([ADR-0022](docs/decisions/ADR-0022.md)), so a document
-  that is not encrypted has no key to use. The status bar says what fixes
-  it: encrypt the document.
-
-- **Recovery for an encrypted document is invisible until you open it.** Its
-  journal is filed under a digest of its path and can only be read once you
-  have unlocked the document, so nothing prompts at startup — deliberately.
+- **Only Standard gets crash recovery.** Private, Confidential and Maximum
+  journal nothing at all. The sealed journal that used to cover the middle two
+  went with `bp-crypto` ([ADR-0064](docs/decisions/ADR-0064.md)), and the
+  variant asking for it was deleted rather than pointed at plaintext — a
+  journal somebody was told was encrypted is worse than none.
 
 - **Used in anger four times, and it paid every time.** The first pass found a
   menu bar where twelve of fourteen menus swallowed clicks, and Save As
@@ -220,6 +215,7 @@ lesson from each is in [DECISIONS.md](DECISIONS.md)**, which is the one
 home for a lesson -- this list is deliberately just the facts, because a
 lesson told in two places is a lesson corrected in one.
 
+- The security stack is removed and what governed it stays as Privacy ([ADR-0064](docs/decisions/ADR-0064.md)). Five crates; the last of ADR-0059's five removals.
 - Huge-file mode is removed ([ADR-0063](docs/decisions/ADR-0063.md)): the engine, the viewer and the streaming search. The first removal with no directory to delete.
 - Executing anything is removed, and notebooks with it ([ADR-0057](docs/decisions/ADR-0057.md)). Two crates, two menus and one shell module; the first capability to leave.
 - A test suite that got flakier the more it was run: temp paths a recycled process id could reuse.

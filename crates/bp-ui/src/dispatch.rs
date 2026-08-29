@@ -13,7 +13,7 @@ use bp_theme::ThemeId;
 
 use crate::AppWindow;
 use crate::menus::{self, action};
-use crate::state::{AppState, NoteOutcome, PushText, SaveResult, secret_scan_report};
+use crate::state::{AppState, NoteOutcome, PushText, SaveResult};
 
 const SHORTCUTS: &str = "\
 Ctrl+N          New
@@ -86,32 +86,6 @@ pub(crate) fn pick_save_path(
         .save_file()
 }
 
-/// Give a chosen path the `.bpadx` extension.
-///
-/// The file dialog suggests the document's current name, and a user who
-/// accepts it would otherwise get an encrypted file called `notes.txt` --
-/// which the shell would happily reopen, but which every other program on the
-/// machine would treat as text and show as binary noise.
-fn with_bpadx_extension(path: PathBuf) -> PathBuf {
-    if path.extension().is_some_and(|e| e == "bpadx") {
-        path
-    } else {
-        let mut name = path.file_name().unwrap_or_default().to_os_string();
-        name.push(".bpadx");
-        path.with_file_name(name)
-    }
-}
-
-/// Choose the public key a signature is claimed to have been made with.
-fn pick_verifying_key(state: &AppState) -> Option<PathBuf> {
-    rfd::FileDialog::new()
-        .set_title("Choose the public key to verify against")
-        .set_directory(state.dialog_directory())
-        .add_filter("Public key", &["pub", "key", "txt"])
-        .add_filter("Any file", &["*"])
-        .pick_file()
-}
-
 /// Choose where to put the registry script Windows registration needs.
 ///
 /// The file name comes from `bp-platform`'s own artefact, so what the user
@@ -148,21 +122,6 @@ fn confirm_registration(body: &str) -> Consent {
     } else {
         Consent::Withheld
     }
-}
-
-/// Show what a redaction is about to destroy, and ask before destroying it.
-///
-/// The listing is not bounded the way `confirm_replace`'s is. A scan that
-/// found four hundred credentials is a document nobody should redact without
-/// reading the list, and a truncated list is one nobody read.
-fn confirm_redaction(plan: &crate::state::RedactionPlan) -> bool {
-    rfd::MessageDialog::new()
-        .set_level(rfd::MessageLevel::Warning)
-        .set_title("Redact")
-        .set_description(plan.consent_body())
-        .set_buttons(rfd::MessageButtons::OkCancel)
-        .show()
-        == rfd::MessageDialogResult::Ok
 }
 
 /// Show what Replace All would do, and ask before doing it.
@@ -274,14 +233,7 @@ pub fn handle_menu_action(
         action::OPEN => {
             let chosen = pick_file(&state.borrow());
             if let Some(path) = chosen {
-                // An encrypted file does not become a tab until it is
-                // unlocked: a tab nobody can read looks like an empty
-                // document, and saving it would write emptiness over the
-                // real one.
-                if state.borrow_mut().open_maybe_encrypted(path) {
-                    ui.invoke_focus_passphrase();
-                    return None;
-                }
+                state.borrow_mut().open(path);
             }
         }
         action::SAVE => {
@@ -481,85 +433,6 @@ pub fn handle_menu_action(
             push = PushText::No;
         }
 
-        action::ENCRYPT_DOCUMENT => {
-            // Save As, not encrypt-in-place: the plaintext original is left
-            // where it was rather than silently destroyed by an operation
-            // that is irreversible without the passphrase. The tab then
-            // adopts the encrypted file, so later saves stay encrypted.
-            let target = state.borrow().workspace.active_id();
-            if let Some(id) = target {
-                let suggested = pick_save_path(&state.borrow(), id);
-                if let Some(path) = suggested {
-                    let path = with_bpadx_extension(path);
-                    state.borrow_mut().ask = Some(crate::passphrase::Ask::Set { id, target: path });
-                    ui.invoke_focus_passphrase();
-                }
-            }
-            return None;
-        }
-
-        action::SCAN_SECRETS => {
-            let findings = state.borrow_mut().scan_for_secrets();
-            // The listing is a dialog rather than more status bar: the bar
-            // elides, and the positions are the part worth reading. Nothing
-            // here is the matched text -- a `Finding` does not carry it, and
-            // reaching back into the document to quote it would undo the one
-            // decision the crate is built around.
-            if !findings.is_empty() {
-                show_info("Possible credentials", &secret_scan_report(&findings));
-            }
-            push = PushText::No;
-        }
-
-        action::HASH_DOCUMENT => {
-            // The borrow ends with the statement, before the dialog opens:
-            // `rfd` pumps events, and a re-entrant callback on a live borrow
-            // panics.
-            let report = state.borrow_mut().hash_active_document();
-            if let Some(report) = report {
-                show_info("Document hash", &report);
-            }
-            push = PushText::No;
-        }
-
-        action::SIGN_DOCUMENT => {
-            push = PushText::No;
-            // Asks the right question and stops. Whether the passphrase bar
-            // says "new signing key passphrase" or "signing key passphrase"
-            // depends on whether a key exists, and `begin_signing` is what
-            // decides -- the whole flow lives there and in
-            // `answer_passphrase`, so a passphrase is typed in exactly one
-            // place in this product.
-            if state.borrow_mut().begin_signing() {
-                ui.invoke_focus_passphrase();
-            }
-        }
-
-        action::VERIFY_SIGNATURE => {
-            push = PushText::No;
-            // The first pass asks the user nothing, because a key cannot
-            // change its answer: whether a sidecar is there at all, whether
-            // it reads as one, and whether it holds against the key it itself
-            // names are all settled before anybody is asked for a file. A
-            // missing one fails here, closed, and stops.
-            let holds = state
-                .borrow_mut()
-                .verify_signature(&bp_integrity::Expectation::AnySigner);
-
-            // Only now is a key worth asking for. It is the one thing that
-            // tells "signed by who you expected" from "signed by somebody
-            // else" -- the verdict a bare 64-byte `.sig` cannot produce, and
-            // the reason ADR-0026's sidecar records a key at all. Cancelling
-            // leaves the first pass's answer standing, caveat and all, which
-            // is why that caveat is written.
-            if holds && let Some(path) = pick_verifying_key(&state.borrow()) {
-                let expect = state.borrow_mut().expected_signer(&path);
-                if let Some(expect) = expect {
-                    state.borrow_mut().verify_signature(&expect);
-                }
-            }
-        }
-
         action::SET_DEFAULT_EDITOR => {
             push = PushText::No;
             // Nothing is borrowed while a dialog is up: `rfd` pumps events,
@@ -634,54 +507,6 @@ pub fn handle_menu_action(
             if let Err(e) = spawned {
                 state.borrow_mut().error = Some(format!("could not open a new window -- {e}"));
             }
-        }
-
-        action::REDACT_SECRETS => {
-            // Three statements, each ending its borrow before the next, and
-            // the dialog in between opened while nothing is borrowed at all:
-            // `rfd` pumps events, and a re-entrant callback on a live
-            // `borrow_mut()` panics.
-            //
-            // The consent is not ceremony. Redaction destroys text the user
-            // wrote, in places on the screen they cannot all see at once, and
-            // it is offered because a scanner *guessed* the text was a
-            // credential. Replace All is confirmed for the weaker version of
-            // the same reason.
-            let plan = state.borrow_mut().plan_redaction();
-            push = PushText::No;
-            if let Some(plan) = plan {
-                if confirm_redaction(&plan) {
-                    // The document changed, so its text has to be re-pushed
-                    // -- and only then, because re-pushing throws away
-                    // `TextInput`'s caret.
-                    if state.borrow_mut().apply_redaction(&plan) {
-                        push = PushText::Yes;
-                    }
-                } else {
-                    state.borrow_mut().decline_redaction(&plan);
-                }
-            }
-        }
-
-        action::SECURITY_HISTORY => {
-            // Same shape as Inspect Metadata: the borrow ends with the
-            // statement, before the dialog opens. `rfd` pumps events, and a
-            // re-entrant callback on a live `borrow_mut()` panics.
-            let report = state.borrow_mut().security_history();
-            if let Some(report) = report {
-                show_info("Security History", &report);
-            }
-            push = PushText::No;
-        }
-
-        action::INSPECT_METADATA => {
-            // Same shape as Hash Document: the borrow ends with the
-            // statement, before the dialog opens.
-            let report = state.borrow_mut().inspect_metadata();
-            if let Some(report) = report {
-                show_info("Metadata", &report);
-            }
-            push = PushText::No;
         }
 
         action::GO_TO_LINE => {
@@ -766,13 +591,6 @@ pub fn handle_menu_action(
             let report = state.borrow().suggested_folder_report();
             push = PushText::No;
             show_info("Suggested Folder", &report);
-        }
-
-        // Security ▸ forget this document's passphrase now.
-        action::LOCK_DOCUMENT => {
-            let said = state.borrow_mut().lock_document();
-            show_info("Lock Document", &said);
-            push = PushText::No;
         }
 
         // Note ▸ the store's view of this document, and the journal's

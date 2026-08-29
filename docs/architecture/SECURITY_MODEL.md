@@ -1,9 +1,19 @@
 # Security Model
 
-**This file is the intent.** What actually ships against it is in the ADRs
-named below and in `docs/product/MENU_MAP.md`; where the two differ, the ADR
-is what the code does and this is what it is aiming at. Sections that have
-been built say so.
+**This file is the intent, and most of it is no longer intended.**
+[ADR-0064](../decisions/ADR-0064.md) removed encryption, signing, secret
+scanning, redaction and the audit history — five crates. What survives is the
+profile model and Privacy Mode, which were never about cryptography: they
+decide what this program may *write down* about a document, and they still
+govern the recovery journal and the metadata store.
+
+**Read every section below as intent that was built and then removed**, unless
+it is one of the two named above. The whole file is kept rather than gutted
+because the propagation requirement in particular is the right way to think
+about a policy, and it will be the right way again if anything is added back.
+
+What actually ships is in `docs/product/MENU_MAP.md`; where the two differ,
+the ADR is what the code does.
 
 ## Security profiles
 

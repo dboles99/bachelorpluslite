@@ -481,7 +481,7 @@ mod tests {
 
     #[test]
     fn the_corpus_is_where_it_is_expected_to_be() {
-        for target in ["data", "files", "envelope"] {
+        for target in ["data", "files"] {
             assert!(!corpus(target).is_empty(), "corpus/{target} has no entries");
         }
     }

@@ -306,9 +306,14 @@ try {
     # called phase 19 *Started* on the strength of them.
     #
     # Deliberately **not** behind -IncludeSpikes. A spike is a prototype the
-    # product does not depend on; these are tests of `bp-crypto`, `bp-data`,
-    # `bp-files` and `bp-formats` against input designed to break them, which
-    # is the one thing a gate is most for.
+    # product does not depend on; these are tests of `bp-files` and
+    # `bp-formats` against input designed to break them, which is the one
+    # thing a gate is most for.
+    #
+    # Two harnesses, down from five. `bp-notebook`'s went under ADR-0057,
+    # `bp-data`'s YAML one under ADR-0062, and `bp-crypto`'s envelope target
+    # -- the highest-value one in the suite -- under ADR-0064, each with the
+    # crate it protected.
     #
     # It costs about two and a half minutes, which is most of why it belongs
     # in the full run and not in -Quick. Where a single harness is too

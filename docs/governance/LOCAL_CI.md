@@ -70,9 +70,10 @@ so every `--workspace` command in every other stage walks straight past it.
 Five harnesses feeding hostile input to `bp-crypto`, `bp-data`, `bp-files`,
 `bp-formats` and `bp-notebook` sat outside the gate that validates everything
 else, formatted, linted and run by nobody, while ROADMAP called phase 19
-*Started* on the strength of them. **Three run in it today**: ADR-0057 deleted
-`bp-notebook` and ADR-0062 deleted `bp-data` along with the YAML target, and a
-harness outlives its subject by nothing.
+*Started* on the strength of them. **Two run in it today**: ADR-0057 deleted
+`bp-notebook`, ADR-0062 deleted `bp-data` with the YAML target, and ADR-0064
+deleted `bp-crypto` with the envelope one. A harness outlives its subject by
+nothing.
 
 It is deliberately **not** behind `-IncludeSpikes`: a spike is a prototype the
 product does not depend on, and these are tests of shipped crates against

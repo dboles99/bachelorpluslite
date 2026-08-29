@@ -89,39 +89,8 @@ pub mod action {
     /// Bounded by [`super::profile_end`]. 56-59 are free.
     pub const PROFILE_BASE: i32 = 52;
 
-    /// Encrypt the active document to a `.bpadx` file (ADR-0021). 57-59 free.
-    pub const ENCRYPT_DOCUMENT: i32 = 56;
-    /// Privacy Mode, a session-wide override (specs §15). 58-59 free.
+    /// Privacy Mode, a session-wide override (specs §15). 56 and 58-59 free.
     pub const PRIVACY_MODE: i32 = 57;
-
-    /// Security operations that act on the *document* rather than on its
-    /// profile (specs §15): scanning, hashing, signing, verifying. 200-209,
-    /// a block of their own rather than the two spare ids at 58-59 -- four
-    /// rows do not fit in two, and splitting one family across two blocks is
-    /// how the fifth row later lands inside the recent-files window at 60.
-    ///
-    /// Above 100 because Slint's `dispatch` routes exactly
-    /// `UNDO..=SELECT_ALL` to the widget and everything else to Rust, so a
-    /// block only has to avoid that window rather than sit below it.
-    /// 207-209 are free.
-    pub const SCAN_SECRETS: i32 = 200;
-    pub const HASH_DOCUMENT: i32 = 201;
-    pub const SIGN_DOCUMENT: i32 = 202;
-    pub const VERIFY_SIGNATURE: i32 = 203;
-    /// Redact what the scan found (ADR-0028). Beside `SCAN_SECRETS` because
-    /// it is the same document operation continued -- the scan produces the
-    /// spans and this destroys them -- and a family split across two blocks
-    /// is how the next row lands somewhere it is dispatched as something
-    /// else.
-    pub const REDACT_SECRETS: i32 = 204;
-    /// Report what identifying metadata the document carries (ADR-0028).
-    pub const INSPECT_METADATA: i32 = 205;
-    /// The security history (ADR-0024). In this block rather than one of its
-    /// own, because it is the same family: every other row here *produces* a
-    /// line in it, and a history filed away from the operations it records is
-    /// the split this block's comment argues against, seen from the reading
-    /// end. 207-209 are free.
-    pub const SECURITY_HISTORY: i32 = 206;
 
     /// File ▸ Set as Default Editor (ADR-0012), opening a block of its own at
     /// 220-229 for platform integration. 222-229 are free.
@@ -230,9 +199,6 @@ pub mod action {
     /// Organize ▸ Suggested Folder (ADR-0048). 703-709 free.
     pub const ORGANIZE_SUGGESTED_FOLDER: i32 = 702;
 
-    /// Security ▸ Lock Document (ADR-0048).
-    pub const LOCK_DOCUMENT: i32 = 212;
-
     /// Rows that do nothing yet.
     pub const NONE: i32 = 0;
 }
@@ -272,7 +238,7 @@ fn row_end(label: &str, shortcut: &str, action: i32) -> MenuItem {
 ///
 /// **It used to mean "not built yet" and it does not any more** (ADR-0048).
 /// `arrives()` and `planned_menu()` went with the last unbuilt row, so every
-/// remaining caller is a *readout* -- the Security menu's three policy lines,
+/// remaining caller is a *readout* -- the Privacy menu's two policy lines,
 /// the Data menu's "nothing to convert here", the Tools menu's account of
 /// where each setting came from. Those are answers, not promises.
 ///
@@ -568,25 +534,22 @@ pub fn format(encoding: Encoding, line_ending: LineEnding, indent: Indent) -> Ve
     ]
 }
 
-/// The Security menu: the active document's profile, and what it permits.
+/// The Privacy menu: what this program may write down about a document.
 ///
-/// The rows below the profiles are not decoration. A profile is a promise
-/// about what happens to derived data, and a user cannot check a promise they
-/// cannot see -- so the menu states the three that are observable today
-/// rather than making them infer it from behaviour that is, by design,
-/// invisible.
-pub fn security(
+/// **It was the Security menu and had thirteen rows.** ADR-0064 removed
+/// encryption, signing, secret scanning, redaction, metadata inspection and
+/// the security history; what is left is the profile a document carries, the
+/// session override, and a readout of what the two of them decide. That is
+/// privacy rather than security, so it is named for what it does -- keeping
+/// "Security" over four profiles and a toggle would be the kind of label that
+/// reads as a promise.
+pub fn privacy_menu(
     current: bp_security::Security,
-    encrypted: bool,
     privacy: bp_security::Privacy,
-    has_content: bool,
-    has_path: bool,
-    can_sign: bool,
-    has_key: bool,
 ) -> Vec<MenuItem> {
     // What is actually in force, which is the document's profile *and* the
-    // session override. Showing the unclamped policy would tell the user their
-    // clipboard is kept while Privacy Mode is discarding it.
+    // session override. Showing the unclamped policy would tell the user
+    // their work is journalled while Privacy Mode is discarding it.
     let policy = current.policy_under(privacy);
     let mut items: Vec<MenuItem> = bp_security::Profile::all()
         .iter()
@@ -604,7 +567,9 @@ pub fn security(
     }
 
     // What the profile in force actually does, in the user's terms. Greyed,
-    // because they are a readout rather than something to click.
+    // because they are a readout rather than something to click -- and both
+    // of them name an axis something actually enforces, which is why these
+    // two survived and the other four readouts did not (ADR-0059 section 4).
     items.extend([
         planned(&format!(
             "Recovery journal: {}",
@@ -612,141 +577,21 @@ pub fn security(
         )),
         MenuItem {
             separator_after: true,
-            ..planned(&format!(
-                "Leaves this machine: {}",
-                match policy.network {
-                    bp_security::Network::Allowed => "permitted",
-                    bp_security::Network::Denied => "never",
-                }
-            ))
+            ..planned(&format!("Recorded: {}", describe_metadata(policy.metadata)))
         },
-        row_enabled(
-            if encrypted {
-                "Encrypted (.bpadx)"
-            } else {
-                "Encrypt Document..."
-            },
-            "",
-            action::ENCRYPT_DOCUMENT,
-            !encrypted,
-        ),
-        MenuItem {
-            separator_after: true,
-            ..toggle("Privacy Mode", privacy.is_on(), action::PRIVACY_MODE)
-        },
-        // Not gated on there being content: "no credentials found" is a real
-        // answer, and an empty document is exactly when somebody checks they
-        // are looking at the tab they think they are.
-        row("Scan for Secrets", "", action::SCAN_SECRETS),
-        // Greyed rather than `planned`, and the label carries the reason:
-        // `bp-redaction` exists and is tested, and what is missing is a
-        // document to act on. An empty document has nothing to redact, and a
-        // row that looked live and then reported "nothing found" would be a
-        // worse answer than one that says so before the click.
-        //
-        // The ellipsis is the house convention for a row that asks first, and
-        // this one asks: redaction destroys text, so it takes consent rather
-        // than assuming it.
-        row_enabled(
-            if has_content {
-                "Redact Found Secrets..."
-            } else {
-                "Redact Found Secrets — it is empty"
-            },
-            "",
-            action::REDACT_SECRETS,
-            has_content,
-        ),
-        // Not gated on content, and not gated on the format either. For a
-        // container this build cannot see inside -- a .docx, a PDF -- the
-        // answer worth having is exactly "there is metadata here that was not
-        // looked at", and an empty buffer does not change that.
-        MenuItem {
-            separator_after: true,
-            ..row("Inspect Metadata", "", action::INSPECT_METADATA)
-        },
-        // The algorithm is on the row rather than in the result, because a
-        // digest you are about to read down a telephone is useless unless you
-        // already know which of the two the other end took.
-        row("Hash Document (SHA-256)", "", action::HASH_DOCUMENT),
-        // Live since ADR-0031 answered where a signing key lives: sealed in
-        // a `.bpadx` envelope under a passphrase, which is the same envelope
-        // encrypted documents use and needs nothing new designed, reviewed or
-        // fuzzed. It was greyed with the reason on the row for three sessions
-        // before that, which is the shape a blocked-on-a-decision row should
-        // take -- `row_enabled(.., false)` and not `planned`.
-        //
-        // Greyed now for the two reasons a signature cannot be made rather
-        // than for the absence of a key store, and each says which: signing
-        // is over the bytes **on disk** (ADR-0026), so a document that has
-        // never been saved has nothing to sign, and one with unsaved changes
-        // would get a valid signature over the previous version -- which is
-        // worse than a refusal, because it verifies.
-        //
-        // The hint names the key, not the document. Whether one exists yet is
-        // what decides which question the passphrase bar asks, and saying so
-        // before the click is what stops "Sign" being followed by an
-        // unexplained ceremony.
-        MenuItem {
-            separator_after: false,
-            ..row_enabled(
-                match (has_path, can_sign) {
-                    (false, _) => "Sign Document — never saved",
-                    (true, false) => "Sign Document — save it first",
-                    (true, true) => "Sign Document...",
-                },
-                if has_path && can_sign {
-                    if has_key {
-                        "unlocks your signing key"
-                    } else {
-                        "creates a signing key"
-                    }
-                } else {
-                    ""
-                },
-                action::SIGN_DOCUMENT,
-                has_path && can_sign,
-            )
-        },
-        // Live even though signing is not: verifying needs the other party's
-        // signature and, to say more than "intact", their public key. It is
-        // the half of the feature that needs nothing stored.
-        //
-        // Greyed rather than `planned` for a document that has never been
-        // saved, and the reason is on the row: `bp_integrity::verify_file`
-        // checks the *file*, and a sidecar is named after a file name, so
-        // there is nothing to look beside. The hint names the convention, so
-        // the user knows which file to go and find before they click.
-        MenuItem {
-            separator_after: true,
-            ..row_enabled(
-                if has_path {
-                    "Verify Signature..."
-                } else {
-                    "Verify Signature — never saved"
-                },
-                if has_path { "document.ext.sig" } else { "" },
-                action::VERIFY_SIGNATURE,
-                has_path,
-            )
-        },
-        // The reading end of every row above it (ADR-0024). Not gated on
-        // anything: an empty history is a real answer, and the one time
-        // somebody most wants to look is when they think something should be
-        // there and are not sure it is.
-        MenuItem {
-            separator_after: true,
-            ..row("Security History...", "", action::SECURITY_HISTORY)
-        },
-        // Forget this document's passphrase now (ADR-0048). Unlocking is
-        // sticky for the life of the tab, which is what makes saving an
-        // encrypted document bearable and also means one unlocked an hour ago
-        // is still unlocked to whoever is at the keyboard. Enabled only when
-        // there is a key to forget -- greying it is the honest state, because
-        // "locked" and "never encrypted" are the same thing to this row.
-        row_enabled("Lock Document", "", action::LOCK_DOCUMENT, has_key),
+        toggle("Privacy Mode", privacy.is_on(), action::PRIVACY_MODE),
     ]);
+
     items
+}
+
+/// What the metadata store is permitted to keep, in one phrase.
+fn describe_metadata(metadata: bp_security::Metadata) -> &'static str {
+    match metadata {
+        bp_security::Metadata::Summary => "path, title and tags",
+        bp_security::Metadata::PathOnly => "the path only",
+        bp_security::Metadata::Disabled => "nothing",
+    }
 }
 
 fn describe_recovery(recovery: bp_security::Recovery) -> &'static str {
@@ -754,10 +599,9 @@ fn describe_recovery(recovery: bp_security::Recovery) -> &'static str {
         // Named plainly. A user who has not thought about it should be able
         // to read this row and understand that unsaved work is on disk.
         bp_security::Recovery::Plaintext => "on, unencrypted",
-        // The honest answer while bp-crypto does not exist (ADR-0020): the
-        // profile asks for encryption, so the journal is off rather than
-        // silently plaintext.
-        bp_security::Recovery::Encrypted => "off until encryption ships (phase 15)",
+        // A profile that asked for an encrypted journal now asks for none:
+        // ADR-0064 deleted the variant rather than pointing it at plaintext,
+        // so there is no third answer to give here.
         bp_security::Recovery::Disabled => "off",
     }
 }
@@ -1061,7 +905,10 @@ mod tests {
             ("Research", research(true)),
             ("Tools", tools(true)),
             ("Help", help()),
-            ("Security", security_menu()),
+            (
+                "Privacy",
+                privacy_menu(bp_security::Security::default(), bp_security::Privacy::Off),
+            ),
         ]
     }
 
@@ -1209,15 +1056,7 @@ mod tests {
         // `profile_end` is sized from `Profile::all()`, so a fifth profile
         // extends the window with the menu rather than landing outside it and
         // silently doing nothing.
-        let items = security(
-            bp_security::Security::default(),
-            false,
-            bp_security::Privacy::Off,
-            true,
-            true,
-            true,
-            false,
-        );
+        let items = privacy_menu(bp_security::Security::default(), bp_security::Privacy::Off);
         // The profile toggles are the leading rows, by construction. Taking
         // them positionally rather than by id range is what lets the range
         // itself be the thing under test.
@@ -1247,14 +1086,9 @@ mod tests {
         // Two ticks would say the document is governed by two policies; none
         // would leave the user unable to tell which is in force.
         for profile in bp_security::Profile::all() {
-            let items = security(
+            let items = privacy_menu(
                 bp_security::Security::Named(*profile),
-                false,
                 bp_security::Privacy::Off,
-                true,
-                true,
-                true,
-                false,
             );
             let ticked: Vec<&str> = items
                 .iter()
@@ -1271,14 +1105,9 @@ mod tests {
     fn a_custom_policy_ticks_no_named_profile() {
         // Custom is not one of the four, and ticking the nearest would tell
         // the user their document is governed by a profile it is not.
-        let items = security(
+        let items = privacy_menu(
             bp_security::Security::Custom(bp_security::Profile::Maximum.policy()),
-            false,
             bp_security::Privacy::Off,
-            true,
-            true,
-            true,
-            false,
         );
         assert!(
             !items.iter().any(|i| i.label.starts_with('✓')),
@@ -1290,14 +1119,9 @@ mod tests {
     fn the_menu_states_what_the_profile_actually_does() {
         // A profile is a promise about invisible behaviour. A user cannot
         // check a promise they cannot see, so the menu says it.
-        let standard = security(
+        let standard = privacy_menu(
             bp_security::Security::Named(bp_security::Profile::Standard),
-            false,
             bp_security::Privacy::Off,
-            true,
-            true,
-            true,
-            false,
         );
         assert!(
             standard
@@ -1310,19 +1134,15 @@ mod tests {
                 .collect::<Vec<_>>()
         );
 
-        let maximum = security(
+        let maximum = privacy_menu(
             bp_security::Security::Named(bp_security::Profile::Maximum),
-            false,
             bp_security::Privacy::Off,
-            true,
-            true,
-            true,
-            false,
         );
         assert!(
             maximum
                 .iter()
-                .any(|i| i.label.contains("Leaves this machine") && i.label.contains("never"))
+                .any(|i| i.label.contains("Recorded") && i.label.contains("nothing")),
+            "Maximum records nothing and the menu must say so"
         );
         assert!(
             maximum
@@ -1339,14 +1159,9 @@ mod tests {
     fn a_profile_wanting_encryption_says_recovery_is_off_not_encrypted() {
         // The honest readout while `bp-crypto` does not exist. Saying
         // "encrypted" here would be the exact lie ADR-0020 forbids.
-        let items = security(
+        let items = privacy_menu(
             bp_security::Security::Named(bp_security::Profile::Private),
-            false,
             bp_security::Privacy::Off,
-            true,
-            true,
-            true,
-            false,
         );
         let row = items
             .iter()
@@ -1360,17 +1175,9 @@ mod tests {
         );
     }
 
-    /// The Security menu as the shell builds it for an ordinary document.
+    /// The Privacy menu as the shell builds it for an ordinary document.
     fn security_menu() -> Vec<MenuItem> {
-        security(
-            bp_security::Security::default(),
-            false,
-            bp_security::Privacy::Off,
-            true,
-            true,
-            true,
-            false,
-        )
+        privacy_menu(bp_security::Security::default(), bp_security::Privacy::Off)
     }
 
     /// Every range `handle_menu_action` matches with `contains`, in one place.
@@ -1421,31 +1228,6 @@ mod tests {
     }
 
     #[test]
-    fn the_security_operations_sit_outside_every_range_dispatch_matches() {
-        // The load-bearing one. Every id below is matched by an *exact* arm
-        // in `handle_menu_action`, but several arms above it match ranges --
-        // and a range arm comes first, so an id that strays into one silently
-        // opens a recent file or pastes a clipboard entry instead. That is
-        // the failure the recent-files window has already caused once.
-        for id in [
-            action::SCAN_SECRETS,
-            action::HASH_DOCUMENT,
-            action::SIGN_DOCUMENT,
-            action::VERIFY_SIGNATURE,
-            action::REDACT_SECRETS,
-            action::INSPECT_METADATA,
-            action::SECURITY_HISTORY,
-        ] {
-            for (name, window) in range_dispatch_windows() {
-                assert!(
-                    !window.contains(&id),
-                    "id {id} falls inside the {name} window and would be dispatched as one"
-                );
-            }
-        }
-    }
-
-    #[test]
     fn set_as_default_editor_sits_outside_every_range_dispatch_matches() {
         // A File action at 220 is matched by an exact arm, and several arms
         // above it match ranges -- a range arm comes first, so an id that
@@ -1487,7 +1269,6 @@ mod tests {
             action::STORE_CONTENTS,
             // ADR-0048.
             action::ORGANIZE_SUGGESTED_FOLDER,
-            action::LOCK_DOCUMENT,
             action::NOTE_TAGS,
             action::NOTE_RECOVERY,
             action::TOOLS_SECURITY_INSPECTOR,
@@ -1608,358 +1389,6 @@ mod tests {
             row.shortcut.contains("Notepad Replacement"),
             "the hint has to name the preset; got '{}'",
             row.shortcut
-        );
-    }
-
-    #[test]
-    fn verifying_greys_out_for_a_document_that_has_never_been_saved() {
-        // `bp_integrity::verify_file` checks the *file*, and a sidecar is
-        // named after a file name -- so there is nothing to look beside.
-        // `row_enabled` rather than `planned`: the capability exists and what
-        // is missing is a file, which is a different sentence.
-        let items = security(
-            bp_security::Security::default(),
-            false,
-            bp_security::Privacy::Off,
-            true,
-            false,
-            true,
-            false,
-        );
-        let row = items
-            .iter()
-            .find(|i| i.action == action::VERIFY_SIGNATURE)
-            .expect("a verify row");
-
-        assert!(
-            !row.enabled,
-            "there is no file for a signature to sit beside"
-        );
-        assert_ne!(
-            row.action,
-            action::NONE,
-            "a real capability with nothing to act on is not a planned row"
-        );
-        assert!(
-            row.label.contains("never saved"),
-            "the row must say why it is greyed; got '{}'",
-            row.label
-        );
-    }
-
-    #[test]
-    fn the_verify_row_names_where_it_will_look_for_the_signature() {
-        // `document.ext.sig`, appended and not substituted. The row is the
-        // last place to say so before a user goes hunting for the file, and
-        // saying it here is cheaper than a refusal that names a path.
-        let row = security_menu()
-            .into_iter()
-            .find(|i| i.action == action::VERIFY_SIGNATURE)
-            .expect("a verify row");
-
-        assert!(row.enabled);
-        assert!(
-            row.shortcut.contains(".sig"),
-            "the sidecar convention belongs on the row; got '{}'",
-            row.shortcut
-        );
-    }
-
-    #[test]
-    fn a_document_with_nothing_in_it_greys_redaction_and_says_why() {
-        // `row_enabled` rather than `planned`: `bp-redaction` exists and is
-        // tested, and what is missing is a document to act on. The reason has
-        // to be on the row, because the greying is all the user gets.
-        let items = security(
-            bp_security::Security::default(),
-            false,
-            bp_security::Privacy::Off,
-            false,
-            true,
-            true,
-            false,
-        );
-        let row = items
-            .iter()
-            .find(|i| i.action == action::REDACT_SECRETS)
-            .expect("a redaction row");
-
-        assert!(!row.enabled, "there is nothing to redact");
-        assert_ne!(
-            row.action,
-            action::NONE,
-            "a real capability with nothing to act on is not a planned row"
-        );
-        assert!(
-            row.label.contains("empty"),
-            "the row must say why it is greyed; got '{}'",
-            row.label
-        );
-        assert!(
-            security_menu()
-                .iter()
-                .find(|i| i.action == action::REDACT_SECRETS)
-                .is_some_and(|i| i.enabled),
-            "a document with content can be redacted"
-        );
-    }
-
-    #[test]
-    fn the_metadata_inspector_is_offered_on_every_document() {
-        // Not gated on content, and not on the format. For a container this
-        // build cannot see inside, "there is metadata here that was not looked
-        // at" is the answer worth having, and an empty buffer does not change
-        // it.
-        for has_content in [false, true] {
-            let items = security(
-                bp_security::Security::default(),
-                false,
-                bp_security::Privacy::Off,
-                has_content,
-                true,
-                true,
-                false,
-            );
-            let row = items
-                .iter()
-                .find(|i| i.action == action::INSPECT_METADATA)
-                .expect("a metadata row");
-            assert!(row.enabled, "'{}' should be usable", row.label);
-        }
-    }
-
-    #[test]
-    fn the_security_menu_no_longer_calls_redaction_planned() {
-        // The planned row and the live rows would otherwise both be on screen,
-        // which reads as the feature being in two states at once.
-        let items = security_menu();
-        assert!(
-            !items
-                .iter()
-                .any(|i| i.action == action::NONE && i.label.contains("Redaction")),
-            "redaction is live; it must not also be listed as planned"
-        );
-    }
-
-    #[test]
-    fn the_security_operations_are_distinct_ids_in_their_documented_block() {
-        // The comment on `SCAN_SECRETS` promises 200-209. A row taking 210
-        // would compile, and would sit inside the YAML conversions instead,
-        // which is exactly how a block stops being a block.
-        let ids = [
-            action::SCAN_SECRETS,
-            action::HASH_DOCUMENT,
-            action::SIGN_DOCUMENT,
-            action::VERIFY_SIGNATURE,
-            action::REDACT_SECRETS,
-            action::INSPECT_METADATA,
-            action::SECURITY_HISTORY,
-        ];
-        for id in ids {
-            assert!((200..210).contains(&id), "id {id} is outside the block");
-        }
-        let mut sorted = ids;
-        sorted.sort_unstable();
-        sorted.windows(2).for_each(|pair| {
-            assert_ne!(pair[0], pair[1], "two security rows share an id");
-        });
-    }
-
-    #[test]
-    fn the_security_menu_never_lists_a_live_row_as_planned_too() {
-        // The trap this guards: a planned label and a live row for the same
-        // thing reads as the feature being in two states at once.
-        //
-        // **Lock Document used to be the exception here and is not any more**
-        // (ADR-0048). The assertion was inverted rather than deleted,
-        // because the row still exists -- what changed is which side of the
-        // line it is on, and a test that just stopped mentioning it would
-        // have left nothing watching.
-        let items = security_menu();
-        assert!(
-            !items
-                .iter()
-                .any(|i| i.action == action::NONE && i.label.contains("audit history")),
-            "the security history is live; it must not also be listed as planned"
-        );
-        assert!(
-            items.iter().any(|i| i.action == action::LOCK_DOCUMENT),
-            "Lock Document is live now and must have a real action"
-        );
-        assert!(
-            !items
-                .iter()
-                .any(|i| i.action == action::NONE && i.label.contains("Lock Document")),
-            "and it must not also be listed as planned"
-        );
-    }
-
-    #[test]
-    fn the_security_menu_has_nothing_planned_left_but_its_readouts() {
-        // The three policy lines are `planned()` because they are inert, not
-        // because they are unbuilt -- a readout is not something to click.
-        // Everything else must carry a real action (ADR-0048).
-        for item in security_menu() {
-            assert!(
-                item.action != action::NONE
-                    || item.label.contains(':')
-                    || item.label.trim().is_empty(),
-                "{:?} does nothing and is not a readout",
-                item.label
-            );
-        }
-    }
-
-    #[test]
-    fn the_history_is_offered_whatever_the_document_is() {
-        // An empty history is an answer, and the moment somebody most wants
-        // to look is when they expected an event and are not sure it is
-        // there. Gating this row would hide exactly that case.
-        let row = security_menu()
-            .into_iter()
-            .find(|i| i.action == action::SECURITY_HISTORY)
-            .expect("no row for the security history");
-        assert!(row.enabled, "'{}' should be usable", row.label);
-    }
-
-    #[test]
-    fn scanning_and_hashing_are_offered_on_every_document() {
-        // Neither needs a path, a profile or content: an empty document has a
-        // digest and has no credentials in it, and both are answers.
-        let items = security_menu();
-        for id in [action::SCAN_SECRETS, action::HASH_DOCUMENT] {
-            let row = items
-                .iter()
-                .find(|i| i.action == id)
-                .unwrap_or_else(|| panic!("no row for action {id}"));
-            assert!(row.enabled, "'{}' should be usable", row.label);
-        }
-    }
-
-    #[test]
-    fn the_hash_row_names_the_algorithm_before_it_is_clicked() {
-        // A digest read down a telephone is only comparable if both ends know
-        // which one was taken.
-        let items = security_menu();
-        let row = items
-            .iter()
-            .find(|i| i.action == action::HASH_DOCUMENT)
-            .expect("a hash row");
-        assert!(
-            row.label.contains("SHA-256"),
-            "the row should say which digest; got '{}'",
-            row.label
-        );
-    }
-
-    /// The Security menu for a document in a given state, for the signing
-    /// rows.
-    fn signing_row(has_path: bool, can_sign: bool, has_key: bool) -> MenuItem {
-        security(
-            bp_security::Security::default(),
-            false,
-            bp_security::Privacy::Off,
-            true,
-            has_path,
-            can_sign,
-            has_key,
-        )
-        .into_iter()
-        .find(|i| i.action == action::SIGN_DOCUMENT)
-        .expect("a signing row")
-    }
-
-    #[test]
-    fn signing_is_live_now_that_a_key_has_somewhere_to_live() {
-        // This row was greyed for three sessions with "no signing key yet" on
-        // it, because `bp_crypto::sign_document` existed and there was
-        // nowhere to keep a key. ADR-0031 answered that -- sealed in the
-        // `.bpadx` envelope encrypted documents already use -- so the row
-        // acts.
-        let row = signing_row(true, true, false);
-        assert!(row.enabled, "got '{}'", row.label);
-        assert!(
-            !row.label.contains("no signing key"),
-            "the reason it was greyed for is gone; got '{}'",
-            row.label
-        );
-    }
-
-    #[test]
-    fn signing_greys_for_the_two_reasons_a_signature_cannot_be_made() {
-        // Neither is about a key store any more. A signature is over the
-        // bytes **on disk** (ADR-0026), so a document that has never been
-        // saved has nothing to sign -- and one with unsaved changes would get
-        // a valid signature over the *previous* version, which is worse than
-        // a refusal because it verifies.
-        //
-        // The two say different things, because the way out of each is
-        // different: one is Save As, the other is Ctrl+S.
-        let never_saved = signing_row(false, true, true);
-        let unsaved_changes = signing_row(true, false, true);
-
-        for row in [&never_saved, &unsaved_changes] {
-            assert!(!row.enabled, "got '{}'", row.label);
-            assert_ne!(
-                row.action,
-                action::NONE,
-                "a real capability with a missing prerequisite is not a planned row"
-            );
-        }
-        assert_ne!(
-            never_saved.label, unsaved_changes.label,
-            "two different problems must not read as one"
-        );
-        assert!(never_saved.label.contains("never saved"));
-        assert!(unsaved_changes.label.contains("save it first"));
-    }
-
-    #[test]
-    fn the_signing_row_says_which_question_the_click_will_ask() {
-        // A click is followed by a passphrase bar, and *which* one depends on
-        // whether a key exists. Saying so before the click is what stops
-        // "Sign" being followed by an unexplained ceremony -- and creating a
-        // signing key is a thing somebody may want to know is about to happen.
-        let first_time = signing_row(true, true, false);
-        let afterwards = signing_row(true, true, true);
-
-        assert!(
-            first_time.shortcut.contains("creates"),
-            "got '{}'",
-            first_time.shortcut
-        );
-        assert!(
-            afterwards.shortcut.contains("unlocks"),
-            "got '{}'",
-            afterwards.shortcut
-        );
-        assert_ne!(first_time.shortcut, afterwards.shortcut);
-    }
-
-    #[test]
-    fn verifying_is_live_even_though_signing_is_not() {
-        // Verification needs the other party's public key and their `.sig`,
-        // both supplied by the user. Greying it alongside signing would hide
-        // the half of the feature that needs nothing stored.
-        let items = security_menu();
-        assert!(
-            items
-                .iter()
-                .find(|i| i.action == action::VERIFY_SIGNATURE)
-                .is_some_and(|i| i.enabled)
-        );
-    }
-
-    #[test]
-    fn the_security_menu_no_longer_calls_secret_scanning_planned() {
-        // The planned row and the live row would otherwise both be on screen,
-        // which reads as the feature being in two states at once.
-        let items = security_menu();
-        assert!(
-            !items
-                .iter()
-                .any(|i| i.action == action::NONE && i.label.contains("Secret scanning")),
-            "secret scanning is live; it must not also be listed as planned"
         );
     }
 
@@ -2471,14 +1900,9 @@ mod tests {
         rust_side.extend(insert(STAMP_CLOCK, true));
         rust_side.extend(tools(true));
         rust_side.extend(tab_context(2, true));
-        rust_side.extend(security(
+        rust_side.extend(privacy_menu(
             bp_security::Security::default(),
-            false,
             bp_security::Privacy::Off,
-            true,
-            true,
-            true,
-            false,
         ));
 
         for item in rust_side.iter().filter(|i| i.enabled) {

@@ -42,12 +42,7 @@ and this table carries the intent until then.
 | `bp-semantic` | **live** | Deterministic extraction: titles, keywords, summaries, outlines, document statistics, and the questions a document asks (ADR-0046). Layer one only. | 8, 13 |
 | `bp-organize` | planned | Projects, topics, tags, related notes, duplicate detection. | 9 |
 | `bp-storage` | **live** | SQLite metadata store and migrations (ADR-0019). Documents, tags. Written to on every successful save and read four ways: Related Notes and duplicate detection (ADR-0037), Research Report's aggregates (ADR-0041), and its own summary (ADR-0046). | 9, 13 |
-| `bp-security` | **live** | Security profiles resolving to a policy over **six** axes, plus Privacy Mode (ADR-0020). Decides policy; performs none of it. **Two axes have an enforcing reader** — the journal and the metadata store; the other four are reported by the Tools inspector and consulted by nothing (ADR-0059 §4, and they leave under R5). | 14, 16 |
-| `bp-crypto` | **live** | The `.bpadx` envelope (ADR-0021): Argon2id, XChaCha20-Poly1305 and AES-256-GCM, chunked with the header and chunk position authenticated. Plus document hashing and detached Ed25519 signatures (specs §15). Composes primitives, implements none. Reached from Security ▸ Encrypt Document and from opening a `.bpadx`; the signing half is not reached yet. | 15, 16 |
-| `bp-secrets` | **built, unwired** | Secret scanning (specs §15): AWS/GitHub/GitLab/Slack tokens, PEM blocks, JWTs, connection strings, high-entropy assignments. Reports where a secret is, never what it is. No dependencies. Platform key protection is still planned. | 16 |
-| `bp-integrity` | **built, unwired** | `.sig` sidecars, signing-key files and hash manifests over `bp-crypto` (ADR-0026). Says what it cannot enforce per platform rather than implying it did. | 16 |
-| `bp-redaction` | **built, unwired** | Irreversible redaction with merging spans, and metadata inspection (ADR-0028). Documents exactly what verification cannot prove. Pure. | 16 |
-| `bp-audit` | **built, unwired** | Security audit history (ADR-0024). An event is `Copy`, so it cannot own a secret; documents are named by an opaque id, never a path. The sealed destination has no implementor yet, so it refuses. | 16 |
+| `bp-security` | **live** | Privacy profiles resolving to a policy, plus Privacy Mode (ADR-0020). Decides policy; performs none of it. **Two axes have an enforcing reader** — the recovery journal and the metadata store — and four do not; [ADR-0064](../decisions/ADR-0064.md) kept the crate for the two that govern. | 14 |
 | `bp-platform` | **built, unwired** | The seam ADR-0001 requires, and it carries rules rather than only traits: path legality per platform (reserved device names, forbidden characters, the length limits each platform counts in its own unit), config/data/cache directories from an injected environment, a capability register, and default-editor registration -- state, plan, artefacts. ADR-0012 is mechanised: a plan that would seize an association or touch Notepad is refused. Two `cfg` attributes in the whole crate, so all 103 tests run on both legs. | 18 |
 | `bp-platform-windows` | **not created, deliberately** | Everything it would hold is either a parameterised function in `bp-platform` or blocked: applying `HKCU` keys needs a Win32 call or a new dependency, and DPAPI/Hello wait on the signing-key decision. ADR-0001's own warning about `cfg`-gated code argues against a crate neither CI leg compiles. | 18 |
 | `bp-platform-linux` | **not created, deliberately** | Same reasoning. `.desktop` and MIME registration are in `bp-platform` and run on both legs; Secret Service waits on the same decision. | 18 |
@@ -57,21 +52,16 @@ and this table carries the intent until then.
 ```text
 bachelorpad ──> bp-config
             ├──> bp-theme
-            └──> bp-ui ──┬─> bp-audit      ──> bp-crypto, bp-security
-                         ├─> bp-buffer     (the latency probe, and the size classes)
+            └──> bp-ui ──┬─> bp-buffer
                          ├─> bp-config     ──> bp-platform
                          ├─> bp-core       ──> bp-security
-                         ├─> bp-crypto
                          ├─> bp-editor     ──> bp-buffer
                          ├─> bp-files      ──> bp-core, bp-naming, bp-platform
                          ├─> bp-formats
-                         ├─> bp-history    ──> bp-crypto, bp-security
-                         ├─> bp-integrity  ──> bp-crypto
+                         ├─> bp-history    ──> bp-security
                          ├─> bp-naming
                          ├─> bp-platform
-                         ├─> bp-redaction
                          ├─> bp-search
-                         ├─> bp-secrets
                          ├─> bp-security
                          ├─> bp-semantic
                          ├─> bp-theme
@@ -103,12 +93,11 @@ illustrates is about how the work was *sized*, and survives it.) This block is g
 from the manifests rather than maintained by hand; regenerate it after adding
 an edge, because a dependency diagram that has drifted is worse than none.
 
-**Eleven crates depend on nothing else in the workspace**: `bp-buffer`,
-`bp-crypto`, `bp-formats`, `bp-naming`, `bp-platform`,
-`bp-redaction`, `bp-search`, `bp-secrets`, `bp-security`,
+**Eight crates depend on nothing else in the workspace**: `bp-buffer`,
+`bp-formats`, `bp-naming`, `bp-platform`, `bp-search`, `bp-security`,
 `bp-semantic` and `bp-theme`. That is what keeps them cheap to test and
-impossible to entangle with the UI toolkit — and it is why all but 292 of the
-workspace's 1,446 tests run without a window.
+impossible to entangle with the UI toolkit — and it is why all but 189 of the
+workspace's 970 tests run without a window.
 
 `bp-platform` is on that list for its *real* dependencies and takes
 `bp-formats` as a **dev**-dependency, deliberately and one-directionally: it
@@ -119,10 +108,11 @@ shape, and the two answer different questions about the same extension — "how
 do I read this" against "what does the OS call it".
 
 `bp-security` is the one that acquired dependants rather than dependencies:
-`bp-core`, `bp-storage`, `bp-history` and `bp-audit` all read
-a policy from it (ADR-0020). A crate everything defers to and that defers to
-nothing is the right shape for that, and it is why the list above shrank from
-an earlier count of eleven without anything going wrong.
+`bp-core`, `bp-storage` and `bp-history` read a policy from it (ADR-0020).
+There were five and there are three -- `bp-clipboard` left under ADR-0061 and
+`bp-audit` under [ADR-0064](../decisions/ADR-0064.md) -- and the crate
+survived both because a governor outlives the things it governs. A crate
+everything defers to and that defers to nothing is the right shape for that.
 
 Two deliberate non-dependencies:
 
@@ -136,26 +126,23 @@ Two deliberate non-dependencies:
 ## Inside `bp-ui`
 
 The shell was one 2,675-line file and the single-writer bottleneck for every
-piece of wiring work. It is now fifteen, split along seams the files already
+piece of wiring work. It is now thirteen, split along seams the files already
 had as comment banners:
 
 | Module | Lines | Owns |
 | --- | ---: | --- |
-| `state/security.rs` | 2,771 | Scan, redact, inspect metadata, hash, sign, verify, the security history all six write into, and the profile and Privacy Mode switches that govern them |
-| `menus.rs` | 2,575 | Menu contents and the action-id map |
-| `state.rs` | 2,500 | `AppState` itself: documents, workspace, opening, saving, reloading, format detection, the gutter and the status labels |
-| `lib.rs` | 1,255 | `run_with`, `refresh`, and the Slint callback wiring |
-| `dispatch.rs` | 955 | The menu-action match, and the dialogs its arms share |
+| `state.rs` | 2,236 | `AppState` itself: documents, workspace, opening, saving, reloading, format detection, the gutter and the status labels |
+| `menus.rs` | 2,006 | Menu contents and the action-id map |
+| `lib.rs` | 1,182 | `run_with`, `refresh`, and the Slint callback wiring |
+| `dispatch.rs` | 773 | The menu-action match, and the dialogs its arms share |
 | `state/research.rs` | 758 | Research Report: aggregate reads over `bp-storage`, worded as insights, each naming the documents behind it and closing with the rules it applied (ADR-0041, ADR-0046); and what the store holds |
 | `default_editor.rs` | 754 | File ▸ Set as Default Editor: the report, the consent dialog, the artefacts (ADR-0012) |
 | `state/organize.rs` | 585 | Related Notes, duplicate detection and Suggested Folder, over `bp-storage` (ADR-0037, ADR-0048) |
-| `editor_view.rs` | 577 | The custom surface: key translation, caret placement, what to draw, and the scroll that serves both a rope and a file |
-| `state/inspectors.rs` | 520 | The Tools menu's readouts: the policy in force on all seven axes, the file on disk, and where each setting came from (ADR-0048) |
-| `state/encryption.rs` | 519 | The `.bpadx` passphrase flow: what the bar is asking, and what a wrong answer does |
-| `audit.rs` | 245 | Which file the security history is, and what a person reading it sees (ADR-0024) |
+| `editor_view.rs` | 577 | The custom surface: key translation, caret placement, what to draw, and the scroll |
+| `state/inspectors.rs` | 513 | The Tools menu's readouts: the policy in force on all six axes, the file on disk, and where each setting came from (ADR-0048) |
+| `state/privacy.rs` | 193 | The profile a document carries and the session override above it — what is left of `state/security.rs` after [ADR-0064](../decisions/ADR-0064.md) |
 | `state/questions.rs` | 176 | What the document in front of you *asks*, through `bp_semantic::questions` (ADR-0046) |
 | `testpaths.rs` | 148 | **Test-only.** One temp path per test that no *earlier* run can have left behind (ADR-0049) |
-| `passphrase.rs` | 141 | What the one-field passphrase bar is currently asking, as a state machine |
 | `state/find.rs` | 139 | What the find bar is looking for, which match the user is standing on, and driving a scan of a document served from disk |
 
 **Three modules meet in the Research menu and none knows the other two**,
@@ -191,27 +178,19 @@ What did *not* split is the struct. `AppState` is one set of fields with one
 `impl` block per module, because splitting the state would mean deciding which
 half of the product owns the active document, and there is no such division.
 
-Two seams the compiler pointed out, which are worth knowing before adding to
-either module:
+**Two seams the compiler pointed out here are gone with their modules**
+([ADR-0064](../decisions/ADR-0064.md)): the passphrase bar that served signing
+as well as encryption, and `default_signing_key_path`'s deliberate
+`pub(super)`. Both were about keeping one decision in one place -- which bar
+is asking, and where the signing key lives -- and the reasoning is worth
+carrying to whatever needs it next rather than lost with the code.
 
-- **The passphrase bar serves signing as well as encryption.**
-  `answer_passphrase` lives in `state/encryption.rs` and routes
-  `Ask::UnlockKey` into `state/security.rs`, so `create_key_and_sign` and
-  `sign_with_stored_key` are `pub(super)` rather than private. One bar, two
-  subjects; ADR-0031 is why.
-- **`default_signing_key_path` is `pub(super)` and deliberately not
-  `pub(crate)`.** `AppState::new` is its only caller. A second place deciding
-  where the signing key lives is exactly the defect the `signing_key` field
-  exists to prevent.
-
-**`state/security.rs` is the largest file in the crate now**, and that is
-recorded rather than hidden. It is one subject -- nothing in it may put a
-secret somewhere the user did not ask for it to be -- and half of it is tests
-under their own banners. Its seams, if it ever needs them, are secrets and
-redaction against hash, sign and verify: different crates behind them
-(`bp-secrets`/`bp-redaction` against `bp-crypto`/`bp-integrity`) and different
-questions -- "what is in this document" against "is this document what it
-was".
+**`state/security.rs` was the largest file in the crate at 2,771 lines**, and
+it is now `state/privacy.rs` at 193. [ADR-0064](../decisions/ADR-0064.md)
+removed scan, redact, inspect, hash, sign, verify and the history they wrote
+into; what is left is the profile switch and Privacy Mode -- the pair that
+*governed* them, kept because they still govern the recovery journal and the
+metadata store.
 
 `ui/app.slint` took the same treatment for the same reason, and is now eleven
 files rather than one 1,189-line one:

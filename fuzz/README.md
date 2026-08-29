@@ -1,17 +1,23 @@
 # Hostile-input harnesses
 
 Phase 19 asked for "fuzz targets for parsers, encrypted envelopes, notebook
-import and malformed inputs". **Three of those five harnesses remain**, and
-the reduction is why:
-[ADR-0057](../docs/decisions/ADR-0057.md) removed `bp-notebook`, taking the
-`import_ipynb` target and its fifteen corpus entries, and
-[ADR-0062](../docs/decisions/ADR-0062.md) removed `bp-data`, taking the YAML
-target and the whole YAML corpus with it.
+import and malformed inputs". **Two of those five harnesses remain**, and the reduction is why:
+[ADR-0057](../docs/decisions/ADR-0057.md) removed `bp-notebook` and its
+`import_ipynb` target, [ADR-0062](../docs/decisions/ADR-0062.md) removed
+`bp-data` with the YAML target and corpus, and
+[ADR-0064](../docs/decisions/ADR-0064.md) removed `bp-crypto` with the
+envelope target and its three golden vectors.
 
-**A corpus is evidence about a parser, and there is no parser left for either
-of those to be evidence about.** What remains — `bp_formats::sniff`,
-`bp_files::load` and `bp_crypto::open` — is every parser this product still
-points at a file somebody else wrote.
+**A corpus is evidence about a parser, and there is no parser left for any of
+those to be evidence about.** What remains — `bp_formats::sniff` and
+`bp_files::load` — is every parser this product still points at a file
+somebody else wrote.
+
+**Losing the envelope target is the largest single reduction in assurance
+here**, and it is worth saying rather than leaving to be inferred from a
+shorter file: it did exhaustive single-byte corruption, every prefix of a real
+document, and the only assertion anywhere about a document *this build did not
+write*.
 
 Read the next section before you describe any of this to anyone, because they
 are not fuzzing.
@@ -84,8 +90,8 @@ stack proves nothing about the shipped binary.
 
 This was ADR-0023's rule and it outlived that ADR. The depth probes it was
 written for went with `bp-data` (ADR-0062); the pinning stays, because
-`bp_crypto::open` and `bp_files::load` recurse on hostile input too and the
-reasoning was never about YAML.
+`bp_files::load` recurses on hostile input too and the reasoning was never
+about YAML.
 
 ## Running it
 
@@ -97,19 +103,18 @@ in the shipped application's graph. `.gitignore` already anticipates it
 ```powershell
 cd fuzz
 cargo test                            # the whole suite, ~2 minutes
-cargo test --test envelope            # one target
-cargo test --release --test envelope  # faster
+cargo test --test files            # one target
+cargo test --release --test files  # faster
 
 # A deliberate soak. The default case count is sized for a gate, not a
 # fuzzing session.
-$env:BP_FUZZ_CASES=100000; cargo test --release --test envelope
+$env:BP_FUZZ_CASES=100000; cargo test --release --test files
 
 # Regenerate the corpus. Only needed if a format changed -- see below.
 cargo run --bin seed-corpus
 
 # The pre-authentication KDF cost measurement, which is ignored by default
 # because it allocates a gigabyte.
-cargo test --release --test envelope -- --ignored --nocapture
 ```
 
 `BP_FUZZ_CASES` sets how many cases each `proptest` block runs; the default
@@ -132,26 +137,7 @@ out of `-Quick` and why pre-push rather than pre-commit is where they land.
 
 Priority order, which is also value order.
 
-### 1. `tests/envelope.rs` — `bp_crypto::open`
-
-An envelope parser reads a header before it has a key, so it acts on whatever
-an attacker wrote before it can authenticate anything — `header.rs` says so
-itself. Covers `open` under three passphrases (right, wrong, empty),
-`is_bpadx` and `stable_name`, plus:
-
-- **every** prefix of a real document (all truncations);
-- **every** single-byte corruption of a real document, at three bit masks —
-  exhaustive, not sampled, because "no flipped byte produces plaintext" is a
-  total claim;
-- arbitrary bytes behind a valid magic, so the header parser is actually
-  reached rather than rejected in the first comparison;
-- a real document with a random slice overwritten, which is the highest-yield
-  generator in the file;
-- `seal`/`open` round trips over arbitrary options;
-- **the three golden vectors**, which are the only assertion anywhere about a
-  document this build did not write. See "The corpus", below.
-
-### 2. `tests/data.rs` — `bp_formats::sniff` and `detect`
+### 1. `tests/data.rs` — `bp_formats::sniff` and `detect`
 
 **Narrowed by [ADR-0062](../docs/decisions/ADR-0062.md), not deleted.** It
 covered every `&str` entry point in `bp_data`; `sniff` was here too, and is
@@ -173,7 +159,7 @@ that is not survival — **appending text past the first kilobyte must not
 change the verdict** — which is checkable without a parser and is the most
 that can honestly be asserted.
 
-### 3. `tests/files.rs` — `bp_files::load`
+### 2. `tests/files.rs` — `bp_files::load`
 
 The first thing that touches a file the user picked. The UTF-16 decoder is
 hand-written, so it is exactly what this is for. Covers arbitrary bytes,
@@ -189,33 +175,23 @@ throughout. See "What was found" for the one place where the *text* does not.
 
 `corpus/<target>/`, checked in, written by `src/bin/seed-corpus.rs`. Every
 entry has a comment there saying where it came from and what it is meant to
-provoke. Re-running the seeder is **not** idempotent for `corpus/envelope/` —
-`seal` draws a fresh random salt per document — so only re-run it if a format
-actually changed.
+provoke. It is idempotent now: `corpus/envelope/` was the one directory it was
+not, because `seal` drew a fresh salt per document, and that directory is
+gone.
 
-**Three of those entries are golden vectors, and that is a stronger claim than
-the rest of the corpus makes.** `envelope/sealed.bpadx`, `sealed-aes.bpadx`
-and `sealed-multichunk.bpadx` were sealed once, under a known passphrase over
-known plaintext, and `a_document_sealed_by_an_earlier_build_still_opens`
-asserts that this build still opens each of them to exactly those bytes. It is
-the only test in the repository that says anything about a document *this*
-build did not write — every other round trip seals and opens with the same
-build, which proves the two halves agree with each other and cannot prove
-either agrees with what is on somebody's disk (ADR-0050).
-
-So **regenerating `corpus/envelope/` is the one action that would make that
-test pass vacuously.** If it fails, the format changed: decide whether that was
-meant before reaching for the seeder.
+**The three golden vectors are gone.** `envelope/sealed.bpadx`,
+`sealed-aes.bpadx` and `sealed-multichunk.bpadx` were sealed once under a
+known passphrase and asserted to still open, and they were the only test in
+the repository that said anything about a document *this* build did not write
+([ADR-0050](../docs/decisions/ADR-0050.md)). They went with `bp-crypto` under
+[ADR-0064](../docs/decisions/ADR-0064.md). Nothing here replaces them, and
+nothing can: the claim needed a format to make it about.
 
 The pathological entries, which came from the ADRs and crate docs rather than
 being invented here:
 
 | Entry | Source |
 | --- | --- |
-| `envelope/truncated-body.bpadx`, `truncated-header.bpadx` | a partial copy or an interrupted sync |
-| `envelope/flipped-ciphertext-byte.bpadx`, `flipped-header-byte.bpadx` | ADR-0021 authenticates the header as additional data, so both must refuse |
-| `envelope/kdf-cost-raised.bpadx`, `kdf-cost-absurd.bpadx` | one inside the format's cost ceiling, one past it |
-| `envelope/sealed.bpadx`, `sealed-aes.bpadx`, `sealed-multichunk.bpadx` | golden vectors: ADR-0021's promise that a document written today opens in ten years |
 | `files/utf16le-odd-length.bin` | `LoadError::TruncatedUtf16` — an odd body, so the last code unit is cut in half |
 | `files/utf16le-unpaired-high-surrogate.bin` and three siblings | `LoadError::UnpairedSurrogate`, in both byte orders and at end-of-file |
 | `files/utf16le-lone-bom.bin` | a file that is nothing but a mark: a valid empty document, not an error |
@@ -269,51 +245,6 @@ legal document, or writing a leading U+FEFF as something no other tool reads.
 Test:
 `files::a_leading_zwnbsp_saved_without_a_bom_is_read_back_as_a_bom`.
 Corpus: `files/utf8-bom-then-zwnbsp.bin`.
-
-### A document's declared KDF cost is paid before anything is authenticated
-
-`bp-crypto`. `open` parses the header, derives a key at the cost the header
-declares, and only then checks a tag. It cannot be otherwise — a tag check
-needs a key — but it means the cost written in an **unauthenticated** header
-is paid in full before the reader can say the document is rubbish. A single
-flipped bit in the cost field of a real document is enough.
-
-`KdfParams::validate` is the bound, and it is doing its job: a cost one KiB
-past the ceiling is refused in microseconds. Measured on this machine
-(release, `--ignored`), 2026-08-22:
-
-```text
-declared cost       8 KiB ->   55.3µs to refuse
-declared cost    1024 KiB ->    1.3ms to refuse
-declared cost   65536 KiB ->   96.0ms to refuse
-declared cost  262144 KiB ->  407.4ms to refuse
-64 MiB at   1 passes ->  104.9ms to refuse
-64 MiB at   8 passes ->  583.6ms to refuse
-64 MiB at  16 passes ->     1.1s to refuse
-declared cost 256 MiB + 1 KiB -> refused immediately
-```
-
-The ceiling `validate` permits is **256 MiB × 16 passes × 64 lanes**
-([ADR-0035](../docs/decisions/ADR-0035.md), which lowered it from 1 GiB and 64
-passes). ADR-0035 measured that corner in release at **~5.56 s**, down from the
-~75 s the old ceiling allowed -- a quarter of a gigabyte of resident memory per
-attempt, on an unauthenticated header, before the user is told the file is
-damaged. The sweep above walks memory and passes; it does not isolate the lane
-multiplier, which is why the corner's number comes from the ADR rather than
-from this table.
-
-That is a bound rather than an unbounded denial-of-service, which is what
-ADR-0021 set out to achieve, and it is written down here because "generous but
-finite" is easier to review with the number attached. Test:
-`envelope::the_declared_kdf_cost_is_paid_before_anything_is_authenticated`.
-
-**This table was wrong for a session and the shape of the mistake is worth
-keeping.** It carried the 1 GiB ceiling after ADR-0035 lowered it, so three of
-its rows -- 512 MiB, 1 GiB, and 64 passes -- were past the bound and were
-timing an *instant refusal* rather than the work. The numbers were real
-measurements of the wrong thing, which is the hardest kind of stale figure to
-notice. The control is now one KiB past the ceiling rather than sixteen times
-past it: a bound is only demonstrated at its edge.
 
 ### The corpus was hostile to the editor, too
 
@@ -383,20 +314,17 @@ and that is not a property of the artefact.
 
 - **Anything requiring nightly or a sanitizer.** No ASan, no MSan, no
   libFuzzer. Stated at the top, repeated here because it is the largest gap.
-- **`bp-crypto`'s cryptographic claims.** Nothing here asserts that a
-  document *cannot* be opened without the passphrase, only that trying does
-  not crash. Confidentiality is a property of the primitives and of ADR-0021's
-  construction; a survival harness is the wrong instrument for it.
-- **`bp_crypto::sign`.** Ed25519 signatures landed alongside the envelope and
-  have no target here. They should get one.
-- **The recovery journal (ADR-0022), `bp-secrets`, and the security profile
-  (ADR-0020).** All parse or deserialise stored state, all are reachable from
-  a file on disk, none is covered.
+- **Nothing cryptographic.** `bp-crypto` and `bp-integrity` are gone
+  ([ADR-0064](../docs/decisions/ADR-0064.md)), so there is no envelope, no
+  signature and no key material anywhere in this product.
+- **The recovery journal and the privacy profile (ADR-0020).** Both parse or
+  deserialise stored state, both are reachable from a file on disk, neither is
+  covered.
 - **`bp_files::save`**, `atomic_write` and `resolve_in_dir` — the write half.
   Hostile *paths* rather than hostile bytes, which is a different target with
   different setup, and it is missing.
-- **`bp-config`, `bp-history`, `bp-search`, `bp-redaction`,
-  `bp-integrity`.** Not surveyed at all. Several read files.
+- **`bp-config`, `bp-history`, `bp-search`, `bp-storage`.** Not surveyed at
+  all. Several read files.
 - **Concurrency.** Every probe is single-threaded. Nothing here would find a
   race, and `bp-files`' watch/reload path has one to be found or ruled out.
 - **Memory growth as a failure.** A hang is detected by a clock; an input

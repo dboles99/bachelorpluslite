@@ -24,21 +24,16 @@ path = "src/lib.rs"
 [dependencies]
 
 [dev-dependencies]
-bp-audit = { path = "../../crates/bp-audit" }
 bp-buffer = { path = "../../crates/bp-buffer" }
 bp-config = { path = "../../crates/bp-config" }
 bp-core = { path = "../../crates/bp-core" }
-bp-crypto = { path = "../../crates/bp-crypto" }
 bp-editor = { path = "../../crates/bp-editor" }
 bp-files = { path = "../../crates/bp-files" }
 bp-formats = { path = "../../crates/bp-formats" }
 bp-history = { path = "../../crates/bp-history" }
-bp-integrity = { path = "../../crates/bp-integrity" }
 bp-naming = { path = "../../crates/bp-naming" }
 bp-platform = { path = "../../crates/bp-platform" }
-bp-redaction = { path = "../../crates/bp-redaction" }
 bp-search = { path = "../../crates/bp-search" }
-bp-secrets = { path = "../../crates/bp-secrets" }
 bp-security = { path = "../../crates/bp-security" }
 bp-semantic = { path = "../../crates/bp-semantic" }
 bp-storage = { path = "../../crates/bp-storage" }

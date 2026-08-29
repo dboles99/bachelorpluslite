@@ -18,30 +18,10 @@
 use std::fs;
 use std::path::Path;
 
-use bp_crypto::{KdfParams, SealOptions, Suite};
-
-/// Argon2id cost for the corpus documents: the floor the format allows.
-///
-/// The default (19 MiB, t=2) is right for a real document and wrong for a
-/// corpus opened dozens of times per test run -- and the target here is the
-/// *parser*, not the KDF. 8 KiB is `KdfParams::validate`'s minimum.
-const CHEAP: KdfParams = KdfParams {
-    memory_kib: 8,
-    iterations: 1,
-    lanes: 1,
-};
-
-/// The passphrase every sealed corpus document is under.
-///
-/// Written down on purpose: these documents contain nothing, and a corpus
-/// nobody can open is harder to reason about than one anybody can.
-pub const PASSPHRASE: &str = "corpus";
-
 fn main() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("corpus");
     data(&root.join("data"));
     files(&root.join("files"));
-    envelope(&root.join("envelope"));
     println!("corpus written under {}", root.display());
 }
 
@@ -205,114 +185,4 @@ fn files(dir: &Path) {
     put(dir, "mixed-line-endings.txt", b"a\r\nb\nc\rd\n");
     put(dir, "no-final-newline.txt", b"one line");
     put(dir, "empty.txt", Vec::new());
-}
-
-// --- .bpadx envelopes ---------------------------------------------------
-
-/// Where the header stops and the first chunk's length prefix begins.
-///
-/// Recomputed from the format rather than imported: `Header::parse` is
-/// crate-private, and a hard-coded 48 would silently point at the wrong byte
-/// the day a field is added. Magic 6 + version 2 + suite 1 + kdf id 1 + cost
-/// 12 + salt 16 + chunk size 4 + prefix length 1, then the prefix itself.
-const PREFIX_LEN_AT: usize = 42;
-
-/// Offset of the stored Argon2id memory cost. Magic 6 + version 2 + suite 1 +
-/// kdf id 1.
-const MEMORY_KIB_AT: usize = 10;
-
-fn header_end(sealed: &[u8]) -> usize {
-    PREFIX_LEN_AT + 1 + usize::from(sealed[PREFIX_LEN_AT])
-}
-
-fn envelope(dir: &Path) {
-    let options = SealOptions {
-        suite: Suite::XChaCha20Poly1305,
-        kdf: CHEAP,
-        chunk_size: 1024,
-    };
-    let sealed =
-        bp_crypto::seal(b"a small document\n", PASSPHRASE, options).expect("seal a document");
-    put(dir, "sealed.bpadx", &sealed);
-
-    // The same document under the other suite: a different nonce width, so a
-    // different branch of the header parser.
-    let aes = bp_crypto::seal(
-        b"a small document\n",
-        PASSPHRASE,
-        SealOptions {
-            suite: Suite::Aes256Gcm,
-            ..options
-        },
-    )
-    .expect("seal under AES");
-    put(dir, "sealed-aes.bpadx", &aes);
-
-    // Multi-chunk, so the chunk loop runs more than once and the last-chunk
-    // flag in the additional data is exercised.
-    let big = bp_crypto::seal(&vec![b'x'; 4096], PASSPHRASE, options).expect("seal a big one");
-    put(dir, "sealed-multichunk.bpadx", &big);
-
-    // Truncated mid-ciphertext: the shape a partial copy or an interrupted
-    // sync leaves behind.
-    put(dir, "truncated-body.bpadx", &sealed[..sealed.len() - 5]);
-    // Truncated inside the header, before the nonce prefix.
-    put(dir, "truncated-header.bpadx", &sealed[..20]);
-    put(dir, "magic-only.bpadx", b"BPADX\0");
-    put(dir, "empty.bpadx", Vec::new());
-
-    // One flipped byte in the ciphertext. Must be `CannotOpen` -- the
-    // authentication tag catches it -- and must never be a panic.
-    let mut flipped = sealed.clone();
-    let last = flipped.len() - 3;
-    flipped[last] ^= 0x01;
-    put(dir, "flipped-ciphertext-byte.bpadx", &flipped);
-
-    // A flipped byte in the *header*. ADR-0021 authenticates the header as
-    // additional data on every chunk, so this must fail to open rather than
-    // quietly change how the document is read.
-    let mut flipped_header = sealed.clone();
-    flipped_header[30] ^= 0x01;
-    put(dir, "flipped-header-byte.bpadx", &flipped_header);
-
-    let at = header_end(&sealed);
-
-    // The declared chunk length raised past what follows: the reader is told
-    // to expect more bytes than exist.
-    let mut long_chunk = sealed.clone();
-    long_chunk[at..at + 4].copy_from_slice(&u32::MAX.to_le_bytes());
-    put(dir, "chunk-length-overstated.bpadx", &long_chunk);
-
-    // A declared chunk length of zero: too small to hold an authentication
-    // tag, let alone a chunk.
-    let mut zero_chunk = sealed.clone();
-    zero_chunk[at..at + 4].copy_from_slice(&0u32.to_le_bytes());
-    put(dir, "chunk-length-zero.bpadx", &zero_chunk);
-
-    // The stored Argon2id cost raised to 64 MiB. Inside the format's bounds,
-    // so it is honoured -- and honoured *before* anything is authenticated,
-    // because a key has to exist before a tag can be checked. See
-    // `fuzz/README.md`: this is the entry behind the pre-authentication cost
-    // note.
-    let mut costly = sealed.clone();
-    costly[MEMORY_KIB_AT..MEMORY_KIB_AT + 4].copy_from_slice(&(64u32 * 1024).to_le_bytes());
-    put(dir, "kdf-cost-raised.bpadx", &costly);
-
-    // Past the format's ceiling: must be refused by name, not attempted.
-    let mut absurd = sealed.clone();
-    absurd[MEMORY_KIB_AT..MEMORY_KIB_AT + 4].copy_from_slice(&(2u32 * 1024 * 1024).to_le_bytes());
-    put(dir, "kdf-cost-absurd.bpadx", &absurd);
-
-    // A version this build does not know, and a suite tag it does not know.
-    let mut future = sealed.clone();
-    future[6..8].copy_from_slice(&999u16.to_le_bytes());
-    put(dir, "future-version.bpadx", &future);
-
-    let mut suite = sealed.clone();
-    suite[8] = 200;
-    put(dir, "unknown-suite.bpadx", &suite);
-
-    // Plain text with no magic at all: the everyday "this is not a .bpadx"
-    // case, which must be a named refusal rather than a guess.
-    put(dir, "not-an-envelope.bpadx", b"just some text\n");
 }

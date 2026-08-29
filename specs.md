@@ -311,33 +311,39 @@ opt-in, and a constraint that cannot fail reads as live when it is vacuous.
 
 ## 15. Security and cryptography
 
-Required security concepts:
+**Almost all of it is deleted.** [ADR-0064](docs/decisions/ADR-0064.md)
+removed the `.bpadx` encrypted format, encrypted recovery and edit journals,
+secret scanning, redaction, document hashing, digital signatures, the audit
+history and the key-protection work that would have followed. Five crates and
+13,742 lines. Windows Notepad has none of it, and a text editor that offers
+cryptography it cannot maintain is worse than one that offers none.
 
-- `.bpadx` encrypted file format
-- passphrase protection
-- Argon2id KDF
-- established AEAD encryption implementation
-- platform-neutral encrypted format
-- Windows DPAPI/key protection where appropriate
-- Windows Hello-assisted unlock where supported
-- Linux secret-service/keyring integration where supported
-- per-document security profiles: Standard, Private, Confidential, Maximum, Custom
-- Privacy Mode
-- encrypted recovery
-- encrypted edit journals
-- encrypted revision history
-- secret scanning
-- auto-lock
-- document hashing
-- digital signatures
-- redaction
-- metadata inspector
-- security audit history
-- semantic privacy controls
-- security inspector
-- sensitive-memory wrappers/zeroization where practical
+**Two things survive, and they are the ones that were never about
+cryptography:**
 
-No custom cryptography.
+- **Per-document profiles** -- Standard, Private, Confidential, Maximum,
+  Custom -- resolving to a policy, with the named ones checked to be monotonic
+  ([ADR-0020](docs/decisions/ADR-0020.md)).
+- **Privacy Mode**, a session-wide override that can only tighten, and that
+  acts on what is already written rather than only on what comes next.
+
+They survive because they still *govern* something: whether the recovery
+journal is written, and what the metadata store may record. The menu they live
+in is called **Privacy** now, for the same reason.
+
+Two consequences worth stating plainly rather than leaving to be discovered:
+
+- **A `.bpadx` document already on a disk cannot be opened by this build**,
+  and there is no migration.
+- **Only Standard keeps a recovery journal.** Private and Confidential asked
+  for an encrypted one; with no implementation left, the variant was *deleted*
+  rather than pointed at plaintext. ADR-0020's rule is that a control which
+  quietly weakens itself is worse than an absent one.
+
+[ADR-0011](docs/decisions/ADR-0011.md)'s "no custom cryptography -- compose
+vetted primitives" is **removed rather than kept**: there is no cryptography
+to implement badly, so the rule cannot fail, and a constraint that cannot fail
+reads as live when it is vacuous.
 
 ## 16. Themes
 

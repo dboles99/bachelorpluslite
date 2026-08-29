@@ -71,6 +71,7 @@ Adding a decision means adding both.
 | BP-ADR-0061 | 2026-08-29 | R2: `bp-clipboard` leaves, and the `Clipboard` policy axis goes with it rather than waiting for R5 -- an axis outlives its subject by nothing. Four tests rewritten; one would have passed while asserting nothing | Accepted | [ADR-0061](docs/decisions/ADR-0061.md) |
 | BP-ADR-0062 | 2026-08-29 | R3: `bp-data` and the Data menu leave, superseding ADR-0023. `sniff` survives and loses the only thing that could contradict it -- the cross-crate agreement test that once caught it calling a pretty-printed array "JSON Lines" | Accepted | [ADR-0062](docs/decisions/ADR-0062.md) |
 | BP-ADR-0063 | 2026-08-30 | R4: huge-file mode leaves -- the engine, the viewer and `StreamSearch`, superseding ADR-0027, ADR-0030 and ADR-0042. No directory and no id block: a *mode* comes out as branches. D11 becomes inert and D2's own re-ask metric moves | Accepted | [ADR-0063](docs/decisions/ADR-0063.md) |
+| BP-ADR-0064 | 2026-08-30 | R5, the last: five security crates leave and `bp-security` stays as Privacy. `Recovery::Encrypted` is deleted rather than degraded to plaintext; `.bpadx` documents become unopenable with no migration; the Security menu is renamed for what four profiles and a toggle actually are | Accepted | [ADR-0064](docs/decisions/ADR-0064.md) |
 | BP-ADR-0017 | amended 2026-08-22 | Half of the renderer revert condition is now a number rather than a feeling: per-frame row building, and its independence from document size | Accepted, amended | [ADR-0017](docs/decisions/ADR-0017.md) |
 
 ## Decisions needed before the work they block
@@ -121,6 +122,51 @@ in the fourth.
 Kept rather than deleted, because every one of these went stale the same
 way — a fix landing without the record moving — and because the lesson in each
 is worth more than the fact.
+
+- **The last removal in a sequence is the one that changes what stays.**
+  R1 to R4 of [ADR-0059](docs/decisions/ADR-0059.md) were deletions: a crate
+  left, its callers left with it, and the survivors were untouched. R5 could
+  not be, because `bp-security` was never a security *feature* -- it was the
+  governor of features, and four of the things it governed had already gone.
+  What was left was a governor with two subjects and a name describing its
+  origins rather than its job.
+
+  **A thing that decides on behalf of other things outlives them, and it
+  should be renamed when it does.** Keeping "Security" over four profiles and
+  a toggle would have been free, and would have left every future reader
+  believing this product does something it does not.
+
+- **A deleted match arm is not a compile failure, it is a menu row that stops
+  working.** [ADR-0064](docs/decisions/ADR-0064.md) removed nine security
+  dispatch arms as one block, and took `SET_DEFAULT_EDITOR` with them by
+  accident. File ▸ Set as Default Editor would have shipped doing nothing.
+
+  **It surfaced as a dead-code *warning* on a constant in another module**,
+  not as an error, and `no_menu_offers_a_row_that_does_nothing` does not catch
+  it either -- the row still has an action id, and the id still exists. The
+  habit that saves this is the one R4 already named: delete the *callee*
+  first, so the compiler audits the callers. Here the callee was `rfd` and
+  `bp-platform`, which are staying, so nothing was owed an error.
+
+- **A test that checks a label's length catches its first new offender.**
+  ADR-0049 found a clipped menu label by driving the window and mechanised it.
+  The Privacy menu's new readout -- "Recorded about this document: path, title
+  and tags" -- was 50 characters and would have been elided. This is the first
+  time that test has failed for a label written *after* it existed, which is
+  the whole point of mechanising a manual finding: the second occurrence costs
+  nothing to find.
+
+- **A grep before a question, and the person who wrote the rule broke it.**
+  A survey during ADR-0064 reported that `bp_crypto::stable_name` named
+  *every* recovery journal file, so removing crypto would orphan unsaved work
+  -- and a whole redesign of journal naming was scoped on that premise.
+  It was wrong: `stable_name` named only the *sealed* journal, and plaintext
+  journals are `{document_id}.json`. One `grep` settled it.
+
+  That is trap 6, committed while warning about trap 6, in the same session
+  that had already read a pull-request listing from the wrong repository.
+  **Both were confident readings of something adjacent to the answer.** The
+  cheap check is not "is this plausible" but "which line of code says so".
 
 - **A capability with no directory of its own is removed by deleting
   *branches*, and a gate that is always open is a gate a reader has to

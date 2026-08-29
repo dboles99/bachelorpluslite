@@ -15,7 +15,8 @@ Status as of **2026-08-29**. Four words, meaning four different things:
   three, for four sessions — was this project's most useful single number
   while it was not zero.
 - **Removed** — the phase's capability was built, shipped, and then taken out
-  again, with an ADR saying why. Five phases carry it: 4 under
+  again, with an ADR saying why. Seven phases carry it: 15 and 16 under
+  [ADR-0064](docs/decisions/ADR-0064.md), 4 under
   [ADR-0063](docs/decisions/ADR-0063.md), 12 entire, under
   [ADR-0057](docs/decisions/ADR-0057.md), 13 in part, under
   [ADR-0060](docs/decisions/ADR-0060.md), 11 under
@@ -41,9 +42,9 @@ Status as of **2026-08-29**. Four words, meaning four different things:
 | 11 | Clipboard system | **Removed** | [ADR-0061](docs/decisions/ADR-0061.md) | — |
 | 12 | Notebook/execution system | **Removed** | [ADR-0057](docs/decisions/ADR-0057.md) | — |
 | 13 | Research mode | **Removed**, in part | [ADR-0060](docs/decisions/ADR-0060.md) | `bp-storage`, `bp-semantic` |
-| 14 | Security foundation | **Started** | [11-security](project/tasks/11-security/) | `bp-security` |
-| 15 | Encrypted `.bpadx` documents | **Started** | [11-security](project/tasks/11-security/) | `bp-crypto` |
-| 16 | Advanced security | **Started** | [11-security](project/tasks/11-security/) | `bp-secrets`, `bp-redaction`, `bp-audit`, `bp-integrity` |
+| 14 | Privacy foundation | **Started** | [11-security](project/tasks/11-security/) | `bp-security` |
+| 15 | Encrypted `.bpadx` documents | **Removed** | [ADR-0064](docs/decisions/ADR-0064.md) | — |
+| 16 | Advanced security | **Removed** | [ADR-0064](docs/decisions/ADR-0064.md) | — |
 | 17 | Themes/personality/accessibility | **Started** | [12-themes-brand](project/tasks/12-themes-brand/) | `bp-theme` |
 | 18 | Windows/Linux platform integration | **Started** | [13-platform](project/tasks/13-platform/) | `bp-platform` |
 | 19 | Hardening, fuzzing and benchmarks | **Started** | [14-hardening](project/tasks/14-hardening/) | `fuzz/` (standalone, and now gated) |
@@ -231,9 +232,10 @@ them**, and both do: the recovery journal refuses rather than writing
 plaintext (and deletes what a looser profile already wrote), and
 `bp-storage`'s `record_document` drops the title under `PathOnly` and records
 nothing under `Disabled`. There were seven axes and three dependants until
-[ADR-0061](docs/decisions/ADR-0061.md) removed the clipboard and its axis
-together; the other four axes are reported by the Tools inspector and
-consulted by nothing ([ADR-0059](docs/decisions/ADR-0059.md) §4). The Security menu sets the profile and
+[ADR-0061](docs/decisions/ADR-0061.md) removed the clipboard and its axis, and
+[ADR-0064](docs/decisions/ADR-0064.md) removed `bp-audit` and the encrypted
+journal; the other four axes are reported by the Tools inspector and consulted
+by nothing ([ADR-0059](docs/decisions/ADR-0059.md) §4). The Security menu sets the profile and
 states what it permits; the status bar shows anything other than the default.
 
 Two limits are deliberate and visible. Profiles requiring an encrypted journal

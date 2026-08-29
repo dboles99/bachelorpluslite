@@ -223,11 +223,13 @@ function Add-Signature {
         and note it signs the *executable*, before it is staged -- so the call
         belongs beside the Copy-Item above, not here.
 
-        Linux needs no authority: `bp-crypto::sign` can produce a detached
-        Ed25519 signature over the tarball, which answers "is this the file
-        the author published?" rather than "who is the author?". That is a
-        different and smaller claim, and ADR-0055 forbids describing it as
-        though it were Authenticode.
+        Linux needs no authority: a detached Ed25519 signature over the
+        tarball answers "is this the file the author published?" rather than
+        "who is the author?". That is a different and smaller claim, and
+        ADR-0055 forbids describing it as though it were Authenticode.
+        `bp-crypto::sign` used to be what would produce it; ADR-0064 removed
+        that crate, so whoever takes this up brings a signing tool of their
+        own -- `minisign` or `ssh-keygen -Y` -- rather than finding one here.
     #>
     throw 'signing is deferred -- ADR-0055'
 }

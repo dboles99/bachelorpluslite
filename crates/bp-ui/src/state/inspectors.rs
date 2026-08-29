@@ -8,7 +8,7 @@
 //!
 //! | Row | Its subject |
 //! | --- | --- |
-//! | Security Inspector | The *policy* in force, on all seven axes, and where each axis got its answer |
+//! | Security Inspector | The *policy* in force, on all six axes, and where each axis got its answer |
 //! | File Analysis | The *file on disk*, which is not the same object as the document |
 //! | Configuration | The *settings*, and where each one came from |
 //!
@@ -29,7 +29,7 @@ impl AppState {
     /// Tools ▸ Security Inspector: the policy actually in force, axis by
     /// axis.
     ///
-    /// **The Security menu shows two of these six and the rest are
+    /// **The Privacy menu shows two of these six and the rest are
     /// invisible**, which is the gap this fills: the menu has room for
     /// recovery and network, and a user has no way to discover that
     /// embeddings, temporary files and zeroising are governed at all.
@@ -49,7 +49,10 @@ impl AppState {
     /// its own answer as well as the one that overrode it.
     pub(crate) fn security_inspector_report(&self) -> String {
         let own = self.security();
-        let policy = own.policy_under(self.privacy);
+        // Through `AppState::policy`, not `policy_under` spelled out here:
+        // one place decides that Privacy Mode applies, and a second call site
+        // computing it itself is how one of them stops.
+        let policy = self.policy();
         let unclamped = own.policy();
 
         let mut lines = vec![
@@ -245,15 +248,6 @@ impl AppState {
             }
         }
 
-        let sealed = self.journal.sealed_count();
-        if sealed > 0 {
-            lines.push(String::new());
-            lines.push(format!(
-                "{sealed} sealed checkpoint{} also exist for encrypted                  documents. They are filed under a digest of the path and can                  only be read once that document is unlocked, so none of them                  can be listed here by name.",
-                if sealed == 1 { "" } else { "s" }
-            ));
-        }
-
         lines.push(String::new());
         lines.push(format!("Journal: {}", self.journal.location().display()));
         lines.join(
@@ -339,12 +333,11 @@ fn human_duration(seconds: u64) -> String {
 // Each axis in the user's words rather than the enum's. Free functions so
 // the wording is asserted by a test without a policy to build first, the
 // same shape `menus::describe_recovery` already has for the three axes the
-// Security menu shows.
+// Privacy menu shows.
 
 fn recovery(value: Recovery) -> String {
     match value {
         Recovery::Plaintext => "kept, unencrypted",
-        Recovery::Encrypted => "kept, encrypted with the document's passphrase",
         Recovery::Disabled => "never written",
     }
     .to_owned()

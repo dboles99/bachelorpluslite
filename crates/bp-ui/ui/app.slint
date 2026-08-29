@@ -101,7 +101,7 @@ export component AppWindow inherits Window {
     in property <[MenuItem]> note-items;
     in property <[MenuItem]> organize-items;
     in property <[MenuItem]> research-items;
-    in property <[MenuItem]> security-items;
+    in property <[MenuItem]> privacy-items;
     in property <[MenuItem]> tools-items;
     in property <[MenuItem]> help-items;
     /// The tab strip's context menu. Not a menu-bar menu, but built the same
@@ -559,10 +559,10 @@ export component AppWindow inherits Window {
                             research-menu.show();
                         }
                     }
-                    security-label := MenuLabel {
-                        label: "Security";
+                    privacy-label := MenuLabel {
+                        label: "Privacy";
                         clicked => {
-                            security-menu.show();
+                            privacy-menu.show();
                         }
                     }
                     tools-label := MenuLabel {
@@ -925,11 +925,11 @@ export component AppWindow inherits Window {
             root.dispatch(a);
         }
     }
-    security-menu := MenuPopup {
-        x: security-label.x + 4px;
+    privacy-menu := MenuPopup {
+        x: privacy-label.x + 4px;
         y: 28px;
         menu-max-height: root.menu-max-height;
-        items: root.security-items;
+        items: root.privacy-items;
         chosen(a) => {
             root.dispatch(a);
         }

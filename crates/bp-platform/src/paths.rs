@@ -758,8 +758,8 @@ fn skip_components(s: &str, n: usize) -> Option<&str> {
 /// Windows treats `/` and `\` alike when parsing, Linux only `/`, so a path
 /// written with backslashes is one component on Linux and several on Windows.
 /// That asymmetry is the point: it is why a manifest written on Windows with
-/// backslash separators cannot be read on Linux, and why `bp-integrity`
-/// normalises to `/` before writing one.
+/// backslash separators cannot be read on Linux, and why anything writing a
+/// manifest normalises to `/` first.
 pub fn components(platform: Platform, path: &str) -> impl Iterator<Item = &str> {
     let (_prefix, rest) = split_prefix(platform, path);
     components_of(platform, rest)

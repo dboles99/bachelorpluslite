@@ -49,11 +49,10 @@
 //!
 //! **Credential storage.** specs.md asks for DPAPI on Windows and Secret
 //! Service on Linux, and `docs/architecture/PLATFORM_MATRIX.md` lists both.
-//! They are not implemented, because what would go in them is entangled with
-//! an open question a human has to answer: where the signing key of
-//! `bp-integrity` lives, and whether a platform credential store is the
-//! custodian or merely a wrapper around a key file. Implementing a keyring
-//! first would decide that by accident. They appear here as
+//! They are not implemented. What would have gone in them was a signing key,
+//! and ADR-0064 removed signing -- so there is no secret for a vault to hold
+//! and the question is now what would *want* one, which is a smaller and
+//! differently-shaped decision than the one this paragraph used to describe. They appear here as
 //! [`Capability::CredentialStore`](capabilities::Capability::CredentialStore)
 //! and [`Capability::BiometricUnlock`](capabilities::Capability::BiometricUnlock),
 //! reported as

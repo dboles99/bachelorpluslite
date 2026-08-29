@@ -37,14 +37,16 @@ Two kinds of greyed row remain, and telling them apart matters:
 Nothing means "does not exist yet" any more, and `menus::planned_menu` and
 `arrives()` were deleted rather than emptied so it cannot start to again.
 
-**Three whole menus have left, and this file no longer has a section for
-any of them.** [ADR-0062](../decisions/ADR-0062.md) removed **Data** -- eight
+**Four whole menus have left, and this file no longer has a section for any
+of them; a fifth was renamed.** [ADR-0064](../decisions/ADR-0064.md) removed
+nine of the Security menu's thirteen rows and renamed what was left
+**Privacy**, because that is what four profiles and a toggle are. [ADR-0062](../decisions/ADR-0062.md) removed **Data** -- eight
 rows over JSON, JSON Lines, TOML, YAML and delimited text, all of them live.
 And [ADR-0057](../decisions/ADR-0057.md) removed Notebook and Run --
 the cell outline, the `.ipynb` export, one row per runnable cell, Stop, Run
 Document and Interpreters. Every one of them was live when it was deleted,
 which is the point: these were decisions about what the product is, not a
-sweep of rows that never worked. **The menu bar is eleven menus now.**
+sweep of rows that never worked. **The menu bar is ten menus now.**
 
 ## File
 
@@ -105,23 +107,26 @@ sweep of rows that never worked. **The menu bar is eleven menus now.**
 | Related Notes | **live, in Organize.** Two rows in two menus running the same query is how one of them goes stale |
 | Classification, properties | Not rows. Both need a schema for what a note *is*, which nothing in this product has decided |
 
-## Security
+## Privacy
+
+**It was the Security menu, and it had thirteen rows**
+([ADR-0064](../decisions/ADR-0064.md)). What is left is what *governs* rather
+than what performs: the profile a document carries, the session override, and
+a readout of what the two of them decide. Renamed because "Security" over four
+profiles and a toggle is a label that reads as a promise.
 
 | Row | State |
 | --- | --- |
-| Standard / Private / Confidential / Maximum | **live** — the active document's profile; exactly one ticks, and a Custom policy ticks none. Private and Confidential seal the recovery journal with the document's passphrase, so they need the document encrypted |
-| What the profile permits (recovery, network) | **live** — a readout, greyed because it is not clickable. A profile is a promise about invisible behaviour, and a promise nobody can see is not one. It named the clipboard until [ADR-0061](../decisions/ADR-0061.md) removed that axis with the crate it governed |
-| Encrypt Document... | **live** — asks for a passphrase twice, writes a `.bpadx` beside the original, and the tab adopts it so later saves stay encrypted. Reads "Encrypted (.bpadx)" and greys once the document is |
-| Privacy Mode | **live** — a session-wide override that can only tighten |
-| Scan for Secrets | **live** — `bp_secrets::scan` over the active document. The status bar gives the count, the kinds and the first three positions; the full listing is a dialog, one line per finding. **Neither ever prints the matched text**: a `Finding` deliberately carries a position and a classification and nothing else, and the shell must not undo that by reaching back into the document to quote it |
-| Hash Document (SHA-256) | **live** — `bp_crypto::hash_document` over the bytes the document *would be written as*, not over the buffer, so the digest matches `sha256sum` on a document with a BOM or CRLF endings. Shown grouped in fours (to read down a telephone) and unbroken (to paste), and says so when unsaved edits mean it is not yet the digest of anything on disk |
-| Sign Document... | **live**, since ADR-0031 answered where a signing key lives: sealed in a `.bpadx` envelope under a passphrase, rather than protected by file permissions Windows cannot narrow from safe Rust. **One ceremony, not one per signature** — the first signature creates the key, because what was asked for was a signature and a key created without one is a ritual nobody requested; the second finds it and asks only to unlock it. The row's hint says which the click will do, "creates a signing key" or "unlocks your signing key", so a first-time click is not followed by an unexplained ceremony. It still greys for two reasons, and neither is about key storage: a signature is over the bytes **on disk** (ADR-0026), so a document that has never been saved has nothing to sign, and one with unsaved changes would receive a valid signature over the *previous* version — worse than a refusal, because it verifies. The two say different things because the way out of each differs, Save As against Ctrl+S, and the row and the action ask the same predicate so the greying cannot promise what the click then refuses. The message carries the public key, because a signature nobody has the key for is one nobody can check and the moment somebody has just made one is the moment they need to send it |
-| Verify Signature... | **live** — `bp_integrity::verify_file` over the `.sig` sidecar, per ADR-0026. The sidecar is **found, not asked for**: `document.ext` is signed by `document.ext.sig`, appended and never substituted, and that name is `bp-integrity`'s function rather than a rule the shell writes down a second time. Greyed for a document that has never been saved, with the reason on the row — there is no file for a sidecar to sit beside. The first pass asks the user nothing, because a key cannot change its answer; **a missing sidecar fails there, closed**, since a check that can be passed by deleting a file is not a check. Only a document that already holds together is worth asking for a key, and that key is what turns "intact" into "signed by who you expected". Each of the five verdicts gets its own sentence, worded by `Verification::explain` so that every surface says the same thing about the same answer: verified / no signature file / the file cannot be read / does not match, the named signer being a claim nothing confirmed / signed by a different key, the document intact. That last one is the verdict a bare 64-byte `.sig` could not produce at all, and the whole reason the format records a key. A pass with no key named carries the caveat `Expectation::AnySigner` earns — anyone who alters a document can re-sign it with a key of their own. The one sentence the shell adds is its own: unsaved edits mean these are not the bytes anybody signed, and the check was made against the file on disk. Public keys are still read in either spelling, 32 raw bytes or hexadecimal as pasted out of an email |
-| Security History... | **live** — `bp-audit` under ADR-0024. The reading end of every row above it: a profile change, Privacy Mode, a secret scan, a redaction and a signature check each append one. What is recorded is governed by the document's own profile, so under Confidential and Maximum, and under Privacy Mode, **nothing is written at all** — `Destination::for_policy` resolves those to `SessionOnly`. A tightening is therefore silent and a loosening is recorded, which is the direction worth having: a move down to Standard re-enables everything the profile was switched on to stop. Under Private the history is sealed with the document's own passphrase, so an unencrypted document under that profile gets the notice telling it so rather than a plaintext line |
-| Redact Found Secrets... | **live** — `bp_secrets::scan` produces the spans and `bp_redaction::redact` destroys them. `Placeholder`, not `Mask`: `MatchOriginal` publishes the length of what was removed, which for a PIN or a short token is most of the secret. The marker is `[REDACTED: kind]`, labelled with the name of the rule that matched and never with what it matched. A confirmation dialog lists line and kind first and states plainly that this changes the document and not the file — the file on disk, the recovery journal, the undo history and the clipboard all still hold the originals, and saying "redacted" without saying that is the same lie the black rectangle tells. Applied as an ordinary undoable edit for the same reason. **A private key block is deliberately not redacted**: `bp-secrets` marks only its `-----BEGIN` line, so redacting the span would take out the label and leave the key body — the row says so rather than half-doing it. `bp_redaction::verify` runs afterwards and a survivor is reported by line number, never by text. Greyed on an empty document, with the reason on the row |
-| Inspect Metadata | **live** — `bp_redaction::metadata::inspect` over the text, reporting kind, exposure and line and never the value. For a container this build cannot open — `.docx`, `.pdf`, `.rtf`, an image — `Container::hidden()` and `requires()` are reported instead of silence: "no metadata found" about a `.docx` reads as an all-clear and would be a lie. For plain text it says the opposite thing it is easy to leave out — that the filesystem entry around the file, its timestamps, ownership and alternate data streams, is not part of the check |
-| Lock Document | **live** — forgets this document's passphrase now, so the next save or reload asks again. The row exists because unlocking is sticky for the life of the tab, which is what makes saving an encrypted document bearable and also means one unlocked an hour ago is still unlocked to whoever is at the keyboard; closing the tab was the only way to undo that. It re-encrypts nothing: the file has been encrypted the whole time and the text on screen is unchanged. Greyed when there is no key to forget, because "locked" and "never encrypted" are the same thing to this row |
-| Audit history | **live**, as Security History above |
+| Standard / Private / Confidential / Maximum | **live** — the active document's profile; exactly one ticks, and a Custom policy ticks none |
+| Recovery journal: … | **live** — a readout, greyed because it is not clickable. Standard journals unsaved work in plaintext; every stricter profile journals nothing at all. **Not "encrypted"** — ADR-0064 deleted that variant rather than pointing it at plaintext, which is ADR-0020's rule about a control that quietly weakens itself |
+| Recorded: … | **live** — a readout: what the metadata store may keep about this document. Path, title and tags under Standard; the path only under Private; nothing under Confidential and Maximum |
+| Privacy Mode | **live** — a session-wide override that can only tighten, and it *acts*: journals already written are removed |
+| Encrypt Document, Scan for Secrets, Redact, Inspect Metadata, Hash, Sign, Verify, Security History, Lock Document | **Removed** ([ADR-0064](../decisions/ADR-0064.md)). All nine were live. `.bpadx` documents already on a disk cannot be opened by this build, and there is no migration — the ADR says why |
+
+**Only two of the six policy axes have an enforcing reader**, and those are the
+two with a row here. `embeddings`, `network`, `temporary_files` and `zeroise`
+are reported by Tools ▸ Security Inspector and consulted by nothing
+([ADR-0059](../decisions/ADR-0059.md) §4).
 
 ## Organize
 
@@ -177,58 +182,12 @@ decision.**
   grammar and can be found, while which one you are actually asking is not
   something the document says.
 
-## Security (the rest)
-
-**This section said "Lock, decrypt in place, secure clipboard, audit,
-settings. Planned — phases 15 and 16" until 2026-08-22, and every part of that
-was wrong**, 220 lines below a heading that says there are no planned rows
-left. Kept as a correction rather than deleted, because the shape recurs:
-
-- **Lock Document is a live row** (`action::LOCK_DOCUMENT`, ADR-0048), and a
-  test says so by name — *"Lock Document is live now and must have a real
-  action"*. It was still listed as planned here.
-- **Audit is Security ▸ Security History** (id 206, ADR-0024), live since
-  before this sentence was last touched.
-- **Settings is Tools ▸ Configuration** (id 723, ADR-0048).
-- **Decrypt in place** and **secure clipboard** were never menu rows and are
-  not planned as any: opening a `.bpadx` asks for its passphrase, and what the
-  clipboard could retain was a *policy* the profile decided
-  ([ADR-0020](../decisions/ADR-0020.md)), read out three rows up. **Both sides
-  of that sentence are now gone** — [ADR-0061](../decisions/ADR-0061.md)
-  removed the history and its policy axis together, because an axis outlives
-  its subject by nothing.
-- **Phases 15 and 16 are both "Started"** in `ROADMAP.md`, which owns phase
-  status, and their crates ship.
-
-So this is a paragraph of roadmap prose that outlived four of its five nouns.
-It is the trap `CLAUDE.md` names — *a name that has sat in a plan long enough
-starts to read like a specification* — arriving in a file whose whole job is
-to say what is real.
-
-Redaction and the metadata inspector are rows above, and were already.
-
-Hash, sign and verify are no longer among them: `bp-crypto`'s hashing half and
-`bp-integrity`'s sidecar are all wired into the rows above, **signing
-included** as of ADR-0031. It was the last row in this product greyed for a
-missing *decision* rather than a missing prerequisite, and it stayed that way
-for three sessions with the reason in its label — which is the shape such a
-row should take. The decision, when it came, was to protect the key's contents
-rather than its permissions, so nothing new had to be designed, reviewed or
-fuzzed: it is the envelope encrypted documents and the recovery journal
-already use.
-
-The things that were waiting on profiles now read them: the recovery journal
-refuses rather than writing plaintext under a profile that forbids it, and
-`bp-storage`'s `record_document` honours `Metadata`. **There were three and
-there are two**, since ADR-0061 took the clipboard — and two is now the whole
-count of policy axes anything enforces (ADR-0059 §4).
-
 ## Tools
 
 | Row | State |
 | --- | --- |
 | Document Inspector | **live** — what is *in* the document: words, lines, paragraphs, format, encoding, security profile, size on disk |
-| Security Inspector | **live** — the policy in force on **all seven** axes. The Security menu shows three; embeddings, temporary files and zeroising were governed invisibly. Every axis Privacy Mode overrode shows the profile's own answer too, so the readout cannot look as though the document itself had changed |
+| Security Inspector | **live** — the policy in force on **all six** axes. The Privacy menu shows the two that anything enforces; embeddings, network, temporary files and zeroising are reported here and consulted by nothing ([ADR-0059](../decisions/ADR-0059.md) §4), which the code says out loud rather than leaving the readout to imply otherwise. Every axis Privacy Mode overrode shows the profile's own answer too |
 | File Analysis | **live** — the *file*, which is a different object from the document: size, size class and what it implies, read-only, and whether it changed on disk since it was opened |
 | Configuration | **live**, and **read-only, which it says.** Every setting is already editable in the menu it belongs to; what none of them answers is where a value came from when the user did not pick it this session |
 | Benchmarks | Not a row. `benches/` holds a README and no benchmark, and a row named for a suite that does not exist is the promise "DOI Lookup" was ([ADR-0048](../decisions/ADR-0048.md)) |

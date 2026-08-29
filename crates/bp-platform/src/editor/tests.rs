@@ -41,10 +41,12 @@ fn desktop_keys(entry: &str) -> Vec<(&str, &str)> {
 
 /// Whether `bp-formats` must be able to identify this extension.
 ///
-/// Every type except the product's own. `.bpadx` is an encrypted envelope
-/// (ADR-0021): `bp-crypto` opens it and *then* the plaintext inside is
-/// detected, so `bp_formats::Format` has no variant for it and should not --
-/// the question "what format is this" has no answer until it is decrypted.
+/// Every type except the product's own. `.bpadx` was an encrypted envelope
+/// (ADR-0021, removed under ADR-0064): it was opened and *then* the plaintext
+/// inside was detected, so `bp_formats::Format` has no variant for it. It
+/// still has none, and the registration table still lists the extension --
+/// removing that is a decision about what this product claims to open, which
+/// ADR-0064 deliberately did not take.
 /// The exemption is by group rather than by extension so that a second
 /// product-owned type inherits it without anyone editing this test.
 fn must_be_parseable(file_type: &FileType) -> bool {

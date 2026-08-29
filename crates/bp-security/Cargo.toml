@@ -9,8 +9,9 @@ workspace = true
 
 [dependencies]
 # A profile travels with the document, so it has to serialise. Nothing else
-# is needed: this crate decides policy and performs none of it -- the
-# encryption it can require lives in bp-crypto (phase 15).
+# is needed: this crate decides policy and performs none of it. It required
+# encryption once, from bp-crypto; ADR-0064 removed both that crate and the
+# `Recovery::Encrypted` variant that asked for it.
 serde.workspace = true
 
 [dev-dependencies]
