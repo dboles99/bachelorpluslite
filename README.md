@@ -217,6 +217,8 @@ lesson from each is in [DECISIONS.md](DECISIONS.md)**, which is the one
 home for a lesson -- this list is deliberately just the facts, because a
 lesson told in two places is a lesson corrected in one.
 
+- Phase 20 finished: there is no installer ([ADR-0067](docs/decisions/ADR-0067.md)), and the icon ships beside the executable with no new dependency ([ADR-0068](docs/decisions/ADR-0068.md)) — which also fixed file-type registration pointing at an icon that had never existed.
+- Read-only is the save refusing, and the type that claimed otherwise had never once run ([ADR-0066](docs/decisions/ADR-0066.md)).
 - The security stack is removed and what governed it stays as Privacy ([ADR-0064](docs/decisions/ADR-0064.md)). Five crates; the last of ADR-0059's five removals.
 - Huge-file mode is removed ([ADR-0063](docs/decisions/ADR-0063.md)): the engine, the viewer and the streaming search. The first removal with no directory to delete.
 - Executing anything is removed, and notebooks with it ([ADR-0057](docs/decisions/ADR-0057.md)). Two crates, two menus and one shell module; the first capability to leave.

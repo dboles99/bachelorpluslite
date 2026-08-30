@@ -51,6 +51,11 @@ enum PendingFocus {
 
 export component AppWindow inherits Window {
     title: "BachelorPlusLite";
+    // Loaded by Rust from the PNG shipped beside the executable (ADR-0068),
+    // rather than `@image-url` -- an embedded copy would be a second icon to
+    // keep in step with the one registration points at, and this way there is
+    // one file. Empty until Rust sets it, which is the toolkit default.
+    icon: root.window-icon;
     preferred-width: 1000px;
     preferred-height: 680px;
     background: Palette.shell;
@@ -93,6 +98,8 @@ export component AppWindow inherits Window {
 
     // Menu contents, built in Rust so that enabled state can depend on
     // application state (Save All only when something is unsaved, and so on).
+    /// The window and taskbar icon. See `icon:` above.
+    in property <image> window-icon;
     in property <[MenuItem]> file-items;
     in property <[MenuItem]> edit-items;
     in property <[MenuItem]> view-items;

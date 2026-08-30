@@ -136,6 +136,14 @@ Set-Content -Path (Join-Path $staging 'bpad.cmd') -Encoding ascii -Value @(
     '"%~dp0bachelorpad.exe" %*'
 )
 
+# The icon, beside the executable rather than inside it (ADR-0068). Windows
+# registration writes `DefaultIcon` pointing here, so an archive without it
+# would register every file type to a blank page in Explorer -- which is
+# exactly what shipped before the icon existed.
+$icon = Join-Path $Root 'assets/bachelorpad.ico'
+if (-not (Test-Path $icon)) { throw 'assets/bachelorpad.ico is missing -- registration would point at nothing' }
+Copy-Item $icon (Join-Path $staging 'bachelorpad.ico')
+
 Set-Content -Path (Join-Path $staging 'BUILD.txt') -Encoding utf8 -Value @(
     "BachelorPad+ $version",
     "commit:   $commit",

@@ -57,6 +57,13 @@ ln -s bachelorpad "$DIR/bpad"
 
 cp README.md LICENSE-MIT LICENSE-APACHE "$DIR/"
 
+# The icon, beside the binary rather than in an icon theme (ADR-0068). With no
+# installer there is no step that could place it in one, so the `.desktop`
+# file written by Set as Default Editor points at it here.
+ICON=io.github.dboles99.BachelorPadPlus.png
+test -f "assets/$ICON" || { echo "assets/$ICON is missing -- the .desktop file would name nothing" >&2; exit 1; }
+cp "assets/$ICON" "$DIR/$ICON"
+
 # Asked of the Linux binary rather than assumed from the Windows one. Two
 # builds of one workspace reporting different versions is a thing that should
 # stop a release, not be discovered by whoever downloads the wrong half.

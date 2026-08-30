@@ -372,6 +372,23 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
     }
 
     let ui = AppWindow::new()?;
+    // The window and taskbar icon, loaded from the PNG that ships beside the
+    // executable (ADR-0068). Distinct from the *file-type* icons the registry
+    // and `.desktop` name -- those are Explorer's and the desktop's business
+    // and are settled at registration -- but read from the same one file, so
+    // there is one icon to replace rather than two to keep in step.
+    //
+    // Silent on failure, and deliberately: a missing or unreadable icon is a
+    // window with the toolkit's default, which is a cosmetic loss. Refusing
+    // to start over it would turn a cosmetic loss into an outage.
+    if let Some(path) = std::env::current_exe().ok().and_then(|exe| {
+        exe.to_str()
+            .and_then(|exe| bp_platform::editor::icon_beside(bp_platform::Platform::HOST, exe))
+    }) && let Ok(image) = slint::Image::load_from_path(std::path::Path::new(&path))
+    {
+        ui.set_window_icon(image);
+    }
+
     let mut initial = state::AppState::new();
     if let Some(theme) = options.theme {
         initial.theme = theme;

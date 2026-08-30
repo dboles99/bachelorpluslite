@@ -90,6 +90,38 @@ pub struct AppInfo {
     pub icon: String,
 }
 
+/// The icon file that ships beside the executable, per platform.
+///
+/// **Beside it, not inside it, and that is ADR-0067's doing.** With no
+/// installer there is no step that could place an icon into a system theme,
+/// so an icon has to travel in the archive and be referenced where it lands.
+/// On Windows that also avoids a build-time resource compiler, which would
+/// have been a new dependency for a file the archive was going to carry
+/// anyway.
+#[must_use]
+pub const fn icon_file_name(platform: Platform) -> &'static str {
+    match platform {
+        Platform::Windows => "bachelorpad.ico",
+        Platform::Linux => "io.github.dboles99.BachelorPadPlus.png",
+    }
+}
+
+/// Where the icon sits, given where the executable does.
+///
+/// `None` when `executable` has no parent -- a bare name rather than a path,
+/// which [`AppInfo::problems`] already refuses for its own reasons. Returning
+/// `None` rather than guessing keeps this from inventing a path that a
+/// refused plan would then write into a `.desktop` file.
+#[must_use]
+pub fn icon_beside(platform: Platform, executable: &str) -> Option<String> {
+    let dir = crate::paths::parent(platform, executable)?;
+    Some(crate::paths::join(
+        platform,
+        dir,
+        &[icon_file_name(platform)],
+    ))
+}
+
 impl AppInfo {
     /// This product, launched from `executable`.
     ///
@@ -97,16 +129,26 @@ impl AppInfo {
     /// promise: the `app_id` in particular must not drift between releases.
     ///
     /// It reads [`crate::APP_ID`] and not [`crate::APP_DIR`], which is the
-    /// whole of ADR-0032. The icon takes the same value because freedesktop
-    /// names an application's icon after its id.
+    /// whole of ADR-0032.
+    ///
+    /// **The icon is an absolute path, not a theme name** (ADR-0068).
+    /// freedesktop names an application's icon after its id and resolves that
+    /// against the icon theme, which is right when something installs into
+    /// the theme -- and ADR-0067 decided nothing does. `Icon=` takes an
+    /// absolute path for exactly this case, so it points at the file shipped
+    /// beside the binary. The id remains the fallback, which is what a
+    /// *packaged* build would want and costs nothing to keep.
     #[must_use]
     pub fn bachelorpad(executable: impl Into<String>) -> Self {
+        let executable = executable.into();
+        let icon =
+            icon_beside(Platform::HOST, &executable).unwrap_or_else(|| crate::APP_ID.to_owned());
         Self {
             display_name: crate::DISPLAY_NAME.to_owned(),
             description: crate::DESCRIPTION.to_owned(),
-            executable: executable.into(),
+            executable,
             app_id: crate::APP_ID.to_owned(),
-            icon: crate::APP_ID.to_owned(),
+            icon,
         }
     }
 

@@ -72,6 +72,8 @@ Adding a decision means adding both.
 | BP-ADR-0062 | 2026-08-29 | R3: `bp-data` and the Data menu leave, superseding ADR-0023. `sniff` survives and loses the only thing that could contradict it -- the cross-crate agreement test that once caught it calling a pretty-printed array "JSON Lines" | Accepted | [ADR-0062](docs/decisions/ADR-0062.md) |
 | BP-ADR-0063 | 2026-08-30 | R4: huge-file mode leaves -- the engine, the viewer and `StreamSearch`, superseding ADR-0027, ADR-0030 and ADR-0042. No directory and no id block: a *mode* comes out as branches. D11 becomes inert and D2's own re-ask metric moves | Accepted | [ADR-0063](docs/decisions/ADR-0063.md) |
 | BP-ADR-0064 | 2026-08-30 | R5, the last: five security crates leave and `bp-security` stays as Privacy. `Recovery::Encrypted` is deleted rather than degraded to plaintext; `.bpadx` documents become unopenable with no migration; the Security menu is renamed for what four profiles and a toggle actually are | Accepted, amended | [ADR-0064](docs/decisions/ADR-0064.md) |
+| BP-ADR-0068 | 2026-08-30 | P2: the icon ships beside the executable and everything points at it there -- which removes the build-time resource dependency the row was sized around rather than adding it. Both halves of ADR-0012's registration had been naming an icon that did not exist | Accepted | [ADR-0068](docs/decisions/ADR-0068.md) |
+| BP-ADR-0067 | 2026-08-30 | P5: there is no installer. An unsigned one is worse than none (ADR-0055), winget needs a public URL a private repo has not, and ADR-0012 forbids the one job left -- registering file types. The archive is the delivery mechanism | Accepted | [ADR-0067](docs/decisions/ADR-0067.md) |
 | BP-ADR-0066 | 2026-08-30 | R1 answered: read-only is the save refusing, and always was. `bp_buffer::Access` guarded every edit against a condition nothing has ever set -- one production call site, in the crate ADR-0063 deleted. The refusal now stats the file rather than listing three candidate causes | Accepted | [ADR-0066](docs/decisions/ADR-0066.md) |
 | BP-ADR-0065 | 2026-08-30 | Two of the reduction's three costs were *concurrent* rather than inherent, and are repaired: `sniff` gets a test-only parser that can contradict it again, and Private keeps an honestly-labelled plaintext journal. The third -- ADR-0050's golden vectors -- is inherent and stays paid | Accepted | [ADR-0065](docs/decisions/ADR-0065.md) |
 | BP-ADR-0017 | amended 2026-08-22 | Half of the renderer revert condition is now a number rather than a feeling: per-frame row building, and its independence from document size | Accepted, amended | [ADR-0017](docs/decisions/ADR-0017.md) |
@@ -124,6 +126,45 @@ in the fourth.
 Kept rather than deleted, because every one of these went stale the same
 way — a fix landing without the record moving — and because the lesson in each
 is worth more than the fact.
+
+- **A decision is often already made by the decisions around it, and an
+  estimate is often already invalidated by them.** Two queue rows fell in one
+  afternoon and neither needed new information.
+
+  P5 asked for *"an installer, or a decision that there is not one"*. The
+  answer came from two ADRs that were already in the record:
+  [ADR-0055](docs/decisions/ADR-0055.md) refused an unsigned trust gesture,
+  and [ADR-0012](docs/decisions/ADR-0012.md) refused a silent file
+  association. Between them an installer is left with one Start Menu shortcut
+  to justify itself, so there is not one
+  ([ADR-0067](docs/decisions/ADR-0067.md)).
+
+  P2 then read: *"Windows takes the icon from the executable, which needs a
+  build-time resource -- a new dependency, so an ADR."* True when written.
+  **ADR-0067 invalidated it an hour before anyone took the row**: with no
+  installer to place an icon in a theme, the icon travels in the archive, and
+  a registry `DefaultIcon` takes any path. The dependency was not needed at
+  all ([ADR-0068](docs/decisions/ADR-0068.md)).
+
+  **The row still read as authoritative because it was written down in a
+  table**, which is the same tell as the five research rows ADR-0046 deleted
+  and the 38 "planned" menu rows ADR-0048 found. The habit: before taking a
+  sized row, check whether anything decided since has moved the constraint it
+  names.
+
+- **Two more claims nothing kept, and both were user-visible.** ADR-0068's
+  inventory found that File ▸ Set as Default Editor had *always* registered
+  file types to an icon that did not exist: Windows wrote `DefaultIcon` as
+  `"<exe>",0` and the executable has never carried an icon resource, and Linux
+  wrote a theme name nothing had ever installed. Every registered type
+  rendered blank in Explorer.
+
+  This is the "type with no producer" pattern again, and the difference is
+  worth noting: those were internal and cost nothing until somebody read them.
+  **This one shipped, and a user could see it.** The lesson is the same and
+  the stakes are not, so the same `grep` -- *who produces this, and who reads
+  it* -- is worth running against anything the product writes *outward*: a
+  registry value, a `.desktop` entry, a file on somebody else's disk.
 
 - **A type with no producer is not an implementation, it is a claim** -- and
   three of them turned up in one sequence, in three different hiding places.

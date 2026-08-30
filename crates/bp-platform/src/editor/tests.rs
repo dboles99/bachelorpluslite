@@ -880,3 +880,106 @@ proptest! {
         }
     }
 }
+
+#[test]
+fn the_icon_a_plan_names_is_the_file_the_release_stages() {
+    // **The seam ADR-0068 exists to hold.** The icon is not embedded in the
+    // executable and is not installed into a theme; it travels in the
+    // archive, and two independent things have to agree about its name: this
+    // crate, which writes it into a `.desktop` file or a registry plan, and
+    // the release scripts, which copy it. Those scripts are PowerShell and
+    // shell and cannot be type-checked against this, so the agreement is
+    // asserted by reading them.
+    //
+    // Before ADR-0068 there was no file at all: Windows registration wrote
+    // `DefaultIcon` as `"<exe>",0` and the executable has never carried an
+    // icon resource, so every type registered through it rendered blank.
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(std::path::Path::parent)
+        .expect("the workspace root is two levels above this crate");
+
+    for platform in [Platform::Windows, Platform::Linux] {
+        let name = icon_file_name(platform);
+        assert!(
+            root.join("assets").join(name).is_file(),
+            "{platform:?}: assets/{name} is named by this crate and does not exist"
+        );
+    }
+
+    for (script, name) in [
+        ("scripts/New-Release.ps1", icon_file_name(Platform::Windows)),
+        ("scripts/release-linux.sh", icon_file_name(Platform::Linux)),
+    ] {
+        let text = std::fs::read_to_string(root.join(script))
+            .unwrap_or_else(|e| panic!("{script} is unreadable: {e}"));
+        assert!(
+            text.contains(name),
+            "{script} never mentions {name}, so the archive would ship without \
+             the icon its own registration points at"
+        );
+    }
+}
+
+#[test]
+fn the_icon_path_follows_the_executable_and_the_platform() {
+    // A user unpacks the archive wherever they like, so the icon's location
+    // is only ever knowable relative to the binary.
+    assert_eq!(
+        icon_beside(Platform::Linux, "/opt/bp/bachelorpad").as_deref(),
+        Some("/opt/bp/io.github.dboles99.BachelorPadPlus.png")
+    );
+    assert_eq!(
+        icon_beside(Platform::Windows, r"C:\Apps\bp\bachelorpad.exe").as_deref(),
+        Some(r"C:\Apps\bp\bachelorpad.ico")
+    );
+    // A bare name has no parent, and guessing one would write a path into a
+    // `.desktop` file that resolves to nothing.
+    assert_eq!(icon_beside(Platform::Linux, "bachelorpad"), None);
+}
+
+#[test]
+fn each_icon_asset_is_the_format_its_name_claims() {
+    // `is_file()` is satisfied by an empty file, and an empty file is exactly
+    // what a mangled copy or a failed generator leaves behind. The window
+    // icon fails *silently* by design -- a missing icon must not stop the
+    // editor starting -- so nothing at runtime would report this, and the
+    // Explorer icon would simply be blank again.
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(std::path::Path::parent)
+        .expect("the workspace root is two levels above this crate");
+    let read = |name: &str| std::fs::read(root.join("assets").join(name)).expect("asset");
+
+    let png = read(icon_file_name(Platform::Linux));
+    assert_eq!(
+        &png[..8],
+        b"\x89PNG\r\n\x1a\n",
+        "the Linux icon is not a PNG"
+    );
+    // IHDR width and height, big-endian at bytes 16..24.
+    let width = u32::from_be_bytes(png[16..20].try_into().unwrap());
+    let height = u32::from_be_bytes(png[20..24].try_into().unwrap());
+    assert_eq!((width, height), (256, 256), "the Linux icon is not 256x256");
+
+    let ico = read(icon_file_name(Platform::Windows));
+    // ICONDIR: reserved 0, type 1 (icon), then the image count.
+    assert_eq!(&ico[..4], &[0, 0, 1, 0], "the Windows icon is not an ICO");
+    let count = u16::from_le_bytes(ico[4..6].try_into().unwrap());
+    assert!(
+        count >= 4,
+        "an ICO with {count} sizes will be scaled badly somewhere; \
+         Explorer alone asks for 16, 32, 48 and 256"
+    );
+    // Every directory entry must point inside the file, or the reader gets a
+    // truncated image and shows nothing.
+    for i in 0..usize::from(count) {
+        let e = 6 + i * 16;
+        let len = u32::from_le_bytes(ico[e + 8..e + 12].try_into().unwrap()) as usize;
+        let off = u32::from_le_bytes(ico[e + 12..e + 16].try_into().unwrap()) as usize;
+        assert!(
+            off + len <= ico.len(),
+            "ICO entry {i} runs past the end of the file"
+        );
+    }
+}

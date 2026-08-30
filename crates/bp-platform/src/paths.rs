@@ -617,6 +617,43 @@ pub fn file_name(platform: Platform, path: &str) -> Option<&str> {
     (last != "." && last != "..").then_some(last)
 }
 
+/// The directory part of `path`, as the platform reads separators.
+///
+/// **`std::path` must not answer this**, which is trap 2 in `CLAUDE.md`: a
+/// function taking a `Platform` that then asks the host is a function whose
+/// Linux answer is only ever tested on Linux. A backslash path has a parent
+/// on Windows and is a single filename on Linux, and both legs of the gate
+/// check the same code.
+///
+/// `None` when there is nothing before the last component -- a bare name, or
+/// a path that is only a root. Returning `None` rather than an empty string
+/// keeps a caller from joining onto nothing and getting a relative path where
+/// it wanted an absolute one.
+///
+/// ```
+/// use bp_platform::{Platform, paths::parent};
+///
+/// let p = r"C:\dir\app.exe";
+/// assert_eq!(parent(Platform::Windows, p), Some(r"C:\dir"));
+/// // One component on Linux, so there is nothing before it.
+/// assert_eq!(parent(Platform::Linux, p), None);
+/// assert_eq!(parent(Platform::Linux, "/opt/app/app"), Some("/opt/app"));
+/// ```
+#[must_use]
+pub fn parent(platform: Platform, path: &str) -> Option<&str> {
+    let name = file_name(platform, path)?;
+    // By byte position rather than by rebuilding from components: rebuilding
+    // would normalise separators and repeated slashes, and the caller asked
+    // where this file is, not for a tidied spelling of it.
+    let end = path.len().checked_sub(name.len())?;
+    let separators: &[char] = match platform {
+        Platform::Windows => &['\\', '/'],
+        Platform::Linux => &['/'],
+    };
+    let head = path[..end].trim_end_matches(separators);
+    (!head.is_empty()).then_some(head)
+}
+
 // --- Windows path prefixes -------------------------------------------------
 
 /// Whether `path` already carries the `\\?\` extended-length prefix.

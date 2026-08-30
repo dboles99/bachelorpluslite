@@ -48,7 +48,7 @@ Status as of **2026-08-29**. Four words, meaning four different things:
 | 17 | Themes/personality/accessibility | **Started** | [12-themes-brand](project/tasks/12-themes-brand/) | `bp-theme` |
 | 18 | Windows/Linux platform integration | **Started** | [13-platform](project/tasks/13-platform/) | `bp-platform` |
 | 19 | Hardening, fuzzing and benchmarks | **Started** | [14-hardening](project/tasks/14-hardening/) | `fuzz/` (standalone, and now gated) |
-| 20 | Packaging, signing, release and upgrade testing | **Started** | [14-hardening](project/tasks/14-hardening/) | — |
+| 20 | Packaging, signing, release and upgrade testing | **Done**, less signing | [ADR-0067](docs/decisions/ADR-0067.md), [ADR-0068](docs/decisions/ADR-0068.md) | — |
 
 **Phase 20 started on 2026-08-23, and what it found is worth knowing before
 anybody sizes the rest of it.** The inventory came first, as ADR-0048
@@ -70,9 +70,11 @@ literals for the four files this product leaves on a disk -- `config.toml`,
 `recent.toml`, the security history and the recovery journal -- each of which
 had only write-then-read-back coverage, which is trap 7 exactly.
 
-What is left of phase 20 is an icon and a `.desktop` file (a build-time
-resource, so a dependency ADR), and a decision about whether there is an
-installer at all.
+**Phase 20 is finished.** The last two items closed on 2026-08-30 and neither
+cost what its row said: there is no installer
+([ADR-0067](docs/decisions/ADR-0067.md)), and the icon ships beside the
+executable with no build-time resource and therefore no new dependency
+([ADR-0068](docs/decisions/ADR-0068.md)).
 
 **Phase 10 was decided on 2026-08-23 without being started, which is a state
 this table needs a word for.** D16 asked what should compute an embedding;
