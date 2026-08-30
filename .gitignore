@@ -51,3 +51,10 @@ artifacts/releases/SHA256SUMS.txt
 # which is a repository inside this one -- `git add -A` sweeps it into a
 # commit as a stray gitlink if it is not ignored. It happened once.
 /.claude/worktrees/
+
+# A personal `.code-workspace` at the root -- how somebody opens this repo,
+# not part of it. `.vscode/settings.json` above is the shared half and stays
+# tracked; this is the half that differs per person, and an untracked file at
+# the root also blocks `New-Release.ps1`, which refuses to build a release
+# from a tree nobody can check out again.
+/*.code-workspace
