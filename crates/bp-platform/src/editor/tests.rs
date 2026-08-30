@@ -41,24 +41,13 @@ fn desktop_keys(entry: &str) -> Vec<(&str, &str)> {
 
 /// Whether `bp-formats` must be able to identify this extension.
 ///
-/// Every type except the product's own. `.bpadx` was an encrypted envelope
-/// (ADR-0021, removed under ADR-0064): it was opened and *then* the plaintext
-/// inside was detected, so `bp_formats::Format` has no variant for it. It
-/// still has none, and the registration table still lists the extension --
-/// removing that is a decision about what this product claims to open, which
-/// ADR-0064 deliberately did not take.
-/// The exemption is by group rather than by extension so that a second
-/// product-owned type inherits it without anyone editing this test.
-fn must_be_parseable(file_type: &FileType) -> bool {
-    file_type.group != TypeGroup::Own
-}
-
 #[test]
 fn every_registerable_extension_is_one_bp_formats_can_identify() {
     // The one agreement that must hold between the registration table and the
     // parser: claiming a file type the editor cannot open is the failure the
     // user experiences as a broken machine rather than a missing feature.
-    for file_type in FILE_TYPES.iter().filter(|t| must_be_parseable(t)) {
+    // No exemption: ADR-0069 removed the one type that had one.
+    for file_type in FILE_TYPES {
         assert!(
             bp_formats::Format::from_extension(file_type.extension).is_some(),
             ".{} is offered for registration and bp-formats does not know it",
@@ -148,10 +137,9 @@ fn everything_supported_is_the_whole_table_and_the_others_are_inside_it() {
     for &preset in AssociationPreset::ALL {
         let selection = AssociationSelection::preset(preset);
         assert!(!selection.is_empty(), "{} is empty", preset.label());
-        // Every preset opens plain text and the product's own format --
-        // whatever else the user chose, the product must open its own files.
+        // Every preset opens plain text -- whatever else a user picked, a
+        // text editor that could not be asked to open a .txt is not one.
         assert!(selection.contains("txt"), "{}", preset.label());
-        assert!(selection.contains("bpadx"), "{}", preset.label());
         for extension in selection.extensions() {
             assert!(everything.contains(extension), "{extension}");
         }
@@ -211,8 +199,9 @@ fn the_desktop_entry_has_the_keys_a_desktop_environment_looks_for() {
         assert!(keys.contains(&required), "no {required} key in\n{entry}");
     }
     assert!(entry.contains("Exec=/usr/local/bin/bachelorpad %F"));
-    assert!(entry.contains("MimeType=application/x-bachelorpad-encrypted;"));
-    assert!(entry.contains(";text/plain;"), "{entry}");
+    // The product owns no type of its own (ADR-0069), so the list is entirely
+    // types the distribution already defines, and text/plain leads it.
+    assert!(entry.contains("MimeType=text/plain;"), "{entry}");
     assert!(entry.contains("Categories=Utility;TextEditor;\n"));
 }
 
@@ -251,9 +240,9 @@ fn a_windows_style_path_survives_both_layers_of_escaping() {
 
 #[test]
 fn the_mime_package_defines_only_the_products_own_types() {
-    let package = desktop::mime_package(&everything()).expect("bpadx is in every preset");
-    assert!(package.contains("application/x-bachelorpad-encrypted"));
-    assert!(package.contains("<glob pattern=\"*.bpadx\"/>"));
+    // PowerShell is the only type left that `shared-mime-info` does not define
+    // (ADR-0069 took the other one), so the package is exactly that type.
+    let package = desktop::mime_package(&everything()).expect("PowerShell is in Developer");
     // Not a redefinition of the distribution's own types.
     assert!(!package.contains("application/json"));
     assert!(!package.contains("text/plain"));
@@ -871,7 +860,7 @@ proptest! {
     ) {
         let refs: Vec<&str> = proposed.iter().map(String::as_str).collect();
         let selection = AssociationSelection::custom(refs);
-        for file_type in selection.file_types().filter(|t| must_be_parseable(t)) {
+        for file_type in selection.file_types() {
             prop_assert!(
                 bp_formats::Format::from_extension(file_type.extension).is_some(),
                 "{}",

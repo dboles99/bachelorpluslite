@@ -122,6 +122,12 @@ file (`%APPDATA%\bachelorpad\config.toml`, or `$XDG_CONFIG_HOME` on Linux),
 then defaults. Broken config warns and falls back; it never stops the editor
 starting.
 
+Features removed this session left two files behind on machines that ran an
+earlier build -- `security-history.log` beside that config file, and a
+`recent.toml` from before the recent list moved out of the roaming directory.
+**Nothing reads either one, and this product will not delete them for you**
+([ADR-0070](docs/decisions/ADR-0070.md) says why). They are yours to remove.
+
 **`bachelorpad --help` lists every flag**, which is why this paragraph no
 longer does ([ADR-0054](docs/decisions/ADR-0054.md)). A flag this product does
 not accept is now reported rather than dropped -- `--font_size=20` says so

@@ -123,13 +123,22 @@ pub const APP_ID: &str = "io.github.dboles99.BachelorPadPlus";
 /// it must not be spelled out at the three places that show it: the desktop
 /// registration, `--version`, and Help ▸ Diagnostics. A rename that reaches
 /// two of the three is worse than no rename.
-pub const DISPLAY_NAME: &str = "BachelorPad+";
+///
+/// **Which is exactly what happened.** The identity change renamed the window
+/// title and the About box by hand and left this constant alone, so for a
+/// week the product introduced itself as BachelorPlusLite in the window and
+/// BachelorPad+ at the command line and in every `mimeapps.list` on the
+/// machine. The paragraph above named the failure mode and did not prevent
+/// it, because a doc comment is a wish unless something asks (trap 3) --
+/// `version_names_the_product_the_desktop_registration_names` is what asks,
+/// and it passed throughout, because both halves of *that* pair read this.
+pub const DISPLAY_NAME: &str = "BachelorPlusLite";
 
 /// One line, wherever the product introduces itself.
 ///
 /// Short enough for a `.desktop` `Comment=`, which is the tightest of the
 /// places it appears.
-pub const DESCRIPTION: &str = "Text editor for notes, data and logs";
+pub const DESCRIPTION: &str = "Text editor for notes and logs";
 
 /// One of the two operating systems ADR-0001 names, as a *value*.
 ///

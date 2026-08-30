@@ -74,6 +74,8 @@ Adding a decision means adding both.
 | BP-ADR-0064 | 2026-08-30 | R5, the last: five security crates leave and `bp-security` stays as Privacy. `Recovery::Encrypted` is deleted rather than degraded to plaintext; `.bpadx` documents become unopenable with no migration; the Security menu is renamed for what four profiles and a toggle actually are | Accepted, amended | [ADR-0064](docs/decisions/ADR-0064.md) |
 | BP-ADR-0068 | 2026-08-30 | P2: the icon ships beside the executable and everything points at it there -- which removes the build-time resource dependency the row was sized around rather than adding it. Both halves of ADR-0012's registration had been naming an icon that did not exist | Accepted | [ADR-0068](docs/decisions/ADR-0068.md) |
 | BP-ADR-0067 | 2026-08-30 | P5: there is no installer. An unsigned one is worse than none (ADR-0055), winget needs a public URL a private repo has not, and ADR-0012 forbids the one job left -- registering file types. The archive is the delivery mechanism | Accepted | [ADR-0067](docs/decisions/ADR-0067.md) |
+| BP-ADR-0069 | 2026-08-30 | `.bpadx` leaves the registration table, `TypeGroup::Own` leaves the enum, and the test exemption that let an unopenable type be registered leaves with them. Every preset -- including Notepad Replacement -- was claiming a file type this build opens as ciphertext | Accepted | [ADR-0069](docs/decisions/ADR-0069.md) |
+| BP-ADR-0070 | 2026-08-30 | Removing the code that writes a file does not remove the file. Leftover state -- a frozen `security-history.log`, a `recent.toml` at a location abandoned when the list stopped roaming -- stays where it is and is named rather than swept, because a product that will not seize a file association does not get to delete out of `%APPDATA%` either | Accepted | [ADR-0070](docs/decisions/ADR-0070.md) |
 | BP-ADR-0066 | 2026-08-30 | R1 answered: read-only is the save refusing, and always was. `bp_buffer::Access` guarded every edit against a condition nothing has ever set -- one production call site, in the crate ADR-0063 deleted. The refusal now stats the file rather than listing three candidate causes | Accepted | [ADR-0066](docs/decisions/ADR-0066.md) |
 | BP-ADR-0065 | 2026-08-30 | Two of the reduction's three costs were *concurrent* rather than inherent, and are repaired: `sniff` gets a test-only parser that can contradict it again, and Private keeps an honestly-labelled plaintext journal. The third -- ADR-0050's golden vectors -- is inherent and stays paid | Accepted | [ADR-0065](docs/decisions/ADR-0065.md) |
 | BP-ADR-0017 | amended 2026-08-22 | Half of the renderer revert condition is now a number rather than a feeling: per-frame row building, and its independence from document size | Accepted, amended | [ADR-0017](docs/decisions/ADR-0017.md) |
@@ -151,6 +153,56 @@ is worth more than the fact.
   and the 38 "planned" menu rows ADR-0048 found. The habit: before taking a
   sized row, check whether anything decided since has moved the constraint it
   names.
+
+- **Deleting the code that writes a file does not delete the file, and the
+  record has to say which of those two happened.** Ten crates of features left
+  this session; the removal ADRs describe the code, because the code is what
+  the commits touched and what the tests cover. **The bytes already on a disk
+  have no compiler and no test**, so they went unmentioned -- and they are the
+  part a user actually meets.
+
+  Two were still there: a `security-history.log` frozen at the moment
+  [ADR-0064](docs/decisions/ADR-0064.md) took the audit log, and a `recent.toml`
+  at the location the recent list left when it stopped roaming. The first is
+  the one that matters, because **it does not rebuild and it looks
+  maintained** -- trap 3 in a file rather than a comment.
+
+  They stay. A product that hands the user a `.reg` to read rather than
+  seizing a file association ([ADR-0012](docs/decisions/ADR-0012.md)) does not
+  get to delete out of `%APPDATA%` on its own judgement
+  ([ADR-0070](docs/decisions/ADR-0070.md)).
+
+  The check is one question at the end of every removal: **what did this
+  feature leave behind, and where?** For nine of the ten the answer was
+  nothing. It only takes one.
+
+  A first draft of that ADR said the whole `%APPDATA%achelorpad` directory
+  was orphaned. It is not -- it is `DirKind::Config` and holds `config.toml`
+  as soon as configuration is saved. **The directory is live and two files in it
+  are dead**, which is the difference between removing a folder and not, and
+  one `grep` for `DirKind::Config` told it.
+
+- **An exemption outlives the reason for it, because an exemption is a
+  `filter`, and a `filter` cannot notice.** The one agreement between the
+  registration table and the parser -- *claiming a file type the editor cannot
+  open is the failure a user experiences as a broken machine* -- was asserted
+  by a test that skipped `TypeGroup::Own`. That skip was correct when written:
+  `.bpadx` was genuinely unparseable and genuinely openable. ADR-0064 removed
+  the second half and could not remove the first, so the test went on passing
+  while **every preset, including Notepad Replacement, registered an extension
+  that double-clicks into a window of ciphertext**
+  ([ADR-0069](docs/decisions/ADR-0069.md)).
+
+  The failure arrives dressed as success, in Explorer, which is worse than
+  Windows saying it cannot open the file at all.
+
+  Trap 3 says a claim in a comment is not a property of the code; this is trap
+  3 with a `filter` in place of the comment, and it is worse, because **a
+  stale comment is read by a person who may doubt it and a stale `filter` is
+  read by nothing.** The habit: when a decision removes a capability, search
+  the *tests* for what stopped being checked, not only the code for what
+  stopped being called. It is the same `grep` either way -- who produces this,
+  and who reads it?
 
 - **Two more claims nothing kept, and both were user-visible.** ADR-0068's
   inventory found that File ▸ Set as Default Editor had *always* registered

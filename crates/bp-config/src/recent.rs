@@ -19,9 +19,11 @@
 //! is not important enough for the data directory") and a local one on
 //! Windows, which is the whole point.
 //!
-//! Nothing migrates the old file. It is a convenience list of at most ten
-//! paths and it rebuilds itself the first time anything is opened, so
-//! carrying code forward to find it would cost more than it saves.
+//! Nothing migrates the old file, and nothing deletes it either: it is a
+//! convenience list of at most ten paths and it rebuilds itself the first
+//! time anything is opened, so carrying code forward to find it would cost
+//! more than it saves. ADR-0070 owns that decision and generalises it to
+//! everything a removed feature leaves on a disk.
 //!
 //! Paths only. This file records *which* documents were opened, never
 //! anything about their contents (ADR-0011).
