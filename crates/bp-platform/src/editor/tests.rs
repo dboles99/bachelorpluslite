@@ -983,3 +983,43 @@ fn each_icon_asset_is_the_format_its_name_claims() {
         );
     }
 }
+
+#[test]
+fn the_window_icon_is_a_format_the_toolkit_can_actually_decode() {
+    // **Caught by extracting an archive and looking at it**, an hour after
+    // the window icon was added. Slint 1.17 builds the `image` crate with
+    // `png` and `jpeg` only; there is no ICO decoder. The window icon loads
+    // silently-or-not by design, so on Windows it produced the toolkit's
+    // default and nothing reported it.
+    //
+    // Asserted as a property of the *name* rather than of Slint, because
+    // this crate cannot depend on the toolkit: the window icon must be a PNG
+    // on every platform, whatever registration names.
+    for platform in [Platform::Windows, Platform::Linux] {
+        let named = window_icon_beside(
+            platform,
+            match platform {
+                Platform::Windows => r"C:\Apps\bp\bachelorpad.exe",
+                Platform::Linux => "/opt/bp/bachelorpad",
+            },
+        )
+        .expect("an absolute executable has a parent");
+        assert!(
+            named.ends_with(".png"),
+            "{platform:?}: the window icon is {named}, which Slint cannot decode"
+        );
+    }
+
+    // And the Windows archive must carry it, not only the .ico.
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(std::path::Path::parent)
+        .expect("workspace root");
+    let script = std::fs::read_to_string(root.join("scripts/New-Release.ps1")).expect("script");
+    assert!(
+        script.contains(window_icon_file_name()),
+        "the Windows archive ships no {}, so the window icon would fall back \
+         to the toolkit default on every machine",
+        window_icon_file_name()
+    );
+}

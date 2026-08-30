@@ -144,8 +144,16 @@ $icon = Join-Path $Root 'assets/bachelorpad.ico'
 if (-not (Test-Path $icon)) { throw 'assets/bachelorpad.ico is missing -- registration would point at nothing' }
 Copy-Item $icon (Join-Path $staging 'bachelorpad.ico')
 
+# And the PNG, which is what the *window* icon loads. Slint decodes png and
+# jpeg only, so it cannot read the .ico Explorer needs -- two files, two
+# readers, and shipping only one of them is a silent failure in whichever was
+# left out.
+$windowIcon = Join-Path $Root 'assets/io.github.dboles99.BachelorPadPlus.png'
+if (-not (Test-Path $windowIcon)) { throw 'assets/io.github.dboles99.BachelorPadPlus.png is missing -- the window would show the toolkit default' }
+Copy-Item $windowIcon (Join-Path $staging 'io.github.dboles99.BachelorPadPlus.png')
+
 Set-Content -Path (Join-Path $staging 'BUILD.txt') -Encoding utf8 -Value @(
-    "BachelorPad+ $version",
+    "BachelorPlusLite $version",
     "commit:   $commit",
     "target:   windows-x86_64",
     "signed:   no -- see ADR-0055",

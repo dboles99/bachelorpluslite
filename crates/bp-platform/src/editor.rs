@@ -122,6 +122,37 @@ pub fn icon_beside(platform: Platform, executable: &str) -> Option<String> {
     ))
 }
 
+/// The icon the *window* shows, which is not always the one registration
+/// names.
+///
+/// **Always the PNG, on both platforms**, and that is not tidiness. Slint
+/// 1.17 builds the `image` crate with `png` and `jpeg` only -- there is no ICO
+/// decoder -- so handing it `bachelorpad.ico` fails. The window icon fails
+/// silently by design, so on Windows that produced the toolkit's default icon
+/// and nothing said why.
+///
+/// Windows registration still needs a real `.ico`: `DefaultIcon` is read by
+/// Explorer, not by us. So the Windows archive carries both files, which is
+/// 1.3 KB for the second one and removes a whole class of question.
+#[must_use]
+pub const fn window_icon_file_name() -> &'static str {
+    // Deliberately `icon_file_name(Platform::Linux)`'s value, written out
+    // rather than called: these are equal today and for different reasons,
+    // and a caller that read one for the other would be right by accident.
+    "io.github.dboles99.BachelorPadPlus.png"
+}
+
+/// Where the window icon sits, given where the executable does.
+#[must_use]
+pub fn window_icon_beside(platform: Platform, executable: &str) -> Option<String> {
+    let dir = crate::paths::parent(platform, executable)?;
+    Some(crate::paths::join(
+        platform,
+        dir,
+        &[window_icon_file_name()],
+    ))
+}
+
 impl AppInfo {
     /// This product, launched from `executable`.
     ///
