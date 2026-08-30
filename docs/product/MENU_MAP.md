@@ -46,7 +46,11 @@ And [ADR-0057](../decisions/ADR-0057.md) removed Notebook and Run --
 the cell outline, the `.ipynb` export, one row per runnable cell, Stop, Run
 Document and Interpreters. Every one of them was live when it was deleted,
 which is the point: these were decisions about what the product is, not a
-sweep of rows that never worked. **The menu bar is ten menus now.**
+sweep of rows that never worked. **The menu bar is eleven menus now** -- the
+eleven this file has a section for, which is a sentence that had said *ten*
+while its own headings, `menus::every_menu` and the window all said otherwise.
+`the_menu_bar_and_the_list_of_menus_name_the_same_menus` reads `app.slint` and
+asks, so that a menu cannot be added or removed without this line failing.
 
 ## File
 

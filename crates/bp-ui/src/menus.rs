@@ -912,6 +912,53 @@ mod tests {
         ]
     }
 
+    /// The menu bar's names, read out of the Slint source that draws it.
+    ///
+    /// Scoped to the *named* `MenuLabel`s. The tab strip's "+" is a
+    /// `MenuLabel` too and is not a menu, which is the whole reason this
+    /// reads the binding rather than counting the component.
+    fn menu_bar_names_in_slint() -> Vec<&'static str> {
+        const SOURCE: &str = include_str!("../ui/app.slint");
+        let mut names = Vec::new();
+        let mut lines = SOURCE.lines();
+        while let Some(line) = lines.next() {
+            if !line.contains(":= MenuLabel {") {
+                continue;
+            }
+            let label = lines.next().expect("a MenuLabel declares a label next");
+            let open = label.find('"').expect("the label is a quoted string");
+            let close = label.rfind('"').expect("the label is a quoted string");
+            names.push(&label[open + 1..close]);
+        }
+        names
+    }
+
+    #[test]
+    fn the_menu_bar_and_the_list_of_menus_name_the_same_menus() {
+        // `every_menu` is a Rust list and `app.slint` is what a user clicks,
+        // and nothing made them agree. They did agree; what had drifted was
+        // `docs/product/MENU_MAP.md`, whose prose said ten while its own
+        // section headings, this list and the window all said eleven.
+        //
+        // A count on its own would not have caught a rename, so this asserts
+        // the names. **The number is deliberately spelled out as well**, so
+        // that adding or removing a menu fails here and sends whoever did it
+        // to MENU_MAP -- which is the step that was skipped.
+        let mut bar = menu_bar_names_in_slint();
+        let mut listed: Vec<&str> = every_menu().into_iter().map(|(name, _)| name).collect();
+        assert_eq!(
+            bar.len(),
+            11,
+            "the menu bar is eleven menus; MENU_MAP says so too"
+        );
+        bar.sort_unstable();
+        listed.sort_unstable();
+        assert_eq!(
+            bar, listed,
+            "app.slint and every_menu disagree about the menu bar"
+        );
+    }
+
     #[test]
     fn no_menu_offers_a_row_that_does_nothing() {
         // **The goal of 2026-08-22, made checkable** (ADR-0048). Every row a
