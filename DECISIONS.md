@@ -154,6 +154,26 @@ is worth more than the fact.
   sized row, check whether anything decided since has moved the constraint it
   names.
 
+- **Driving the window takes the keyboard from whoever is at the machine, and
+  the contaminated run looks exactly like a clean one.** `Drive-Window.ps1`
+  already guarded the case it knew about -- `SetForegroundWindow` failing
+  silently, so keys land somewhere else -- and that guard is useless against
+  the reverse: the *right* window is in front, and the keystrokes arriving are
+  a person's rather than the script's.
+
+  On 2026-08-30 a manual pass ran seven launches while Daniel was using the
+  desktop. Nine characters he typed were captured into the document under
+  test, reached the recovery journal, and **a defect was nearly reported out of
+  that evidence** -- "saving does not clear the journal", which was wrong twice
+  over, because `-Kill` also makes every run look like a crash and a journal
+  surviving a crash is correct.
+
+  Two habits, and the second is the one that generalises. Say before driving
+  the window and let the person say when. And **when a manual pass produces a
+  surprising result, suspect the pass before the product** -- an automated test
+  that is wrong usually fails, while a manual one that is wrong quietly
+  produces a finding.
+
 - **Deleting the code that writes a file does not delete the file, and the
   record has to say which of those two happened.** Ten crates of features left
   this session; the removal ADRs describe the code, because the code is what
