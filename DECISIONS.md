@@ -196,7 +196,7 @@ is worth more than the fact.
   feature leave behind, and where?** For nine of the ten the answer was
   nothing. It only takes one.
 
-  A first draft of that ADR said the whole `%APPDATA%achelorpad` directory
+  A first draft of that ADR said the whole `%APPDATA%\bachelorpad` directory
   was orphaned. It is not -- it is `DirKind::Config` and holds `config.toml`
   as soon as configuration is saved. **The directory is live and two files in it
   are dead**, which is the difference between removing a folder and not, and

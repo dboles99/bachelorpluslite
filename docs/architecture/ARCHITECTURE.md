@@ -43,7 +43,7 @@ and this table carries the intent until then.
 | `bp-organize` | planned | Projects, topics, tags, related notes, duplicate detection. | 9 |
 | `bp-storage` | **live** | SQLite metadata store and migrations (ADR-0019). Documents, tags. Written to on every successful save and read four ways: Related Notes and duplicate detection (ADR-0037), Research Report's aggregates (ADR-0041), and its own summary (ADR-0046). | 9, 13 |
 | `bp-security` | **live** | Privacy profiles resolving to a policy, plus Privacy Mode (ADR-0020). Decides policy; performs none of it. **Two axes have an enforcing reader** — the recovery journal and the metadata store — and four do not; [ADR-0064](../decisions/ADR-0064.md) kept the crate for the two that govern. | 14 |
-| `bp-platform` | **built, unwired** | The seam ADR-0001 requires, and it carries rules rather than only traits: path legality per platform (reserved device names, forbidden characters, the length limits each platform counts in its own unit), config/data/cache directories from an injected environment, a capability register, and default-editor registration -- state, plan, artefacts. ADR-0012 is mechanised: a plan that would seize an association or touch Notepad is refused. Two `cfg` attributes in the whole crate, so all 103 tests run on both legs. | 18 |
+| `bp-platform` | **live** | The seam ADR-0001 requires, and it carries rules rather than only traits: path legality per platform (reserved device names, forbidden characters, the length limits each platform counts in its own unit), config/data/cache directories from an injected environment, a capability register, and default-editor registration -- state, plan, artefacts. ADR-0012 is mechanised: a plan that would seize an association or touch Notepad is refused. Two `cfg` attributes in the whole crate, so all 115 tests run on both legs. **Wired since File > Set as Default Editor shipped**, and this row said *unwired* for longer than that was true. | 18 |
 | `bp-platform-windows` | **not created, deliberately** | Everything it would hold is either a parameterised function in `bp-platform` or blocked: applying `HKCU` keys needs a Win32 call or a new dependency, and DPAPI/Hello wait on the signing-key decision. ADR-0001's own warning about `cfg`-gated code argues against a crate neither CI leg compiles. | 18 |
 | `bp-platform-linux` | **not created, deliberately** | Same reasoning. `.desktop` and MIME registration are in `bp-platform` and run on both legs; Secret Service waits on the same decision. | 18 |
 
@@ -96,8 +96,8 @@ an edge, because a dependency diagram that has drifted is worse than none.
 **Eight crates depend on nothing else in the workspace**: `bp-buffer`,
 `bp-formats`, `bp-naming`, `bp-platform`, `bp-search`, `bp-security`,
 `bp-semantic` and `bp-theme`. That is what keeps them cheap to test and
-impossible to entangle with the UI toolkit — and it is why all but 189 of the
-workspace's 975 tests run without a window.
+impossible to entangle with the UI toolkit — and it is why all but 190 of the
+workspace's 977 tests run without a window.
 
 `bp-platform` is on that list for its *real* dependencies and takes
 `bp-formats` as a **dev**-dependency, deliberately and one-directionally: it

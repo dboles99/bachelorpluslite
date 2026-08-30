@@ -1,8 +1,8 @@
-# BachelorPad+ Full-Product Roadmap
+# BachelorPlusLite Full-Product Roadmap
 
 This is not an MVP roadmap. Each phase contributes to the full v1 target.
 
-Status as of **2026-08-29**. Four words, meaning four different things:
+Status as of **2026-08-30**. Four words, meaning four different things:
 
 - **Done** — the phase's work is finished.
 - **Started** — a real, tested slice exists *and is reachable from the
@@ -75,6 +75,22 @@ cost what its row said: there is no installer
 ([ADR-0067](docs/decisions/ADR-0067.md)), and the icon ships beside the
 executable with no build-time resource and therefore no new dependency
 ([ADR-0068](docs/decisions/ADR-0068.md)).
+
+**Phase 18 is the one the reduction quietly finished.** Its remaining items
+were DPAPI, Windows Hello and the Linux Secret Service -- every one of them a
+place to keep a key, and [ADR-0064](docs/decisions/ADR-0064.md) removed the
+keys. What is left of the phase shipped: path rules per platform, the
+capability register, config/data/cache directories, and File > Set as Default
+Editor. It still reads **Started** rather than Done because
+[ADR-0012](docs/decisions/ADR-0012.md)'s Windows half hands the user a `.reg`
+instead of applying it, and applying it needs a Win32 call or a dependency --
+a real remaining item rather than a technicality.
+
+Two defects in that phase were found on 2026-08-30 by installing the product
+rather than by testing it: registration had always named an icon that did not
+exist ([ADR-0068](docs/decisions/ADR-0068.md)), and every preset registered
+`.bpadx`, which this build opens as ciphertext
+([ADR-0069](docs/decisions/ADR-0069.md)).
 
 **Phase 10 was decided on 2026-08-23 without being started, which is a state
 this table needs a word for.** D16 asked what should compute an embedding;

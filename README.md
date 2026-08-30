@@ -16,8 +16,9 @@ and Linux** — a Notepad clone, and deliberately little more.
 > [ADR-0059](docs/decisions/ADR-0059.md) scoped the rest and **all five
 > removals are done**: research and citations, clipboard history, the
 > structured-data operations, huge-file mode, and the security stack. Eight
-> crates, and the workspace went from 67,316 lines of Rust to **33,388** —
-> under the ~40,000 that ADR estimated.
+> crates, and the workspace went from 67,316 lines of Rust to **33,711** in
+> `crates/` and `apps/` — under the ~40,000 that ADR estimated. Ten crates
+> left; fifteen remain.
 >
 > **What stays is the profile model**, narrowed to the two axes that govern
 > something: whether a recovery journal is written, and whether anything is
@@ -91,9 +92,9 @@ inside WSL so the executable bit and the `bpad` symlink survive), and writes a
 the script says so on every run** — signing is deferred and self-signing
 refused, for the reason in [ADR-0055](docs/decisions/ADR-0055.md).
 
-## Current state (2026-08-23)
+## Current state (2026-08-30)
 
-**25 crates, 1,986 tests, green on Windows and Linux.** **Every menu row either does something or is a readout** ([ADR-0048](docs/decisions/ADR-0048.md)) — nothing anywhere says "not implemented yet" any more. The app opens, edits and
+**15 crates, 977 tests, green on Windows and Linux.** **Every menu row either does something or is a readout** ([ADR-0048](docs/decisions/ADR-0048.md)) — nothing anywhere says "not implemented yet" any more. The app opens, edits and
 saves atomically, and does rather more than that:
 
 | Area | What works |
@@ -223,6 +224,9 @@ lesson from each is in [DECISIONS.md](DECISIONS.md)**, which is the one
 home for a lesson -- this list is deliberately just the facts, because a
 lesson told in two places is a lesson corrected in one.
 
+- Every file type any preset offers to register is one this build can open ([ADR-0069](docs/decisions/ADR-0069.md)). `.bpadx` was in all five presets, including Notepad Replacement, and this build opens one as ciphertext; the test that guards exactly this had an exemption for it that outlived its reason.
+- State written by a removed feature is left where it is and named rather than swept ([ADR-0070](docs/decisions/ADR-0070.md)).
+- The menu bar and the Rust list of menus are made to agree by a test that reads `app.slint`; `MENU_MAP.md` had said ten menus while the window, the headings and the code all said eleven.
 - Phase 20 finished: there is no installer ([ADR-0067](docs/decisions/ADR-0067.md)), and the icon ships beside the executable with no new dependency ([ADR-0068](docs/decisions/ADR-0068.md)) — which also fixed file-type registration pointing at an icon that had never existed.
 - Read-only is the save refusing, and the type that claimed otherwise had never once run ([ADR-0066](docs/decisions/ADR-0066.md)).
 - The security stack is removed and what governed it stays as Privacy ([ADR-0064](docs/decisions/ADR-0064.md)). Five crates; the last of ADR-0059's five removals.
