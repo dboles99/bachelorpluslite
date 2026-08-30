@@ -67,6 +67,27 @@ pub enum SaveError {
     #[error("{} already exists", .path.display())]
     AlreadyExists { path: PathBuf },
 
+    /// The file on disk is marked read-only, and we know it rather than
+    /// guessing.
+    ///
+    /// **Separate from [`SaveError::Replace`] because the way out differs.**
+    /// Replace lists three candidate causes and hedges with "may be", which is
+    /// honest when the cause is unknown and needlessly vague when it is not:
+    /// at the moment a replace fails we can stat the file and read the
+    /// attribute. Where the answer is yes, this says so and names Save As.
+    ///
+    /// Only raised when the attribute is *set*. On Unix
+    /// `Permissions::readonly()` reports "no write bit for anyone", which is a
+    /// different question from "may this process write it" -- a file owned by
+    /// somebody else with mode 644 answers `false` and still refuses us. That
+    /// case keeps `Replace`'s hedge, because there the hedge is true.
+    #[error(
+        "cannot save {} -- the file is marked read-only. Use Save As to write a \
+         copy somewhere else, or clear the read-only attribute and try again",
+        .path.display()
+    )]
+    ReadOnlyFile { path: PathBuf },
+
     #[error(
         "cannot replace {} -- it may be read-only, open in another program, or in a \
          directory that no longer exists: {source}",
@@ -134,6 +155,15 @@ pub struct SaveOutcome {
     pub replaced_existing: bool,
 }
 
+/// Whether `path` carries the read-only attribute.
+///
+/// `false` for a path that cannot be stat'ed at all: this refines an error
+/// message and must never invent a cause. A file that vanished between the
+/// failed replace and this call is a `Replace`, which is what it was.
+fn is_marked_read_only(path: &Path) -> bool {
+    std::fs::metadata(path).is_ok_and(|meta| meta.permissions().readonly())
+}
+
 /// Write `contents` to `path` atomically.
 ///
 /// On success the file at `path` is exactly `contents`. On any error the
@@ -184,9 +214,22 @@ pub fn atomic_write(
     // The atomic step. Everything before this touched only the temp file, so
     // any earlier failure leaves the user's file exactly as it was.
     let _persisted = match options.overwrite {
-        Overwrite::Replace => temp.persist(target).map_err(|e| SaveError::Replace {
-            path: path.to_owned(),
-            source: e.error,
+        Overwrite::Replace => temp.persist(target).map_err(|e| {
+            // Asked only once the write has already failed, so the ordinary
+            // path pays nothing for it -- and asked of the *target* now rather
+            // than remembered from the open, because the attribute can be set
+            // while a document is open and a remembered answer would be wrong
+            // in exactly that case.
+            if is_marked_read_only(target) {
+                SaveError::ReadOnlyFile {
+                    path: path.to_owned(),
+                }
+            } else {
+                SaveError::Replace {
+                    path: path.to_owned(),
+                    source: e.error,
+                }
+            }
         })?,
         Overwrite::FailIfExists => {
             temp.persist_noclobber(target)
@@ -886,5 +929,62 @@ mod tests {
                 assert_eq!(std::fs::read(&path).unwrap(), b"body");
             }
         }
+    }
+
+    /// Mark `path` read-only, the way each platform means it.
+    ///
+    /// `Permissions::set_readonly(true)` is the portable call and does the
+    /// right thing on both: the read-only attribute on Windows, and clearing
+    /// every write bit on Unix.
+    fn make_read_only(path: &Path) {
+        let mut perms = std::fs::metadata(path).unwrap().permissions();
+        perms.set_readonly(true);
+        std::fs::set_permissions(path, perms).unwrap();
+    }
+
+    #[test]
+    fn a_read_only_file_is_refused_by_name_rather_than_by_guess() {
+        // **The whole of what read-only means in this product** (ADR-0066).
+        // `bp_buffer::Access` claimed to be the mechanism and was never once
+        // set by anything; the real answer has always been the save refusing,
+        // and until now it refused with a message listing three candidate
+        // causes and hedging with "may be". At the moment a replace fails we
+        // can stat the file, so where the attribute is set we say so.
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("locked.txt");
+        std::fs::write(&path, b"original").unwrap();
+        make_read_only(&path);
+
+        let result = atomic_write(&path, b"replacement", SaveOptions::default());
+
+        // Cleared before any assertion can panic, or the temporary directory
+        // cannot be removed on Windows.
+        let mut perms = std::fs::metadata(&path).unwrap().permissions();
+        #[allow(clippy::permissions_set_readonly_false)]
+        perms.set_readonly(false);
+        std::fs::set_permissions(&path, perms).unwrap();
+
+        match result {
+            Err(SaveError::ReadOnlyFile { path: named }) => {
+                assert_eq!(named, path, "the refusal must name the file");
+                let said = SaveError::ReadOnlyFile { path: named }.to_string();
+                assert!(
+                    said.contains("read-only") && said.contains("Save As"),
+                    "a refusal has to say what is wrong and what to do: {said}"
+                );
+            }
+            // Unix permits replacing a read-only file when its *directory* is
+            // writable -- the rename does not open the file at all -- so the
+            // save legitimately succeeds there. Asserted rather than skipped,
+            // because "it succeeded" and "the test did not run" look the same
+            // in a green log.
+            Ok(_) => {
+                assert_eq!(Platform::HOST, Platform::Linux, "{result:?}");
+                assert_eq!(std::fs::read(&path).unwrap(), b"replacement");
+            }
+            other => panic!("expected a named refusal or a successful replace, got {other:?}"),
+        }
+
+        assert!(path.exists(), "the original must still be there either way");
     }
 }

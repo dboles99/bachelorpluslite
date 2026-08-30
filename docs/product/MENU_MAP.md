@@ -188,7 +188,7 @@ decision.**
 | --- | --- |
 | Document Inspector | **live** — what is *in* the document: words, lines, paragraphs, format, encoding, security profile, size on disk |
 | Security Inspector | **live** — the policy in force on **all six** axes. The Privacy menu shows the two that anything enforces; embeddings, network, temporary files and zeroising are reported here and consulted by nothing ([ADR-0059](../decisions/ADR-0059.md) §4), which the code says out loud rather than leaving the readout to imply otherwise. Every axis Privacy Mode overrode shows the profile's own answer too |
-| File Analysis | **live** — the *file*, which is a different object from the document: size, size class and what it implies, read-only, and whether it changed on disk since it was opened |
+| File Analysis | **live** — the *file*, which is a different object from the document: size, whether it is marked read-only, and whether it changed on disk since it was opened. The size class left with huge-file mode ([ADR-0063](../decisions/ADR-0063.md)) |
 | Configuration | **live**, and **read-only, which it says.** Every setting is already editable in the menu it belongs to; what none of them answers is where a value came from when the user did not pick it this session |
 | Benchmarks | Not a row. `benches/` holds a README and no benchmark, and a row named for a suite that does not exist is the promise "DOI Lookup" was ([ADR-0048](../decisions/ADR-0048.md)) |
 | Conversions | Not a row, and no longer possible — the Data menu owned format conversion and left under [ADR-0062](../decisions/ADR-0062.md) |

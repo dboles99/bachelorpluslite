@@ -53,64 +53,10 @@ impl Position {
     }
 }
 
-/// Whether a document accepts edits, and if not, why not.
-///
-/// **Two variants, not a boolean**, and that survived the removal of the third
-/// (ADR-0063). A file that is read-only on disk becomes editable when its
-/// permissions change, and Save As is the way out; saying only "read-only"
-/// leaves somebody clicking at whichever cause was not theirs. The variant
-/// that went was `ReadOnlyBySize`, whose way out was a different tool -- and
-/// it was the reason this type is an enum. **It is kept as an enum anyway**:
-/// `project/WORK_QUEUE.md`'s read-only design pass asks whether Lock Document
-/// belongs here, and collapsing to a `bool` now would have to be undone to
-/// answer it.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum Access {
-    /// Edits are accepted. The default, so that every buffer built before
-    /// anyone thought about access is editable rather than mysteriously
-    /// inert.
-    #[default]
-    Editable,
-    /// The file on disk forbids writing: permissions, a read-only volume, or
-    /// another process holding it.
-    ReadOnlyFile,
-}
-
-impl Access {
-    /// Decide access from the file's own permissions.
-    ///
-    /// Took a size as well until ADR-0063, and size won when both applied --
-    /// because size refused edits *while typing* and permissions only surface
-    /// at save time. Nothing is refused by size now.
-    pub const fn of(file_is_read_only: bool) -> Self {
-        if file_is_read_only {
-            Self::ReadOnlyFile
-        } else {
-            Self::Editable
-        }
-    }
-
-    /// Whether edits must be refused.
-    pub const fn is_read_only(self) -> bool {
-        !matches!(self, Self::Editable)
-    }
-
-    /// What to tell the user, in one line.
-    ///
-    /// Phrased as a fact about the document rather than an apology.
-    pub fn message(self) -> String {
-        match self {
-            Self::Editable => String::new(),
-            Self::ReadOnlyFile => "Read-only: the file cannot be written.".to_owned(),
-        }
-    }
-}
-
 /// A rope-backed text buffer.
 #[derive(Debug, Clone, Default)]
 pub struct Buffer {
     rope: Rope,
-    access: Access,
 }
 
 impl Buffer {
@@ -121,40 +67,7 @@ impl Buffer {
     pub fn from_text(text: &str) -> Self {
         Self {
             rope: Rope::from_str(text),
-            access: Access::Editable,
         }
-    }
-
-    /// Whether this buffer accepts edits, and why not if it does not.
-    ///
-    /// Carried on the buffer rather than checked by every caller because
-    /// "read-only" enforced at the call sites is read-only until somebody
-    /// adds a call site. The rope is the one place every edit passes through.
-    pub fn access(&self) -> Access {
-        self.access
-    }
-
-    /// Shorthand for the common question.
-    pub fn is_read_only(&self) -> bool {
-        self.access.is_read_only()
-    }
-
-    /// Mark the buffer read-only, or editable again.
-    ///
-    /// Takes the reason, not a boolean: a buffer that is read-only because
-    /// the file is locked and one that is read-only because the document is
-    /// 2 GB need different words in the status bar, and a `bool` throws that
-    /// away at the only point where it is still known. See [`Access`].
-    pub fn set_access(&mut self, access: Access) {
-        self.access = access;
-    }
-
-    /// The same buffer, marked. For construction sites that would otherwise
-    /// need a `let mut` and a second statement.
-    #[must_use]
-    pub fn with_access(mut self, access: Access) -> Self {
-        self.access = access;
-        self
     }
 
     pub fn len_chars(&self) -> usize {
@@ -185,18 +98,11 @@ impl Buffer {
     /// the caller is a keystroke, the answer is already on screen in the
     /// status bar, and a dialog per character is not a better editor.
     pub fn insert(&mut self, char_idx: usize, text: &str) {
-        if self.is_read_only() {
-            return;
-        }
         self.rope.insert(char_idx.min(self.len_chars()), text);
     }
 
-    /// Remove a character range, clamped to the buffer. Does nothing when the
-    /// buffer is read-only.
+    /// Remove a character range, clamped to the buffer.
     pub fn remove(&mut self, range: Range<usize>) {
-        if self.is_read_only() {
-            return;
-        }
         let end = range.end.min(self.len_chars());
         let start = range.start.min(end);
         if start < end {
@@ -440,55 +346,6 @@ mod tests {
         assert_eq!(b.char_at(1), Some('é'), "chars, not bytes");
         assert_eq!(b.char_at(2), None);
         assert_eq!(b.char_at(999), None);
-    }
-
-    #[test]
-    fn a_buffer_is_editable_until_it_is_told_otherwise() {
-        // The default matters more than it looks: every existing caller
-        // builds a buffer without mentioning access, and all of them must
-        // keep working.
-        let mut b = Buffer::from_text("hi");
-        assert_eq!(b.access(), Access::Editable);
-        assert!(!b.is_read_only());
-        b.insert(2, "!");
-        assert_eq!(b.to_string(), "hi!");
-        assert_eq!(Buffer::new().access(), Access::Editable);
-        assert_eq!(Buffer::default().access(), Access::Editable);
-        assert_eq!(Buffer::from("x").access(), Access::Editable);
-    }
-
-    #[test]
-    fn a_read_only_buffer_refuses_every_edit_whatever_the_reason() {
-        // Written as a loop over every non-editable variant, and kept that
-        // way with one left. ADR-0063 removed `ReadOnlyBySize`; the point of
-        // the loop was that a reason which only changed the *message* must
-        // never become one that changes whether the edit lands, and a second
-        // reason is exactly what the read-only design pass may add back.
-        // One element today, and written as a loop on purpose: the point was
-        // that a reason which only changes the *message* must never become
-        // one that changes whether the edit lands, and the read-only design
-        // pass may add the second reason back.
-        #[allow(clippy::single_element_loop)]
-        for access in [Access::ReadOnlyFile] {
-            let mut b = Buffer::from_text("hello").with_access(access);
-            assert!(b.is_read_only(), "{access:?}");
-            b.insert(0, "X");
-            b.remove(0..3);
-            assert_eq!(b.to_string(), "hello", "{access:?} let an edit through");
-            assert!(!b.access().message().is_empty(), "and must say why");
-        }
-    }
-
-    #[test]
-    fn a_buffer_can_be_made_editable_again() {
-        // Permissions change while a file is open, and reopening the
-        // document to pick that up would be a worse editor.
-        let mut b = Buffer::from_text("ab").with_access(Access::ReadOnlyFile);
-        b.insert(2, "c");
-        assert_eq!(b.to_string(), "ab");
-        b.set_access(Access::Editable);
-        b.insert(2, "c");
-        assert_eq!(b.to_string(), "abc");
     }
 
     #[test]

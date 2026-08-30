@@ -442,10 +442,13 @@ it was written:
   superseded by [ADR-0063](docs/decisions/ADR-0063.md), which removes the
   choice the flag would have forced: the flag stays deleted for a second
   reason now.
-- `--readonly` is **not a flag**. Read-only is a property of a document, not
-  of an invocation -- `bp_buffer::Access` carries it and Security > Lock
-  Document already exists. It wants a design pass, and
-  `project/WORK_QUEUE.md` has it.
+- `--readonly` is **not a flag, and it is not a document property either**
+  ([ADR-0066](docs/decisions/ADR-0066.md)). It was declined as a flag here and
+  the capability left open, on the belief that `bp_buffer::Access` carried it.
+  That type had no producer anywhere and never had one, so **read-only in this
+  product is the save refusing** -- which is what Notepad does. The refusal
+  now stats the file and names Save As rather than listing three candidate
+  causes.
 
 The `bpad` short spelling this block also showed is **kept and unbuilt**: it
 is a second name for the same executable, which is something an installer

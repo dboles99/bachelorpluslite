@@ -34,7 +34,7 @@ and this table carries the intent until then.
 | `bp-theme` | **live** | Palettes as data (ADR-0009). Green is the default. | 1, 17 |
 | `bp-config` | **live** | Settings precedence, config file, recent-files list, recovery from bad input, and **the inventory of what the command line accepts** (`cli`, which renders `--help` and `--version` from it -- ADR-0054). | 1 |
 | `bp-ui` | **live** | The Slint application shell (ADR-0015). Split into modules — see below. | 1 |
-| `bp-buffer` | **live** | Rope buffer, character indices, line/column maths, and `Access` — whether a document accepts edits and why not. The large-file engine (ADR-0027) was 2,391 of its lines and left under [ADR-0063](../decisions/ADR-0063.md). | 2 |
+| `bp-buffer` | **live** | Rope buffer, character indices, line/column maths, and nothing else — 360 lines. The large-file engine (ADR-0027) was 2,391 of them and left under [ADR-0063](../decisions/ADR-0063.md); `Access` left under [ADR-0066](../decisions/ADR-0066.md), which found it had never been set by anything. | 2 |
 | `bp-editor` | **live** | Caret, selection, motion, transaction-based undo/redo, line operations, key-to-command mapping, document-to-screen geometry. The editor's storage — see below. | 2 |
 | `bp-history` | **live** | Crash-safe recovery journal and autosave checkpoints. | 3 |
 | `bp-formats` | **live** | Format detection and profiles (ADR-0008). | 5 |
@@ -97,7 +97,7 @@ an edge, because a dependency diagram that has drifted is worse than none.
 `bp-formats`, `bp-naming`, `bp-platform`, `bp-search`, `bp-security`,
 `bp-semantic` and `bp-theme`. That is what keeps them cheap to test and
 impossible to entangle with the UI toolkit — and it is why all but 189 of the
-workspace's 974 tests run without a window.
+workspace's 972 tests run without a window.
 
 `bp-platform` is on that list for its *real* dependencies and takes
 `bp-formats` as a **dev**-dependency, deliberately and one-directionally: it

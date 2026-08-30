@@ -72,6 +72,7 @@ Adding a decision means adding both.
 | BP-ADR-0062 | 2026-08-29 | R3: `bp-data` and the Data menu leave, superseding ADR-0023. `sniff` survives and loses the only thing that could contradict it -- the cross-crate agreement test that once caught it calling a pretty-printed array "JSON Lines" | Accepted | [ADR-0062](docs/decisions/ADR-0062.md) |
 | BP-ADR-0063 | 2026-08-30 | R4: huge-file mode leaves -- the engine, the viewer and `StreamSearch`, superseding ADR-0027, ADR-0030 and ADR-0042. No directory and no id block: a *mode* comes out as branches. D11 becomes inert and D2's own re-ask metric moves | Accepted | [ADR-0063](docs/decisions/ADR-0063.md) |
 | BP-ADR-0064 | 2026-08-30 | R5, the last: five security crates leave and `bp-security` stays as Privacy. `Recovery::Encrypted` is deleted rather than degraded to plaintext; `.bpadx` documents become unopenable with no migration; the Security menu is renamed for what four profiles and a toggle actually are | Accepted, amended | [ADR-0064](docs/decisions/ADR-0064.md) |
+| BP-ADR-0066 | 2026-08-30 | R1 answered: read-only is the save refusing, and always was. `bp_buffer::Access` guarded every edit against a condition nothing has ever set -- one production call site, in the crate ADR-0063 deleted. The refusal now stats the file rather than listing three candidate causes | Accepted | [ADR-0066](docs/decisions/ADR-0066.md) |
 | BP-ADR-0065 | 2026-08-30 | Two of the reduction's three costs were *concurrent* rather than inherent, and are repaired: `sniff` gets a test-only parser that can contradict it again, and Private keeps an honestly-labelled plaintext journal. The third -- ADR-0050's golden vectors -- is inherent and stays paid | Accepted | [ADR-0065](docs/decisions/ADR-0065.md) |
 | BP-ADR-0017 | amended 2026-08-22 | Half of the renderer revert condition is now a number rather than a feeling: per-frame row building, and its independence from document size | Accepted, amended | [ADR-0017](docs/decisions/ADR-0017.md) |
 
@@ -123,6 +124,27 @@ in the fourth.
 Kept rather than deleted, because every one of these went stale the same
 way — a fix landing without the record moving — and because the lesson in each
 is worth more than the fact.
+
+- **A type with no producer is not an implementation, it is a claim** -- and
+  three of them turned up in one sequence, in three different hiding places.
+
+  - Four of `Policy`'s seven axes are computed, stored and printed by the
+    Security Inspector as *the policy in force*, and consulted by nothing
+    ([ADR-0059](docs/decisions/ADR-0059.md)).
+  - `Format::has_data_operations` answered a question whose only asker was a
+    menu that had left ([ADR-0062](docs/decisions/ADR-0062.md)).
+  - `bp_buffer::Access` guarded `insert` and `remove` against a condition
+    **nothing has ever set** ([ADR-0066](docs/decisions/ADR-0066.md)). Not a
+    casualty of the reduction either: before any of it, its one production
+    call site was `LargeFile::open`, and a huge document had no `Buffer` at
+    all -- so the guard on the rope has never once fired.
+
+  **None would fail a build, a test, or a review of the file it lives in.**
+  Each one reads perfectly well locally; what is missing is somewhere else.
+  All three fall out of one question asked of the *workspace* rather than of a
+  file: **who produces this, and who reads it?** That is a `grep`, and it is
+  the same `grep` that would have caught both of this session's own trap-6
+  mistakes.
 
 - **Ask whether a cost is *inherent* to a change or merely *concurrent* with
   it.** [ADR-0059](docs/decisions/ADR-0059.md)'s five removals reported three
