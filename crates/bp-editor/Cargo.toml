@@ -9,3 +9,12 @@ workspace = true
 
 [dependencies]
 bp-buffer = { path = "../bp-buffer" }
+
+# No criterion, for the reason `bp-buffer`'s bench gives: it is not in the
+# workspace dependency set, and its model -- many iterations of a small
+# operation -- is only half right here. A frame *is* a small repeated
+# operation, but the question is whether its cost moves with the document,
+# which wants two columns of one run compared rather than one number tracked.
+[[bench]]
+name = "scroll"
+harness = false

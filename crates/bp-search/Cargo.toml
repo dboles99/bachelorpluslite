@@ -8,6 +8,13 @@ license.workspace = true
 workspace = true
 
 [dependencies]
+# ADR-0042. Streaming a file too large to read whole is the one thing this
+# crate cannot do with a `&str`, and `bp_buffer::stream` was written for a
+# matcher to consume -- its `is_new_match` takes a range "in characters, as
+# `bp_search::Match::range` gives it". The dependency goes this way and not
+# the other: `bp-buffer` decides what a matcher gets to look at, and stays
+# free of any opinion about what a match is.
+bp-buffer = { path = "../bp-buffer" }
 regex = "1"
 thiserror.workspace = true
 

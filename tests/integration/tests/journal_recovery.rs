@@ -77,6 +77,8 @@ fn checkpoint(path: Option<&Path>, text: &str, written_at: u64) -> Checkpoint {
         name: "note.txt".to_owned(),
         text: text.to_owned(),
         written_at,
+        encoding: bp_history::CheckpointEncoding::Utf8,
+        line_ending: Some(bp_history::CheckpointLineEnding::Lf),
     }
 }
 

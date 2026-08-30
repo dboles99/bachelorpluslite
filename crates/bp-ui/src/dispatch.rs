@@ -30,6 +30,16 @@ Ctrl+0          Reset zoom
 Ctrl+D          Duplicate line
 Alt+Up / Down   Move line up / down";
 
+/// A document's filename, for a row whose detail column already shows the
+/// full path -- the same reasoning `state::organize`'s own `filename_of`
+/// applies to a status-bar notice, applied here to a panel row's label.
+fn filename(path: &str) -> &str {
+    std::path::Path::new(path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(path)
+}
+
 /// Static information, shown in a native dialog rather than built as a
 /// bespoke window.
 fn show_info(title: &str, body: &str) {
@@ -176,12 +186,18 @@ pub(crate) fn confirm_replace(plan: &bp_search::ReplacePlan) -> bool {
         == rfd::MessageDialogResult::Ok
 }
 
-/// Select a character range in the editor.
+/// Select a character range in the editor **and take the caret with it**.
 ///
-/// Under the custom surface we own the selection, so this sets it and asks
-/// only for the focus back. Under `TextInput` the widget owns it, and the
-/// offsets are clamped into `i32` because that is what its API takes -- a
-/// document long enough to overflow one would have other problems first.
+/// [`reveal`] does the selecting; this adds the focus, and the focus is the
+/// whole difference between them. Use it when the action came from somewhere
+/// that is not a text box -- a results panel, a list of related notes -- so
+/// there is no box the caret can be stolen from.
+///
+/// **Do not use it for anything submitted from a bar.** Find Next and Go to
+/// Line both leave their bar open on purpose, and moving the caret into the
+/// document while a box is still on screen means the user's next keystroke
+/// edits the document. That destroyed text for as long as this function was
+/// used for all five callers; see [`reveal`].
 pub(crate) fn select(ui: &AppWindow, state: &mut AppState, range: &std::ops::Range<usize>) {
     use crate::editor_view::draw_editor_view;
 
@@ -197,6 +213,45 @@ pub(crate) fn select(ui: &AppWindow, state: &mut AppState, range: &std::ops::Ran
     let start = i32::try_from(range.start).unwrap_or(i32::MAX);
     let end = i32::try_from(range.end).unwrap_or(i32::MAX);
     ui.invoke_select_range(start, end);
+}
+
+/// Select a character range and scroll it into view, **leaving the caret
+/// wherever it already is**.
+///
+/// This is the one to reach for by default, and [`select`] is the exception.
+///
+/// It used to be called `preview_match` and to exist only for the find box's
+/// keystroke-by-keystroke preview, on the premise -- written into `select` --
+/// that Find Next, Go to Line and a cross-file result are each "a single
+/// deliberate jump the user makes once" and may therefore take the caret.
+/// **Two of the three are repeated, from a bar that stays open on purpose.**
+/// Go to Line's call site says so in as many words, three lines from a call
+/// whose comment said the opposite, and neither had been asked which was
+/// right.
+///
+/// What that cost: pressing Enter twice in the find box replaced the match
+/// with a line break and went on inserting one per press, with nothing to
+/// announce it but the dirty dot and a line count going up. Found by driving
+/// the window over a 601-line fixture -- a document that fits on one screen
+/// cannot show it, because the damage is off-screen by the time it happens.
+///
+/// Focus is not lost, only deferred: closing either bar calls
+/// `focus-editor()`, so the caret returns when the user is finished with the
+/// box rather than while they are still typing into it.
+pub(crate) fn reveal(ui: &AppWindow, state: &mut AppState, range: &std::ops::Range<usize>) {
+    use crate::editor_view::draw_editor_view;
+
+    if state.editor_view {
+        if let Some(editor) = state.active_editor_mut() {
+            editor.select(range.start, range.end);
+        }
+        state.reveal_caret();
+        draw_editor_view(ui, state);
+        return;
+    }
+    let start = i32::try_from(range.start).unwrap_or(i32::MAX);
+    let end = i32::try_from(range.end).unwrap_or(i32::MAX);
+    ui.invoke_preview_range(start, end);
 }
 
 /// Handle a menu action id from the UI.
@@ -356,6 +411,17 @@ pub fn handle_menu_action(
             push = PushText::No;
         }
 
+        action::TOOLS_INSPECTOR => {
+            // The borrow ends with the statement, before the dialog opens:
+            // `rfd` pumps events, and a re-entrant callback on a live
+            // `borrow_mut()` panics.
+            let report = state.borrow().inspector_report();
+            if let Some(report) = report {
+                show_info("Document Inspector", &report);
+            }
+            push = PushText::No;
+        }
+
         // Tab context menu. All three act on `tab_context` -- the tab that was
         // right-clicked -- falling back to the active one, so a row can never
         // act on a tab the user was not pointing at.
@@ -457,14 +523,16 @@ pub fn handle_menu_action(
         }
 
         action::SIGN_DOCUMENT => {
-            // The row is greyed, so this is only reachable by a keyboard
-            // route that does not exist yet -- but a silent no-op would be a
-            // bug report nobody could describe, the same reasoning as the
-            // stamp arm above.
-            state.borrow_mut().error = Some(
-                "signing needs a signing key, and there is nowhere to keep one yet".to_owned(),
-            );
             push = PushText::No;
+            // Asks the right question and stops. Whether the passphrase bar
+            // says "new signing key passphrase" or "signing key passphrase"
+            // depends on whether a key exists, and `begin_signing` is what
+            // decides -- the whole flow lives there and in
+            // `answer_passphrase`, so a passphrase is typed in exactly one
+            // place in this product.
+            if state.borrow_mut().begin_signing() {
+                ui.invoke_focus_passphrase();
+            }
         }
 
         action::VERIFY_SIGNATURE => {
@@ -550,6 +618,21 @@ pub fn handle_menu_action(
                     };
                     state.borrow_mut().error = Some(message);
                 }
+            }
+        }
+
+        // A second, wholly independent instance -- its own `AppState`, its
+        // own window, none of this process's arguments carried over, so it
+        // opens exactly as launching the app fresh would. Nothing about
+        // *this* window's state changes, so there is nothing to push back
+        // into the widget; the fall-through refresh below still runs, which
+        // is what shows the error message if the spawn failed.
+        action::NEW_WINDOW => {
+            push = PushText::No;
+            let spawned = crate::state::new_window_command()
+                .and_then(|mut command| command.spawn().map(|_child| ()));
+            if let Err(e) = spawned {
+                state.borrow_mut().error = Some(format!("could not open a new window -- {e}"));
             }
         }
 
@@ -639,6 +722,30 @@ pub fn handle_menu_action(
             // Duplicate Line beside it.
         }
 
+        id if (action::INSERT_BOLD..=action::INSERT_TABLE).contains(&id) => {
+            // The text each construct inserts, and how far back from the end
+            // of it the caret should land -- 0 for every construct but the
+            // code block, which leaves it between the fences rather than
+            // after the closing one.
+            let (text, step_back): (&str, usize) = match id {
+                action::INSERT_BOLD => ("**text**", 0),
+                action::INSERT_ITALIC => ("*text*", 0),
+                action::INSERT_LINK => ("[text](url)", 0),
+                action::INSERT_CODE_BLOCK => ("```\n```", 3),
+                _ => ("| Header | Header |\n| --- | --- |\n| Cell | Cell |", 0),
+            };
+            let mut s = state.borrow_mut();
+            if !s.insert_markdown(text, step_back) {
+                // Same shape as the date/time stamps above: the rows are
+                // disabled without the custom editor view, so this is only
+                // reachable by a route that does not exist yet -- but a
+                // silent no-op would still be a bug report nobody could
+                // describe.
+                s.error = Some("markdown insertion needs --editor-view".to_owned());
+            }
+            // `PushText::Yes`, the default: the document changed.
+        }
+
         action::LINE_ENDING_LF => state.borrow_mut().set_line_ending(LineEnding::Lf),
         action::LINE_ENDING_CRLF => state.borrow_mut().set_line_ending(LineEnding::CrLf),
         action::ENCODING_UTF8 => state.borrow_mut().set_encoding(Encoding::Utf8),
@@ -646,14 +753,67 @@ pub fn handle_menu_action(
 
         action::SHORTCUTS => show_info("Keyboard shortcuts", SHORTCUTS),
         action::ABOUT => show_info(
-            "About BachelorPad+",
+            "About BachelorPlusLite",
             &format!(
-                "BachelorPad+ {}\n\nNotepad when you want it. More when you need it.\n\n\
+                "BachelorPlusLite {}\n\nNotepad when you want it. More when you need it.\n\n\
                  Renderer: {}\nLicence: MIT OR Apache-2.0",
                 env!("CARGO_PKG_VERSION"),
                 std::env::var("SLINT_BACKEND").unwrap_or_else(|_| "software".to_owned()),
             ),
         ),
+        // Organize ▸ where documents sharing this one's tags already live.
+        action::ORGANIZE_SUGGESTED_FOLDER => {
+            let report = state.borrow().suggested_folder_report();
+            push = PushText::No;
+            show_info("Suggested Folder", &report);
+        }
+
+        // Security ▸ forget this document's passphrase now.
+        action::LOCK_DOCUMENT => {
+            let said = state.borrow_mut().lock_document();
+            show_info("Lock Document", &said);
+            push = PushText::No;
+        }
+
+        // Note ▸ the store's view of this document, and the journal's
+        // (ADR-0048).
+        action::NOTE_TAGS => {
+            let report = state.borrow().tags_report();
+            push = PushText::No;
+            show_info("Tags", &report);
+        }
+        action::NOTE_RECOVERY => {
+            let report = state.borrow().recovery_report();
+            push = PushText::No;
+            show_info("Recovery Checkpoints", &report);
+        }
+
+        // Tools ▸ the three readouts ADR-0048 added. Same borrow discipline
+        // as `TOOLS_INSPECTOR` above: the borrow ends with the statement,
+        // before `rfd` pumps events.
+        action::TOOLS_SECURITY_INSPECTOR => {
+            let report = state.borrow().security_inspector_report();
+            push = PushText::No;
+            show_info("Security Inspector", &report);
+        }
+        action::TOOLS_FILE_ANALYSIS => {
+            let report = state.borrow().file_analysis_report();
+            push = PushText::No;
+            show_info("File Analysis", &report);
+        }
+        action::TOOLS_CONFIGURATION => {
+            let report = state.borrow().configuration_report();
+            push = PushText::No;
+            show_info("Configuration", &report);
+        }
+
+        // What the application thinks its environment is, not a file
+        // browser: no document content, no passphrase, no listing of what is
+        // in the directories it names -- only where it resolved them to.
+        action::DIAGNOSTICS => {
+            show_info("Diagnostics", &crate::state::diagnostics_report());
+            push = PushText::No;
+        }
 
         // Only reachable with the custom surface. Under `TextInput`
         // Slint handles these on the widget itself and they never get
@@ -749,6 +909,96 @@ pub fn handle_menu_action(
                 }
                 NoteOutcome::Nothing => {}
             }
+        }
+
+        // Organize ▸ Related Notes (ADR-0037). Same shape as cross-file
+        // search's `on_search_folder`: the query runs once, here, rather
+        // than being re-run on every `refresh` -- `refresh` only converts
+        // whatever `related_notes` already holds into rows if it ever needs
+        // to, the way `note_items` and the rest of the state-dependent menus
+        // do, but nothing here forces it to re-query the store on every
+        // keystroke the way a field read in `refresh` would.
+        action::ORGANIZE_RELATED_NOTES => {
+            push = PushText::No;
+            let related = state.borrow().related_notes_for_active();
+            let rows: Vec<crate::SearchHit> = related
+                .iter()
+                .enumerate()
+                .map(|(index, record)| crate::SearchHit {
+                    label: record
+                        .title
+                        .clone()
+                        .unwrap_or_else(|| filename(&record.path).to_owned())
+                        .into(),
+                    detail: record.path.as_str().into(),
+                    index: i32::try_from(index).unwrap_or(i32::MAX),
+                })
+                .collect();
+            let summary = if rows.is_empty() {
+                "no related notes found".to_owned()
+            } else {
+                format!(
+                    "{} related note{}",
+                    rows.len(),
+                    if rows.len() == 1 { "" } else { "s" }
+                )
+            };
+            state.borrow_mut().related_notes = related;
+            ui.set_organize_hits(Rc::new(slint::VecModel::from(rows)).into());
+            ui.set_organize_summary(summary.into());
+            ui.set_organize_open(true);
+        }
+
+        // The on-demand half of Duplicate Detection. `duplicate_detection_report`
+        // is the same check the automatic save-time notice runs -- see
+        // `AppState::record_for_organize` -- so a click here and a save can
+        // never disagree about what counts as a duplicate.
+        action::ORGANIZE_DUPLICATE_DETECTION => {
+            let report = state.borrow().duplicate_detection_report();
+            push = PushText::No;
+            show_info("Duplicate Detection", &report);
+        }
+
+        // Research ▸ Research Report (ADR-0041). The borrow ends with the
+        // statement, before the dialog opens -- the same reason
+        // `TOOLS_INSPECTOR`'s own arm gives: `rfd` pumps events, and a
+        // re-entrant callback on a live `borrow_mut()` panics.
+        action::RESEARCH_REPORT => {
+            let report = state.borrow().research_report();
+            push = PushText::No;
+            show_info("Research Report", &report);
+        }
+
+        // Research ▸ what the active document cites (ADR-0044). Each borrow
+        // ends with its statement, before the dialog opens, for the reason
+        // `RESEARCH_REPORT` gives just above.
+        action::CITATION_METADATA => {
+            let report = state.borrow().citation_metadata_report();
+            push = PushText::No;
+            show_info("Citation Metadata", &report);
+        }
+        action::FIND_IDENTIFIERS => {
+            let report = state.borrow().identifiers_report();
+            push = PushText::No;
+            show_info("Identifiers", &report);
+        }
+        action::CHECK_BIBLIOGRAPHY => {
+            let report = state.borrow().bibliography_report();
+            push = PushText::No;
+            show_info("Bibliography", &report);
+        }
+
+        // Research ▸ what the active document asks, and what the store holds
+        // (ADR-0046). Same borrow discipline as every arm above.
+        action::OPEN_QUESTIONS => {
+            let report = state.borrow().open_questions_report();
+            push = PushText::No;
+            show_info("Open Questions", &report);
+        }
+        action::STORE_CONTENTS => {
+            let report = state.borrow().store_contents_report();
+            push = PushText::No;
+            show_info("What the Store Holds", &report);
         }
 
         // Two ranges rather than one, because the Data block at 70-79 had a

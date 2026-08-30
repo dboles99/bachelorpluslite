@@ -141,7 +141,7 @@ pub mod action {
     pub const DATA_JSON_TO_YAML: i32 = 211;
 
     /// File ▸ Set as Default Editor (ADR-0012), opening a block of its own at
-    /// 220-229 for platform integration. 221-229 are free.
+    /// 220-229 for platform integration. 222-229 are free.
     ///
     /// Not one of the three ids left at 207-209, and not one of the eight at
     /// 212-219: those are the Security operations' block and the Data
@@ -153,6 +153,10 @@ pub mod action {
     /// Above 100, so outside Slint's `UNDO..=SELECT_ALL` window, on the same
     /// argument as the two blocks above.
     pub const SET_DEFAULT_EDITOR: i32 = 220;
+
+    /// File ▸ New Window: a second, independent instance of this process.
+    /// 222-229 are still free.
+    pub const NEW_WINDOW: i32 = 221;
 
     /// Clipboard history occupies `CLIP_BASE ..` (bounded by [`super::clip_end`]).
     ///
@@ -177,6 +181,38 @@ pub mod action {
     /// transform rows exist.
     pub const CLIP_TRANSFORM_BASE: i32 = 500;
 
+    /// Organize, ADR-0037. A block of its own -- 700-709, 702-709 free.
+    pub const ORGANIZE_RELATED_NOTES: i32 = 700;
+    pub const ORGANIZE_DUPLICATE_DETECTION: i32 = 701;
+
+    /// Insert ▸ Markdown constructs. A block of their own -- 710-719, 715-719
+    /// free -- rather than borrowed from an unrelated family's spare ids, for
+    /// the reason `SET_DEFAULT_EDITOR`'s own comment gives.
+    ///
+    /// Caret-only, same constraint as the date/time stamps above: `TextInput`
+    /// exposes no caret to insert at, so these need --editor-view.
+    pub const INSERT_BOLD: i32 = 710;
+    pub const INSERT_ITALIC: i32 = 711;
+    pub const INSERT_LINK: i32 = 712;
+    pub const INSERT_CODE_BLOCK: i32 = 713;
+    pub const INSERT_TABLE: i32 = 714;
+
+    /// Tools ▸ the four readouts. A block of its own -- 720-729, 724-729
+    /// free.
+    pub const TOOLS_INSPECTOR: i32 = 720;
+    /// The three ADR-0048 added: the policy in force, the file on disk, and
+    /// where each setting came from.
+    pub const TOOLS_SECURITY_INSPECTOR: i32 = 721;
+    pub const TOOLS_FILE_ANALYSIS: i32 = 722;
+    pub const TOOLS_CONFIGURATION: i32 = 723;
+
+    /// Help ▸ Diagnostics. A block of its own -- 730-739, 731-739 free.
+    pub const DIAGNOSTICS: i32 = 730;
+
+    /// Research ▸ Research Report (ADR-0041). A block of its own -- 740-749,
+    /// 747-749 free.
+    pub const RESEARCH_REPORT: i32 = 740;
+
     pub const NOTE_TITLE: i32 = 80;
     pub const NOTE_RENAME: i32 = 81;
     pub const NOTE_SUMMARY: i32 = 82;
@@ -188,6 +224,10 @@ pub mod action {
     /// Go to Line. Opens the bar; the line number arrives as text, not as an
     /// id, so one action is enough for the whole feature.
     pub const GO_TO_LINE: i32 = 86;
+
+    /// Note ▸ Tags and Recovery Checkpoints (ADR-0048). 89 is free.
+    pub const NOTE_TAGS: i32 = 87;
+    pub const NOTE_RECOVERY: i32 = 88;
 
     /// Line operations that need no caret: a whole-document replace, like a
     /// data operation.
@@ -233,6 +273,27 @@ pub mod action {
     pub const PASTE: i32 = 104;
     pub const SELECT_ALL: i32 = 105;
 
+    /// Research ▸ what the active document cites (ADR-0044).
+    pub const CITATION_METADATA: i32 = 741;
+    pub const FIND_IDENTIFIERS: i32 = 742;
+    pub const CHECK_BIBLIOGRAPHY: i32 = 743;
+
+    /// Research ▸ what the active document asks (ADR-0046). In the Research
+    /// block with the rest of the menu rather than beside `DOCUMENT_STATS`,
+    /// whose crate it shares: an id block follows the menu a row is in,
+    /// because `range_dispatch_windows` is what the blocks exist to keep
+    /// clear of, and that is a dispatch concern rather than a crate one.
+    pub const OPEN_QUESTIONS: i32 = 745;
+
+    /// Research ▸ What the Store Holds (ADR-0046).
+    pub const STORE_CONTENTS: i32 = 746;
+
+    /// Organize ▸ Suggested Folder (ADR-0048). 703-709 free.
+    pub const ORGANIZE_SUGGESTED_FOLDER: i32 = 702;
+
+    /// Security ▸ Lock Document (ADR-0048).
+    pub const LOCK_DOCUMENT: i32 = 212;
+
     /// Rows that do nothing yet.
     pub const NONE: i32 = 0;
 }
@@ -268,7 +329,18 @@ fn row_end(label: &str, shortcut: &str, action: i32) -> MenuItem {
     }
 }
 
-/// A row that exists to say what is coming, and does nothing.
+/// An inert row: greyed, with no action behind it.
+///
+/// **It used to mean "not built yet" and it does not any more** (ADR-0048).
+/// `arrives()` and `planned_menu()` went with the last unbuilt row, so every
+/// remaining caller is a *readout* -- the Security menu's three policy lines,
+/// the Data menu's "nothing to convert here", the Tools menu's account of
+/// where each setting came from. Those are answers, not promises.
+///
+/// The name is kept because the rendering is the same and renaming it would
+/// touch every call site to say nothing new. What changed is what it is
+/// allowed to mean, and `no_menu_offers_a_row_that_does_nothing` is what
+/// holds the line.
 fn planned(label: &str) -> MenuItem {
     MenuItem {
         label: label.into(),
@@ -287,11 +359,6 @@ fn toggle(label: &str, on: bool, action: i32) -> MenuItem {
         "",
         action,
     )
-}
-
-/// The trailing note naming when a menu's contents arrive.
-fn arrives(phase: &str) -> MenuItem {
-    planned(&format!("— not implemented yet ({phase})"))
 }
 
 /// One past the last plain-paste clipboard id `CLIP_BASE` can produce.
@@ -388,7 +455,12 @@ pub(crate) fn decode_transform(
     Some((entry_index, transform))
 }
 
-pub fn file(any_dirty: bool, has_path: bool, recent: &[std::path::PathBuf]) -> Vec<MenuItem> {
+pub fn file(
+    any_dirty: bool,
+    has_path: bool,
+    served_from_disk: bool,
+    recent: &[std::path::PathBuf],
+) -> Vec<MenuItem> {
     let mut items = vec![
         row("New", "Ctrl+N", action::NEW),
         row_end("Open...", "Ctrl+O", action::OPEN),
@@ -418,22 +490,33 @@ pub fn file(any_dirty: bool, has_path: bool, recent: &[std::path::PathBuf]) -> V
         last.separator_after = true;
     }
 
+    // A document served from disk in chunks (ADR-0030) has no text to write
+    // and must not be re-read whole. `AppState` refuses all four by name, and
+    // this greys them so the refusal is not the first the user hears of it --
+    // `row_enabled(.., false)` and deliberately not `planned`, because these
+    // rows exist and cannot act right now, which is a different statement
+    // from "does not exist yet".
+    //
+    // Save All is not among them: it acts on whichever *other* tabs are
+    // dirty, and a viewer is never dirty, so it is already correct.
+    let writable = !served_from_disk;
     items.extend([
-        row("Save", "Ctrl+S", action::SAVE),
-        row("Save As...", "Ctrl+Shift+S", action::SAVE_AS),
+        row_enabled("Save", "Ctrl+S", action::SAVE, writable),
+        row_enabled("Save As...", "Ctrl+Shift+S", action::SAVE_AS, writable),
         MenuItem {
             enabled: any_dirty,
             ..row_end("Save All", "", action::SAVE_ALL)
         },
         MenuItem {
             // Reload means "discard my edits and re-read the file", which
-            // needs a file to re-read.
-            enabled: has_path,
+            // needs a file to re-read -- and, for a document that was
+            // deliberately never loaded, would load it.
+            enabled: has_path && writable,
             ..row_end("Reload from Disk", "", action::RELOAD)
         },
         MenuItem {
             separator_after: true,
-            ..row("Save a Copy...", "", action::SAVE_COPY)
+            ..row_enabled("Save a Copy...", "", action::SAVE_COPY, writable)
         },
         row_end("Close Tab", "Ctrl+W", action::CLOSE_TAB),
         // Live on both platforms, and it is not the same amount of work on
@@ -450,6 +533,7 @@ pub fn file(any_dirty: bool, has_path: bool, recent: &[std::path::PathBuf]) -> V
             "Notepad Replacement",
             action::SET_DEFAULT_EDITOR,
         ),
+        row("New Window", "", action::NEW_WINDOW),
     ]);
     items
 }
@@ -538,14 +622,22 @@ pub fn edit(clips: &[bp_clipboard::Entry], editor_view: bool) -> Vec<MenuItem> {
             enabled: editor_view,
             ..row_end("Move Line Down", "Alt+Down", action::MOVE_LINE_DOWN)
         },
-        // Caret work as well -- `Editor::go_to_line` moves the caret we own,
-        // and `TextInput`'s cannot be moved from here.
-        MenuItem {
-            enabled: editor_view,
-            ..row_end("Go to Line...", "Ctrl+G", action::GO_TO_LINE)
-        },
-        planned("Multi-cursor"),
-        arrives("phase 2"),
+        // **Not `editor_view`-gated any more, and the note that gated it was
+        // wrong.** `TextInput`'s caret cannot be *read* from here, which is
+        // what stops Duplicate Line and the date stamps above; it can be
+        // *moved*, via `set-selection-offsets`, which is how Find Next has
+        // always jumped. Going to a line only ever needed the second.
+        row_end("Go to Line...", "Ctrl+G", action::GO_TO_LINE),
+        // **"Multi-cursor" is not here, and its absence is the decision**
+        // (ADR-0048). `TextInput` has one caret and no way to draw a second,
+        // so it could only ever work under `--editor-view` -- the same
+        // one-view half-feature Run Selection was dropped for, except this
+        // one also needs `bp-editor` to carry a set of carets through every
+        // command, every selection and every undo entry.
+        //
+        // That is a real feature and a large one. It comes back as a queue
+        // item with a design behind it, not as a row that has been sitting in
+        // a menu since the repository was scaffolded.
     ]);
     items
 }
@@ -601,8 +693,24 @@ pub fn view(
                 font_size != bp_config::DEFAULT_FONT_SIZE,
             )
         },
-        planned("Split / Preview"),
-        arrives("phase 8"),
+        // **"Split / Preview" is not here, and its absence is the decision**
+        // (ADR-0048, answering D14). Slint 1.17.1 has no rich-text item --
+        // no styled runs, no spans -- so bold inside a sentence is not
+        // representable at all, and a Markdown preview that silently dropped
+        // inline formatting would be worse than none. The alternative, an
+        // HTML file handed to the system browser, means writing the
+        // document's text to a temporary file in plaintext, which is exactly
+        // what `Policy::temporary_files` exists to forbid for a Confidential
+        // document.
+        //
+        // What a reader actually wanted from it partly exists: Note ▸ Outline
+        // gives the structure. Two of the three answers this comment used to
+        // give were Notebook ▸ Cell Outline and Run, and ADR-0057 removed
+        // both -- so the case for a preview is *stronger* than it was, not
+        // weaker, and it is still blocked on the same toolkit gap.
+        //
+        // Revisit if Slint ships styled text. *Split* -- two panes over one
+        // document -- is a separate feature and was never the hard half.
     ]
 }
 
@@ -637,7 +745,11 @@ pub fn format(encoding: Encoding, line_ending: LineEnding, indent: Indent) -> Ve
             separator_after: true,
             ..toggle("Tab Width 8", indent.width == 8, action::TAB_WIDTH_8)
         },
-        arrives("phase 5"),
+        // No `arrives(..)` line: there was one naming phase 5 with **no
+        // planned rows above it** (ADR-0048), so the menu said more was
+        // coming and listed nothing. Line endings, encoding and indentation
+        // are the whole of what `MENU_MAP.md` asks of this menu, and all of
+        // it works.
     ]
 }
 
@@ -654,6 +766,8 @@ pub fn security(
     privacy: bp_security::Privacy,
     has_content: bool,
     has_path: bool,
+    can_sign: bool,
+    has_key: bool,
 ) -> Vec<MenuItem> {
     // What is actually in force, which is the document's profile *and* the
     // session override. Showing the unclamped policy would tell the user their
@@ -726,7 +840,7 @@ pub fn security(
             if has_content {
                 "Redact Found Secrets..."
             } else {
-                "Redact Found Secrets — this document is empty"
+                "Redact Found Secrets — it is empty"
             },
             "",
             action::REDACT_SECRETS,
@@ -744,17 +858,45 @@ pub fn security(
         // digest you are about to read down a telephone is useless unless you
         // already know which of the two the other end took.
         row("Hash Document (SHA-256)", "", action::HASH_DOCUMENT),
-        // Greyed with a reason, deliberately not `planned`. `bp_crypto`'s
-        // signing half exists and is tested; what does not exist is anywhere
-        // to keep a signing key, and inventing a key store on the way to a
-        // menu row would be a worse answer than the row saying so. The reason
-        // is in the label because the greying is the only thing on screen.
-        row_enabled(
-            "Sign Document — no signing key yet",
-            "",
-            action::SIGN_DOCUMENT,
-            false,
-        ),
+        // Live since ADR-0031 answered where a signing key lives: sealed in
+        // a `.bpadx` envelope under a passphrase, which is the same envelope
+        // encrypted documents use and needs nothing new designed, reviewed or
+        // fuzzed. It was greyed with the reason on the row for three sessions
+        // before that, which is the shape a blocked-on-a-decision row should
+        // take -- `row_enabled(.., false)` and not `planned`.
+        //
+        // Greyed now for the two reasons a signature cannot be made rather
+        // than for the absence of a key store, and each says which: signing
+        // is over the bytes **on disk** (ADR-0026), so a document that has
+        // never been saved has nothing to sign, and one with unsaved changes
+        // would get a valid signature over the previous version -- which is
+        // worse than a refusal, because it verifies.
+        //
+        // The hint names the key, not the document. Whether one exists yet is
+        // what decides which question the passphrase bar asks, and saying so
+        // before the click is what stops "Sign" being followed by an
+        // unexplained ceremony.
+        MenuItem {
+            separator_after: false,
+            ..row_enabled(
+                match (has_path, can_sign) {
+                    (false, _) => "Sign Document — never saved",
+                    (true, false) => "Sign Document — save it first",
+                    (true, true) => "Sign Document...",
+                },
+                if has_path && can_sign {
+                    if has_key {
+                        "unlocks your signing key"
+                    } else {
+                        "creates a signing key"
+                    }
+                } else {
+                    ""
+                },
+                action::SIGN_DOCUMENT,
+                has_path && can_sign,
+            )
+        },
         // Live even though signing is not: verifying needs the other party's
         // signature and, to say more than "intact", their public key. It is
         // the half of the feature that needs nothing stored.
@@ -770,7 +912,7 @@ pub fn security(
                 if has_path {
                     "Verify Signature..."
                 } else {
-                    "Verify Signature — this document has never been saved"
+                    "Verify Signature — never saved"
                 },
                 if has_path { "document.ext.sig" } else { "" },
                 action::VERIFY_SIGNATURE,
@@ -781,9 +923,17 @@ pub fn security(
         // anything: an empty history is a real answer, and the one time
         // somebody most wants to look is when they think something should be
         // there and are not sure it is.
-        row("Security History...", "", action::SECURITY_HISTORY),
-        planned("Lock Document"),
-        arrives("phase 16"),
+        MenuItem {
+            separator_after: true,
+            ..row("Security History...", "", action::SECURITY_HISTORY)
+        },
+        // Forget this document's passphrase now (ADR-0048). Unlocking is
+        // sticky for the life of the tab, which is what makes saving an
+        // encrypted document bearable and also means one unlocked an hour ago
+        // is still unlocked to whoever is at the keyboard. Enabled only when
+        // there is a key to forget -- greying it is the honest state, because
+        // "locked" and "never encrypted" are the same thing to this row.
+        row_enabled("Lock Document", "", action::LOCK_DOCUMENT, has_key),
     ]);
     items
 }
@@ -859,9 +1009,32 @@ pub fn insert(at: time::OffsetDateTime, editor_view: bool) -> Vec<MenuItem> {
     if let Some(last) = items.last_mut() {
         last.separator_after = true;
     }
+    // Caret-only, same as the stamps above and for the same reason: each of
+    // these inserts at a position `TextInput` cannot report.
     items.extend([
-        planned("Markdown constructs, citation, code block, table"),
-        arrives("phase 6"),
+        MenuItem {
+            enabled: editor_view,
+            ..row("Bold", "", action::INSERT_BOLD)
+        },
+        MenuItem {
+            enabled: editor_view,
+            ..row("Italic", "", action::INSERT_ITALIC)
+        },
+        MenuItem {
+            enabled: editor_view,
+            ..row("Link", "", action::INSERT_LINK)
+        },
+        // The only one of the five that leaves the caret somewhere other
+        // than after the inserted text -- between the fences, so typing
+        // starts inside the code block rather than after it.
+        MenuItem {
+            enabled: editor_view,
+            ..row("Code Block", "", action::INSERT_CODE_BLOCK)
+        },
+        MenuItem {
+            enabled: editor_view,
+            ..row("Table", "", action::INSERT_TABLE)
+        },
     ]);
     items
 }
@@ -922,14 +1095,22 @@ pub fn data(format: Format) -> Vec<MenuItem> {
             row("Convert to JSON", "", action::DATA_CSV_TO_JSON),
             row_end("Convert to JSON Lines", "", action::DATA_CSV_TO_JSONL),
         ],
-        _ => {
-            let mut items = planned_menu("Data");
-            items.insert(
-                0,
-                planned(&format!("— nothing for {} documents", format.label())),
-            );
-            items
-        }
+        // **One honest line, not a menu of six things that will not happen**
+        // (ADR-0048). This branch used to say "nothing for TXT documents" and
+        // then list Validate, Format / Minify, Sort Keys, Filter / Query,
+        // Statistics and Convert under a "phase 6" banner -- every one of
+        // which is *already built* for the formats that have them, and none
+        // of which will ever apply to plain text. It read as a backlog and
+        // was a contradiction.
+        //
+        // `Format::has_data_operations` is the question, and it is asked of
+        // the format rather than of its class -- see `bp-formats`, and the
+        // Tier 0.5 note in `DECISIONS.md` about the predicate that was asked
+        // of the wrong type.
+        _ => vec![planned(&format!(
+            "Nothing to validate or convert in a {} document",
+            format.label()
+        ))],
     }
 }
 
@@ -965,125 +1146,294 @@ pub fn note(has_content: bool) -> Vec<MenuItem> {
         // Not gated on `has_content`: "0 words" is a legitimate answer to
         // "how long is this", and an empty document is exactly when someone
         // might check they are looking at the right tab.
-        row_end("Document Statistics", "", action::DOCUMENT_STATS),
-        planned("Tags"),
-        planned("Related Notes"),
-        planned("Revision History"),
-        arrives("phase 9"),
+        MenuItem {
+            separator_after: true,
+            ..row("Document Statistics", "", action::DOCUMENT_STATS)
+        },
+        // The store's view of this document rather than the text's. Gated on
+        // content for the same reason Keywords is: there is nothing to have
+        // tagged.
+        MenuItem {
+            enabled: has_content,
+            ..row("Tags", "", action::NOTE_TAGS)
+        },
+        // **Not "Revision History"** (ADR-0048). `bp-history` is a
+        // crash-recovery journal, not a version store -- it holds the pending
+        // checkpoint and discards it the moment a save succeeds. A row named
+        // Revision History would promise successive versions to go back to.
+        //
+        // Ungated: whether a journal would be written at all is a property of
+        // the profile, and that is worth being able to ask with an empty tab.
+        row_end("Recovery Checkpoints", "", action::NOTE_RECOVERY),
+        // **"Related Notes" is not here, and its absence is the decision.**
+        // It is a live row in the Organize menu (ADR-0037), and two rows in
+        // two menus running the same query is how one of them goes stale.
+    ]
+}
+
+/// The Tools menu: utilities over the active document that belong to neither
+/// Note (deterministic extraction about it) nor Security (protecting it).
+pub fn tools(has_content: bool) -> Vec<MenuItem> {
+    vec![
+        // Not gated on the format, unlike Data: `bp_semantic::statistics`
+        // reads any text, and the readout also carries the format, encoding
+        // and profile, which apply to every document regardless of shape.
+        MenuItem {
+            enabled: has_content,
+            ..row_end("Document Inspector", "", action::TOOLS_INSPECTOR)
+        },
+        // Each reads something that exists whether or not a document is
+        // open: the policy belongs to the session as much as the tab, and
+        // Configuration is about the process. Only File Analysis needs a
+        // document, and it needs a *saved* one -- which it says itself
+        // rather than being greyed, because "this has never been saved" is
+        // an answer and a greyed row is not.
+        row("Security Inspector", "", action::TOOLS_SECURITY_INSPECTOR),
+        MenuItem {
+            enabled: has_content,
+            ..row("File Analysis", "", action::TOOLS_FILE_ANALYSIS)
+        },
+        // **"Benchmarks" is not here, and its absence is the decision**
+        // (ADR-0048). `benches/` holds a README and no benchmark; a row
+        // named for a suite that does not exist is the same promise "DOI
+        // Lookup" was. It comes back when there is something to run.
+        //
+        // **"Settings" is named Configuration**, because it reads and does
+        // not write. Every setting is already editable in the menu it
+        // belongs to; what none of them says is where a value came from.
+        row_end("Configuration", "", action::TOOLS_CONFIGURATION),
     ]
 }
 
 pub fn help() -> Vec<MenuItem> {
     vec![
         row("Keyboard Shortcuts", "", action::SHORTCUTS),
-        row_end("About BachelorPad+", "", action::ABOUT),
-        planned("Diagnostics"),
-        arrives("phase 19"),
+        row("About BachelorPlusLite", "", action::ABOUT),
+        row_end("Diagnostics", "", action::DIAGNOSTICS),
     ]
 }
 
-/// The menus whose subsystems do not exist yet.
+/// The Organize menu (ADR-0037): what `bp-storage`'s two new queries give a
+/// user, plus what is still ahead for the rest of `docs/product/MENU_MAP.md`'s
+/// Organize section.
 ///
-/// Their contents come from `docs/product/MENU_MAP.md`, so the UI shows the
-/// intended shape of the product rather than an empty box.
-pub fn planned_menu(name: &str) -> Vec<MenuItem> {
-    let (entries, phase): (&[&str], &str) = match name {
-        "Insert" => (
-            &["Date and Time", "Code Block", "Table", "Citation", "Cell"],
-            "phase 5",
-        ),
-        "Data" => (
-            &[
-                "Validate",
-                "Format / Minify",
-                "Sort Keys",
-                "Filter / Query",
-                "Statistics",
-                "Convert",
-            ],
-            "phase 6",
-        ),
-        "Note" => (
-            &[
-                "Semantic Rename",
-                "Title and Filename",
-                "Tags",
-                "Summary",
-                "Related Notes",
-                "History",
-            ],
-            "phase 8",
-        ),
-        "Notebook" => (
-            &[
-                "Enable Notebook Mode",
-                "New Cell",
-                "Run Cell",
-                "Run All",
-                "Export .ipynb",
-            ],
-            "phase 12",
-        ),
-        "Organize" => (
-            &[
-                "Project",
-                "Suggested Folder",
-                "Topics",
+/// Gated on `has_content` the same way `note`'s rows are: both read the
+/// active document's text (a title to relate or check duplicates by), and an
+/// empty document has none to give either.
+pub fn organize(has_content: bool) -> Vec<MenuItem> {
+    let mut items = vec![
+        MenuItem {
+            enabled: has_content,
+            ..row("Related Notes", "", action::ORGANIZE_RELATED_NOTES)
+        },
+        MenuItem {
+            enabled: has_content,
+            ..row_end(
                 "Duplicate Detection",
-                "Semantic Search",
-            ],
-            "phase 9",
-        ),
-        "Research" => (
-            &["Citation Metadata", "DOI Lookup", "Evidence", "Datasets"],
-            "phase 13",
-        ),
-        "Run" => (
-            &[
-                "Run Selection",
-                "Run Document",
-                "Choose Interpreter",
-                "Stop",
-                "Rust Scratchpad",
-            ],
-            "phase 12",
-        ),
-        "Security" => (
-            &[
-                "Lock Document",
-                "Encrypt as .bpadx",
-                "Privacy Mode",
-                "Scan for Secrets",
-                "Hash and Sign",
-                "Redact",
-                "Audit History",
-            ],
-            "phase 14",
-        ),
-        "Tools" => (
-            &[
-                "Document Inspector",
-                "Security Inspector",
-                "File Analysis",
-                "Benchmarks",
-                "Settings",
-            ],
-            "phase 19",
-        ),
-        _ => (&[], "later"),
-    };
+                "",
+                action::ORGANIZE_DUPLICATE_DETECTION,
+            )
+        },
+    ];
+    // Where documents sharing this one's tags already live. Counted from
+    // what the user has filed, not a scheme imposed on them.
+    items.push(MenuItem {
+        enabled: has_content,
+        ..row_end("Suggested Folder", "", action::ORGANIZE_SUGGESTED_FOLDER)
+    });
 
-    let mut items: Vec<MenuItem> = entries.iter().map(|e| planned(e)).collect();
-    if let Some(last) = items.last_mut() {
-        last.separator_after = true;
-    }
-    items.push(arrives(phase));
+    // **Three rows left this menu on 2026-08-22 and none was built**
+    // (ADR-0048):
+    //
+    // - *Project* -- nothing in this product has a concept of a project, and
+    //   inventing one to fill a menu row is how a feature nobody asked for
+    //   gets built. It needs a decision first, not a row.
+    // - *Topics* -- what it would show is already in two places: Note ▸ Tags
+    //   for this document, and Research ▸ Research Report's dominant themes
+    //   for the store.
+    // - *Semantic Search* -- needs embeddings. `bp-security`'s policy has an
+    //   `Embeddings` axis and nothing computes one; doing so reaches ADR-0033
+    //   and is a decision rather than a row. Search ▸ cross-file search is the
+    //   honest thing that exists.
+    items
+}
+
+/// The Research menu (ADR-0041): the one real row `AppState::research_report`
+/// gives, plus what is still ahead for the rest of
+/// `docs/product/MENU_MAP.md`'s Research section.
+///
+/// Unlike `organize`'s rows, not gated on `has_content`: the report reads
+/// the whole store through `bp-storage`, not the active document, so an
+/// empty active tab is not a reason to grey it out -- the same reasoning
+/// `DOCUMENT_STATS` already applies to itself above.
+pub fn research(has_content: bool) -> Vec<MenuItem> {
+    // Two features share this menu, and the separator is where one ends and
+    // the other begins (ADR-0044). Above it: what the *store* says the user
+    // has been writing about (ADR-0041). Below it: what the *document in
+    // front of them* cites.
+    let mut items = vec![row_end("Research Report", "", action::RESEARCH_REPORT)];
+
+    // Each of the three reads the active document, so each is greyed when
+    // there is nothing to read -- `row_enabled`, not `planned`: they exist.
+    items.push(row_enabled(
+        "Citation Metadata",
+        "",
+        action::CITATION_METADATA,
+        has_content,
+    ));
+    // **Not "DOI Lookup", which `MENU_MAP.md` used to name.** Finding an
+    // identifier and resolving one are different acts, and only the first is
+    // available offline (ADR-0006). A row named Lookup would be a promise
+    // this product cannot keep.
+    items.push(row_enabled(
+        "Find Identifiers",
+        "",
+        action::FIND_IDENTIFIERS,
+        has_content,
+    ));
+    items.push(row_enabled(
+        "Check Bibliography",
+        "",
+        action::CHECK_BIBLIOGRAPHY,
+        has_content,
+    ));
+    // **Not "Research Question", which `MENU_MAP.md` named until 2026-08-22**
+    // -- ADR-0046, and the same correction "DOI Lookup" got one row up.
+    // A question has a grammar and can be found; which one you are actually
+    // asking is not something the document says, so the row is named for the
+    // act it can perform.
+    items.push(MenuItem {
+        separator_after: true,
+        ..row_enabled("Open Questions", "", action::OPEN_QUESTIONS, has_content)
+    });
+
+    // Below the second separator: the store talking about itself rather than
+    // about the user's subject matter. Not gated on `has_content`, for the
+    // reason Research Report is not -- it reads the store, not the tab.
+    items.push(row_end("What the Store Holds", "", action::STORE_CONTENTS));
+
+    // Nothing is left of `MENU_MAP.md`'s Research section: ADR-0046 scoped
+    // its last five names, and none of them survived as a row of its own.
+    // `planned_menu("Research")` is therefore gone rather than empty -- a
+    // menu that ends in a separator with nothing after it is a promise the
+    // product has already kept.
     items
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every menu, built with a document open and everything available.
+    ///
+    /// One list so a menu added later cannot quietly escape the check below
+    /// -- the failure mode of a hand-written sweep is the menu nobody added
+    /// to it.
+    ///
+    /// **That is exactly what happened, and the comment above predicted it
+    /// without preventing it.** The Run menu was absent from this list from
+    /// the day it was written, so neither the readout check nor
+    /// `LABEL_BUDGET` ever saw it -- and it was carrying a 52-character
+    /// readout and two around 70. It is the one menu built from the document
+    /// rather than written down, which is both why it was easy to forget and
+    /// why it most needed the sweep.
+    ///
+    /// It takes arguments, so it appears once per state worth checking rather
+    /// than once. A menu whose rows depend on a value is not covered by
+    /// building it one way.
+    fn every_menu() -> Vec<(&'static str, Vec<MenuItem>)> {
+        vec![
+            ("File", file(true, true, true, &[])),
+            ("Edit", edit(&[], true)),
+            ("View", view(ThemeId::Dark, false, true, false, 14)),
+            (
+                "Format",
+                format(Encoding::Utf8, LineEnding::Lf, Indent::default()),
+            ),
+            ("Insert", insert(time::OffsetDateTime::UNIX_EPOCH, true)),
+            ("Data", data(Format::Json)),
+            ("Note", note(true)),
+            ("Organize", organize(true)),
+            ("Research", research(true)),
+            ("Tools", tools(true)),
+            ("Help", help()),
+            ("Security", security_menu()),
+        ]
+    }
+
+    #[test]
+    fn no_menu_offers_a_row_that_does_nothing() {
+        // **The goal of 2026-08-22, made checkable** (ADR-0048). Every row a
+        // user can see either does something or is a readout -- a line that
+        // answers a question rather than inviting a click.
+        //
+        // A readout is recognised by carrying a colon or being a whole
+        // sentence, which is deliberately loose: the point is to catch a row
+        // that *looks* like a command and is not, and "Multi-cursor" or
+        // "Rust Scratchpad" would fail it while "Recovery journal: on" and
+        // "Nothing to convert in a plain-text document." pass.
+        for (menu, items) in every_menu() {
+            for item in items {
+                if item.action != action::NONE {
+                    continue;
+                }
+                assert!(
+                    item.label.contains(':') || item.label.split_whitespace().count() >= 5,
+                    "{menu} ▸ {:?} does nothing and does not read as a readout",
+                    item.label
+                );
+            }
+        }
+    }
+
+    /// The widest label that fits `MenuPopup`'s 280px at 13px, measured by
+    /// driving the window rather than computed: "Sign Document — it has never
+    /// bee…" elided at 34 characters, and "Redact Found Secrets — it is
+    /// empty" at 34 did not.
+    ///
+    /// Deliberately generous, because this is a smoke alarm rather than a
+    /// ruler: proportional text has no character count, and a test that
+    /// pretended to know the exact one would fail on a font change for a
+    /// reason nobody could act on.
+    const LABEL_BUDGET: usize = 42;
+
+    #[test]
+    fn no_row_label_is_too_long_for_the_popup_to_show() {
+        // **Found by driving the window** (ADR-0048). The popup is a fixed
+        // width and clips; before `overflow: elide` a label was cut mid-word
+        // with nothing to say it had been, and every label it happened to was
+        // a greyed row's *reason* -- the one text on screen whose whole job
+        // is to explain.
+        //
+        // Eliding makes truncation visible. This keeps the reasons short
+        // enough not to need it, which is the half a stylesheet cannot do.
+        for (menu, items) in every_menu() {
+            for item in items {
+                assert!(
+                    item.label.chars().count() <= LABEL_BUDGET,
+                    "{menu} ▸ {:?} is {} characters and will be elided by the popup",
+                    item.label,
+                    item.label.chars().count()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn no_menu_says_a_feature_is_coming_later() {
+        // `arrives()` is gone, and this is what stops it coming back one row
+        // at a time. A menu that announces a backlog is a menu somebody has
+        // to keep true.
+        for (menu, items) in every_menu() {
+            for item in items {
+                assert!(
+                    !item.label.contains("not implemented"),
+                    "{menu} ▸ {:?} still promises a later phase",
+                    item.label
+                );
+            }
+        }
+    }
 
     /// A fixed instant, so a stamp preview is the same on every run and in
     /// every timezone. `bp-naming` never reads a clock, which is what makes
@@ -1095,7 +1445,13 @@ mod tests {
         // `stamp_end` is sized from `Stamp::all()`, so a sixth stamp extends
         // the window with the menu. This fails if the two ever part company.
         let items = insert(STAMP_CLOCK, true);
-        let rows: Vec<&MenuItem> = items.iter().filter(|i| i.action != action::NONE).collect();
+        // Scoped to the stamp window rather than "any real action": the
+        // markdown rows beside them now carry real ids too, and a filter
+        // that swept those in would count the wrong rows and still pass.
+        let rows: Vec<&MenuItem> = items
+            .iter()
+            .filter(|i| (action::STAMP_BASE..stamp_end()).contains(&i.action))
+            .collect();
 
         assert_eq!(rows.len(), bp_naming::Stamp::all().len());
         for (index, row) in rows.iter().enumerate() {
@@ -1155,6 +1511,8 @@ mod tests {
             bp_security::Privacy::Off,
             true,
             true,
+            true,
+            false,
         );
         // The profile toggles are the leading rows, by construction. Taking
         // them positionally rather than by id range is what lets the range
@@ -1191,6 +1549,8 @@ mod tests {
                 bp_security::Privacy::Off,
                 true,
                 true,
+                true,
+                false,
             );
             let ticked: Vec<&str> = items
                 .iter()
@@ -1213,6 +1573,8 @@ mod tests {
             bp_security::Privacy::Off,
             true,
             true,
+            true,
+            false,
         );
         assert!(
             !items.iter().any(|i| i.label.starts_with('✓')),
@@ -1230,6 +1592,8 @@ mod tests {
             bp_security::Privacy::Off,
             true,
             true,
+            true,
+            false,
         );
         assert!(
             standard
@@ -1248,6 +1612,8 @@ mod tests {
             bp_security::Privacy::Off,
             true,
             true,
+            true,
+            false,
         );
         assert!(
             maximum
@@ -1271,6 +1637,8 @@ mod tests {
             bp_security::Privacy::Off,
             true,
             true,
+            true,
+            false,
         );
         let row = items
             .iter()
@@ -1292,6 +1660,8 @@ mod tests {
             bp_security::Privacy::Off,
             true,
             true,
+            true,
+            false,
         )
     }
 
@@ -1340,6 +1710,22 @@ mod tests {
     }
 
     #[test]
+    fn no_two_range_dispatch_windows_overlap() {
+        // A range arm swallowing another range's ids is the same failure as
+        // one swallowing an exact id, and nothing else checks for it. The
+        // recent-files window has caused that once already, from 60 to 100.
+        let windows = range_dispatch_windows();
+        for (i, (left_name, left)) in windows.iter().enumerate() {
+            for (right_name, right) in windows.iter().skip(i + 1) {
+                assert!(
+                    left.end <= right.start || right.end <= left.start,
+                    "the {left_name} window {left:?} overlaps the {right_name} window {right:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn the_security_operations_sit_outside_every_range_dispatch_matches() {
         // The load-bearing one. Every id below is matched by an *exact* arm
         // in `handle_menu_action`, but several arms above it match ranges --
@@ -1384,12 +1770,143 @@ mod tests {
     }
 
     #[test]
+    fn the_ids_this_change_adds_sit_outside_every_range_dispatch_matches() {
+        // Each is matched by an exact arm in `handle_menu_action`, and a
+        // range arm coming first would silently dispatch it as something
+        // else -- the same failure `SET_DEFAULT_EDITOR`'s own test above
+        // guards against.
+        for id in [
+            action::NEW_WINDOW,
+            action::ORGANIZE_RELATED_NOTES,
+            action::ORGANIZE_DUPLICATE_DETECTION,
+            action::INSERT_BOLD,
+            action::INSERT_ITALIC,
+            action::INSERT_LINK,
+            action::INSERT_CODE_BLOCK,
+            action::INSERT_TABLE,
+            action::TOOLS_INSPECTOR,
+            action::DIAGNOSTICS,
+            action::RESEARCH_REPORT,
+            // ADR-0043 and ADR-0044.
+            action::CITATION_METADATA,
+            action::FIND_IDENTIFIERS,
+            action::CHECK_BIBLIOGRAPHY,
+            // ADR-0046.
+            action::OPEN_QUESTIONS,
+            action::STORE_CONTENTS,
+            // ADR-0048.
+            action::ORGANIZE_SUGGESTED_FOLDER,
+            action::LOCK_DOCUMENT,
+            action::NOTE_TAGS,
+            action::NOTE_RECOVERY,
+            action::TOOLS_SECURITY_INSPECTOR,
+            action::TOOLS_FILE_ANALYSIS,
+            action::TOOLS_CONFIGURATION,
+        ] {
+            for (name, window) in range_dispatch_windows() {
+                assert!(
+                    !window.contains(&id),
+                    "id {id} falls inside the {name} window and would be dispatched as one"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_file_menu_offers_a_new_window() {
+        let row = file(false, true, false, &[])
+            .into_iter()
+            .find(|i| i.action == action::NEW_WINDOW)
+            .expect("a New Window row");
+        assert!(row.enabled, "a second instance is always available");
+    }
+
+    #[test]
+    fn the_markdown_insert_rows_are_caret_only_and_in_order() {
+        // Same constraint as the date/time stamps beside them: `TextInput`
+        // exposes no caret to insert at.
+        let disabled = insert(STAMP_CLOCK, false);
+        let markdown_ids = [
+            action::INSERT_BOLD,
+            action::INSERT_ITALIC,
+            action::INSERT_LINK,
+            action::INSERT_CODE_BLOCK,
+            action::INSERT_TABLE,
+        ];
+        for id in markdown_ids {
+            let row = disabled
+                .iter()
+                .find(|i| i.action == id)
+                .unwrap_or_else(|| panic!("a row for {id}"));
+            assert!(!row.enabled, "'{}' should be greyed", row.label);
+        }
+
+        let enabled = insert(STAMP_CLOCK, true);
+        for id in markdown_ids {
+            let row = enabled
+                .iter()
+                .find(|i| i.action == id)
+                .unwrap_or_else(|| panic!("a row for {id}"));
+            assert!(
+                row.enabled,
+                "'{}' should be live under --editor-view",
+                row.label
+            );
+        }
+
+        let labels: Vec<&str> = markdown_ids
+            .iter()
+            .map(|id| {
+                enabled
+                    .iter()
+                    .find(|i| i.action == *id)
+                    .unwrap()
+                    .label
+                    .as_str()
+            })
+            .collect();
+        assert_eq!(labels, ["Bold", "Italic", "Link", "Code Block", "Table"]);
+    }
+
+    #[test]
+    fn the_tools_menu_greys_the_inspector_on_an_empty_document() {
+        let empty = tools(false);
+        let row = empty
+            .iter()
+            .find(|i| i.action == action::TOOLS_INSPECTOR)
+            .expect("a Document Inspector row");
+        assert!(!row.enabled, "nothing to inspect on an empty document");
+
+        let with_content = tools(true);
+        let row = with_content
+            .iter()
+            .find(|i| i.action == action::TOOLS_INSPECTOR)
+            .expect("a Document Inspector row");
+        assert!(row.enabled);
+    }
+
+    #[test]
+    fn help_offers_diagnostics_as_a_real_row() {
+        let items = help();
+        let row = items
+            .iter()
+            .find(|i| i.action == action::DIAGNOSTICS)
+            .expect("a Diagnostics row");
+        assert!(row.enabled, "diagnostics has nothing to grey on");
+        assert_ne!(
+            row.action,
+            action::NONE,
+            "this was a planned row and now has to do something"
+        );
+    }
+
+    #[test]
     fn the_default_editor_row_names_the_preset_it_would_register_for() {
         // The preset is a real choice and this row makes one. Naming it on
         // the row is what keeps it from being made out of sight -- and the
         // ellipsis is the house convention for a row that asks first, which
         // this one does, because registration writes files.
-        let row = file(false, true, &[])
+        let row = file(false, true, false, &[])
             .into_iter()
             .find(|i| i.action == action::SET_DEFAULT_EDITOR)
             .expect("a default-editor row");
@@ -1415,6 +1932,8 @@ mod tests {
             bp_security::Privacy::Off,
             true,
             false,
+            true,
+            false,
         );
         let row = items
             .iter()
@@ -1431,7 +1950,7 @@ mod tests {
             "a real capability with nothing to act on is not a planned row"
         );
         assert!(
-            row.label.contains("never been saved"),
+            row.label.contains("never saved"),
             "the row must say why it is greyed; got '{}'",
             row.label
         );
@@ -1566,6 +2085,8 @@ mod tests {
             bp_security::Privacy::Off,
             false,
             true,
+            true,
+            false,
         );
         let row = items
             .iter()
@@ -1605,6 +2126,8 @@ mod tests {
                 bp_security::Privacy::Off,
                 has_content,
                 true,
+                true,
+                false,
             );
             let row = items
                 .iter()
@@ -1652,10 +2175,15 @@ mod tests {
     }
 
     #[test]
-    fn the_security_menu_no_longer_calls_the_history_planned() {
-        // The same trap as the redaction row above: a planned label and a
-        // live row for the same thing reads as the feature being in two
-        // states at once. `Lock Document` is still planned and must stay.
+    fn the_security_menu_never_lists_a_live_row_as_planned_too() {
+        // The trap this guards: a planned label and a live row for the same
+        // thing reads as the feature being in two states at once.
+        //
+        // **Lock Document used to be the exception here and is not any more**
+        // (ADR-0048). The assertion was inverted rather than deleted,
+        // because the row still exists -- what changed is which side of the
+        // line it is on, and a test that just stopped mentioning it would
+        // have left nothing watching.
         let items = security_menu();
         assert!(
             !items
@@ -1664,11 +2192,31 @@ mod tests {
             "the security history is live; it must not also be listed as planned"
         );
         assert!(
-            items
+            items.iter().any(|i| i.action == action::LOCK_DOCUMENT),
+            "Lock Document is live now and must have a real action"
+        );
+        assert!(
+            !items
                 .iter()
                 .any(|i| i.action == action::NONE && i.label.contains("Lock Document")),
-            "Lock Document is still planned and must still say so"
+            "and it must not also be listed as planned"
         );
+    }
+
+    #[test]
+    fn the_security_menu_has_nothing_planned_left_but_its_readouts() {
+        // The three policy lines are `planned()` because they are inert, not
+        // because they are unbuilt -- a readout is not something to click.
+        // Everything else must carry a real action (ADR-0048).
+        for item in security_menu() {
+            assert!(
+                item.action != action::NONE
+                    || item.label.contains(':')
+                    || item.label.trim().is_empty(),
+                "{:?} does nothing and is not a readout",
+                item.label
+            );
+        }
     }
 
     #[test]
@@ -1713,29 +2261,88 @@ mod tests {
         );
     }
 
-    #[test]
-    fn signing_is_greyed_with_a_reason_rather_than_listed_as_not_existing() {
-        // `planned` means "this does not exist yet"; `bp_crypto::sign_document`
-        // does exist and is tested. What is missing is somewhere to keep a
-        // key, which is a different sentence -- and it has to be on the row,
-        // because the greying is all the user gets.
-        let items = security_menu();
-        let row = items
-            .iter()
-            .find(|i| i.action == action::SIGN_DOCUMENT)
-            .expect("a signing row");
+    /// The Security menu for a document in a given state, for the signing
+    /// rows.
+    fn signing_row(has_path: bool, can_sign: bool, has_key: bool) -> MenuItem {
+        security(
+            bp_security::Security::default(),
+            false,
+            bp_security::Privacy::Off,
+            true,
+            has_path,
+            can_sign,
+            has_key,
+        )
+        .into_iter()
+        .find(|i| i.action == action::SIGN_DOCUMENT)
+        .expect("a signing row")
+    }
 
-        assert!(!row.enabled, "there is nowhere to keep a signing key yet");
-        assert_ne!(
-            row.action,
-            action::NONE,
-            "a real capability with a missing prerequisite is not a planned row"
-        );
+    #[test]
+    fn signing_is_live_now_that_a_key_has_somewhere_to_live() {
+        // This row was greyed for three sessions with "no signing key yet" on
+        // it, because `bp_crypto::sign_document` existed and there was
+        // nowhere to keep a key. ADR-0031 answered that -- sealed in the
+        // `.bpadx` envelope encrypted documents already use -- so the row
+        // acts.
+        let row = signing_row(true, true, false);
+        assert!(row.enabled, "got '{}'", row.label);
         assert!(
-            row.label.contains("key"),
-            "the row must say why it is greyed; got '{}'",
+            !row.label.contains("no signing key"),
+            "the reason it was greyed for is gone; got '{}'",
             row.label
         );
+    }
+
+    #[test]
+    fn signing_greys_for_the_two_reasons_a_signature_cannot_be_made() {
+        // Neither is about a key store any more. A signature is over the
+        // bytes **on disk** (ADR-0026), so a document that has never been
+        // saved has nothing to sign -- and one with unsaved changes would get
+        // a valid signature over the *previous* version, which is worse than
+        // a refusal because it verifies.
+        //
+        // The two say different things, because the way out of each is
+        // different: one is Save As, the other is Ctrl+S.
+        let never_saved = signing_row(false, true, true);
+        let unsaved_changes = signing_row(true, false, true);
+
+        for row in [&never_saved, &unsaved_changes] {
+            assert!(!row.enabled, "got '{}'", row.label);
+            assert_ne!(
+                row.action,
+                action::NONE,
+                "a real capability with a missing prerequisite is not a planned row"
+            );
+        }
+        assert_ne!(
+            never_saved.label, unsaved_changes.label,
+            "two different problems must not read as one"
+        );
+        assert!(never_saved.label.contains("never saved"));
+        assert!(unsaved_changes.label.contains("save it first"));
+    }
+
+    #[test]
+    fn the_signing_row_says_which_question_the_click_will_ask() {
+        // A click is followed by a passphrase bar, and *which* one depends on
+        // whether a key exists. Saying so before the click is what stops
+        // "Sign" being followed by an unexplained ceremony -- and creating a
+        // signing key is a thing somebody may want to know is about to happen.
+        let first_time = signing_row(true, true, false);
+        let afterwards = signing_row(true, true, true);
+
+        assert!(
+            first_time.shortcut.contains("creates"),
+            "got '{}'",
+            first_time.shortcut
+        );
+        assert!(
+            afterwards.shortcut.contains("unlocks"),
+            "got '{}'",
+            afterwards.shortcut
+        );
+        assert_ne!(first_time.shortcut, afterwards.shortcut);
     }
 
     #[test]
@@ -1795,21 +2402,21 @@ mod tests {
 
     #[test]
     fn save_all_is_disabled_when_nothing_is_unsaved() {
-        let items = file(false, true, &[]);
+        let items = file(false, true, false, &[]);
         let save_all = items
             .iter()
             .find(|i| i.action == action::SAVE_ALL)
             .expect("Save All");
         assert!(!save_all.enabled);
 
-        let items = file(true, true, &[]);
+        let items = file(true, true, false, &[]);
         let save_all = items.iter().find(|i| i.action == action::SAVE_ALL).unwrap();
         assert!(save_all.enabled);
     }
 
     #[test]
     fn reload_needs_a_file_to_reload_from() {
-        let items = file(false, false, &[]);
+        let items = file(false, false, false, &[]);
         let reload = items
             .iter()
             .find(|i| i.action == action::RELOAD)
@@ -2014,32 +2621,166 @@ mod tests {
     }
 
     #[test]
-    fn planned_menus_are_entirely_inert() {
-        for name in [
-            "Insert", "Data", "Note", "Notebook", "Organize", "Research", "Run", "Security",
-            "Tools",
+    fn the_research_menu_has_nothing_planned_left_in_it() {
+        let items = research(true);
+        assert!(
+            items.iter().all(|i| i.action != action::NONE),
+            "ADR-0046 resolved the last five planned names; a row that does \
+             nothing should not have outlived them"
+        );
+    }
+
+    #[test]
+    fn open_questions_greys_out_with_nothing_to_read_and_the_store_row_does_not() {
+        let empty = research(false);
+        let asks = |items: &[MenuItem], id: i32| {
+            items
+                .iter()
+                .find(|i| i.action == id)
+                .expect("the row exists")
+                .enabled
+        };
+        assert!(
+            !asks(&empty, action::OPEN_QUESTIONS),
+            "a document reading has nothing to read"
+        );
+        assert!(
+            asks(&empty, action::STORE_CONTENTS),
+            "the store is there whether or not a tab is -- the same reasoning \
+             Research Report already applies to itself"
+        );
+        assert!(asks(&research(true), action::OPEN_QUESTIONS));
+    }
+
+    #[test]
+    fn the_research_menu_offers_no_row_named_for_a_paper_section() {
+        // ADR-0046. The five IMRaD names were written down before anybody had
+        // decided what the mode was for, and a row that carried one now would
+        // be a promise about a structure this product does not have.
+        for absent in [
+            "Research Question",
+            "Evidence",
+            "Findings",
+            "Methods",
+            "Datasets",
         ] {
-            let items = planned_menu(name);
-            assert!(!items.is_empty(), "{name} has no contents");
             assert!(
-                items.iter().all(|i| !i.enabled),
-                "{name} has an enabled row that does nothing"
-            );
-            assert!(
-                items.iter().all(|i| i.action == action::NONE),
-                "{name} has a row with a real action"
-            );
-            assert!(
-                items.last().unwrap().label.contains("not implemented"),
-                "{name} does not say when it arrives"
+                !research(true).iter().any(|i| i.label.contains(absent)),
+                "{absent} is back in the Research menu"
             );
         }
     }
 
     #[test]
+    fn the_format_menu_does_not_promise_more_than_it_has() {
+        // It carried an "arrives in phase 5" line with no planned rows above
+        // it, so it announced a backlog and listed nothing (ADR-0048).
+        assert!(
+            !format(Encoding::Utf8, LineEnding::Lf, Indent::default())
+                .iter()
+                .any(|i| i.label.contains("not implemented")),
+            "the Format menu is complete and must not say otherwise"
+        );
+    }
+
+    #[test]
+    fn a_format_with_no_data_operations_says_so_once() {
+        let items = data(Format::PlainText);
+        assert_eq!(
+            items.len(),
+            1,
+            "one honest line, not a list of six things that will not happen:              {items:?}"
+        );
+        assert!(items[0].label.contains("Nothing to validate"), "{items:?}");
+    }
+
+    #[test]
+    fn a_format_with_data_operations_still_offers_them() {
+        assert!(
+            data(Format::Json).iter().all(|i| i.action != action::NONE),
+            "collapsing the fallback must not have touched the real rows"
+        );
+    }
+
+    #[test]
+    fn the_note_menu_has_nothing_planned_left_in_it() {
+        assert!(
+            note(true).iter().all(|i| i.action != action::NONE),
+            "ADR-0048 resolved all three"
+        );
+    }
+
+    #[test]
+    fn related_notes_lives_in_exactly_one_menu() {
+        // Two rows running the same query is how one of them goes stale.
+        assert!(
+            !note(true).iter().any(|i| i.label.contains("Related Notes")),
+            "Related Notes is back in the Note menu; it belongs to Organize"
+        );
+        assert!(
+            organize(true)
+                .iter()
+                .any(|i| i.label.contains("Related Notes")),
+            "and it must still be in Organize"
+        );
+    }
+
+    #[test]
+    fn the_note_menu_offers_no_revision_history() {
+        // ADR-0048: bp-history is crash recovery, not a version store.
+        assert!(
+            !note(true).iter().any(|i| i.label.contains("Revision")),
+            "Revision History promises versions this product does not keep"
+        );
+    }
+
+    #[test]
+    fn the_tools_menu_has_nothing_planned_left_in_it() {
+        assert!(
+            tools(true).iter().all(|i| i.action != action::NONE),
+            "ADR-0048 resolved all four; a row that does nothing should not \
+             have outlived them"
+        );
+    }
+
+    #[test]
+    fn the_tools_menu_offers_no_benchmarks_row() {
+        // ADR-0048: `benches/` is a README and no benchmark. A row named for
+        // a suite that does not exist is the promise "DOI Lookup" was.
+        assert!(
+            !tools(true).iter().any(|i| i.label.contains("Benchmark")),
+            "Benchmarks is back in the Tools menu"
+        );
+    }
+
+    #[test]
+    fn only_file_analysis_needs_a_document() {
+        let empty = tools(false);
+        let asks = |id: i32| {
+            empty
+                .iter()
+                .find(|i| i.action == id)
+                .expect("the row exists")
+                .enabled
+        };
+        assert!(
+            !asks(action::TOOLS_FILE_ANALYSIS),
+            "there is no file to analyse without a document"
+        );
+        assert!(
+            asks(action::TOOLS_SECURITY_INSPECTOR),
+            "the policy belongs to the session as much as to the tab"
+        );
+        assert!(
+            asks(action::TOOLS_CONFIGURATION),
+            "configuration is about the process, not the document"
+        );
+    }
+
+    #[test]
     fn every_working_row_has_an_action() {
         let mut all = Vec::new();
-        all.extend(file(true, true, &[]));
+        all.extend(file(true, true, false, &[]));
         // `true` so the caret-dependent rows are enabled here too -- the
         // stronger check, since a disabled row is exempt below regardless.
         all.extend(edit(&[], true));
@@ -2053,6 +2794,8 @@ mod tests {
         all.extend(format(Encoding::Utf8, LineEnding::Lf, Indent::default()));
         all.extend(data(Format::Csv));
         all.extend(data(Format::Yaml));
+        all.extend(insert(STAMP_CLOCK, true));
+        all.extend(tools(true));
         all.extend(help());
         all.extend(security_menu());
 
@@ -2072,7 +2815,7 @@ mod tests {
             std::path::PathBuf::from("/notes/a/Report_17AUG2026.txt"),
             std::path::PathBuf::from("/notes/b/Report_17AUG2026.txt"),
         ];
-        let items = file(false, true, &recent);
+        let items = file(false, true, false, &recent);
 
         let rows: Vec<&MenuItem> = items
             .iter()
@@ -2091,7 +2834,7 @@ mod tests {
 
     #[test]
     fn no_recent_files_means_no_recent_rows() {
-        let items = file(false, true, &[]);
+        let items = file(false, true, false, &[]);
         assert!(
             items
                 .iter()
@@ -2106,7 +2849,7 @@ mod tests {
         let recent: Vec<std::path::PathBuf> = (0..bp_config::MAX_RECENT + 5)
             .map(|i| std::path::PathBuf::from(format!("/f{i}.txt")))
             .collect();
-        let items = file(false, true, &recent);
+        let items = file(false, true, false, &recent);
 
         // The recent rows, picked out by their labels rather than by the id
         // range under test -- a filter written from `RECENT_BASE` would agree
@@ -2145,7 +2888,12 @@ mod tests {
 
         let clips = [bp_clipboard::Entry::new("copied")];
         let mut rust_side = Vec::new();
-        rust_side.extend(file(true, true, &[std::path::PathBuf::from("/a.txt")]));
+        rust_side.extend(file(
+            true,
+            true,
+            false,
+            &[std::path::PathBuf::from("/a.txt")],
+        ));
         rust_side.extend(view(
             ThemeId::Green,
             false,
@@ -2160,6 +2908,7 @@ mod tests {
         rust_side.extend(data(Format::Yaml));
         rust_side.extend(help());
         rust_side.extend(insert(STAMP_CLOCK, true));
+        rust_side.extend(tools(true));
         rust_side.extend(tab_context(2, true));
         rust_side.extend(security(
             bp_security::Security::default(),
@@ -2167,6 +2916,8 @@ mod tests {
             bp_security::Privacy::Off,
             true,
             true,
+            true,
+            false,
         ));
 
         for item in rust_side.iter().filter(|i| i.enabled) {
@@ -2393,6 +3144,114 @@ mod tests {
                     row.label
                 );
             }
+        }
+    }
+
+    #[test]
+    fn a_document_served_from_disk_greys_every_row_that_would_write_or_reload_it() {
+        // ADR-0030. `AppState` refuses all four by name -- a save would write
+        // an empty file over two gigabytes, and a reload would load a
+        // document that was deliberately never loaded -- and these grey so
+        // the refusal is not the first the user hears of it.
+        //
+        // `row_enabled(.., false)` rather than `planned`: the rows exist and
+        // cannot act right now, which is a different statement from "does not
+        // exist yet", and the greying is the only thing on screen that
+        // explains why Ctrl+S stopped responding.
+        let served = file(false, true, true, &[]);
+        for id in [
+            action::SAVE,
+            action::SAVE_AS,
+            action::SAVE_COPY,
+            action::RELOAD,
+        ] {
+            let row = served
+                .iter()
+                .find(|i| i.action == id)
+                .unwrap_or_else(|| panic!("the File menu lost action {id}"));
+            assert!(
+                !row.enabled,
+                "'{}' would act on a document that is never held whole",
+                row.label
+            );
+        }
+
+        // And the same menu for an ordinary document, so this is a test of
+        // the flag rather than of the rows always being off.
+        let ordinary = file(false, true, false, &[]);
+        for id in [action::SAVE, action::SAVE_AS, action::SAVE_COPY] {
+            assert!(
+                ordinary
+                    .iter()
+                    .find(|i| i.action == id)
+                    .is_some_and(|row| row.enabled),
+                "action {id} is greyed for an ordinary document"
+            );
+        }
+    }
+
+    #[test]
+    fn save_all_is_not_greyed_by_the_active_document_being_a_viewer() {
+        // It acts on whichever *other* tabs are dirty. A viewer is never
+        // dirty, so it is already excluded -- and greying the row would stop
+        // somebody saving the note in the next tab because a log is in front.
+        let items = file(true, true, true, &[]);
+        assert!(
+            items
+                .iter()
+                .find(|i| i.action == action::SAVE_ALL)
+                .is_some_and(|row| row.enabled),
+            "Save All must still reach the other tabs"
+        );
+    }
+
+    #[test]
+    fn the_data_menu_and_bp_formats_agree_on_which_documents_have_one() {
+        // Two answers to one question, kept in step here because there is
+        // nowhere else they meet. `Format::has_data_operations` is what a
+        // caller outside this crate asks -- a keyboard shortcut, a toolbar, a
+        // future command palette -- and this `match` is what the menu itself
+        // does. A format added to one and not the other is a row that exists
+        // and a shortcut that says it does not, or the reverse.
+        //
+        // The trap this replaced was the same question asked of the
+        // *profile*: `Profile::StructuredData` covers INI and XML, neither of
+        // which `bp-data` can parse, so a menu gated on the profile failed on
+        // every row it offered.
+        for &format in Format::ALL {
+            let items = data(format);
+            let acts = items.iter().any(|i| i.action != action::NONE);
+            assert_eq!(
+                acts,
+                format.has_data_operations(),
+                "{}: the Data menu {} rows that do something, and \
+                 has_data_operations says {}",
+                format.label(),
+                if acts { "has" } else { "has no" },
+                format.has_data_operations()
+            );
+            assert!(
+                !items.is_empty(),
+                "{}: a menu with no rows at all reads as broken; a format \
+                 with nothing to offer says so instead",
+                format.label()
+            );
+        }
+    }
+
+    #[test]
+    fn a_format_without_data_operations_names_itself_in_the_refusal() {
+        // Offering an empty menu, or one that says only "not implemented",
+        // leaves the user guessing which of the two it is. INI is the case
+        // worth pinning: it is structured data, so the answer is genuinely
+        // surprising.
+        for format in [Format::Ini, Format::Xml, Format::PlainText] {
+            let items = data(format);
+            assert!(
+                items.iter().any(|i| i.label.contains(format.label())),
+                "{} documents get a Data menu that does not say so",
+                format.label()
+            );
         }
     }
 

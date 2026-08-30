@@ -42,7 +42,8 @@ jobs:
         run: cargo test --workspace
       # `fuzz/` declares its own `[workspace]`, so every `--workspace` step
       # above walks past it. It holds the hostile-input harnesses for
-      # bp-crypto, bp-data, bp-files, bp-formats and bp-notebook.
+      # bp-crypto, bp-data, bp-files and bp-formats. There was a fifth, for
+      # bp-notebook, until ADR-0057 removed the crate it protected.
       - name: Format (fuzz)
         working-directory: fuzz
         run: cargo fmt --all -- --check

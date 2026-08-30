@@ -42,7 +42,36 @@ use serde::{Deserialize, Serialize};
 /// Crate identity used by workspace smoke tests and diagnostics.
 pub const CRATE_NAME: &str = "bp-history";
 
+/// A document's encoding, as recorded in a [`Checkpoint`].
+///
+/// This mirrors `bp_core::Encoding` rather than reusing it, so that this
+/// crate's on-disk journal format does not depend on `bp-core`'s type -- the
+/// caller (`bp-ui`, which already depends on both) converts at the boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum CheckpointEncoding {
+    #[default]
+    Utf8,
+    Utf8Bom,
+    Utf16Le,
+    Utf16Be,
+}
+
+/// A document's line-ending convention, as recorded in a [`Checkpoint`].
+///
+/// Mirrors `bp_core::LineEnding` for the same reason as [`CheckpointEncoding`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CheckpointLineEnding {
+    Lf,
+    CrLf,
+}
+
 /// One document's unsaved state.
+///
+/// `encoding` and `line_ending` were added after this format shipped, so both
+/// are `#[serde(default)]`: a journal file written by an older build simply
+/// lacks the keys, and must still deserialize rather than losing the
+/// recovery entirely. See each field's doc comment for what an absent value
+/// falls back to.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Checkpoint {
     /// The file this belonged to, if it had one. `None` for an unsaved
@@ -55,6 +84,28 @@ pub struct Checkpoint {
     /// Seconds since the Unix epoch. A plain integer rather than a timestamp
     /// type so the journal format does not depend on a crate's serialisation.
     pub written_at: u64,
+    /// The document's encoding at the moment of the checkpoint.
+    ///
+    /// Absent on a pre-upgrade journal, in which case there is genuinely no
+    /// way to recover it: the checkpoint holds already-decoded text, and
+    /// nothing about *that* says whether the file on disk was UTF-8,
+    /// UTF-8-with-BOM, or UTF-16. A missing value falls back to
+    /// [`CheckpointEncoding::default`] -- a guess, not a recovered fact --
+    /// rather than pretending to know.
+    #[serde(default)]
+    pub encoding: CheckpointEncoding,
+    /// The document's line-ending convention at the moment of the
+    /// checkpoint.
+    ///
+    /// Absent on a pre-upgrade journal. Unlike `encoding`, the text itself
+    /// carries evidence here, so the caller resolves a missing value at
+    /// recovery time with `LineEnding::detect` rather than a blind platform
+    /// default -- the same guess the rest of this codebase makes when
+    /// certainty isn't available. `None` is also what a *freshly written*
+    /// checkpoint carries for text with no line break at all, so this stays
+    /// optional rather than eagerly resolving during deserialization.
+    #[serde(default)]
+    pub line_ending: Option<CheckpointLineEnding>,
 }
 
 /// What a checkpoint attempt did.
@@ -387,6 +438,8 @@ mod tests {
             name: "a.txt".to_owned(),
             text: text.to_owned(),
             written_at: now_unix(),
+            encoding: CheckpointEncoding::Utf8,
+            line_ending: Some(CheckpointLineEnding::CrLf),
         }
     }
 
@@ -402,6 +455,43 @@ mod tests {
         assert_eq!(pending.len(), 1);
         assert_eq!(pending[0].0, 1);
         assert_eq!(pending[0].1, entry);
+    }
+
+    #[test]
+    fn a_checkpoints_encoding_and_line_ending_round_trip() {
+        // Non-default values on purpose: a bug that always falls back to
+        // `CheckpointEncoding::default()` would still pass a test that only
+        // ever wrote the default.
+        let (_dir, journal) = journal();
+        let mut entry = checkpoint("unsaved work");
+        entry.encoding = CheckpointEncoding::Utf16Le;
+        entry.line_ending = Some(CheckpointLineEnding::Lf);
+
+        journal
+            .checkpoint(1, &entry, Recovery::Plaintext, None)
+            .unwrap();
+
+        let pending = journal.pending();
+        assert_eq!(pending[0].1.encoding, CheckpointEncoding::Utf16Le);
+        assert_eq!(pending[0].1.line_ending, Some(CheckpointLineEnding::Lf));
+    }
+
+    #[test]
+    fn a_pre_upgrade_journal_entry_without_encoding_or_line_ending_still_deserializes() {
+        // Journals already on disk were written before these fields existed.
+        // An old entry must still recover -- with the documented fallbacks --
+        // rather than failing to deserialize and losing the recovery outright.
+        let old_shape = r#"{
+            "path": "/notes/a.txt",
+            "name": "a.txt",
+            "text": "work from before the upgrade",
+            "written_at": 1000
+        }"#;
+
+        let entry: Checkpoint = serde_json::from_str(old_shape).unwrap();
+        assert_eq!(entry.encoding, CheckpointEncoding::Utf8);
+        assert_eq!(entry.line_ending, None);
+        assert_eq!(entry.text, "work from before the upgrade");
     }
 
     #[test]
@@ -531,6 +621,8 @@ mod tests {
             name: "Untitled".to_owned(),
             text: "notes with no file yet".to_owned(),
             written_at: now_unix(),
+            encoding: CheckpointEncoding::Utf8,
+            line_ending: None,
         };
         journal
             .checkpoint(7, &entry, Recovery::Plaintext, None)
@@ -622,6 +714,8 @@ mod tests {
             name: "Untitled".to_owned(),
             text: "unsaved".to_owned(),
             written_at: now_unix(),
+            encoding: CheckpointEncoding::Utf8,
+            line_ending: None,
         };
 
         let written = journal

@@ -1,4 +1,4 @@
-// BachelorPad+ application shell.
+// BachelorPlusLite application shell.
 //
 // This file owns the window: its properties, the callbacks Rust binds to, the
 // shortcut bindings, and the layout that puts the pieces in order. The pieces
@@ -29,7 +29,7 @@ import { EditorSurface } from "editor_surface.slint";
 import { FindBar } from "find_bar.slint";
 import { GotoBar } from "goto_bar.slint";
 import { PassphraseBar } from "passphrase_bar.slint";
-import { ResultsPanel } from "results_panel.slint";
+import { ListPanel } from "list_panel.slint";
 import { StatusBar } from "status_bar.slint";
 import { Tab } from "tab.slint";
 import { EditorRow, MenuItem, Palette, SearchHit, SelectionBox, TabInfo } from "types.slint";
@@ -38,8 +38,19 @@ import { EditorRow, MenuItem, Palette, SearchHit, SelectionBox, TabInfo } from "
 // compiled entry file exports. `bp-ui` names all six.
 export { EditorRow, MenuItem, Palette, SearchHit, SelectionBox, TabInfo }
 
+// Which bar is waiting for the caret. Not exported and not in `types.slint`:
+// nothing outside this file may set it, and Rust never sees it -- it exists
+// only to carry one request across one tick. See `focus-timer` below.
+enum PendingFocus {
+    none,
+    find,
+    goto,
+    passphrase,
+    editor,
+}
+
 export component AppWindow inherits Window {
-    title: "BachelorPad+";
+    title: "BachelorPlusLite";
     preferred-width: 1000px;
     preferred-height: 680px;
     background: Palette.shell;
@@ -57,6 +68,7 @@ export component AppWindow inherits Window {
     in property <string> theme-name;
     /// The active document's security profile, or empty under the default.
     in property <string> security-profile;
+    in property <string> size-label;
     in property <string> error-message;
     /// What the desktop's appearance setting says, reported to Rust so
     /// `bp_theme::ThemeId::for_system` can resolve it.
@@ -89,10 +101,8 @@ export component AppWindow inherits Window {
     in property <[MenuItem]> format-items;
     in property <[MenuItem]> data-items;
     in property <[MenuItem]> note-items;
-    in property <[MenuItem]> notebook-items;
     in property <[MenuItem]> organize-items;
     in property <[MenuItem]> research-items;
-    in property <[MenuItem]> run-items;
     in property <[MenuItem]> security-items;
     in property <[MenuItem]> tools-items;
     in property <[MenuItem]> help-items;
@@ -157,6 +167,24 @@ export component AppWindow inherits Window {
     callback find-previous();
     callback replace-all();
 
+    /// True while a document served from disk is being scanned for the find
+    /// bar's query (ADR-0042).
+    ///
+    /// `in-out` because both ends set it: Rust turns it on when a scan
+    /// starts and off when the scan reports it has finished, and the timer
+    /// below reads it. It is the *whole* of the cancellation story -- there
+    /// is no thread to signal, so a scan stops when nothing asks it to
+    /// continue.
+    in-out property <bool> scanning;
+    /// How long between two ticks of a scan, in milliseconds.
+    ///
+    /// Set by Rust from `bp_search::STREAM_TICK` rather than written here as
+    /// a literal. It is half of a scan rate whose other half
+    /// (`WINDOWS_PER_TICK`) lives in that crate, and two numbers that only
+    /// mean something together must not be a file apart.
+    in property <int> scan-tick-ms: 16;
+    callback scan-tick();
+
     // Cross-file search results.
     in property <[SearchHit]> search-hits;
     // in-out: Rust opens it after a search, the close button shuts it.
@@ -164,6 +192,14 @@ export component AppWindow inherits Window {
     in property <string> results-summary;
     callback search-folder();
     callback open-hit(int);
+
+    // Organize ▸ Related Notes (ADR-0037). Same shape as the cross-file
+    // search results just above.
+    in property <[SearchHit]> organize-hits;
+    // in-out: Rust opens it on a click, the close button shuts it.
+    in-out property <bool> organize-open;
+    in property <string> organize-summary;
+    callback open-organize-hit(int);
 
     // --- go to line -----------------------------------------------------
     // in-out: the menu row and Ctrl+G open it, the × closes it.
@@ -198,6 +234,20 @@ export component AppWindow inherits Window {
         editor.focus();
     }
 
+    /// Select a range in the editor without moving focus -- a live preview
+    /// while the user is still typing in the find box, where taking focus
+    /// back on every keystroke (as `select-range` does) would send the next
+    /// character typed into the document instead of the box.
+    ///
+    /// Only reached under `TextInput`: under the custom surface Rust owns
+    /// the selection outright and never calls into Slint for a preview.
+    public function preview-range(start: int, end: int) {
+        if (root.use-editor-view) {
+            return;
+        }
+        editor.set-selection-offsets(start, end);
+    }
+
     /// Paste whatever the OS clipboard holds at the caret.
     ///
     /// Rust puts the chosen history entry on the clipboard first. Under
@@ -214,19 +264,107 @@ export component AppWindow inherits Window {
         editor.paste();
     }
 
+    // --- opening a bar, and giving it the caret -------------------------
+    //
+    // **A bar asks for the caret on the tick after it opens, never in the
+    // same one.** Every route into these three functions is a callback that
+    // two other things run *after*, and both of them put the caret back in
+    // the editor:
+    //
+    // - `dispatch` calls `focus-editor()` immediately after `menu-action`
+    //   returns, which is right for every row that is not opening a bar;
+    // - closing a `MenuPopup` restores the focus the popup took from the
+    //   editor when it opened. Slint does that in `close_popup_impl`, which
+    //   `process_mouse_input` calls *after* it has dispatched the click that
+    //   chose the row (`i-slint-core-1.17.1/window.rs`) -- read rather than
+    //   inferred, and there is no way to opt a popup out of it.
+    //
+    // Neither is reachable from here, so the caret is handed over once both
+    // have had their turn. Asking directly loses the race, and what the user
+    // types next goes into the *document*: found on 2026-08-21 by
+    // `Security > Sign Document`, which typed a signing passphrase into the
+    // open document in plain text, where saving would have written it to
+    // disk in the clear.
+    //
+    // Every other route through a menu row into one of these three functions
+    // was exposed to the same race -- `Edit > Go to Line`, and the two
+    // encrypted-document paths that reach `focus-passphrase` from
+    // `Security > Encrypt Document` and an encrypted `File > Open`. The two
+    // encrypted paths were not driven: both put a native `rfd` dialog in
+    // front of the bar, and a native dialog swallows synthetic input.
+    private property <PendingFocus> pending-focus: PendingFocus.none;
+
+    focus-timer := Timer {
+        // Not a delay: the shortest interval that still lands in a later
+        // turn of the event loop than the click being dispatched now.
+        interval: 1ms;
+        // A binding rather than an assignment, so there is one source of
+        // truth for whether a request is outstanding, and clearing the
+        // request below is what stops the timer.
+        running: root.pending-focus != PendingFocus.none;
+        triggered => {
+            if (root.pending-focus == PendingFocus.find) {
+                find-bar.focus-query();
+            } else if (root.pending-focus == PendingFocus.goto) {
+                goto-bar.focus-input();
+            } else if (root.pending-focus == PendingFocus.passphrase) {
+                passphrase-bar.focus-input();
+            } else if (root.pending-focus == PendingFocus.editor) {
+                root.focus-editor();
+            }
+            root.pending-focus = PendingFocus.none;
+        }
+    }
+
+    scan-timer := Timer {
+        interval: root.scan-tick-ms * 1ms;
+        // `find-open` as well as `scanning`, and it is not belt and braces:
+        // closing the find bar is a user cancelling a search, and with no
+        // thread to signal that has to *be* the timer not firing again.
+        running: root.scanning && root.find-open;
+        triggered => {
+            root.scan-tick();
+        }
+    }
+
     public function focus-find() {
         root.find-open = true;
-        find-bar.focus-query();
+        root.pending-focus = PendingFocus.find;
     }
 
     public function focus-goto() {
         root.goto-open = true;
-        goto-bar.focus-input();
+        root.pending-focus = PendingFocus.goto;
     }
 
     public function focus-passphrase() {
         root.passphrase-open = true;
-        passphrase-bar.focus-input();
+        root.pending-focus = PendingFocus.passphrase;
+    }
+
+    /// Give the caret to whichever surface is drawing the document -- but not
+    /// if anything else wants it.
+    ///
+    /// **`forward-focus` cannot do this job, and that is why this exists.**
+    /// It names `editor`, the `TextInput`, which is `visible:
+    /// !use-editor-view` -- invisible for a document served from disk
+    /// (ADR-0030) and for every document under `--editor-view`. It is also
+    /// resolved at *compile* time into the component's init code
+    /// (`i-slint-compiler`'s `focus_handling` pass), so it is one fixed
+    /// element chosen once and cannot follow a property. Left alone, the
+    /// window opens with the keyboard held by something nobody can see, and
+    /// Ctrl+F does nothing until the reader clicks in the document.
+    ///
+    /// Called at startup and whenever the surface changes under the active
+    /// document. **The guard is the whole of the difference between this and
+    /// a defect**: switching to a tab drawn by the other surface must not
+    /// take the caret out of an open find box, and a bar that has already
+    /// asked for it this tick outranks a surface that merely changed.
+    public function focus-editor-soon() {
+        if (root.pending-focus == PendingFocus.none && !root.find-open && !root.goto-open
+            && !root.passphrase-open) {
+            root.pending-focus = PendingFocus.editor;
+        }
     }
 
     /// Wipe the box without closing the bar -- a wrong passphrase gets
@@ -445,12 +583,6 @@ export component AppWindow inherits Window {
                             note-menu.show();
                         }
                     }
-                    notebook-label := MenuLabel {
-                        label: "Notebook";
-                        clicked => {
-                            notebook-menu.show();
-                        }
-                    }
                     organize-label := MenuLabel {
                         label: "Organize";
                         clicked => {
@@ -461,12 +593,6 @@ export component AppWindow inherits Window {
                         label: "Research";
                         clicked => {
                             research-menu.show();
-                        }
-                    }
-                    run-label := MenuLabel {
-                        label: "Run";
-                        clicked => {
-                            run-menu.show();
                         }
                     }
                     security-label := MenuLabel {
@@ -574,7 +700,7 @@ export component AppWindow inherits Window {
                     }
                 }
 
-                Flickable {
+                editor-scroll := Flickable {
                     visible: !root.use-editor-view;
                     viewport-height: max(self.height, editor-row.preferred-height);
 
@@ -605,6 +731,39 @@ export component AppWindow inherits Window {
                             horizontal-stretch: 1;
                             edited => {
                                 root.text-edited(self.text);
+                            }
+
+                            // **Scroll the caret into view.** `TextInput`
+                            // does not do this for a selection set from
+                            // outside it -- `set-selection-offsets` moves the
+                            // caret and nothing moves the viewport -- so Find
+                            // could report `1 of 1` for a match a hundred
+                            // lines below the fold and leave the reader
+                            // looking at line 1. Found on 2026-08-21; every
+                            // earlier test of Find used a document that fitted
+                            // on one screen, which is why four manual passes
+                            // did not see it.
+                            //
+                            // This is Slint's own answer, from
+                            // `widgets/common/textedit-base.slint`: the
+                            // toolkit exposes `cursor-position-changed`
+                            // precisely so a scroll container can follow the
+                            // caret, and `TextEdit` uses it the same way.
+                            // The clamp shape is theirs too -- the middle
+                            // term is what stops the view jumping back and
+                            // forth between the two branches when the visible
+                            // height is less than one line.
+                            cursor-position-changed(caret) => {
+                                if (caret.y + editor-scroll.viewport-y < 0px) {
+                                    editor-scroll.viewport-y = min(0px, min(
+                                        editor-scroll.height - caret.y - root.font-size * 2,
+                                        max(editor-scroll.height - editor-row.preferred-height, -caret.y)));
+                                } else if (caret.y + editor-scroll.viewport-y
+                                        > editor-scroll.height - root.font-size * 2) {
+                                    editor-scroll.viewport-y = min(0px, max(
+                                        editor-scroll.height - editor-row.preferred-height,
+                                        editor-scroll.height - caret.y - root.font-size * 2));
+                                }
                             }
                         }
                     }
@@ -669,16 +828,32 @@ export component AppWindow inherits Window {
                 }
             }
 
-            ResultsPanel {
+            ListPanel {
                 open: root.results-open;
                 hits: root.search-hits;
                 summary: root.results-summary;
+                // A file path plus a line number, which is the widest of the
+                // three uses.
+                label-width: 320px;
 
                 open-hit(index) => {
                     root.open-hit(index);
                 }
                 closed => {
                     root.results-open = false;
+                }
+            }
+
+            ListPanel {
+                open: root.organize-open;
+                hits: root.organize-hits;
+                summary: root.organize-summary;
+
+                open-hit(index) => {
+                    root.open-organize-hit(index);
+                }
+                closed => {
+                    root.organize-open = false;
                 }
             }
 
@@ -692,6 +867,7 @@ export component AppWindow inherits Window {
                 line-ending-label: root.line-ending-label;
                 cursor-label: root.cursor-label;
                 security-label: root.security-profile;
+                size-label: root.size-label;
                 theme-name: root.theme-name;
                 location: root.location;
                 error-message: root.error-message;
@@ -777,15 +953,6 @@ export component AppWindow inherits Window {
             root.dispatch(a);
         }
     }
-    notebook-menu := MenuPopup {
-        x: notebook-label.x + 4px;
-        y: 28px;
-        menu-max-height: root.menu-max-height;
-        items: root.notebook-items;
-        chosen(a) => {
-            root.dispatch(a);
-        }
-    }
     organize-menu := MenuPopup {
         x: organize-label.x + 4px;
         y: 28px;
@@ -800,15 +967,6 @@ export component AppWindow inherits Window {
         y: 28px;
         menu-max-height: root.menu-max-height;
         items: root.research-items;
-        chosen(a) => {
-            root.dispatch(a);
-        }
-    }
-    run-menu := MenuPopup {
-        x: run-label.x + 4px;
-        y: 28px;
-        menu-max-height: root.menu-max-height;
-        items: root.run-items;
         chosen(a) => {
             root.dispatch(a);
         }

@@ -95,14 +95,18 @@ impl AppInfo {
     ///
     /// Everything but the path is fixed, because everything but the path is a
     /// promise: the `app_id` in particular must not drift between releases.
+    ///
+    /// It reads [`crate::APP_ID`] and not [`crate::APP_DIR`], which is the
+    /// whole of ADR-0032. The icon takes the same value because freedesktop
+    /// names an application's icon after its id.
     #[must_use]
     pub fn bachelorpad(executable: impl Into<String>) -> Self {
         Self {
-            display_name: "BachelorPad+".to_owned(),
-            description: "Text editor for notes, data and logs".to_owned(),
+            display_name: crate::DISPLAY_NAME.to_owned(),
+            description: crate::DESCRIPTION.to_owned(),
             executable: executable.into(),
-            app_id: crate::APP_DIR.to_owned(),
-            icon: crate::APP_DIR.to_owned(),
+            app_id: crate::APP_ID.to_owned(),
+            icon: crate::APP_ID.to_owned(),
         }
     }
 

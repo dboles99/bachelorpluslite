@@ -1,0 +1,106 @@
+// The bottom panel that lists things you can click (ADR-0045).
+//
+// **One component, two uses**: cross-file search results and Organize ▸
+// Related Notes. Those two were separate files whose only differences were
+// their comments -- `diff` on them, with the names normalised, showed nothing
+// structural at all -- and ADR-0044 said adding a third copy would prejudge a
+// question worth answering once. This is the answer.
+//
+// The third use was Notebook ▸ Cell Outline, and ADR-0057 removed it. The
+// merge is not undone by that: the argument for one component was never the
+// count of callers, it was that two of them had already been written twice.
+//
+// Collapsed rather than conditional, like every other bottom panel here: an
+// element inside a Slint `if` cannot be referred to from outside it, and
+// keeping all of them on one rule means one fewer difference to remember.
+//
+// `SearchHit` carries every row, and is not renamed: a row is a label, a
+// detail line and an id to click, and a second struct with those three fields
+// would be a second name for one idea.
+
+import { MenuLabel } from "menu.slint";
+import { SearchHit, Palette } from "types.slint";
+
+export component ListPanel inherits Rectangle {
+    in property <bool> open;
+    in property <[SearchHit]> hits;
+    in property <string> summary;
+    /// How wide the label column is. The one thing the three uses disagree
+    /// about: a file path needs more room than "Line 42 · Python".
+    in property <length> label-width: 260px;
+
+    /// The index carried by the hit, not its position in the list -- the list
+    /// is a view of what Rust found, and only Rust can turn a hit into a
+    /// file, a document or a position.
+    callback open-hit(int);
+    callback closed();
+
+    height: root.open ? 180px : 0px;
+    visible: root.open;
+    background: Palette.panel;
+
+    VerticalLayout {
+        padding: 6px;
+        spacing: 4px;
+
+        HorizontalLayout {
+            spacing: 8px;
+            Text {
+                text: root.summary;
+                color: Palette.ink-dim;
+                font-size: 12px;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+            }
+            MenuLabel {
+                label: "×";
+                clicked => {
+                    root.closed();
+                }
+            }
+        }
+
+        Flickable {
+            viewport-height: hit-list.preferred-height;
+
+            hit-list := VerticalLayout {
+                alignment: start;
+
+                for hit in root.hits: Rectangle {
+                    height: 22px;
+                    background: hit-area.has-hover ? Palette.edge : transparent;
+
+                    HorizontalLayout {
+                        padding-left: 6px;
+                        padding-right: 6px;
+                        spacing: 10px;
+
+                        Text {
+                            text: hit.label;
+                            color: Palette.accent;
+                            font-size: 12px;
+                            vertical-alignment: center;
+                            width: root.label-width;
+                            overflow: elide;
+                        }
+                        Text {
+                            text: hit.detail;
+                            color: Palette.ink-dim;
+                            font-family: "Consolas";
+                            font-size: 12px;
+                            vertical-alignment: center;
+                            overflow: elide;
+                            horizontal-stretch: 1;
+                        }
+                    }
+
+                    hit-area := TouchArea {
+                        clicked => {
+                            root.open-hit(hit.index);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

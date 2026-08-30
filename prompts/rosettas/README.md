@@ -32,7 +32,7 @@ when the task matches; otherwise use the chain.
 | R002 | Semantic naming (`bp-naming`, ADR-0003) |
 | R003 | Reviewing something for security consequences |
 | R004 | Adding a format handler (`bp-formats`, `bp-data`) |
-| R005 | Notebook runners (phase 12) |
+| R005 | **Deleted.** Notebook runners, phase 12 — both removed by [ADR-0057](../../docs/decisions/ADR-0057.md). The number is not reused: R006 to R011 keep theirs, because every ADR and task file that points at one points by number |
 | R006 | Anything whose behaviour differs by platform |
 | R007 | Research mode (phase 13) |
 | R008 | Performance work with a measured baseline |

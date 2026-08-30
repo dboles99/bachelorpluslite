@@ -1,8 +1,15 @@
 # Hostile-input harnesses
 
 Phase 19 asked for "fuzz targets for parsers, encrypted envelopes, notebook
-import and malformed inputs". This is those targets — but read the next
-section before you describe them to anyone, because they are not fuzzing.
+import and malformed inputs". This is those targets, less one: **notebook
+import no longer exists to target.** [ADR-0057](../docs/decisions/ADR-0057.md)
+removed `bp-notebook` and `bp-execution`, so the harness that fed arbitrary
+JSON to `import_ipynb` went with the function it was protecting, and its
+fifteen corpus entries with it — a corpus is evidence about a parser, and
+there is no parser left for it to be evidence about.
+
+Read the next section before you describe any of this to anyone, because they
+are not fuzzing.
 
 ## This is not fuzzing
 
@@ -103,18 +110,18 @@ cargo test --release --test envelope -- --ignored --nocapture
 `BP_FUZZ_CASES` sets how many cases each `proptest` block runs; the default
 is 2,000.
 
-### The gate does not run this yet
+### The gate runs this
 
-`Invoke-LocalCI.ps1`'s `spikes` stage globs `spikes/*/` only, so **nothing in
-the gate reaches this directory** — not fmt, not clippy, not test. Wiring it
-in needs a change to that script, and R008 and the repository's convention
-are explicit that a change to the gate is its own commit and never a
-passenger on someone else's. It is left undone on purpose. Until then, this
-suite runs by hand.
+It did not, for as long as this section said so. `Invoke-LocalCI.ps1`'s
+`spikes` stage globs `spikes/*/` only, so nothing in the gate reached this
+directory — not fmt, not clippy, not test — while `ROADMAP.md` called phase
+19 *Started* on the strength of what lives here.
 
-Whoever wires it in: note that `-IncludeSpikes` currently runs only `fmt` and
-`clippy` over a standalone workspace. This one has tests worth running, which
-is a difference the switch does not currently express.
+Two stages now do, on the full run and both legs, and deliberately **not**
+behind `-IncludeSpikes`: a spike is a prototype the product does not depend
+on, and these are tests of shipped crates against input designed to break
+them. They cost about two and a half minutes per leg, which is why they are
+out of `-Quick` and why pre-push rather than pre-commit is where they land.
 
 ## The targets
 
@@ -150,22 +157,11 @@ itself. Covers `open` under three passphrases (right, wrong, empty),
   reached rather than rejected in the first comparison;
 - a real document with a random slice overwritten, which is the highest-yield
   generator in the file;
-- `seal`/`open` round trips over arbitrary options.
+- `seal`/`open` round trips over arbitrary options;
+- **the three golden vectors**, which are the only assertion anywhere about a
+  document this build did not write. See "The corpus", below.
 
-### 3. `tests/notebook.rs` — `bp_notebook::import_ipynb`
-
-Arbitrary JSON through both entry points: `import_ipynb` (a parsed `Value`)
-and `parse_raw_json_view` (text, which is what the raw-JSON editor writes
-into, so it meets input a human has just hand-edited into an invalid state).
-Anything that imports is exported and imported again — a field accepted as
-"missing, warned about" has to be writable back as something.
-
-Object keys are drawn from the `.ipynb` vocabulary nine times in ten. A
-generator producing random keys never writes `"execution_count"`, so the
-branch reading it is never entered; this is the substitute for coverage
-feedback and it is used in every target here.
-
-### 4. `tests/data.rs` — JSON, JSONL, TOML, CSV, and `bp_formats::sniff`
+### 3. `tests/data.rs` — JSON, JSONL, TOML, CSV, and `bp_formats::sniff`
 
 Every `&str` entry point in `bp_data` except the YAML ones, run over the same
 input regardless of what the input looks like — a CSV reader handed JSON is
@@ -180,7 +176,7 @@ quoted field), and a round-trip property: whatever `json_format`,
 never a `Result` — which means a panic is its only possible failure, and it
 runs on every file the editor opens.
 
-### 5. `tests/files.rs` — `bp_files::load`
+### 4. `tests/files.rs` — `bp_files::load`
 
 The first thing that touches a file the user picked. The UTF-16 decoder is
 hand-written, so it is exactly what this is for. Covers arbitrary bytes,
@@ -200,6 +196,20 @@ provoke. Re-running the seeder is **not** idempotent for `corpus/envelope/` —
 `seal` draws a fresh random salt per document — so only re-run it if a format
 actually changed.
 
+**Three of those entries are golden vectors, and that is a stronger claim than
+the rest of the corpus makes.** `envelope/sealed.bpadx`, `sealed-aes.bpadx`
+and `sealed-multichunk.bpadx` were sealed once, under a known passphrase over
+known plaintext, and `a_document_sealed_by_an_earlier_build_still_opens`
+asserts that this build still opens each of them to exactly those bytes. It is
+the only test in the repository that says anything about a document *this*
+build did not write — every other round trip seals and opens with the same
+build, which proves the two halves agree with each other and cannot prove
+either agrees with what is on somebody's disk (ADR-0050).
+
+So **regenerating `corpus/envelope/` is the one action that would make that
+test pass vacuously.** If it fails, the format changed: decide whether that was
+meant before reaching for the seeder.
+
 The pathological entries, which came from the ADRs and crate docs rather than
 being invented here:
 
@@ -216,6 +226,7 @@ being invented here:
 | `envelope/truncated-body.bpadx`, `truncated-header.bpadx` | a partial copy or an interrupted sync |
 | `envelope/flipped-ciphertext-byte.bpadx`, `flipped-header-byte.bpadx` | ADR-0021 authenticates the header as additional data, so both must refuse |
 | `envelope/kdf-cost-raised.bpadx`, `kdf-cost-absurd.bpadx` | one inside the format's cost ceiling, one past it |
+| `envelope/sealed.bpadx`, `sealed-aes.bpadx`, `sealed-multichunk.bpadx` | golden vectors: ADR-0021's promise that a document written today opens in ten years |
 | `files/utf16le-odd-length.bin` | `LoadError::TruncatedUtf16` — an odd body, so the last code unit is cut in half |
 | `files/utf16le-unpaired-high-surrogate.bin` and three siblings | `LoadError::UnpairedSurrogate`, in both byte orders and at end-of-file |
 | `files/utf16le-lone-bom.bin` | a file that is nothing but a mark: a valid empty document, not an error |
@@ -223,14 +234,15 @@ being invented here:
 
 Plus, in each directory, the ordinary and the merely awkward: empty files,
 comments only, merge keys, complex keys, `.nan`/`.inf`, overlong UTF-8, lone
-surrogate escapes in JSON, ragged and quote-damaged CSV, notebooks with
-duplicate cell ids and outputs of the wrong shape.
+surrogate escapes in JSON, and ragged and quote-damaged CSV.
 
 ## What was found
 
 **No panic. No abort. No hang.** Across the corpus, the exhaustive sweeps and
-several hundred thousand property cases per target, every one of the five
-targets held its invariant. In particular ADR-0023's two caps hold: nothing
+several hundred thousand property cases per target, every one of the targets
+held its invariant. There were five when that was written and there are four
+now, and the notebook target is not among the ones that found something --
+its removal costs this section no finding. In particular ADR-0023's two caps hold: nothing
 between 0 and 100,000 levels of YAML nesting reached a stack overflow on a
 1 MiB stack in a debug build, in either flow or block style, and the alias
 bomb is refused at every size from 2 levels to 100.
@@ -266,29 +278,42 @@ needs a key — but it means the cost written in an **unauthenticated** header
 is paid in full before the reader can say the document is rubbish. A single
 flipped bit in the cost field of a real document is enough.
 
-`KdfParams::validate` is the bound, and it is doing its job: 4 GiB is refused
-in microseconds. Measured on this machine (release, `--ignored`):
+`KdfParams::validate` is the bound, and it is doing its job: a cost one KiB
+past the ceiling is refused in microseconds. Measured on this machine
+(release, `--ignored`), 2026-08-22:
 
 ```text
-declared cost       8 KiB ->   46.5µs to refuse
-declared cost    1024 KiB ->    1.5ms to refuse
-declared cost   65536 KiB ->  124.2ms to refuse
-declared cost  524288 KiB ->     1.1s to refuse
-declared cost 1048576 KiB ->     2.1s to refuse
-64 MiB at   1 passes ->  125.1ms to refuse
-64 MiB at   8 passes ->  643.6ms to refuse
-64 MiB at  64 passes ->     4.7s to refuse
-declared cost 4 GiB -> refused immediately
+declared cost       8 KiB ->   55.3µs to refuse
+declared cost    1024 KiB ->    1.3ms to refuse
+declared cost   65536 KiB ->   96.0ms to refuse
+declared cost  262144 KiB ->  407.4ms to refuse
+64 MiB at   1 passes ->  104.9ms to refuse
+64 MiB at   8 passes ->  583.6ms to refuse
+64 MiB at  16 passes ->     1.1s to refuse
+declared cost 256 MiB + 1 KiB -> refused immediately
 ```
 
-The ceiling `validate` permits is 1 GiB × 64 passes × 64 lanes. Argon2's time
-is linear in passes, so that corner is roughly **75 seconds and a gigabyte of
-resident memory per attempt**, on an unauthenticated header, before the user
-is told the file is damaged. That is a bound rather than an unbounded
-denial-of-service, which is what ADR-0021 set out to achieve, and it is
-written down here because "generous but finite" is easier to review with the
-number attached. Test:
+The ceiling `validate` permits is **256 MiB × 16 passes × 64 lanes**
+([ADR-0035](../docs/decisions/ADR-0035.md), which lowered it from 1 GiB and 64
+passes). ADR-0035 measured that corner in release at **~5.56 s**, down from the
+~75 s the old ceiling allowed -- a quarter of a gigabyte of resident memory per
+attempt, on an unauthenticated header, before the user is told the file is
+damaged. The sweep above walks memory and passes; it does not isolate the lane
+multiplier, which is why the corner's number comes from the ADR rather than
+from this table.
+
+That is a bound rather than an unbounded denial-of-service, which is what
+ADR-0021 set out to achieve, and it is written down here because "generous but
+finite" is easier to review with the number attached. Test:
 `envelope::the_declared_kdf_cost_is_paid_before_anything_is_authenticated`.
+
+**This table was wrong for a session and the shape of the mistake is worth
+keeping.** It carried the 1 GiB ceiling after ADR-0035 lowered it, so three of
+its rows -- 512 MiB, 1 GiB, and 64 passes -- were past the bound and were
+timing an *instant refusal* rather than the work. The numbers were real
+measurements of the wrong thing, which is the hardest kind of stale figure to
+notice. The control is now one KiB past the ceiling rather than sixteen times
+past it: a bound is only demonstrated at its edge.
 
 ### The corpus is hostile to the editor, too
 
@@ -323,11 +348,21 @@ Confirmed by driving that extension's own bundled server directly, capped at a
 | `corpus/yaml/billion-laughs.yaml` (570 bytes) | exit 134 after 12.3 s |
 | a four-line Kubernetes Pod manifest | survived 45 s, no crash |
 
-`.vscode/settings.json` now narrows that matcher to `**/k8s/**/*.yaml`, which
-this repository has none of, so the server never opens the file. The setting is
-checked in deliberately: `.gitignore` excludes `.vscode/*` but the file is
-tracked, and anyone who clones this repository with that extension installed
-meets the same crash loop.
+**Narrowing that matcher does not fix it, and this repository briefly claimed
+it did.** Setting `cloudcode.yaml.yamlFileMatcher` to a glob this tree has no
+files for reaches the server — it lands in
+`SettingsRegistry.instance.yamlFilePattern` — but a window opened with the
+setting in place still aborted four times in four minutes. The pattern governs
+which files are matched against schemas, not which are parsed, and the log says
+`Server initialization failed`: it dies during startup, before the setting
+spares it anything. There is no checked-in setting that prevents this.
+
+What works is not installing the extension, or disabling it for this
+workspace — it is a GCP, Kubernetes and Skaffold extension, and the only match
+for any of those words in this tree is this paragraph. VS Code keeps
+per-workspace extension enablement in its own state rather than in `.vscode/`,
+so that cannot be committed for everyone; it is one action per clone, from the
+Extensions view.
 
 Two things generalise beyond one extension. **Any tool that walks the tree
 looking for YAML is a candidate** — the `.claude/worktrees/` copies multiply

@@ -65,6 +65,36 @@ pub struct DocumentRecord {
     pub last_seen: i64,
 }
 
+/// What the store actually holds, in one read.
+///
+/// Every insight over this store is an aggregate, and an aggregate is only
+/// as honest as the reader's sense of what it was taken over. This is that
+/// denominator: "four documents mention Rust" reads very differently against
+/// a store of six than against a store of six hundred.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct StoreSummary {
+    pub documents: usize,
+    /// Documents carrying at least one tag.
+    ///
+    /// Separate from `documents` because an untagged document is invisible
+    /// to every tag-shaped query in this crate -- `documents_tagged`,
+    /// `related_to`, `tag_frequency` -- and a report that never says how many
+    /// there are cannot explain why it found so little.
+    pub tagged_documents: usize,
+    /// Distinct tags in use.
+    ///
+    /// In *use*, counted through the join, rather than rows in `tags` --
+    /// so this is always `tag_frequency().len()`, which is the list the
+    /// report actually shows. `forget_document` now clears orphaned tag rows
+    /// as well, so the two agree; counting through the join means they still
+    /// would if it stopped.
+    pub tags: usize,
+    /// The earliest `first_seen` and the latest `last_seen` recorded, or
+    /// `None` for a store with no documents in it.
+    pub first_seen: Option<i64>,
+    pub last_seen: Option<i64>,
+}
+
 /// The local metadata database.
 pub struct Store {
     connection: Connection,
@@ -201,10 +231,25 @@ impl Store {
     }
 
     /// Forget a document, and with it any tags that were only on it.
+    ///
+    /// **The second half of that sentence was a wish until 2026-08-22.**
+    /// `ON DELETE CASCADE` takes the join rows, which is what the existing
+    /// test asserted; nothing took the now-unused `tags` row, so a store
+    /// silently accumulated tag names carried by nothing. It went unnoticed
+    /// because every tag-shaped query here joins `document_tags` and so
+    /// cannot see an orphan -- until [`Store::summary`] wanted to count them
+    /// and had to decide which number was the true one.
     pub fn forget_document(&self, path: &Path) -> Result<bool, StoreError> {
         let removed = self.connection.execute(
             "DELETE FROM documents WHERE path = ?1",
             params![path_str(path)?],
+        )?;
+        // After the cascade, not before: a tag is orphaned by this delete,
+        // and asking first would find it still attached.
+        self.connection.execute(
+            "DELETE FROM tags
+              WHERE id NOT IN (SELECT tag_id FROM document_tags)",
+            [],
         )?;
         Ok(removed > 0)
     }
@@ -264,6 +309,125 @@ impl Store {
               ORDER BY d.last_seen DESC, d.id DESC",
         )?;
         let rows = statement.query_map(params![tag], document_from_row)?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    /// Other documents that share at least one tag with `document`, closest
+    /// first.
+    ///
+    /// "Closest" is the number of tags in common, most shared first, ties
+    /// broken by recency -- a stronger overlap outranks a fresher one because
+    /// it is the more specific claim. This is the relation ADR-0037's Related
+    /// Notes panel shows: the join is `documents_tagged`'s, run twice --
+    /// once to find `document`'s own tags, once to find who else has any of
+    /// them -- and folded into one query so the count and the ordering come
+    /// from SQL rather than from a second pass in Rust.
+    pub fn related_to(
+        &self,
+        document: i64,
+        limit: usize,
+    ) -> Result<Vec<DocumentRecord>, StoreError> {
+        let mut statement = self.connection.prepare(
+            "SELECT d.id, d.path, d.title, d.first_seen, d.last_seen
+               FROM documents d
+               JOIN document_tags dt ON dt.document_id = d.id
+              WHERE dt.tag_id IN (
+                        SELECT tag_id FROM document_tags WHERE document_id = ?1
+                    )
+                AND d.id != ?1
+              GROUP BY d.id
+              ORDER BY COUNT(*) DESC, d.last_seen DESC
+              LIMIT ?2",
+        )?;
+        let rows = statement.query_map(params![document, limit as i64], document_from_row)?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    /// Every tag currently in use, with how many documents carry it, most
+    /// frequent first.
+    ///
+    /// For ADR-0041's "dominant themes" and "consolidation candidates"
+    /// reports: one aggregate query over the same `tags`/`document_tags`
+    /// join `documents_tagged` and `related_to` already use, rather than a
+    /// Rust-side loop calling `documents_tagged` once per tag -- the count
+    /// and the ordering come from SQL, the same discipline `related_to`'s
+    /// own doc comment holds itself to.
+    pub fn tag_frequency(&self) -> Result<Vec<(String, usize)>, StoreError> {
+        let mut statement = self.connection.prepare(
+            "SELECT t.name, COUNT(*) AS uses
+               FROM tags t
+               JOIN document_tags dt ON dt.tag_id = t.id
+              GROUP BY t.id
+              ORDER BY uses DESC, t.name COLLATE NOCASE",
+        )?;
+        let rows = statement.query_map([], |row| {
+            let name: String = row.get(0)?;
+            let uses: i64 = row.get(1)?;
+            Ok((name, uses as usize))
+        })?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    /// What the store holds: how much, how many of it is tagged, and the
+    /// span of time it covers.
+    ///
+    /// One statement rather than five, for the reason `tag_frequency`'s own
+    /// comment gives: the counting is SQL's job, and five round trips to
+    /// answer one question is five chances for the answers to describe
+    /// different moments.
+    ///
+    /// `MIN(first_seen)` and `MAX(last_seen)` are `NULL` over no rows, which
+    /// is exactly the `None` a store with nothing in it should report --
+    /// rather than the epoch, which would read as a document recorded in
+    /// 1970.
+    pub fn summary(&self) -> Result<StoreSummary, StoreError> {
+        Ok(self.connection.query_row(
+            "SELECT (SELECT COUNT(*) FROM documents),
+                    (SELECT COUNT(DISTINCT document_id) FROM document_tags),
+                    (SELECT COUNT(DISTINCT tag_id) FROM document_tags),
+                    (SELECT MIN(first_seen) FROM documents),
+                    (SELECT MAX(last_seen) FROM documents)",
+            [],
+            |row| {
+                let documents: i64 = row.get(0)?;
+                let tagged: i64 = row.get(1)?;
+                let tags: i64 = row.get(2)?;
+                Ok(StoreSummary {
+                    documents: documents as usize,
+                    tagged_documents: tagged as usize,
+                    tags: tags as usize,
+                    first_seen: row.get(3)?,
+                    last_seen: row.get(4)?,
+                })
+            },
+        )?)
+    }
+
+    /// Documents already recorded under the same title as `title`, excluding
+    /// the document at `exclude_path`.
+    ///
+    /// **Deliberately a simple, honest v1**: an exact, case-insensitive title
+    /// match, nothing fuzzier. `documents.title` carries no `NOCASE`
+    /// collation of its own the way `tags.name` does, so this asks for it at
+    /// the query rather than pretending a title comparison needs less care
+    /// than a tag does. Similarity scoring, edit distance or embeddings over
+    /// content are explicitly later work -- not attempted here, and not
+    /// needed for a duplicate detector to be useful: two documents saved
+    /// under the same title are already a strong, cheap signal.
+    pub fn possible_duplicates(
+        &self,
+        title: &str,
+        exclude_path: &Path,
+    ) -> Result<Vec<DocumentRecord>, StoreError> {
+        let mut statement = self.connection.prepare(
+            "SELECT id, path, title, first_seen, last_seen
+               FROM documents
+              WHERE title = ?1 COLLATE NOCASE
+                AND path != ?2
+              ORDER BY last_seen DESC, id DESC",
+        )?;
+        let rows =
+            statement.query_map(params![title, path_str(exclude_path)?], document_from_row)?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 }
@@ -529,7 +693,94 @@ mod tests {
         assert_eq!(orphans, 0, "the join rows went with the document");
         assert!(
             store.documents_tagged("rust").unwrap().is_empty(),
-            "the tag itself survives; nothing carries it"
+            "nothing carries the tag any more"
+        );
+
+        let names: i64 = store
+            .connection
+            .query_row("SELECT COUNT(*) FROM tags", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(
+            names, 0,
+            "and the tag name went too, which this doc comment promised long              before the code did it"
+        );
+    }
+
+    #[test]
+    fn a_tag_still_carried_by_something_else_survives_a_forget() {
+        let store = store();
+        let a = store
+            .record_document(&path("a.md"), None, 1, Metadata::Summary)
+            .unwrap()
+            .unwrap();
+        let b = store
+            .record_document(&path("b.md"), None, 2, Metadata::Summary)
+            .unwrap()
+            .unwrap();
+        store.tag_document(a, "rust").unwrap();
+        store.tag_document(b, "rust").unwrap();
+
+        store.forget_document(&path("a.md")).unwrap();
+        assert_eq!(
+            store.documents_tagged("rust").unwrap().len(),
+            1,
+            "clearing orphans must not clear a tag that is still in use"
+        );
+    }
+
+    #[test]
+    fn an_empty_store_summarises_to_nothing_rather_than_to_the_epoch() {
+        let summary = store().summary().unwrap();
+        assert_eq!(summary, StoreSummary::default());
+        assert_eq!(
+            summary.first_seen, None,
+            "MIN over no rows is NULL, and a store with nothing in it has no              first day"
+        );
+    }
+
+    #[test]
+    fn a_summary_counts_documents_tags_and_the_span_they_cover() {
+        let store = store();
+        let a = store
+            .record_document(&path("a.md"), None, 100, Metadata::Summary)
+            .unwrap()
+            .unwrap();
+        let b = store
+            .record_document(&path("b.md"), None, 400, Metadata::Summary)
+            .unwrap()
+            .unwrap();
+        store.tag_document(a, "rust").unwrap();
+        store.tag_document(a, "notes").unwrap();
+        store.tag_document(b, "rust").unwrap();
+        // Recorded, never tagged -- the number the report needs to explain
+        // why a tag-shaped query found less than the store holds.
+        store
+            .record_document(&path("c.md"), None, 250, Metadata::Summary)
+            .unwrap()
+            .unwrap();
+
+        let summary = store.summary().unwrap();
+        assert_eq!(summary.documents, 3);
+        assert_eq!(summary.tagged_documents, 2);
+        assert_eq!(summary.tags, 2);
+        assert_eq!(summary.first_seen, Some(100));
+        assert_eq!(summary.last_seen, Some(400));
+    }
+
+    #[test]
+    fn a_summary_counts_the_same_tags_the_frequency_list_shows() {
+        let store = store();
+        let id = store
+            .record_document(&path("a.md"), None, 1, Metadata::Summary)
+            .unwrap()
+            .unwrap();
+        store.tag_document(id, "rust").unwrap();
+        store.tag_document(id, "Rust").unwrap();
+
+        assert_eq!(
+            store.summary().unwrap().tags,
+            store.tag_frequency().unwrap().len(),
+            "one number, whichever way it is asked -- `tags.name` is NOCASE,              so these are one tag"
         );
     }
 
@@ -636,6 +887,184 @@ mod tests {
 
         assert_eq!(recorded, None);
         assert_eq!(store.document(&path("secret.md")).unwrap(), None);
+    }
+
+    // --- related notes and duplicate detection (ADR-0037) -----------------
+
+    #[test]
+    fn related_to_orders_by_shared_tags_then_recency() {
+        let store = store();
+        let a = store
+            .record_document(&path("a.md"), None, 1, Metadata::Summary)
+            .unwrap()
+            .unwrap();
+        let b = store
+            .record_document(&path("b.md"), None, 2, Metadata::Summary)
+            .unwrap()
+            .unwrap();
+        let c = store
+            .record_document(&path("c.md"), None, 3, Metadata::Summary)
+            .unwrap()
+            .unwrap();
+        let unrelated = store
+            .record_document(&path("unrelated.md"), None, 4, Metadata::Summary)
+            .unwrap()
+            .unwrap();
+
+        // `a` shares two tags with `c` and one with `b`; `unrelated` shares
+        // none with `a` at all.
+        store.tag_document(a, "rust").unwrap();
+        store.tag_document(a, "notes").unwrap();
+        store.tag_document(b, "rust").unwrap();
+        store.tag_document(c, "rust").unwrap();
+        store.tag_document(c, "notes").unwrap();
+        store.tag_document(unrelated, "cooking").unwrap();
+
+        let related = store.related_to(a, 10).unwrap();
+        let ids: Vec<i64> = related.iter().map(|r| r.id).collect();
+        assert_eq!(ids, vec![c, b], "two shared tags outranks one");
+        assert!(
+            !ids.contains(&unrelated),
+            "a document sharing no tag is not related"
+        );
+        assert!(!ids.contains(&a), "a document is not related to itself");
+    }
+
+    #[test]
+    fn related_to_is_bounded_by_limit() {
+        let store = store();
+        let a = store
+            .record_document(&path("a.md"), None, 1, Metadata::Summary)
+            .unwrap()
+            .unwrap();
+        store.tag_document(a, "rust").unwrap();
+        for (index, name) in ["b.md", "c.md", "d.md"].iter().enumerate() {
+            let id = store
+                .record_document(
+                    &path(name),
+                    None,
+                    i64::try_from(index).unwrap() + 2,
+                    Metadata::Summary,
+                )
+                .unwrap()
+                .unwrap();
+            store.tag_document(id, "rust").unwrap();
+        }
+
+        assert_eq!(store.related_to(a, 2).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn a_document_with_no_tags_has_no_related_notes() {
+        let store = store();
+        let a = store
+            .record_document(&path("a.md"), None, 1, Metadata::Summary)
+            .unwrap()
+            .unwrap();
+        let b = store
+            .record_document(&path("b.md"), None, 2, Metadata::Summary)
+            .unwrap()
+            .unwrap();
+        store.tag_document(b, "rust").unwrap();
+
+        assert!(store.related_to(a, 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn possible_duplicates_matches_the_title_case_insensitively() {
+        let store = store();
+        store
+            .record_document(
+                &path("first.md"),
+                Some("Meeting Notes"),
+                1,
+                Metadata::Summary,
+            )
+            .unwrap()
+            .unwrap();
+        store
+            .record_document(
+                &path("second.md"),
+                Some("meeting notes"),
+                2,
+                Metadata::Summary,
+            )
+            .unwrap()
+            .unwrap();
+
+        let dupes = store
+            .possible_duplicates("Meeting Notes", &path("third.md"))
+            .unwrap();
+        assert_eq!(
+            dupes.len(),
+            2,
+            "both existing titles match, case-insensitively"
+        );
+    }
+
+    #[test]
+    fn possible_duplicates_excludes_the_document_itself() {
+        let store = store();
+        store
+            .record_document(&path("only.md"), Some("Draft"), 1, Metadata::Summary)
+            .unwrap()
+            .unwrap();
+
+        let dupes = store
+            .possible_duplicates("Draft", &path("only.md"))
+            .unwrap();
+        assert!(
+            dupes.is_empty(),
+            "the document being saved must not be its own duplicate"
+        );
+    }
+
+    #[test]
+    fn possible_duplicates_is_exact_match_only_not_fuzzy() {
+        // The deliberately simple v1: "Draft" and "Draft 2" do not match.
+        let store = store();
+        store
+            .record_document(&path("a.md"), Some("Draft"), 1, Metadata::Summary)
+            .unwrap()
+            .unwrap();
+
+        let dupes = store.possible_duplicates("Draft 2", &path("b.md")).unwrap();
+        assert!(dupes.is_empty());
+    }
+
+    // --- research synthesis (ADR-0041) -------------------------------------
+
+    #[test]
+    fn tag_frequency_counts_documents_per_tag_most_frequent_first() {
+        let store = store();
+        let a = store
+            .record_document(&path("a.md"), None, 1, Metadata::Summary)
+            .unwrap()
+            .unwrap();
+        let b = store
+            .record_document(&path("b.md"), None, 2, Metadata::Summary)
+            .unwrap()
+            .unwrap();
+        let c = store
+            .record_document(&path("c.md"), None, 3, Metadata::Summary)
+            .unwrap()
+            .unwrap();
+
+        store.tag_document(a, "rust").unwrap();
+        store.tag_document(b, "rust").unwrap();
+        store.tag_document(c, "rust").unwrap();
+        store.tag_document(a, "notes").unwrap();
+
+        assert_eq!(
+            store.tag_frequency().unwrap(),
+            vec![("rust".to_owned(), 3), ("notes".to_owned(), 1)],
+            "the more widely used tag sorts first"
+        );
+    }
+
+    #[test]
+    fn tag_frequency_is_empty_when_nothing_is_tagged() {
+        assert!(store().tag_frequency().unwrap().is_empty());
     }
 
     #[test]

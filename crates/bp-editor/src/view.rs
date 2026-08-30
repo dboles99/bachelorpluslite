@@ -114,6 +114,45 @@ pub fn visual_column(line: &str, char_column: usize, tab_width: usize) -> usize 
     visual
 }
 
+/// `line` with every tab replaced by the spaces it stands for.
+///
+/// The counterpart to [`visual_column`], and it exists because a manual pass
+/// found the two disagreeing on screen. The surface places the caret and the
+/// selection at `visual_column x advance`, so a tab **drawn** as a single
+/// glyph -- which is what a toolkit does with `\t` -- puts every caret on
+/// that line somewhere the character is not, and the further along the line
+/// the worse it gets.
+///
+/// Stops are counted from the start of `line`. For a row that is the left
+/// edge of the screen, which is the same basis [`visual_column`] and
+/// [`char_column`] use; they have to agree or the caret and the glyphs part
+/// company again.
+///
+/// Spaces rather than a rendered tab because the width has to be *ours*: the
+/// toolkit's idea of a tab stop is its own, and the whole reason the mapping
+/// here is arithmetic rather than a layout pass is that nothing else gets to
+/// decide how wide a column is.
+#[must_use]
+pub fn expand_tabs(line: &str, tab_width: usize) -> String {
+    if !line.contains('\t') {
+        return line.to_owned();
+    }
+    let tab = tab_width.max(1);
+    let mut out = String::with_capacity(line.len() + tab);
+    let mut visual = 0;
+    for ch in line.chars() {
+        if ch == '\t' {
+            let stop = (visual / tab + 1) * tab;
+            out.extend(std::iter::repeat_n(' ', stop - visual));
+            visual = stop;
+        } else {
+            out.push(ch);
+            visual += 1;
+        }
+    }
+    out
+}
+
 /// Which character sits at `target`, in visual columns.
 ///
 /// The inverse of [`visual_column`]. A click inside the whitespace a tab
@@ -375,6 +414,21 @@ impl VisualRow {
     #[must_use]
     pub const fn is_continuation(&self) -> bool {
         self.sub_row > 0
+    }
+
+    /// The row as it should be *drawn*.
+    ///
+    /// [`text`](Self::text) is the row's characters, which is what the column
+    /// arithmetic in this module indexes; this is its appearance, which is
+    /// what a toolkit paints. They differ only in tabs, and that difference
+    /// is the whole point -- see [`expand_tabs`].
+    ///
+    /// A method rather than a second field, because the two must not be
+    /// allowed to drift: a field would be set once at construction and then
+    /// be wrong the moment the tab width changed under it.
+    #[must_use]
+    pub fn display_text(&self, tab_width: usize) -> String {
+        expand_tabs(&self.text, tab_width)
     }
 }
 
@@ -660,6 +714,84 @@ mod tests {
 
     fn point(x: f32, y: f32) -> Point {
         Point { x, y }
+    }
+
+    // --- tabs on screen ---------------------------------------------------
+
+    #[test]
+    fn a_tab_expands_to_the_next_stop_and_not_to_a_fixed_width() {
+        // The distinction that matters: a tab is not "four spaces", it is
+        // "however many spaces reach the next multiple of four".
+        assert_eq!(expand_tabs("a\tb", 4), "a   b");
+        assert_eq!(expand_tabs("abc\td", 4), "abc d");
+        assert_eq!(expand_tabs("abcd\te", 4), "abcd    e");
+        assert_eq!(expand_tabs("\tx", 4), "    x");
+    }
+
+    #[test]
+    fn consecutive_tabs_each_reach_their_own_stop() {
+        assert_eq!(expand_tabs("\t\tx", 4), "        x");
+        assert_eq!(expand_tabs("a\t\tb", 4), "a       b");
+    }
+
+    #[test]
+    fn a_line_without_tabs_is_returned_unchanged() {
+        assert_eq!(expand_tabs("nothing to expand", 4), "nothing to expand");
+        assert_eq!(expand_tabs("", 4), "");
+    }
+
+    #[test]
+    fn a_tab_width_of_zero_is_treated_as_one() {
+        // The same clamp `Layout::tab` applies. A width of zero would divide
+        // by zero on the stop calculation, and a caller that read one out of
+        // a config file should get a usable editor rather than a panic.
+        assert_eq!(expand_tabs("a\tb", 0), "a b");
+    }
+
+    #[test]
+    fn the_drawn_row_is_as_wide_as_the_column_arithmetic_thinks_it_is() {
+        // **The property the caret depends on.** The surface puts the caret
+        // at `visual_column x advance`, so for every position in the line the
+        // number of characters drawn before it must equal the visual column
+        // the arithmetic computes for it. Where these disagree, every caret
+        // on a line containing a tab lands where the character is not -- and
+        // that is exactly what a person found by looking at the screen.
+        for line in [
+            "a\tb",
+            "\tindented",
+            "a\t\tb",
+            "abcd\te",
+            "no tabs here",
+            "\t",
+            "trailing\t",
+            "MULTIBYTE\tAFTER",
+        ] {
+            for width in [1usize, 2, 4, 8] {
+                for i in 0..=line.chars().count() {
+                    let prefix: String = line.chars().take(i).collect();
+                    assert_eq!(
+                        expand_tabs(&prefix, width).chars().count(),
+                        visual_column(line, i, width),
+                        "line {line:?} at char {i} with tab width {width}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_row_the_surface_draws_expands_its_tabs() {
+        // The seam: `text` stays raw because the column arithmetic in this
+        // module indexes it by character, and `display_text` is what a
+        // toolkit gets.
+        let buffer = Buffer::from_text("a\tb\n");
+        let layout = Layout {
+            wrap: Wrap::OFF,
+            tab_width: 4,
+        };
+        let rows = visible_rows(&buffer, Anchor::default(), 1, layout);
+        assert_eq!(rows[0].text, "a\tb", "the row must keep its characters");
+        assert_eq!(rows[0].display_text(4), "a   b", "and draw them expanded");
     }
 
     #[test]

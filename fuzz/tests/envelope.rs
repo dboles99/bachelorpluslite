@@ -226,7 +226,7 @@ fn arbitrary_bytes_behind_the_magic_are_survivable() {
 /// hide anything: the pre-authentication cost is written up in the README and
 /// walked deliberately by
 /// [`no_single_byte_flip_ever_produces_plaintext`]. It is pinned because a
-/// generator free to set a 1 GiB cost spends the whole run in Argon2 instead
+/// generator free to set a 256 MiB cost spends the whole run in Argon2 instead
 /// of in the parser this target is aimed at.
 #[test]
 fn a_damaged_real_document_is_survivable() {
@@ -269,9 +269,16 @@ fn a_damaged_real_document_is_survivable() {
 ///
 /// The consequence: opening a hostile `.bpadx` and typing any passphrase at
 /// all costs whatever the file asked for, up to the ceiling
-/// `KdfParams::validate` sets (1 GiB, 64 iterations, 64 lanes), before it can
-/// report that the file is rubbish. A single flipped bit in the cost field of
-/// a real document is enough to do it.
+/// `KdfParams::validate` sets, before it can report that the file is rubbish.
+/// A single flipped bit in the cost field of a real document is enough to do
+/// it.
+///
+/// **That ceiling is 256 MiB, 16 passes, 64 lanes** -- ADR-0035 lowered it
+/// from 1 GiB and 64 passes. This test walked the old one for a session after
+/// the change, which made three of its rows measure a refusal rather than the
+/// work: the numbers were real and were measuring the wrong thing. The rows
+/// below are pinned to `KdfParams::validate`'s actual bounds, and the last
+/// one is one KiB past them.
 ///
 /// `#[ignore]`d because it allocates hundreds of megabytes and takes seconds,
 /// which is not a thing to put on a gate. Run it deliberately:
@@ -288,7 +295,7 @@ fn the_declared_kdf_cost_is_paid_before_anything_is_authenticated() {
     // kdf id 1.
     const MEMORY_KIB_AT: usize = 10;
 
-    for memory_kib in [8u32, 1024, 64 * 1024, 512 * 1024, 1024 * 1024] {
+    for memory_kib in [8u32, 1024, 64 * 1024, 256 * 1024] {
         let mut document = sealed.clone();
         document[MEMORY_KIB_AT..MEMORY_KIB_AT + 4].copy_from_slice(&memory_kib.to_le_bytes());
 
@@ -311,10 +318,10 @@ fn the_declared_kdf_cost_is_paid_before_anything_is_authenticated() {
 
     // Iterations, the other multiplier, measured at a memory cost small
     // enough to keep this test tolerable. Argon2's time is linear in the
-    // pass count, so the ceiling -- 1 GiB at 64 passes -- is the product of
+    // pass count, so the ceiling -- 256 MiB at 16 passes -- is the product of
     // the two worst rows printed here and is not measured directly, because
     // measuring it means sitting through it.
-    for iterations in [1u32, 8, 64] {
+    for iterations in [1u32, 8, 16] {
         let mut document = sealed.clone();
         document[MEMORY_KIB_AT..MEMORY_KIB_AT + 4].copy_from_slice(&(64u32 * 1024).to_le_bytes());
         document[MEMORY_KIB_AT + 4..MEMORY_KIB_AT + 8].copy_from_slice(&iterations.to_le_bytes());
@@ -328,11 +335,15 @@ fn the_declared_kdf_cost_is_paid_before_anything_is_authenticated() {
     }
 
     // Past the ceiling, refused without doing the work. This is the half that
-    // is a control rather than an observation, so it is the half asserted.
+    // is a control rather than an observation, so it is the half asserted --
+    // and it is one KiB past rather than sixteen times past, because a bound
+    // is only demonstrated at its edge. A test that refuses 4 GiB says
+    // nothing about where the refusal actually starts.
     let mut absurd = sealed;
-    absurd[MEMORY_KIB_AT..MEMORY_KIB_AT + 4].copy_from_slice(&(4u32 * 1024 * 1024).to_le_bytes());
+    absurd[MEMORY_KIB_AT..MEMORY_KIB_AT + 4].copy_from_slice(&(256u32 * 1024 + 1).to_le_bytes());
     let started = std::time::Instant::now();
-    let refused = bp_crypto::open(&absurd, PASSPHRASE).expect_err("4 GiB must be refused");
+    let refused =
+        bp_crypto::open(&absurd, PASSPHRASE).expect_err("one KiB past the ceiling must be refused");
     assert!(
         matches!(refused, CryptoError::UnreasonableCost { .. }),
         "got {refused}"
@@ -341,7 +352,7 @@ fn the_declared_kdf_cost_is_paid_before_anything_is_authenticated() {
         started.elapsed() < Duration::from_millis(100),
         "a cost past the ceiling must be refused without paying it"
     );
-    println!("declared cost 4 GiB -> refused immediately: {refused}");
+    println!("declared cost 256 MiB + 1 KiB -> refused immediately: {refused}");
 }
 
 /// Arbitrary seal options round-tripped, so `seal` is not left untested while
@@ -384,4 +395,80 @@ fn anything_that_seals_can_be_opened_again() {
             }
         });
     });
+}
+
+/// The one property nothing else in this repository checks: **a document
+/// sealed by an earlier build still opens.**
+///
+/// Every other round-trip test in the workspace -- and the property test just
+/// above -- seals and opens with the *same* build. That proves the two halves
+/// agree with each other; it cannot prove either agrees with what is already
+/// on somebody's disk. A change that altered the header layout, the additional
+/// data, the nonce construction or the Argon2id invocation *coherently on both
+/// sides* would pass the entire gate and silently orphan every document ever
+/// written.
+///
+/// ADR-0021 opens by saying a document written today has to open in ten years.
+/// This is the test that would fail if that stopped being true.
+///
+/// The vectors are the three well-formed envelopes already in the corpus.
+/// They were written once by `seed-corpus`, are checked into git, and are the
+/// reason `fuzz/README.md` says re-running the seeder is not idempotent here:
+/// **regenerating them is what this test exists to make somebody think twice
+/// about.** If it fails, the format changed -- decide whether that was meant
+/// before reaching for the seeder.
+#[test]
+fn a_document_sealed_by_an_earlier_build_still_opens() {
+    // Plaintexts from `src/bin/seed-corpus.rs`. Written out rather than
+    // imported so that a change to the seeder cannot quietly move the goal
+    // posts this test is here to hold still.
+    // `corpus` names an entry by its target directory as well as its file, so
+    // these are the names as reported, not as they appear on disk.
+    let expected: [(&str, Vec<u8>); 3] = [
+        ("envelope/sealed.bpadx", b"a small document\n".to_vec()),
+        ("envelope/sealed-aes.bpadx", b"a small document\n".to_vec()),
+        ("envelope/sealed-multichunk.bpadx", vec![b'x'; 4096]),
+    ];
+
+    for (name, plaintext) in expected {
+        let sample = corpus("envelope")
+            .into_iter()
+            .find(|s| s.name == name)
+            .unwrap_or_else(|| panic!("corpus/{name} is missing from a checked-out tree"));
+
+        let opened = bp_crypto::open(&sample.bytes, PASSPHRASE).unwrap_or_else(|e| {
+            panic!(
+                "{name} was sealed by an earlier build and no longer opens: {e}. \
+                 The format changed. That is either a deliberate version bump -- \
+                 in which case this build must still read version 1 -- or a \
+                 regression that has orphaned every existing document."
+            )
+        });
+
+        assert_eq!(
+            opened.as_slice(),
+            plaintext.as_slice(),
+            "{name} opened, but to different bytes than it was sealed with"
+        );
+    }
+}
+
+/// A wrong passphrase against a real document, asserted rather than merely
+/// survived.
+///
+/// `exercise` above hands the corpus a wrong passphrase and discards the
+/// result, because a survival harness asserts survival. The cryptographic
+/// claim -- that it does not open -- belongs somewhere, and the vectors are
+/// here.
+#[test]
+fn an_earlier_builds_document_does_not_open_under_the_wrong_passphrase() {
+    let sample = corpus("envelope")
+        .into_iter()
+        .find(|s| s.name == "envelope/sealed.bpadx")
+        .expect("corpus/envelope/sealed.bpadx");
+
+    assert_eq!(
+        bp_crypto::open(&sample.bytes, "not the passphrase"),
+        Err(CryptoError::CannotOpen)
+    );
 }

@@ -26,6 +26,13 @@ export component StatusBar inherits Rectangle {
     /// noise on every document, and the whole value of the readout is that
     /// something *unusual* is in force.
     in property <string> security-label;
+    /// "Large file" and its size, or empty.
+    ///
+    /// Empty for an ordinary document, on the same argument as the security
+    /// label above: a status bar that labels the ordinary case teaches people
+    /// to ignore it. `bp_buffer::SizeClass::label` makes exactly that point
+    /// and returns "" for `Normal`.
+    in property <string> size-label;
     in property <string> location;
     in property <string> error-message;
 
@@ -60,6 +67,15 @@ export component StatusBar inherits Rectangle {
             // In the accent, like the theme name and the dirty marker: it
             // only appears when it has something to say, and when it does it
             // is a statement about where this document's data may go.
+            // Before the security label, because it explains a pause the
+            // user is feeling *now*, where the profile explains where data
+            // may go later.
+            if root.size-label != "": Text {
+                text: "│ " + root.size-label;
+                color: Palette.accent;
+                font-size: 12px;
+                vertical-alignment: center;
+            }
             if root.security-label != "": Text {
                 text: "│ " + root.security-label;
                 color: Palette.accent;

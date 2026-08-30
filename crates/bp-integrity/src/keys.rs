@@ -212,6 +212,102 @@ pub fn read_verifying_key(path: &Path) -> Result<VerifyingKey, IntegrityError> {
     })
 }
 
+// --- the sealed key file, which is what this product actually uses --------
+
+/// The extension a sealed signing key gets.
+///
+/// The same `.bpadx` every encrypted document has, because it is the same
+/// envelope and pretending otherwise would invite a second format. What tells
+/// them apart is the name and the directory, not the bytes -- and that is
+/// fine: a `.bpadx` this product cannot make sense of as a document is one it
+/// refuses, and a document opened by mistake from the key store fails its
+/// length check rather than doing something surprising.
+pub const SEALED_KEY_EXTENSION: &str = "bpadx";
+
+/// Write a signing key sealed under `passphrase`.
+///
+/// **The protection is the envelope, not the file mode**, which is ADR-0031
+/// and is the whole reason this exists beside [`write_signing_key`].
+/// [`KeyFileProtection`] measured a hole that could not be closed:
+/// [`KeyFileProtection::OwnerOnly`] on Linux, nothing at all on Windows,
+/// where narrowing a DACL needs Win32 and `unsafe` that this crate forbids.
+/// Sealing the contents is the same on both platforms, and it designs,
+/// reviews and fuzzes nothing new -- it is `bp-crypto`'s envelope, the one
+/// ADR-0021 settled and ADR-0022 already uses for the recovery journal.
+///
+/// The file mode is still narrowed where the platform allows it. Two locks
+/// are not worse than one, and a key file that is *also* unreadable by other
+/// local users is strictly better than one that is merely unreadable.
+///
+/// **A forgotten passphrase is a lost key**, and a lost signing key means
+/// every document already signed with it can still be verified and no new one
+/// can ever join them. That is a property of the decision rather than a
+/// defect, and it belongs in front of the user at the moment the key is
+/// created -- which is why this returns nothing that could be mistaken for
+/// reassurance.
+pub fn write_sealed_signing_key(
+    path: &Path,
+    key: &SigningKey,
+    passphrase: &str,
+) -> Result<KeyFileProtection, IntegrityError> {
+    let seed = key.to_bytes();
+    let sealed = bp_crypto::seal(seed.as_ref(), passphrase, bp_crypto::SealOptions::default())
+        .map_err(|source| IntegrityError::SealedKey {
+            path: path.to_owned(),
+            source,
+        })?;
+    write_atomically(path, &sealed, Restrict::Yes).map_err(IntegrityError::write(path))?;
+    Ok(freshly_written_protection())
+}
+
+/// Read a signing key back out of a sealed key file.
+///
+/// Two failures, kept apart because the user can act on one and not the
+/// other: [`IntegrityError::SealedKey`] means the passphrase was wrong or the
+/// file is damaged -- and deliberately does not say which, because an
+/// authenticated envelope cannot tell -- while
+/// [`IntegrityError::NotAKeyFile`] means the envelope opened and what came
+/// out is not 32 bytes, which is a file that was sealed by this product and
+/// is not a key.
+///
+/// That second check is not ceremony. `bp-crypto` will happily seal anything,
+/// so pointing this at an encrypted *document* opens it successfully and
+/// hands back prose; a key read from the wrong length would sign perfectly
+/// well and match nothing anyone has verified against, and the failure would
+/// surface only at the recipient.
+pub fn read_sealed_signing_key(
+    path: &Path,
+    passphrase: &str,
+) -> Result<SigningKey, IntegrityError> {
+    let sealed = std::fs::read(path).map_err(IntegrityError::read(path))?;
+    let seed =
+        bp_crypto::open(&sealed, passphrase).map_err(|source| IntegrityError::SealedKey {
+            path: path.to_owned(),
+            source,
+        })?;
+    SigningKey::from_bytes(&seed).map_err(|source| IntegrityError::NotAKeyFile {
+        path: path.to_owned(),
+        source,
+    })
+}
+
+/// Whether `path` holds something this product sealed.
+///
+/// A six-byte header read, not a file read -- the same test the open path
+/// makes for a document. Used to tell "there is no key yet, offer to make
+/// one" from "there is a key, ask for its passphrase", which are different
+/// questions with different first words.
+pub fn is_sealed_key_file(path: &Path) -> bool {
+    let mut magic = [0u8; bp_crypto::MAGIC_LEN];
+    std::fs::File::open(path)
+        .and_then(|mut file| {
+            use std::io::Read as _;
+            file.read_exact(&mut magic)
+        })
+        .is_ok()
+        && bp_crypto::is_bpadx(&magic)
+}
+
 /// Report how well an existing key file is protected right now.
 ///
 /// Separate from reading the key so that a caller can check a key file it did

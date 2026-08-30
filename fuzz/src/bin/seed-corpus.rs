@@ -41,7 +41,6 @@ fn main() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("corpus");
     yaml(&root.join("yaml"));
     data(&root.join("data"));
-    notebook(&root.join("notebook"));
     files(&root.join("files"));
     envelope(&root.join("envelope"));
     println!("corpus written under {}", root.display());
@@ -270,78 +269,6 @@ fn deep_toml(levels: usize) -> String {
         path.push_str(".a");
     }
     out
-}
-
-// --- notebooks ----------------------------------------------------------
-
-fn notebook(dir: &Path) {
-    put(
-        dir,
-        "minimal-v4.ipynb",
-        r#"{"nbformat":4,"nbformat_minor":5,"metadata":{},"cells":[{"cell_type":"code","source":"1+1","metadata":{},"outputs":[],"execution_count":null}]}"#,
-    );
-    put(dir, "not-an-object.ipynb", "[1, 2, 3]");
-    put(dir, "no-nbformat.ipynb", r#"{"cells":[]}"#);
-    put(dir, "nbformat-3.ipynb", r#"{"nbformat":3,"cells":[]}"#);
-    put(
-        dir,
-        "nbformat-huge.ipynb",
-        r#"{"nbformat":99999999999999999999,"cells":[]}"#,
-    );
-    put(
-        dir,
-        "cells-not-array.ipynb",
-        r#"{"nbformat":4,"cells":{"a":1}}"#,
-    );
-    put(
-        dir,
-        "cell-not-object.ipynb",
-        r#"{"nbformat":4,"cells":[null, 1, "text", []]}"#,
-    );
-    put(
-        dir,
-        "unknown-cell-type.ipynb",
-        r#"{"nbformat":4,"cells":[{"cell_type":"nonsense","source":"x"}]}"#,
-    );
-    put(
-        dir,
-        "source-shapes.ipynb",
-        r#"{"nbformat":4,"cells":[{"cell_type":"code","source":["a\n","b\n"]},{"cell_type":"code","source":42},{"cell_type":"code","source":null},{"cell_type":"code"}]}"#,
-    );
-    put(
-        dir,
-        "duplicate-cell-ids.ipynb",
-        r#"{"nbformat":4,"cells":[{"cell_type":"code","id":"same","source":"a"},{"cell_type":"code","id":"same","source":"b"},{"cell_type":"code","id":"","source":"c"}]}"#,
-    );
-    put(
-        dir,
-        "hostile-outputs.ipynb",
-        r#"{"nbformat":4,"cells":[{"cell_type":"code","source":"x","outputs":[{"output_type":"stream","name":"stderr","text":["a"]},{"output_type":"display_data","data":{"image/png":"not base64 at all"}},{"output_type":"error","ename":null,"traceback":"not an array"},{"output_type":"unknown"},42]}]}"#,
-    );
-    put(
-        dir,
-        "metadata-is-a-trap.ipynb",
-        r#"{"nbformat":4,"cells":[],"metadata":{"language_info":{"name":123},"kernelspec":[1,2],"bachelorpad":{"anything":true}}}"#,
-    );
-
-    // 129 levels of nesting inside metadata: past serde_json's own limit, so
-    // this exercises the text entry point's error path rather than the value
-    // one.
-    put(
-        dir,
-        "deep-metadata.ipynb",
-        format!(
-            "{{\"nbformat\":4,\"cells\":[],\"metadata\":{{\"x\":{}{}}}}}",
-            "[".repeat(129),
-            "]".repeat(129)
-        ),
-    );
-    put(
-        dir,
-        "truncated.ipynb",
-        "{\"nbformat\":4,\"cells\":[{\"cell_type\":\"",
-    );
-    put(dir, "empty.ipynb", "");
 }
 
 // --- files: encodings on disk ------------------------------------------

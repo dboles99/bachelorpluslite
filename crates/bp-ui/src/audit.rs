@@ -14,46 +14,48 @@ use std::path::{Path, PathBuf};
 
 use bp_audit::{AuditLog, Record};
 
+/// The name of the file the security history is appended to.
+const FILE_NAME: &str = "security-history.log";
+
+/// Where the security history is appended, given a state directory.
+///
+/// The rule, separated from the edge that reads the environment, so that it
+/// is assertable without a real profile directory. It asks for the state
+/// directory directly rather than deriving a path from `recovery_dir` with a
+/// `with_file_name`, which is what it used to do: a path built by subtracting
+/// the last component of another path is a path that moves when that one
+/// does.
+pub(crate) fn audit_path_under(state: Option<&Path>) -> PathBuf {
+    state.map_or_else(|| PathBuf::from(FILE_NAME), |dir| dir.join(FILE_NAME))
+}
+
 /// The file the security history is appended to.
 ///
-/// Beside the recovery journal rather than beside `config.toml`, and for the
-/// same reason: it is machine-specific state rather than settings a user
-/// might copy between machines. `bp-platform` calls this `DirKind::State`,
-/// and both this and `recovery_dir` still hang off the config directory --
-/// which on Windows roams. That is one change owning `bp-config` and
-/// `bp-ui`, recorded in `project/WORK_QUEUE.md`, and it moves both together
-/// or neither.
+/// In the state directory beside the recovery journal, and for the same
+/// reason: it is machine-specific state rather than settings a user might
+/// copy between machines. `bp-platform` calls this `DirKind::State`.
 #[cfg(not(test))]
 pub(crate) fn audit_path() -> PathBuf {
-    crate::state::recovery_dir().with_file_name("security-history.log")
+    audit_path_under(crate::state::state_dir().as_deref())
 }
 
 /// The same, redirected and made unique under test.
 ///
-/// The one `cfg(test)` in this crate, and both halves of it were learned the
-/// hard way. Recording happens inside `set_security`, `set_privacy`,
+/// Pointed at the real state directory, `cargo test` wrote a live security
+/// history into the user's `%APPDATA%` -- which it did, once, before this
+/// existed. Recording happens inside `set_security`, `set_privacy`,
 /// `scan_for_secrets` and two more, so **every** test that touches a security
-/// operation appends to whatever this returns:
+/// operation appends to whatever this returns.
 ///
-/// * pointed at the real config directory, `cargo test` wrote a live security
-///   history into the user's `%APPDATA%` -- which it did, once, before this
-///   existed;
-/// * pointed at one shared temp file, parallel tests each read the log, each
-///   computed the same next sequence number, and the log then refused to open
-///   as out of order -- so every one of them failed, on a file none of them
-///   was really testing.
-///
-/// A counter rather than a random name, so a failing run names a file that
-/// can be looked at, and the process id so two runs at once cannot collide.
+/// **The uniqueness is `testpaths`' problem, not this one's, and that is the
+/// point of the split.** This function invented its own pid-and-counter
+/// scheme and so did `default_signing_key_path`; both were unique within a
+/// run and neither was unique *across* runs, because nothing deleted the
+/// files and Windows recycles process ids. `crate::testpaths` has the whole
+/// story and the fix.
 #[cfg(test)]
 pub(crate) fn audit_path() -> PathBuf {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static NEXT: AtomicU64 = AtomicU64::new(0);
-    let n = NEXT.fetch_add(1, Ordering::Relaxed);
-    std::env::temp_dir().join(format!(
-        "bpad-test-security-history-{}-{n}.log",
-        std::process::id()
-    ))
+    crate::testpaths::unique("security-history", "log")
 }
 
 /// The report shown by Security ▸ Security History.

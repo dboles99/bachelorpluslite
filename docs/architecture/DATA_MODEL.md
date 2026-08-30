@@ -24,8 +24,6 @@ Proposed tables:
 - file_events
 - recovery_sessions
 - clipboard_items
-- notebook_cells
-- notebook_outputs
 - security_events
 - signatures
 - integrity_checks
@@ -33,3 +31,10 @@ Proposed tables:
 - schema_migrations
 
 Sensitive rows must inherit the owning document/project security policy.
+
+**`notebook_cells` and `notebook_outputs` were on this list and are not any
+more.** [ADR-0057](../decisions/ADR-0057.md) removed notebooks and execution,
+and neither table had ever been migrated into existence -- `bp-storage`'s
+schema never held them. They are deleted rather than struck through, because
+a proposed table nothing proposes any longer is the trap `CLAUDE.md` numbers
+3 written into a data model.

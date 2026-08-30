@@ -13,6 +13,13 @@
     problem rather than making you fix them one at a time. The exit code is
     non-zero if any stage failed.
 
+    `cargo-nextest` is used for the test stage when it is installed, which is
+    about 2.5x faster on this workspace, and the doctests then need a stage of
+    their own because nextest cannot run them. Neither leg requires it; both
+    fall back to `cargo test --workspace`, which does both halves more slowly.
+    Install it with `cargo install cargo-nextest --locked`, on Windows and
+    inside WSL separately.
+
 .PARAMETER Quick
     Skip the stages that need a clean dependency resolve. Used by the
     pre-commit hook, where the full gate would be too slow to tolerate.
@@ -33,6 +40,13 @@
 .PARAMETER RecordEvidence
     Write a JSON run record under artifacts/test-evidence/, per the
     Definition of Done's provenance requirement.
+
+    A *successful full* run records one whether or not this is passed, and
+    that is load-bearing rather than tidy: Test-GateEvidence.ps1 reads those
+    records so the pre-push hook can tell that the full gate has already run
+    over exactly this content, and skip re-running it. Evidence nobody writes
+    cannot be checked, and a gate that runs three times per commit is the
+    thing that record exists to stop.
 
 .EXAMPLE
     ./scripts/Invoke-LocalCI.ps1
@@ -57,6 +71,48 @@ $ErrorActionPreference = 'Stop'
 $Root = Split-Path -Parent $PSScriptRoot
 $script:Results = [System.Collections.Generic.List[object]]::new()
 $script:Failed = $false
+
+function Get-NewestTrackedWrite {
+    <#
+    .SYNOPSIS
+        The most recent write time of any file git tracks.
+
+    .DESCRIPTION
+        Tracked files only. `target/` alone would make every run look newer
+        than itself, and an untracked scratch file is not something the gate
+        has an opinion about.
+
+        Returns the epoch when git cannot answer, which reads as "infinitely
+        stale" and makes every consumer re-run rather than trust a record it
+        could not date. Failing open here would mean a broken git invocation
+        silently disabling the gate.
+    #>
+    $files = & git -C $Root ls-files 2>$null
+    if ($LASTEXITCODE -ne 0 -or -not $files) { return [datetime]::MinValue }
+
+    $newest = [datetime]::MinValue
+    foreach ($relative in $files) {
+        # A guard rather than a fix. These records are ignored today
+        # (.gitignore line 26 -- the "deliberately NOT ignored" comment above
+        # it is about artifacts/benchmarks/, which is a different rule), so
+        # `git ls-files` never lists one and this branch never fires.
+        #
+        # It is here because un-ignoring them would break this mechanism
+        # *silently*: a record is written after the timestamp it carries, so a
+        # tracked one is always newer than itself, every record would read as
+        # stale, and pre-push would re-run the full gate forever while
+        # appearing to work. Nothing would fail -- the optimisation would just
+        # never fire, which is the failure mode nobody reports.
+        if ($relative -like 'artifacts/test-evidence/*') { continue }
+
+        $full = Join-Path $Root $relative
+        $item = Get-Item -LiteralPath $full -ErrorAction SilentlyContinue
+        if ($item -and $item.LastWriteTime -gt $newest) {
+            $newest = $item.LastWriteTime
+        }
+    }
+    return $newest
+}
 
 function Add-Result {
     param([string]$Stage, [string]$Status, [double]$Seconds, [string]$Detail = '')
@@ -125,7 +181,42 @@ try {
     }
 
     Invoke-Stage 'clippy' { cargo clippy --workspace --all-targets -- -D warnings }
-    Invoke-Stage 'test' { cargo test --workspace }
+
+    # `cargo nextest` where it exists, `cargo test` where it does not.
+    #
+    # Measured on this workspace, warm: 111.8s for `cargo test --workspace`
+    # against 35.4s + 9.8s for nextest plus a separate doctest pass. A
+    # process per test rather than a thread per test, so it is also stricter
+    # about shared state -- and it makes the doctest split mandatory rather
+    # than optional, which is the trap:
+    #
+    # **nextest cannot run doctests at all**, and this workspace has one.
+    #
+    # It had six when this stage was written, and five of them were the whole
+    # argument: `compile_fail` doctests proving a `UserGesture` could not be
+    # constructed outside the crate defining it -- ADR-0011 and ADR-0025's
+    # "notebook content never auto-runs", enforced by the type system and
+    # checked nowhere else. ADR-0057 removed execution, so those five went
+    # with the crates that held them.
+    #
+    # The stage stays, and the reason it stays is now the general one rather
+    # than that specific guarantee: **a runner that silently skips a category
+    # of test is a runner that retires it.** One doctest is enough for that to
+    # be true, and the day somebody writes the seventh is not the day anybody
+    # would remember to add the stage back.
+    #
+    # Not a required tool: a clone without it runs `cargo test --workspace`,
+    # which covers both halves in one slower command. The gate must not stop
+    # working because an optional accelerator is missing.
+    $script:HasNextest = $null -ne (Get-Command cargo-nextest -ErrorAction SilentlyContinue)
+    if ($script:HasNextest) {
+        Invoke-Stage 'test' { cargo nextest run --workspace }
+        Invoke-Stage 'doctests' { cargo test --workspace --doc }
+    }
+    else {
+        Invoke-Stage 'test' { cargo test --workspace }
+        Skip-Stage 'doctests' 'covered by test (cargo-nextest not installed)'
+    }
 
     # Actually load the linked binary. `cargo build` and `cargo test` never do
     # -- a bad link-time feature or side-by-side manifest passes both and then
@@ -210,14 +301,14 @@ try {
     # --- fuzz ----------------------------------------------------------
     # `fuzz/` declares its own `[workspace]`, so every `--workspace` command
     # above walks straight past it. Nothing formatted it, linted it or ran it
-    # until this stage existed -- five harnesses feeding hostile input to
-    # shipped crates, outside the gate that validates everything else, while
-    # ROADMAP called phase 19 *Started* on the strength of them.
+    # until this stage existed -- harnesses feeding hostile input to shipped
+    # crates, outside the gate that validates everything else, while ROADMAP
+    # called phase 19 *Started* on the strength of them.
     #
     # Deliberately **not** behind -IncludeSpikes. A spike is a prototype the
     # product does not depend on; these are tests of `bp-crypto`, `bp-data`,
-    # `bp-files`, `bp-formats` and `bp-notebook` against input designed to
-    # break them, which is the one thing a gate is most for.
+    # `bp-files` and `bp-formats` against input designed to break them, which
+    # is the one thing a gate is most for.
     #
     # It costs about two and a half minutes, which is most of why it belongs
     # in the full run and not in -Quick. Where a single harness is too
@@ -310,11 +401,19 @@ try {
             Skip-Stage 'linux (wsl)' "no Rust toolchain in '$Distro' (see docs/governance/LOCAL_CI.md)"
         }
         else {
+            # The same nextest-or-not choice as the Windows leg, decided
+            # inside the distro because the two machines install tools
+            # separately -- `cargo-nextest` on the host says nothing about
+            # what is on the other side of WSL. Written as shell rather than
+            # resolved here so the check and the run cannot disagree.
+            $linuxTest = "if command -v cargo-nextest >/dev/null 2>&1; then " +
+                         "cargo nextest run --workspace && cargo test --workspace --doc; " +
+                         "else cargo test --workspace; fi"
             $cmd = $prelude +
                    "export CARGO_TARGET_DIR=`$HOME/.cache/bachelorpadplus-target; " +
                    "cd '$wslRoot' && cargo fmt --all -- --check && " +
                    "cargo clippy --workspace --all-targets -- -D warnings && " +
-                   "cargo test --workspace"
+                   $linuxTest
             Invoke-Stage "linux (wsl: $Distro)" { wsl -d $Distro -- bash -c $cmd }
 
             # The fuzz workspace on the Linux leg too, and for the reason the
@@ -343,7 +442,11 @@ try {
     Write-Host ''
     $script:Results | Format-Table -AutoSize | Out-String | Write-Host
 
-    if ($RecordEvidence) {
+    # A successful full run always records, because pre-push reads these to
+    # decide whether it has to repeat the work -- see Test-GateEvidence.ps1.
+    # A quick or failed run records only when asked, since neither is evidence
+    # of anything a later step could rely on.
+    if ($RecordEvidence -or ((-not $Quick) -and (-not $script:Failed))) {
         $dir = Join-Path $Root 'artifacts/test-evidence'
         New-Item -ItemType Directory -Force -Path $dir | Out-Null
         $stamp = (Get-Date).ToString('yyyyMMdd-HHmmss')
@@ -353,10 +456,36 @@ try {
             host_os   = [System.Environment]::OSVersion.VersionString
             rustc     = (rustc --version)
             mode      = $(if ($Quick) { 'quick' } else { 'full' })
+            # Whether the Linux leg actually *ran*, not whether -Linux was
+            # passed: it skips itself when the distro or its toolchain is
+            # missing, and a record claiming a leg that skipped would let
+            # pre-push wave through a push nothing had checked on Linux.
+            linux     = [bool](
+                $script:Results | Where-Object {
+                    $_.Stage -like 'linux*' -and $_.Status -eq 'pass'
+                }
+            )
+            # The newest write time of anything tracked, taken *after* the
+            # stages have run. Any later edit makes this record stale, which
+            # is the whole mechanism: it dates the content rather than the
+            # commit, because the gate runs on a working tree and the commit
+            # it becomes does not exist yet.
+            source_at = (Get-NewestTrackedWrite).ToString('o')
+            head      = (& git -C $Root rev-parse HEAD 2>$null)
             succeeded = (-not $script:Failed)
             stages    = $script:Results
         } | ConvertTo-Json -Depth 5 | Set-Content -Encoding utf8 $file
         Write-Host "evidence: $file" -ForegroundColor DarkGray
+
+        # Keep the ten most recent and delete the rest. A full run now writes
+        # one every time rather than only when asked, so without a bound this
+        # directory grows by a file per gate run forever. They are ignored, so
+        # this is about disk and tidiness rather than repository churn -- and
+        # about the reader below, which scans every record it finds.
+        Get-ChildItem -Path $dir -Filter 'local-ci-*.json' -File |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -Skip 10 |
+            Remove-Item -Force -ErrorAction SilentlyContinue
     }
 
     if ($script:Failed) {

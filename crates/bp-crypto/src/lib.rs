@@ -28,6 +28,17 @@
 //! * without the last-chunk flag, the file can be truncated and the remainder
 //!   still authenticates -- data loss that looks like a successful decrypt.
 //!
+//! ## Being reviewed
+//!
+//! ADR-0011 permits composing primitives and forbids implementing them, which
+//! makes the *arrangement* below the part nobody here can check by re-reading
+//! it. `docs/architecture/BPADX_ENVELOPE_REVIEW.md` is written for somebody
+//! who has not seen this repository: the byte layout, the four call sites, a
+//! self-audit against fourteen standard pitfalls with the test behind each,
+//! and the ten questions a reviewer is asked. Four of the fourteen are
+//! conceded rather than mitigated -- no key commitment, no domain separation,
+//! no padding, no streaming API.
+//!
 //! ## One thing this cannot do
 //!
 //! **Tell a wrong passphrase from a corrupted file.** Both are an
@@ -453,10 +464,25 @@ pub fn stable_name(bytes: &[u8]) -> String {
     digest.iter().take(16).map(|b| format!("{b:02x}")).collect()
 }
 
+/// How many bytes [`is_bpadx`] needs to reach its answer.
+///
+/// Exposed so a caller can read a *header* rather than a file. [`is_bpadx`]
+/// is cheap, and says so — but a caller that reaches for `std::fs::read` to
+/// obtain its argument has made it the most expensive call in the program,
+/// and one did: opening a document read the whole of it to look at six bytes,
+/// and then `bp_files::load` read the whole of it again. On a 2 GB file that
+/// is 4 GB of I/O before anything is on screen.
+pub const MAGIC_LEN: usize = MAGIC.len();
+
 /// Whether `bytes` begins with the `.bpadx` magic.
 ///
 /// Cheap enough to call on every file open, so the shell can route a document
-/// to the passphrase prompt instead of showing the user its ciphertext.
+/// to the passphrase prompt instead of showing the user its ciphertext. Read
+/// [`MAGIC_LEN`] bytes to call it; do not read the file.
+///
+/// A short slice is not encrypted rather than unknown: a file with fewer than
+/// [`MAGIC_LEN`] bytes cannot carry the magic, so `false` is the whole truth
+/// about it.
 #[must_use]
 pub fn is_bpadx(bytes: &[u8]) -> bool {
     bytes.starts_with(MAGIC)
@@ -719,6 +745,21 @@ mod tests {
         let mut sealed = seal(b"secret", PASS, options(Suite::default())).unwrap();
         let absurd = (64u32 * 1024 * 1024).to_le_bytes();
         sealed[10..14].copy_from_slice(&absurd);
+
+        assert!(matches!(
+            open(&sealed, PASS),
+            Err(CryptoError::UnreasonableCost { .. })
+        ));
+    }
+
+    #[test]
+    fn a_memory_cost_that_was_valid_under_the_old_ceiling_is_now_refused() {
+        // ADR-0035 lowered the memory ceiling from 1 GiB to 256 MiB. 512 MiB
+        // was legal under the old bound and is refused under the new one --
+        // catching an accidental reversion of this change.
+        let mut sealed = seal(b"secret", PASS, options(Suite::default())).unwrap();
+        let tightened = (512u32 * 1024).to_le_bytes(); // 512 MiB, above new 256 MiB ceiling
+        sealed[10..14].copy_from_slice(&tightened);
 
         assert!(matches!(
             open(&sealed, PASS),

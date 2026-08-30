@@ -81,7 +81,19 @@ Each of these has already cost somebody a debugging session.
    fails to start with `STATUS_ENTRYPOINT_NOT_FOUND` before `main`. The
    comment in `crates/bp-ui/Cargo.toml` says so; leave it there.
 
-9. **The log-hygiene gate stage is real.** A `tracing::*!` macro mentioning an
+9. **A menu row's callback cannot take the keyboard focus for itself.** Two
+   things put the caret back in the editor *after* it returns, and neither is
+   reachable from the callback: `dispatch()` in `app.slint` ends with
+   `root.focus-editor()`, and closing a `MenuPopup` restores the focus the
+   popup took when it opened -- `i-slint-core` calls `close_popup` after it
+   has dispatched the click, not before. This cost a session and shipped a
+   defect that typed a signing passphrase into the open document. If a row
+   opens something that wants the caret, set `pending-focus` and let
+   `focus-timer` hand it over on the next tick, the way `focus-passphrase`,
+   `focus-goto` and `focus-find` do. Confirm it by driving the window; no
+   test in this repository can see it.
+
+10. **The log-hygiene gate stage is real.** A `tracing::*!` macro mentioning an
    identifier that carries document text or secrets fails the build. Log
    *about* a document — its path, its size — never what it contains.
 
@@ -90,7 +102,6 @@ Each of these has already cost somebody a debugging session.
 - Windows 10, Windows 11 and Linux are equal targets (ADR-0001)
 - core editing never depends on cloud or AI services (ADR-0006)
 - no custom cryptography (ADR-0011)
-- notebook content never auto-runs (ADR-0011)
 - physical file renames and moves need explicit user approval
 - **do not add a dependency** without saying so explicitly and giving the
   reason; dependency choices are ADR material here

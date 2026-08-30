@@ -764,6 +764,7 @@ dependencies = [
 name = "bp-buffer"
 version = "0.1.0"
 dependencies = [
+ "proptest",
  "ropey",
  "tempfile",
  "thiserror 2.0.20",
@@ -876,7 +877,6 @@ dependencies = [
  "bp-history",
  "bp-integrity",
  "bp-naming",
- "bp-notebook",
  "bp-platform",
  "bp-redaction",
  "bp-search",
@@ -896,6 +896,7 @@ name = "bp-integrity"
 version = "0.1.0"
 dependencies = [
  "bp-crypto",
+ "bp-platform",
  "proptest",
  "tempfile",
  "thiserror 2.0.20",
@@ -908,17 +909,6 @@ version = "0.1.0"
 dependencies = [
  "proptest",
  "time",
-]
-
-[[package]]
-name = "bp-notebook"
-version = "0.1.0"
-dependencies = [
- "proptest",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.20",
 ]
 
 [[package]]
@@ -954,6 +944,7 @@ dependencies = [
 name = "bp-search"
 version = "0.1.0"
 dependencies = [
+ "bp-buffer",
  "regex",
  "tempfile",
  "thiserror 2.0.20",
@@ -1016,12 +1007,15 @@ dependencies = [
  "bp-naming",
  "bp-platform",
  "bp-redaction",
+ "bp-research",
  "bp-search",
  "bp-secrets",
  "bp-security",
  "bp-semantic",
+ "bp-storage",
  "bp-theme",
  "rfd",
+ "serde_json",
  "slint",
  "slint-build",
  "tempfile",

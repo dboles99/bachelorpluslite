@@ -11,13 +11,28 @@ workspace = true
 # 1.x rather than 2.0.0-beta. The buffer is the one component where a
 # mid-flight API break would ripple through everything above it, and
 # BP-ADR-0015 already weighed API stability heavily.
-ropey = "1"
+# ADR-0029: a line break in this product is `\n` or `\r\n` and nothing else.
+# Ropey's default `unicode_lines` also breaks on a bare `\r`, U+0085, U+2028
+# and three more -- a set nobody chose, inherited by writing `ropey = "1"`,
+# and one that disagrees with every other answer here: `bp_core::LineEnding`
+# has exactly `Lf` and `CrLf`, and `bp_files::encode` says in as many words
+# that a bare carriage return is data and not a break.
+#
+# `cr_lines` goes with it, and must: ropey declares
+# `unicode_lines = ["cr_lines"]`, and `cr_lines` alone still breaks on a bare
+# `\r`. `simd` is kept -- it is a performance feature with nothing to say
+# about lines.
+ropey = { version = "1", default-features = false, features = ["simd"] }
 # Errors that name the file. A chunked read fails halfway through a 2 GB file
 # far more often than a whole-file read fails, so the failure path is part of
 # the interface rather than an afterthought.
 thiserror.workspace = true
 
 [dev-dependencies]
+# ADR-0029's property: the crate's two answers to "how many lines" must agree
+# for every document, including one made of the separators ropey used to break
+# on. An example-based test would have to guess which separator somebody uses.
+proptest.workspace = true
 # Every large-file test generates its fixture at run time under a temporary
 # directory. Nothing multi-gigabyte belongs in a checkout, and a test that
 # writes into the working tree has caused a real incident here.

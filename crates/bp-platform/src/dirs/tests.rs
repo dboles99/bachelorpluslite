@@ -301,15 +301,21 @@ proptest! {
         }
     }
 
-    /// Whatever the environment says, a resolved directory is a legal path on
-    /// the platform it was resolved for. The interesting half is Windows: the
-    /// root the environment handed us is its own business, but everything this
-    /// module appends to it must survive `path_problems`.
+    /// Whatever the environment says, what this module *appends* to it is a
+    /// legal path on the platform it was resolved for. The root itself is
+    /// the environment's business, not checked here: `%APPDATA%` is read,
+    /// not constructed, and an environment strange enough to name a device
+    /// in its own root is a fact about that environment, not a defect this
+    /// module could fix by refusing to resolve. `APP_DIR` and the per-kind
+    /// sub-path are the only strings this module chooses, so they are the
+    /// only strings it is answerable for.
     #[test]
     fn a_resolved_directory_is_a_legal_path((platform, env) in platform_and_env()) {
         for &kind in DirKind::ALL {
-            let resolved = directory(platform, kind, &env).expect("this environment resolves");
-            let problems = crate::paths::path_problems(platform, &resolved.to_string_lossy());
+            let (_root, sub) =
+                root_and_subdirectory(platform, kind, &env).expect("this environment resolves");
+            let appended = crate::paths::join(platform, "", &[APP_DIR, sub]);
+            let problems = crate::paths::path_problems(platform, &appended);
             prop_assert!(problems.is_empty(), "{kind:?} on {platform:?}: {problems:?}");
         }
     }

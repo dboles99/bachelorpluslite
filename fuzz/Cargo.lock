@@ -166,7 +166,6 @@ dependencies = [
  "bp-data",
  "bp-files",
  "bp-formats",
- "bp-notebook",
  "proptest",
  "serde_json",
  "tempfile",
@@ -177,15 +176,6 @@ name = "bp-naming"
 version = "0.1.0"
 dependencies = [
  "time",
-]
-
-[[package]]
-name = "bp-notebook"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "thiserror",
 ]
 
 [[package]]

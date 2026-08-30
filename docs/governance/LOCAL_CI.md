@@ -70,9 +70,12 @@ so every `--workspace` command in every other stage walks straight past it.
 Five harnesses feeding hostile input to `bp-crypto`, `bp-data`, `bp-files`,
 `bp-formats` and `bp-notebook` sat outside the gate that validates everything
 else, formatted, linted and run by nobody, while ROADMAP called phase 19
-*Started* on the strength of them. It is deliberately **not** behind
-`-IncludeSpikes`: a spike is a prototype the product does not depend on, and
-these are tests of shipped crates against input designed to break them.
+*Started* on the strength of them. **Four run in it today**: ADR-0057 deleted
+`bp-notebook`, and a harness outlives its subject by nothing.
+
+It is deliberately **not** behind `-IncludeSpikes`: a spike is a prototype the
+product does not depend on, and these are tests of shipped crates against
+input designed to break them.
 
 It runs on both legs, for the reason the Linux leg exists at all. One-leg
 testing hides defects and this repository has been caught by that twice --

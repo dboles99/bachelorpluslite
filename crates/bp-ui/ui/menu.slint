@@ -42,12 +42,21 @@ export component MenuRow inherits Rectangle {
 
         Text {
             text: root.item.label;
-            // Greyed when inert, so "not implemented" is visible rather than
+            // Greyed when inert, so a readout is visible rather than
             // discovered by clicking.
             color: root.item.enabled ? Palette.ink : Palette.ink-dim;
             font-size: 13px;
             vertical-alignment: center;
             horizontal-stretch: 1;
+            // **Elided rather than clipped, and it is not cosmetic.** The
+            // popup is a fixed width and the Flickable around it clips, so a
+            // long label was cut mid-word with nothing to say it had been --
+            // "Sign Document — this document has never b". Found by driving
+            // the window; every label it happened to was a *greyed row's
+            // reason*, which is the one text on screen whose entire job is to
+            // explain, so losing it silently is the worst case rather than a
+            // cosmetic one. An ellipsis at least says to widen or hover.
+            overflow: elide;
         }
 
         Text {

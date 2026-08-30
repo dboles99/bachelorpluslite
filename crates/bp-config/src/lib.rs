@@ -25,6 +25,8 @@ use std::path::PathBuf;
 use bp_platform::dirs::{self, DirKind};
 use serde::Deserialize;
 
+pub mod cli;
+
 pub mod recent;
 pub use recent::{MAX_RECENT, Recent, load_recent, save_recent};
 
@@ -163,10 +165,39 @@ impl Default for Config {
 /// A non-fatal configuration problem worth showing the user.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Notice {
-    Unreadable { path: PathBuf, error: String },
-    Malformed { path: PathBuf, error: String },
-    UnknownKey { key: String },
-    UnknownValue { key: String, value: String },
+    Unreadable {
+        path: PathBuf,
+        error: String,
+    },
+    Malformed {
+        path: PathBuf,
+        error: String,
+    },
+    UnknownKey {
+        key: String,
+    },
+    UnknownValue {
+        key: String,
+        value: String,
+    },
+    /// A command-line flag this product does not accept, as it was typed.
+    ///
+    /// The counterpart of [`Notice::UnknownKey`] on the other layer of the
+    /// same precedence chain. It did not exist for nineteen phases, which
+    /// meant `--font_size=20` was discarded in silence while `font_size` in
+    /// the config file was reported -- the same mistake, told once.
+    UnknownFlag {
+        flag: String,
+    },
+    /// A flag that takes a value, typed without one.
+    MissingValue {
+        flag: String,
+        spelling: String,
+    },
+    /// A switch, typed with a value it has nowhere to put.
+    UnexpectedValue {
+        flag: String,
+    },
 }
 
 impl fmt::Display for Notice {
@@ -185,6 +216,15 @@ impl fmt::Display for Notice {
             Self::UnknownKey { key } => write!(f, "unknown setting '{key}'; ignored"),
             Self::UnknownValue { key, value } => {
                 write!(f, "'{value}' is not a valid {key}; ignored")
+            }
+            Self::UnknownFlag { flag } => {
+                write!(f, "unknown option '{flag}'; ignored. Try --help")
+            }
+            Self::MissingValue { flag, spelling } => {
+                write!(f, "'{flag}' needs a value, as {spelling}; ignored")
+            }
+            Self::UnexpectedValue { flag } => {
+                write!(f, "'{flag}' takes no value; ignored")
             }
         }
     }
@@ -287,21 +327,29 @@ pub fn config_path() -> Option<PathBuf> {
 /// and the second answer at the same time.
 #[must_use]
 pub fn config_path_in(platform: Platform, env: &EnvSnapshot) -> Option<PathBuf> {
-    beside_the_config_file(platform, env, FILE_NAME)
+    in_product_directory(platform, DirKind::Config, env, FILE_NAME)
 }
 
-/// A named file directly inside the product's configuration directory.
+/// A named file directly inside one of the product's four directories.
 ///
-/// Shared with [`recent`] so that "beside `config.toml`" is one piece of code
-/// rather than a promise two modules each keep separately.
+/// Shared with [`recent`] so that "which of the four, and how the path is
+/// assembled" is one piece of code rather than a promise two modules each
+/// keep separately. The *kind* is the caller's argument, because that is the
+/// part that differs and the part that matters: settings roam to every
+/// machine the user signs into, state does not.
 ///
 /// The join goes through [`bp_platform::paths::join`] rather than
 /// [`PathBuf::join`] because `PathBuf` uses the *host* separator: assembling
 /// the Windows answer on Linux would otherwise produce
 /// `C:\Users\me\AppData\Roaming\bachelorpad/config.toml`, which mostly works
 /// on Windows and is wrong in every assertion that compares the two legs.
-fn beside_the_config_file(platform: Platform, env: &EnvSnapshot, name: &str) -> Option<PathBuf> {
-    let directory = dirs::directory(platform, DirKind::Config, env)?;
+fn in_product_directory(
+    platform: Platform,
+    kind: DirKind,
+    env: &EnvSnapshot,
+    name: &str,
+) -> Option<PathBuf> {
+    let directory = dirs::directory(platform, kind, env)?;
     Some(PathBuf::from(bp_platform::paths::join(
         platform,
         directory.to_str()?,
@@ -385,17 +433,50 @@ pub fn resolve(file: Option<&str>, env: &Env, args: &[String]) -> (Config, Vec<N
     }
 
     // --- command line (highest) ----------------------------------------
+    //
+    // Every argument is looked up in `cli::FLAGS` before it is used, so a
+    // flag this product does not accept is *reported* rather than dropped.
+    // The lookup covers the flags the shell and `bp-ui` own as well as the
+    // six applied here -- which is the only reason it can tell a typo from a
+    // flag somebody else acts on.
     for arg in args {
-        let Some((key, value)) = arg.strip_prefix("--").and_then(|a| a.split_once('=')) else {
+        // Not a flag at all: a file to open, which the shell collects.
+        let Some(name) = cli::selector(arg) else {
             continue;
         };
-        match key {
+        let Some(flag) = cli::find(name) else {
+            notices.push(Notice::UnknownFlag { flag: arg.clone() });
+            continue;
+        };
+        let typed = arg.split_once('=').map(|(_, value)| value);
+        let value = match (flag.value, typed) {
+            (Some(_), Some(value)) => value,
+            (Some(_), None) => {
+                notices.push(Notice::MissingValue {
+                    flag: arg.clone(),
+                    spelling: flag.spelling(),
+                });
+                continue;
+            }
+            (None, Some(_)) => {
+                notices.push(Notice::UnexpectedValue { flag: arg.clone() });
+                continue;
+            }
+            // A switch, typed correctly. Whoever owns it acts on it; this
+            // crate's part was to confirm it is a real one.
+            (None, None) => continue,
+        };
+        match name {
             "theme" => config.theme = Some(value.to_owned()),
             "renderer" => apply_renderer(&mut config, value, &mut notices),
             "log" => config.log = value.to_owned(),
             "font-size" => apply_font_size(&mut config, value, &mut notices),
             "tab-width" => apply_tab_width(&mut config, value, &mut notices),
             "indent-spaces" => apply_indent_spaces(&mut config, value, &mut notices),
+            // A setting-shaped flag `cli` knows and this match does not. It
+            // cannot happen while both live in this crate, and if it ever
+            // does, silence is the right answer rather than a notice blaming
+            // the user for a gap of ours.
             _ => {}
         }
     }
@@ -957,16 +1038,91 @@ mod tests {
     }
 
     #[test]
-    fn unrecognised_arguments_are_ignored() {
-        // --measure-exit and --self-check are handled elsewhere; config must
-        // not choke on them.
+    fn a_flag_owned_elsewhere_is_accepted_in_silence() {
+        // --measure-exit and --self-check belong to the shell and
+        // --editor-view to bp-ui. This crate must neither act on them nor
+        // complain about them -- and it can only tell them from a typo
+        // because `cli::FLAGS` lists all of them.
         let (c, n) = resolve(
             None,
             &Env::default(),
-            &args(&["--measure-exit", "--self-check", "-v", "file.txt"]),
+            &args(&[
+                "--measure-exit",
+                "--self-check",
+                "--editor-view",
+                "--latency-probe",
+                "file.txt",
+            ]),
         );
         assert_eq!(c, Config::default());
-        assert!(n.is_empty());
+        assert!(n.is_empty(), "got {n:?}");
+    }
+
+    #[test]
+    fn a_mistyped_flag_is_reported_rather_than_discarded() {
+        // The underscore is the mistake this exists for: `font_size` is
+        // right in the config file and wrong on the command line, so it is
+        // the spelling somebody arrives at by knowing the product.
+        let (c, n) = resolve(None, &Env::default(), &args(&["--font_size=20", "-v"]));
+        assert_eq!(c, Config::default(), "nothing may be applied from a typo");
+        let said: Vec<String> = n.iter().map(ToString::to_string).collect();
+        assert_eq!(n.len(), 2, "got {said:?}");
+        assert!(said[0].contains("--font_size=20"), "got {said:?}");
+        assert!(said[0].contains("--help"), "got {said:?}");
+        assert!(said[1].contains("-v"), "got {said:?}");
+    }
+
+    #[test]
+    fn a_setting_typed_without_its_value_says_how_to_type_it() {
+        let (c, n) = resolve(None, &Env::default(), &args(&["--theme"]));
+        assert_eq!(c, Config::default());
+        let said = n.first().map(ToString::to_string).unwrap_or_default();
+        assert!(said.contains("--theme=NAME"), "got {said}");
+    }
+
+    #[test]
+    fn a_switch_typed_with_a_value_is_reported() {
+        // `--editor-view=true` reads as though it works and does nothing:
+        // the shell compares the whole argument, so the value stops it
+        // matching. Silence here is what made that a five-minute puzzle.
+        let (c, n) = resolve(None, &Env::default(), &args(&["--editor-view=true"]));
+        assert_eq!(c, Config::default());
+        let said = n.first().map(ToString::to_string).unwrap_or_default();
+        assert!(said.contains("takes no value"), "got {said}");
+    }
+
+    #[test]
+    fn every_setting_flag_the_help_advertises_is_one_resolve_applies() {
+        // The mechanism against `resolve`'s `_ => {}` arm: a flag added to
+        // `cli::FLAGS` as a Setting, and to `--help` with it, but never
+        // wired into the match below would be advertised and inert. The row
+        // is a valid value for each, so "applied" can be asserted rather
+        // than assumed.
+        let valid = [
+            ("theme", "Green"),
+            ("renderer", "platform"),
+            ("log", "trace"),
+            ("font-size", "18"),
+            ("tab-width", "8"),
+            ("indent-spaces", "true"),
+        ];
+        for flag in cli::FLAGS
+            .iter()
+            .filter(|f| f.section == cli::Section::Setting)
+        {
+            let name = flag.names.first().copied().unwrap_or_default();
+            let Some((_, value)) = valid.iter().find(|(k, _)| *k == name) else {
+                panic!("{name} is advertised as a setting with no case here");
+            };
+            let typed = format!("--{name}={value}");
+            let (c, n) = resolve(None, &Env::default(), &args(&[typed.as_str()]));
+            assert!(n.is_empty(), "--{name}={value} was refused: {n:?}");
+            assert_ne!(
+                c,
+                Config::default(),
+                "--{name}={value} is advertised and changes nothing"
+            );
+        }
     }
 
     #[test]

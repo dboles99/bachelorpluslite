@@ -8,7 +8,7 @@ BachelorPad+ is a cross-platform Rust-native semantic text-processing appliance 
 - Windows 11
 - Linux
 
-It must remain usable as a very fast plain-text editor when all semantic, notebook, research, clipboard-history, and cloud-connected features are disabled.
+It must remain usable as a very fast plain-text editor when all semantic, research, clipboard-history, and cloud-connected features are disabled.
 
 Canonical positioning:
 
@@ -268,20 +268,25 @@ Virtual organization must not require moving physical files.
 
 ## 12. Notebook and execution
 
-Required:
+**Deleted, in full.** [ADR-0057](docs/decisions/ADR-0057.md) removed the
+ability to execute anything, and notebooks with it: `bp-notebook`,
+`bp-execution`, the Notebook and Run menus, and the panel a cell's output was
+drawn in. A text editor that runs code is a different product, and this one is
+being reduced to the feature set of Windows 11 Notepad plus a note-organising
+layer.
 
-- optional notebook mode
-- plain text, Markdown, Python, Rust, PowerShell, SQL, Shell and Raw cells
-- run selection
-- run cell / all / above / below
-- stop execution
-- split/merge/move/duplicate/collapse cells
-- mixed-language notebooks
-- Jupyter `.ipynb` import/export
-- raw notebook JSON view
-- output types: text, tables, JSON, HTML, images, charts, errors, files
+What this section asked for that **survives**: `.ipynb` is still a recognised
+file type. `bp-formats` identifies one and `bp-platform` still offers to
+register for it -- a Jupyter notebook is JSON, JSON is text, and opening one
+is not a claim this product cannot keep. Section 7's `IPYNB` and `Notebook`
+rows are those, and they stay.
 
-Security rule: never auto-run an opened or pasted notebook/cell.
+The security rule this section carried -- *never auto-run an opened or pasted
+notebook cell* -- is **removed rather than kept**. It was enforced by a
+`UserGesture` no parsed file could construct, that mechanism worked, and it
+now has nothing to guard: nothing auto-runs because nothing runs. A constraint
+that cannot fail reads as live when it is vacuous, which is the trap
+`CLAUDE.md` numbers 3.
 
 ## 13. Rust-aware commands
 
@@ -375,7 +380,6 @@ Customizable:
 - borders
 - accent
 - syntax colors
-- notebook cell colors
 - semantic indicators
 
 Themes should be data-driven and user-editable.
@@ -404,10 +408,8 @@ Insert
 Format
 Data
 Note
-Notebook
 Organize
 Research
-Run
 Security
 Tools
 Help
@@ -438,11 +440,29 @@ CLI:
 
 ```text
 bachelorpad file.txt
-bpad file.txt
-bachelorpad --line 427 server.log
-bachelorpad --readonly huge.log
-bachelorpad --large-file dataset.jsonl
+bachelorpad --line=427 server.log
+bachelorpad --help
 ```
+
+**`bp_config::cli::FLAGS` is the home for what the command line accepts**, and
+`--help` renders from it, so this block deliberately shows shapes rather than
+a list -- a second list is a list that goes stale (ADR-0054).
+
+Two flags this section used to show are gone, and neither was a decision when
+it was written:
+
+- `--large-file` is **deleted**. ADR-0027 and ADR-0030 make size decide how a
+  document opens, from metadata, before a byte is read; a flag forcing it is
+  either a no-op or a worse answer than the automatic one.
+- `--readonly` is **not a flag**. Read-only is a property of a document, not
+  of an invocation -- the huge-document viewer is already read-only and
+  Security > Lock Document already exists. It wants a design pass, and
+  `project/WORK_QUEUE.md` has it.
+
+The `bpad` short spelling this block also showed is **kept and unbuilt**: it
+is a second name for the same executable, which is something an installer
+creates rather than something the product does. It belongs to phase 20 with
+the rest of the artefact, and is listed there rather than here.
 
 ## 20. Cross-platform architecture
 
@@ -471,7 +491,6 @@ SQLite recommended for:
 - file events
 - recovery sessions
 - clipboard items
-- notebook cells
 - artifacts
 - security events
 - signatures
@@ -533,7 +552,6 @@ Required:
 - plaintext recovery
 - cloud transmission
 - secret persistence
-- notebook code execution
 - plugin/integration abuse
 - metadata leakage
 - file corruption
