@@ -27,6 +27,25 @@ away. If this file grows past a screen or two it has stopped doing its job.
 4. `project/NEXT_SESSION.md` — what matters most, which is not the same list
    as what is ready.
 
+> **Items 2 and 4 live in a private repository**, and have since this one went
+> public on 2026-09-10:
+> [dboles99/bachelorpluslite-planning](https://github.com/dboles99/bachelorpluslite-planning).
+> `project/` and the marketing plan moved there because they hold commercial
+> strategy and open questions rather than reasoning. **Everything that
+> explains why the software is the way it is stayed here** — every ADR, every
+> lesson in `DECISIONS.md`, the whole manual.
+>
+> Roughly seventy-five references to those filenames remain in the ADRs and
+> were deliberately left alone. *"The checklist is in
+> `project/NEXT_SESSION.md` section 3"* is a true statement about how this
+> project was run, and rewriting seventy-five of them to say something vaguer
+> would damage the record to hide a filename. Only the fourteen actual links
+> were changed, because a link that 404s is a different thing from a
+> reference that names something.
+>
+> **If you are working on this from outside, you do not need them.** They
+> schedule work; they do not explain it.
+
 ---
 
 ## Standing authorities
@@ -119,9 +138,10 @@ will be updated in three. When you need to mention something owned elsewhere,
 | `docs/decisions/ADR-*.md` | One decision each, with its reasoning | Status of the work that implements it |
 | `docs/product/MENU_MAP.md` | Every menu row and its state | Implementation detail |
 | `docs/architecture/ARCHITECTURE.md` | Crates, modules, sizes, seams | Feature descriptions |
-| `project/DECISIONS_NEEDED.md` | Open questions for a human | Answers — those move to an ADR and the row is deleted |
-| `project/WORK_QUEUE.md` | What is ready to take, and collision rules | Why it matters |
-| `project/NEXT_SESSION.md` | What matters most, and the manual-pass checklist | Anything a permanent file owns |
+| `project/DECISIONS_NEEDED.md` *(private repo)* | Open questions for a human | Answers — those move to an ADR and the row is deleted |
+| `project/WORK_QUEUE.md` *(private repo)* | What is ready to take, and collision rules | Why it matters |
+| `project/NEXT_SESSION.md` *(private repo)* | What matters most, and the manual-pass checklist | Anything a permanent file owns |
+| `docs/product/MARKETING_PLAN.md` *(private repo)* | Positioning, channels, and what is not decided | Anything about how the software works |
 | `prompts/rosettas/R011...` | The traps in `bp-ui` | Anything about a specific feature |
 | `docs/user/`, `docs/tutorials/`, `docs/developer/` | The documentation, as source | Anything a generated page holds |
 | `docs/generated/`, `app-help/`, `wiki/` | **Nothing. Generated** ([ADR-0075](docs/decisions/ADR-0075.md)) | Edits — the gate reverts them |

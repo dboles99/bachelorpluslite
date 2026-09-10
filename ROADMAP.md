@@ -47,25 +47,25 @@ Status as of **2026-08-30**. Four words, meaning four different things:
 
 | # | Phase | Status | Tasks | Crates |
 | --- | --- | --- | --- | --- |
-| 1 | Foundation and workspace | **Done** | [01-foundation](project/tasks/01-foundation/) | `bp-core`, `bp-config`, `bp-theme`, `bp-ui` |
-| 2 | Core editor | **Started** | [02-core-editor](project/tasks/02-core-editor/) | `bp-buffer`, `bp-editor` |
-| 3 | File safety and recovery | **Done** | [03-file-safety](project/tasks/03-file-safety/) | `bp-files`, `bp-history` |
+| 1 | Foundation and workspace | **Done** | `project/tasks/01-foundation` | `bp-core`, `bp-config`, `bp-theme`, `bp-ui` |
+| 2 | Core editor | **Started** | `project/tasks/02-core-editor` | `bp-buffer`, `bp-editor` |
+| 3 | File safety and recovery | **Done** | `project/tasks/03-file-safety` | `bp-files`, `bp-history` |
 | 4 | Large-file engine | **Removed** | [ADR-0063](docs/decisions/ADR-0063.md) | — |
-| 5 | Format registry and parser framework | **Started** | [05-formats](project/tasks/05-formats/) | `bp-formats` |
+| 5 | Format registry and parser framework | **Started** | `project/tasks/05-formats` | `bp-formats` |
 | 6 | Structured formats | **Removed** | [ADR-0062](docs/decisions/ADR-0062.md) | — |
-| 7 | Search engine | **Started** | [06-search](project/tasks/06-search/) | `bp-search` |
-| 8 | Semantic foundation and naming | **Started** | [07-semantic](project/tasks/07-semantic/) | `bp-semantic`, `bp-naming` |
-| 9 | Organization and related-note graph | **Started** | [07-semantic](project/tasks/07-semantic/) | `bp-storage` |
-| 10 | Semantic/hybrid search | Not started, **decided** | [07-semantic](project/tasks/07-semantic/) | — |
+| 7 | Search engine | **Started** | `project/tasks/06-search` | `bp-search` |
+| 8 | Semantic foundation and naming | **Started** | `project/tasks/07-semantic` | `bp-semantic`, `bp-naming` |
+| 9 | Organization and related-note graph | **Started** | `project/tasks/07-semantic` | `bp-storage` |
+| 10 | Semantic/hybrid search | Not started, **decided** | `project/tasks/07-semantic` | — |
 | 11 | Clipboard system | **Removed** | [ADR-0061](docs/decisions/ADR-0061.md) | — |
 | 12 | Notebook/execution system | **Removed** | [ADR-0057](docs/decisions/ADR-0057.md) | — |
 | 13 | Research mode | **Removed**, in part | [ADR-0060](docs/decisions/ADR-0060.md) | `bp-storage`, `bp-semantic` |
-| 14 | Privacy foundation | **Started** | [11-security](project/tasks/11-security/) | `bp-security` |
+| 14 | Privacy foundation | **Started** | `project/tasks/11-security` | `bp-security` |
 | 15 | Encrypted `.bpadx` documents | **Removed** | [ADR-0064](docs/decisions/ADR-0064.md) | — |
 | 16 | Advanced security | **Removed** | [ADR-0064](docs/decisions/ADR-0064.md) | — |
-| 17 | Themes/personality/accessibility | **Started** | [12-themes-brand](project/tasks/12-themes-brand/) | `bp-theme` |
-| 18 | Windows/Linux platform integration | **Started** | [13-platform](project/tasks/13-platform/) | `bp-platform` |
-| 19 | Hardening, fuzzing and benchmarks | **Started** | [14-hardening](project/tasks/14-hardening/) | `fuzz/` (standalone, and now gated) |
+| 17 | Themes/personality/accessibility | **Started** | `project/tasks/12-themes-brand` | `bp-theme` |
+| 18 | Windows/Linux platform integration | **Started** | `project/tasks/13-platform` | `bp-platform` |
+| 19 | Hardening, fuzzing and benchmarks | **Started** | `project/tasks/14-hardening` | `fuzz/` (standalone, and now gated) |
 | 20 | Packaging, signing, release and upgrade testing | **Done**, less signing | [ADR-0067](docs/decisions/ADR-0067.md), [ADR-0068](docs/decisions/ADR-0068.md) | — |
 
 **Phase 20 started on 2026-08-23, and what it found is worth knowing before

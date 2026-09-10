@@ -1632,6 +1632,13 @@ And the newest one, which cost this project a rename:
 
 ### What no test can catch
 
+> **`project/` is not in this repository.** The manual-pass checklist and the
+> work queue live in a private planning repository, because they hold
+> scheduling and open questions rather than reasoning. Nothing you need in
+> order to contribute is in there; everything that explains the software is
+> here.
+
+
 **What the toolkit does with what it is handed.** Five defects have lived in
 that seam, including a signing passphrase typed into the open document in
 plain text. 1,812 passing tests did not see it.

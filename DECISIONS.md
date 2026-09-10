@@ -1251,9 +1251,9 @@ is worth more than the fact.
 [ROADMAP.md](ROADMAP.md) has per-phase status;
 [MENU_MAP.md](docs/product/MENU_MAP.md) says which menu rows are real;
 [ARCHITECTURE.md](docs/architecture/ARCHITECTURE.md) has the crate map and the
-editor-view constraint; [WORK_QUEUE.md](project/WORK_QUEUE.md) lists what is
+editor-view constraint; `project/WORK_QUEUE.md` lists what is
 ready to take and what cannot run in parallel;
-[NEXT_SESSION.md](project/NEXT_SESSION.md) is the plan for picking this up
+`project/NEXT_SESSION.md` is the plan for picking this up
 again.
 
 ## What the tiers taught

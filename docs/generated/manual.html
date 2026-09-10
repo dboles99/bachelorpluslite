@@ -1865,6 +1865,13 @@ count is higher than the number of readers, the constant is a convention
 rather than a mechanism (<a href="../decisions/ADR-0074.md">ADR-0074</a>).</p>
 </blockquote>
 <h3 id="what-no-test-can-catch">What no test can catch</h3>
+<blockquote>
+<p><strong><code>project/</code> is not in this repository.</strong> The manual-pass checklist and the
+work queue live in a private planning repository, because they hold
+scheduling and open questions rather than reasoning. Nothing you need in
+order to contribute is in there; everything that explains the software is
+here.</p>
+</blockquote>
 <p><strong>What the toolkit does with what it is handed.</strong> Five defects have lived in
 that seam, including a signing passphrase typed into the open document in
 plain text. 1,812 passing tests did not see it.</p>
