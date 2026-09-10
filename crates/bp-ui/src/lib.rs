@@ -1,4 +1,4 @@
-//! The BachelorPlusLite application shell.
+//! The BachelorPad+ Lite application shell.
 //!
 //! This crate owns the window and nothing else. Document state lives in
 //! `bp-core`, saving in `bp-files`, naming in `bp-naming`, colours in
@@ -70,6 +70,10 @@ mod state;
 mod testpaths;
 
 /// Crate identity used by workspace smoke tests and diagnostics.
+/// The product name, re-exported so the shell's callers need not depend on
+/// `bp-platform` to say it. One home, reached from more places (ADR-0074).
+pub use bp_platform::DISPLAY_NAME;
+
 pub const CRATE_NAME: &str = "bp-ui";
 
 #[derive(Debug, thiserror::Error)]
@@ -348,7 +352,7 @@ pub struct RunOptions {
     pub font_size: Option<u8>,
 }
 
-/// Run the BachelorPlusLite shell.
+/// Run the BachelorPad+ Lite shell.
 pub fn run() -> Result<(), UiError> {
     run_with(RunOptions::default())
 }
@@ -372,6 +376,12 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
     }
 
     let ui = AppWindow::new()?;
+
+    // The window title, from the constant rather than from `app.slint`. The
+    // last rename changed the literal in that file and left DISPLAY_NAME
+    // alone, so the product introduced itself by two different names for a
+    // week; there is now only one place to change (ADR-0074).
+    ui.set_app_title(DISPLAY_NAME.into());
     // The window and taskbar icon, loaded from the PNG that ships beside the
     // executable (ADR-0068). **The PNG on both platforms**, even though
     // Windows registration names a `.ico`: Slint decodes png and jpeg only,
@@ -433,7 +443,8 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
             .set_level(rfd::MessageLevel::Warning)
             .set_title("Unsaved work recovered")
             .set_description(format!(
-                "BachelorPlusLite closed with {} unsaved document(s):\n\n{}\n\nRestore them?",
+                "{} closed with {} unsaved document(s):\n\n{}\n\nRestore them?",
+                bp_platform::DISPLAY_NAME,
                 pending.len(),
                 names.join("\n")
             ))

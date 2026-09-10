@@ -1,0 +1,66 @@
+# BachelorPad+ Lite
+
+> https://bpad.prompt-forge.dev/
+
+## What this is
+
+BachelorPad+ Lite is a free, open source Notepad replacement for Windows and Linux. Everything Notepad does, plus one thing it cannot: it knows which of your notes are about the same subject, so you can find last month's thinking without remembering the filename. It opens instantly, works offline forever, and it will never run anything or send anything anywhere.
+
+Free and open source under GPL-3.0-only. Windows 10, Windows 11 and Linux,
+64-bit. There is no macOS build. Version 0.9.5.
+
+Source: https://github.com/dboles99/bachelorpluslite
+Downloads: https://github.com/dboles99/bachelorpluslite/releases/latest
+
+## What it does
+
+- You already know how to use it. Tabs, find and replace, go to line, undo, zoom, UTF-8, LF or CRLF. If you can use Notepad you can use this, and big files stay quick because editing costs what you changed rather than what the file weighs.
+- It names your files for you. One menu item turns "untitled_3.txt" into Quarterly_Review_10SEP2026.md, taking the title from what you actually wrote. A folder of these sorts itself by date and reads like a list of subjects. You approve every rename before it happens.
+- Your work survives a crash. Unsaved changes are kept through a crash, a forced quit or a power cut, and offered back to you next time you open the program. You choose, per document, whether it does this at all.
+- "What else did I write about this?" One click lists every note that covers the same ground as the one you are reading, closest first. This is the feature people keep it for: your own thinking from three months ago, found without remembering where you put it.
+- It spots when you have written this before. Save something close to a note you already have, and it tells you, so you end up with one good note instead of four half ones.
+
+## What it refuses to do, stated exactly
+
+- **It executes nothing.** No scripts, macros, plugins or interpreters.
+  Opening a document cannot run anything.
+- **It makes no network connection.** No telemetry, no update check, no crash
+  reporting, no AI, no account. It behaves identically offline.
+- **It launches no other program**, not even a browser for its own help.
+- **It will not seize a file association** or delete anything from a user
+  profile without showing what it would do first.
+
+## What it records on the user's machine
+
+Two things, and nothing else: a recovery file so a crash does not cost you work, and an index entry so the note features work. Both are real trades, so here they are rather than a paragraph of reassurance.
+
+- Standard: recovery file yes, not encrypted; records Path, title and topics.
+- Private: recovery file yes, not encrypted; records The path only.
+- Confidential: no recovery file; records nothing.
+- Maximum: no recovery file; records nothing.
+
+Nothing is encrypted in this edition, and the program says so rather than
+implying otherwise.
+
+## Downloads, and one thing to tell people
+
+The archives are **unsigned**. Windows SmartScreen warns on first run. A
+code-signing certificate has not been bought, and self-signing was refused
+because it would ask a user to install a root certificate they have no reason
+to trust. Every release ships a SHA-256 checksum file.
+
+There is no installer. Unpack the archive anywhere and run it.
+
+## The paid version
+
+BachelorPad+ is the full version: encrypted notes, runnable notebooks,
+structured-data tools, clipboard history and complete privacy controls. It
+arrives on 10 October 2026. The price is not set. Lite stays free either way.
+
+Waitlist: https://bpad.prompt-forge.dev/waitlist.html
+
+## Licence
+
+GPL-3.0-only, not -or-later. The user interface is built with Slint, whose
+grant is to version 3 and no other, so "or later" would offer terms this
+project has not been granted.

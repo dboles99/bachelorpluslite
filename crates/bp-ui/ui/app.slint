@@ -1,4 +1,4 @@
-// BachelorPlusLite application shell.
+// BachelorPad+ Lite application shell.
 //
 // This file owns the window: its properties, the callbacks Rust binds to, the
 // shortcut bindings, and the layout that puts the pieces in order. The pieces
@@ -50,7 +50,11 @@ enum PendingFocus {
 }
 
 export component AppWindow inherits Window {
-    title: "BachelorPlusLite";
+    // Set by Rust from `bp_platform::DISPLAY_NAME`, never written here.
+    // A literal in this file is a second home for the product name, and
+    // the last rename reached the window and missed the constant --
+    // exactly the failure DISPLAY_NAME's doc comment predicts (ADR-0074).
+    title: root.app-title;
     // Loaded by Rust from the PNG shipped beside the executable (ADR-0068),
     // rather than `@image-url` -- an embedded copy would be a second icon to
     // keep in step with the one registration points at, and this way there is
@@ -60,6 +64,7 @@ export component AppWindow inherits Window {
     preferred-height: 680px;
     background: Palette.shell;
 
+    in property <string> app-title;
     in-out property <string> doc-text;
     in property <[TabInfo]> tabs;
     in property <string> gutter;

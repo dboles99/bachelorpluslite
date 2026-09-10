@@ -1,280 +1,193 @@
-# BachelorPlusLite
+# BachelorPad+ Lite
 
-**BachelorPlusLite** is a lightweight text editor for **Windows 10, Windows 11
-and Linux** — a Notepad clone, and deliberately little more.
-
-> **Derived from BachelorPad+.** BachelorPlusLite began as a clone of the
-> [BachelorPad+](https://github.com/dboles99/bachelorpadplus_rust) repository,
-> and it keeps that project's whole history, its licences and its attribution.
-> **The reduction has started, and it is scoped.** Executing anything, and
-> notebooks with it, were removed on 2026-08-29
-> ([ADR-0057](docs/decisions/ADR-0057.md)). The target is the feature set of
-> Windows 11 Notepad plus a note-organising layer — semantic filenames,
-> related notes, duplicate detection and what the store knows — which stays
-> on purpose.
->
-> [ADR-0059](docs/decisions/ADR-0059.md) scoped the rest and **all five
-> removals are done**: research and citations, clipboard history, the
-> structured-data operations, huge-file mode, and the security stack. Eight
-> crates, and the workspace went from 67,316 lines of Rust to **33,711** in
-> `crates/` and `apps/` — under the ~40,000 that ADR estimated. Ten crates
-> left; fifteen remain.
->
-> **What stays is the profile model**, narrowed to the two axes that govern
-> something: whether a recovery journal is written, and whether anything is
-> recorded about a document at all. A smaller editor should not know more
-> about you than the larger one did.
-
-## What this repository contains
-
-It begins as a fast Notepad-like editor and adds:
-
-- semantic filenames using `Title_DDMMMYYYY.ext`
-- full-path and last-save visibility
-- rope-based editing
-- Markdown, YAML, JSON, JSONL/NDJSON, TOML, CSV/TSV, XML and source-code *recognition* — the operations over them left under [ADR-0062](docs/decisions/ADR-0062.md)
-- semantic organization, related notes, duplicate detection and hybrid search
-- Light, Dark, Organic and Green themes
-- per-document privacy profiles governing what is written down about a document
-- Windows/Linux default-editor integration
-- original retro-futurist "text appliance" branding
-
-The product philosophy is:
+**A text editor that stops where it should.**
+Windows 10, Windows 11 and Linux. Free software under GPL-3.0-only.
 
 > **Notepad when you want it. More when you need it.**
 
-## Install the repository scaffold
+[**Download**](https://github.com/dboles99/bachelorpluslite/releases/latest) &middot;
+[**bpad.prompt-forge.dev**](https://bpad.prompt-forge.dev) &middot;
+[**Manual**](docs/generated/manual.md) &middot;
+[**Wiki**](https://github.com/dboles99/bachelorpluslite/wiki)
 
-Inherited from BachelorPad+, and kept because the scaffold is the same one.
-The installer ships with a BachelorPad+ release; to work on BachelorPlusLite
-you clone this repository instead.
+---
 
-1. Put the release ZIP and `Install-BachelorPadPlusRepo.ps1` in your Windows Downloads folder.
-2. Open PowerShell 7.
-3. Run:
+BachelorPad+ Lite is Windows 11 Notepad's feature set, plus one thing Notepad
+does not have: a note layer that knows which of your documents are about the
+same subject.
 
-```powershell
-Set-ExecutionPolicy -Scope Process Bypass
-.\Install-BachelorPadPlusRepo.ps1
-```
+It opens instantly, it never touches the network, and **it cannot run
+anything**.
 
-Default destination:
+This started as a much larger product and was deliberately cut down. Ten
+crates were removed on purpose, each with a written decision behind it
+([ADR-0057](docs/decisions/ADR-0057.md),
+[ADR-0059](docs/decisions/ADR-0059.md)--[ADR-0064](docs/decisions/ADR-0064.md)),
+until what was left was Notepad plus the one idea worth keeping. The larger
+one is still being built; there is [a waitlist](https://bpad.prompt-forge.dev/waitlist.html).
 
-```text
-G:\dev2\bachelorpluslite
-```
+## What works today
 
-The installer is conservative: it will not silently overwrite an existing repository. It creates a timestamped backup if you explicitly use `-BackupExisting`.
+**Editing.** Tabs, find and replace, search across a folder, go to line, undo
+and redo, zoom, UTF-8 and UTF-8 with BOM, LF and CRLF, Light/Dark/Organic/Green
+themes plus System. A rope underneath, so an edit costs what it changes rather
+than what the file weighs.
 
-## Development
+**The note layer**, which is the part that is not Notepad:
 
-```powershell
-./scripts/Install-GitHooks.ps1   # once per clone
-./scripts/Invoke-LocalCI.ps1     # format, check, clippy, test
-```
+- **semantic filenames** -- `Title_DDMMMYYYY.ext`, proposed from the document
+  itself and never applied without you seeing it first
+- **related notes** -- what else have I written that is about this
+- **duplicate detection** -- automatically on save, and on demand
+- **a research report** over your whole collection, which tells you what it
+  did not look at
+- **per-document privacy profiles** governing what is written down at all
 
-This project has **no hosted CI**. `scripts/Invoke-LocalCI.ps1` is the
-authoritative gate and runs from `pre-commit` and `pre-push`. See
-[docs/governance/LOCAL_CI.md](docs/governance/LOCAL_CI.md) and ADR-0016.
+**Recovery.** A journal keeps unsaved work through a crash, a kill or a power
+cut, and asks on the next launch.
 
-```powershell
-cargo run --release            # the app
-cargo run --release -- --help  # every flag it accepts
-cargo run --release -- --editor-view   # with the custom editor view (ADR-0018)
-./scripts/Measure-Startup.ps1  # startup and idle memory vs specs.md §22
-./scripts/New-Release.ps1 -Linux       # archives for both targets, with checksums
-```
+**Default-editor registration** on Windows and Linux, which never seizes an
+association -- it shows you what it would do and hands you the means
+([ADR-0012](docs/decisions/ADR-0012.md)).
 
-`New-Release.ps1` stages the binary with both licence texts and a `BUILD.txt`
-naming the commit, archives it (`.zip` for Windows, `.tar.gz` for Linux, built
-inside WSL so the executable bit and the `bpad` symlink survive), and writes a
-`SHA256SUMS.txt` that `sha256sum -c` reads. **The archives are unsigned and
-the script says so on every run** — signing is deferred and self-signing
-refused, for the reason in [ADR-0055](docs/decisions/ADR-0055.md).
+Format *recognition* for Markdown, YAML, JSON, JSONL/NDJSON, TOML, CSV/TSV,
+XML and source code. The operations over them left under
+[ADR-0062](docs/decisions/ADR-0062.md).
 
-## Current state (2026-08-30)
+### What it refuses to do
 
-**15 crates, 977 tests, green on Windows and Linux.** **Every menu row either does something or is a readout** ([ADR-0048](docs/decisions/ADR-0048.md)) — nothing anywhere says "not implemented yet" any more. The app opens, edits and
-saves atomically, and does rather more than that:
-
-| Area | What works |
+| | |
 | --- | --- |
-| Editing | Tabs, four themes plus Follow System, zoom, indentation (tabs or soft tabs, 2/4/8), honest save state, atomic save, undo/cut/copy/paste, sort / deduplicate / reverse / trim lines, duplicate and move lines, **go to line in either surface** |
-| Storage | A rope buffer holds every document; whole-document operations are one undo step |
-| Safety | Unsaved-changes prompts, external-change detection, a plaintext crash recovery journal under Standard. Stricter profiles journal nothing at all — ADR-0064 removed the sealed form rather than quietly writing it in clear |
-| Releases | `scripts/New-Release.ps1 -Linux` produces a `.zip` and a `.tar.gz` carrying the binary, both licences, a `bpad` short spelling and a `BUILD.txt` naming the commit, plus a `SHA256SUMS.txt`. Unsigned, and it says so ([ADR-0055](docs/decisions/ADR-0055.md)) |
-| Command line | `bachelorpad notes.txt` opens files; `--line=427 server.log` opens one already scrolled to the line, highlighted, in either editor surface; `--help` lists all thirteen flags and `--version` names the product, its version and its licence ([ADR-0054](docs/decisions/ADR-0054.md)). A mistyped flag, a flag missing its value and a switch given one are each reported at startup rather than discarded |
-| Files | Open/Save/Save As/Save All/Save a Copy/Reload, recent files, tab context menu, command-line file opening. Every document is loaded whole — the size classes and the read-from-disk viewer left under [ADR-0063](docs/decisions/ADR-0063.md). UTF-8, UTF-8 with BOM and **UTF-16 LE/BE** all load and save; a truncated or malformed UTF-16 file is refused by name rather than repaired with replacement characters |
-| Search | Find and replace with case-sensitive, whole-word and regex toggles, changes shown before they are applied, recursive cross-file search. The streaming scan that searched a document too large to hold left with huge-file mode ([ADR-0063](docs/decisions/ADR-0063.md)) |
-| Semantic | Title, keywords, summary and outline extracted from the document; document statistics; date and time insertion |
-| Metadata | A SQLite store with migrations, written to on every save ([ADR-0019](docs/decisions/ADR-0019.md)) |
-| Organize | Related Notes, a collapsible panel of documents sharing tags with the active one; Duplicate Detection, automatic at save and on-demand ([ADR-0037](docs/decisions/ADR-0037.md)) |
-| Research | Research Report, reading `bp-storage` into dominant themes, stale clusters, under-connected documents and consolidation candidates ([ADR-0041](docs/decisions/ADR-0041.md)) — each insight **naming the documents it is drawn from**, and closing with a section that states every threshold it applied and every number it applied them over, including the truncation it used to leave silent ([ADR-0046](docs/decisions/ADR-0046.md)). Plus **Open Questions**, every question the document asks, at the line it begins on. And **What the Store Holds**, which says what the store has recorded about you and that it never holds the text of a document. The three citation rows that used to sit here left with `bp-research` ([ADR-0060](docs/decisions/ADR-0060.md)) |
-| Tools | **Document Inspector** (what is in the document), **Security Inspector** (the policy in force on all six axes — the Privacy menu shows the two that anything enforces), **File Analysis** (the file, which is a different object from the document) and **Configuration**, which is read-only and says so ([ADR-0048](docs/decisions/ADR-0048.md)) |
-| Privacy | Per-document profiles (Standard / Private / Confidential / Maximum) governing the recovery journal and the metadata store, plus Privacy Mode — a session override that can only tighten, and that removes journals already written ([ADR-0020](docs/decisions/ADR-0020.md)). **Encryption, signing, secret scanning, redaction and the security history all left under [ADR-0064](docs/decisions/ADR-0064.md)**, and a `.bpadx` document already on a disk cannot be opened by this build |
+| **Execute anything** | No scripting, no macros, no cells, no interpreters ([ADR-0057](docs/decisions/ADR-0057.md)) |
+| **Reach the network** | No telemetry, no update check, no crash reporting, no AI ([ADR-0006](docs/decisions/ADR-0006.md)) |
+| **Launch another program** | Not even a browser for its own help ([ADR-0075](docs/decisions/ADR-0075.md)) |
+| **Seize a file association** | It writes a script you read and run ([ADR-0012](docs/decisions/ADR-0012.md)) |
+| **Delete out of your profile** | Even files left behind by removed features ([ADR-0070](docs/decisions/ADR-0070.md)) |
+| **Rename a file silently** | Every rename is proposed and approved first |
 
-Startup, with the software renderer ([ADR-0017](docs/decisions/ADR-0017.md)):
-**35.7 ms to window, 21.9 MB idle**, against targets of 150 ms and 50 MB.
-Idle memory rose ~2.7 MB this session; `std-widgets` is imported now, for the
-one thing that reports the desktop's light/dark preference.
+### What it does not have
 
-Configuration precedence: command line, environment (`BACHELORPAD_*`), a TOML
-file (`%APPDATA%\bachelorpad\config.toml`, or `$XDG_CONFIG_HOME` on Linux),
-then defaults. Broken config warns and falls back; it never stops the editor
-starting.
+No macOS build ([ADR-0072](docs/decisions/ADR-0072.md), which says what it
+would cost). No printing. No Markdown preview -- the toolkit has no rich-text
+item, so inline formatting cannot be rendered at all
+([ADR-0048](docs/decisions/ADR-0048.md)). No drag and drop to open -- the
+toolkit's backend carries no file-drop plumbing. No encryption; that left with
+[ADR-0064](docs/decisions/ADR-0064.md).
 
-Features removed this session left two files behind on machines that ran an
-earlier build -- `security-history.log` beside that config file, and a
-`recent.toml` from before the recent list moved out of the roaming directory.
-**Nothing reads either one, and this product will not delete them for you**
-([ADR-0070](docs/decisions/ADR-0070.md) says why). They are yours to remove.
+Duplicate line, move line and the Insert menu need `--editor-view`, because
+they have to know where the caret is and the toolkit's text widget will not
+say ([ADR-0018](docs/decisions/ADR-0018.md)).
 
-**`bachelorpad --help` lists every flag**, which is why this paragraph no
-longer does ([ADR-0054](docs/decisions/ADR-0054.md)). A flag this product does
-not accept is now reported rather than dropped -- `--font_size=20` says so
-instead of doing nothing.
+## Install
 
+**There is no installer, and that is a decision**
+([ADR-0067](docs/decisions/ADR-0067.md)). Unpack the archive where you want it
+and run it.
 
-### Known gaps
-
-Things that do not work, with the reason. Where the reason is "Slint
-1.17.1", it was checked in the toolkit's source rather than assumed — the
-citation is in `project/WORK_QUEUE.md`, and the point of it is that nobody
-should spend an afternoon on these before checking the version changed.
-
-- **Input-method composition does not work under `--editor-view`, and cannot
-  on this Slint.** `FocusScope` rejects `UpdateComposition` and
-  `CommitComposition` in both its handlers and exposes no callback for either;
-  `TextInput` is the only item in the toolkit that consumes them. Without it
-  CJK entry does not work at all, so the default stays `TextInput`. **This was
-  the second of two parity conditions, and it is now a blocker rather than a
-  task** -- see `project/WORK_QUEUE.md`.
-
-- **Drag and drop to open does not work, and cannot yet.** specs §4 wants it.
-  On Slint 1.17.1 the winit backend has no file-drop plumbing and
-  `DataTransfer` carries only plain text or an image, so there is no channel a
-  dropped file's path could arrive through. Blocked on Slint, not on effort.
-
-- **Four features are enabled only under `--editor-view`**: duplicate and move
-  line, and date and time insertion. They need to know *where the caret is*,
-  and `TextInput` will not say. [MENU_MAP.md](docs/product/MENU_MAP.md) marks
-  which rows those are.
-
-  **Go to Line left this list on 2026-08-22, and the reason it was on it is
-  worth keeping.** It was recorded as needing the caret, like the others. It
-  does not: it needs the caret *moved*, which `set-selection-offsets` does and
-  which Find Next has always relied on. Reading and moving turned out to be
-  different requirements filed under one word. What kept the mistake alive was
-  that the move used to be invisible — nothing scrolled the viewport to the
-  caret, so a correct jump looked like nothing happening — and fixing that
-  (see "Find did not scroll to its match", below) is what made the claim
-  checkable at all.
-
-- **No crate is unreachable.** This list was three crates long four sessions
-  ago and is now empty: `bp-notebook` and `bp-execution` left it under
-  [ADR-0043](docs/decisions/ADR-0043.md), `bp-research` under
-  [ADR-0044](docs/decisions/ADR-0044.md). Two of the three have since left the
-  workspace altogether ([ADR-0057](docs/decisions/ADR-0057.md)), which is a
-  second way for the count to reach zero and not the same claim — the heading
-  is kept because the count is worth being able to check rather than remember,
-  and because *deleted* and *wired in* have to stay tellable apart.
-- **Confidential and Maximum get no crash recovery.** Standard and Private
-  keep a plaintext journal and the Privacy menu says so on a row of its own:
-  *"Recovery journal: on, unencrypted"*. The sealed form went with `bp-crypto`
-  ([ADR-0064](docs/decisions/ADR-0064.md)); Private keeps an honestly-labelled
-  plaintext one ([ADR-0065](docs/decisions/ADR-0065.md)) because a journal on
-  the local disk does not contradict what Private is for, and because the
-  failure the rule forbids is a *quiet* one.
-
-- **Used in anger four times, and it paid every time.** The first pass found a
-  menu bar where twelve of fourteen menus swallowed clicks, and Save As
-  defaulting to the process working directory -- which wrote real documents
-  into a git checkout. The second, on 2026-08-20, found a tab drawn as a single
-  glyph while every column in `bp-editor` was computed as though it reached the
-  next tab stop, so the caret on any tab-bearing line sat where the character
-  was not. The third, on 2026-08-21, found typing a query into Find edited the
-  document. The fourth, later the same day, found the worst of the four:
-  `Security ▸ Sign Document`'s passphrase typed itself into the document in
-  plain text. All four are fixed -- the last two, and the crash-recovery
-  defect found alongside the third, are below in "Recently closed".
-
-  **All four lived in the same seam, and it is the one a test in this
-  repository cannot see: what a toolkit does with what it is handed.**
-  1,754 tests did not find the third -- `AppState::find` was correct
-  throughout, and every test of it passed. 1,812 did not find the fourth
-  either: `PassphraseBar`, its `focus-input()` and the Rust call site that
-  invokes it are each correct on their own, and the defect was entirely in
-  who took the caret back afterwards, and when.
-
-  Still unclicked, in the order they now matter: **File ▸ Set as Default
-  Editor**, the one row that changes state outside this application, which
-  wants a person's explicit go-ahead rather than a script's click; and
-  drag-to-select in the default `TextInput` surface, which uses Slint's own
-  selection rather than this codebase's. The wheel, a window resize, reading
-  an enormous document, drag-to-select under `--editor-view` and the caret's
-  goal column are all checked and clean; signing one is now reachable, since
-  the passphrase bar takes the caret.
-  [NEXT_SESSION.md](project/NEXT_SESSION.md) has the checklist and a four-line
-  recipe for a 192 MiB fixture.
-
-### Recently closed
-
-What has closed since the record last moved, newest first. **The
-lesson from each is in [DECISIONS.md](DECISIONS.md)**, which is the one
-home for a lesson -- this list is deliberately just the facts, because a
-lesson told in two places is a lesson corrected in one.
-
-- Every file type any preset offers to register is one this build can open ([ADR-0069](docs/decisions/ADR-0069.md)). `.bpadx` was in all five presets, including Notepad Replacement, and this build opens one as ciphertext; the test that guards exactly this had an exemption for it that outlived its reason.
-- State written by a removed feature is left where it is and named rather than swept ([ADR-0070](docs/decisions/ADR-0070.md)).
-- The menu bar and the Rust list of menus are made to agree by a test that reads `app.slint`; `MENU_MAP.md` had said ten menus while the window, the headings and the code all said eleven.
-- Phase 20 finished: there is no installer ([ADR-0067](docs/decisions/ADR-0067.md)), and the icon ships beside the executable with no new dependency ([ADR-0068](docs/decisions/ADR-0068.md)) — which also fixed file-type registration pointing at an icon that had never existed.
-- Read-only is the save refusing, and the type that claimed otherwise had never once run ([ADR-0066](docs/decisions/ADR-0066.md)).
-- The security stack is removed and what governed it stays as Privacy ([ADR-0064](docs/decisions/ADR-0064.md)). Five crates; the last of ADR-0059's five removals.
-- Huge-file mode is removed ([ADR-0063](docs/decisions/ADR-0063.md)): the engine, the viewer and the streaming search. The first removal with no directory to delete.
-- Executing anything is removed, and notebooks with it ([ADR-0057](docs/decisions/ADR-0057.md)). Two crates, two menus and one shell module; the first capability to leave.
-- A test suite that got flakier the more it was run: temp paths a recycled process id could reuse.
-- A clipped menu label, found by driving the window; every one it hit was a greyed row's reason.
-- Driving the window is a script now, not plumbing re-derived every session.
-- Every menu row now works or is a readout; a 38-row backlog was mostly finished work nobody had pruned.
-- A doc comment promised something the code had never done.
-- `bp-notebook` and `bp-execution` are reachable.
-- Find did not scroll to its match.
-- Research mode, and the last unreachable crate.
-- A huge document had no keyboard shortcuts at all, and nobody had noticed.
-- Find works in a document the rope does not hold.
-- A signing passphrase no longer types itself into the document.
-- Find no longer edits the document while you type the query.
-- A 2 GB file opens, and costs 0.8 MiB.
-- Signing works, and the key is sealed rather than protected.
-- Somebody has now typed into the custom editor view, and it works.
-- Word wrap now works under `--editor-view`.
-- The command line answers `--help` and `--version`, and reports a typo.
-- `--line=427 server.log` opens the file already at the line.
-
-Every one of these went stale the same way before the record caught up:
-a fix landing without the record moving. See [CLAUDE.md](CLAUDE.md) for
-which file owns which kind of fact.
-
-## Governance hierarchy
-
-Where logical and useful, work follows:
-
-```text
-project
-  -> task
-    -> step
-      -> prompts/rosettas
-        -> artifacts
-          -> metadata
-            -> database
-              -> note
+```powershell
+Expand-Archive bachelorpad-lite-0.9.5-windows-x86_64.zip C:\Apps\BachelorPadLite
+C:\Apps\BachelorPadLite\bachelorpad.exe
 ```
 
-See `docs/governance/WORK_MODEL.md`.
+```sh
+tar xzf bachelorpad-lite-0.9.5-linux-x86_64.tar.gz
+cd bachelorpad-lite-0.9.5-linux-x86_64 && ./bachelorpad
+```
+
+> **The archives are unsigned.** Windows SmartScreen will warn. A certificate
+> has not been bought and self-signing was **refused outright**, because a
+> self-signed certificate is only satisfied once the user installs a root
+> certificate they have no reason to trust
+> ([ADR-0055](docs/decisions/ADR-0055.md)). `SHA256SUMS.txt` is attached to
+> every release and answers tampering in transit, which is the threat a
+> certificate answers worst.
+
+Full instructions: [Installation and first launch](docs/user/01-installation.md).
+
+## Build it yourself
+
+```sh
+git clone https://github.com/dboles99/bachelorpluslite
+cd bachelorpluslite
+cargo run --release
+```
+
+Linux needs `libfontconfig1-dev libxkbcommon-dev libxcb-shape0-dev
+libxcb-xfixes0-dev libxcb1-dev libgl1-mesa-dev libwayland-dev`.
+
+```powershell
+./scripts/Install-GitHooks.ps1      # once per clone
+./scripts/Invoke-LocalCI.ps1 -Linux # the gate: both legs, ~7 minutes
+./scripts/New-Release.ps1 -Linux    # archives for both targets, with checksums
+```
+
+**`scripts/Invoke-LocalCI.ps1` is the authoritative gate** and runs from
+`pre-commit` and `pre-push`. Every commit in this repository has passed it.
+GitHub Actions runs the same stages under the same names for pull requests and
+releases ([ADR-0073](docs/decisions/ADR-0073.md)); when the two disagree, the
+local one is right.
+
+More: [Building from source](docs/developer/01-building.md),
+[Testing and the gate](docs/developer/02-testing.md).
+
+## Documentation
+
+**`docs/` is the one source. Everything else is generated from it**
+([ADR-0075](docs/decisions/ADR-0075.md)) -- the manual, the in-app help the
+archives carry, the GitHub Wiki, and the website. Three reference pages are
+generated from the *code* rather than from prose, because the flag list, the
+shortcut list and the menu map already have a home there and a second copy
+would be wrong within a session.
+
+| | |
+| --- | --- |
+| [The manual](docs/generated/manual.md) | Everything, one file |
+| [`docs/user/`](docs/user/) | One topic per file |
+| [`docs/tutorials/`](docs/tutorials/) | Start-to-finish walkthroughs |
+| [`docs/developer/`](docs/developer/) | Building, testing, releasing, architecture |
+| Help &rsaquo; User Guide | The same pages, inside the editor, as a document |
 
 ## Licence
 
-Dual-licensed under [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at
-your option — which every crate manifest has claimed since the scaffold
-commit and neither file backed until 2026-08-23
-([ADR-0054](docs/decisions/ADR-0054.md)).
+**GPL-3.0-only.** Not `-or-later`, and the difference is the decision:
+[Slint](https://slint.dev)'s grant is to version 3 and no other, so a project
+offering "or later" would be offering terms it has not been granted
+([ADR-0071](docs/decisions/ADR-0071.md)).
+
+[`LICENSE`](LICENSE) is the text. [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)
+lists all 626 crates linked into the binary, generated from the resolve graph
+and checked by the gate.
+
+## Contributing
+
+Issues and pull requests are welcome. Read [`CONTRIBUTING.md`](CONTRIBUTING.md)
+first -- particularly the part about a **separate BachelorPad+**, which is why
+contributions need a sign-off.
+
+Before touching `crates/bp-ui/`, read
+[`prompts/rosettas/R011_WIRE_CAPABILITY_INTO_SHELL.md`](prompts/rosettas/R011_WIRE_CAPABILITY_INTO_SHELL.md).
+It holds ten traps that have each cost somebody a session.
+
+**For a security problem, do not open a public issue** --
+[`SECURITY.md`](SECURITY.md).
+
+## How this project works, if you are curious
+
+[`DECISIONS.md`](DECISIONS.md) is the index of 76 architecture decision
+records **and the one home for every lesson learned**. The lessons are the
+interesting part: this repository writes down the *shape* of each mistake, not
+only the fix.
+
+A sample, all of them real:
+
+- A comment claiming something is not a property of the code. Ask what would
+  fail if it stopped being true; if nothing would, the comment is a wish.
+- Two claims about the same fact coexist for exactly as long as nothing asks.
+- A test that proves two things agree is evidence about two things. Before
+  trusting a constant as the one home for a value, **grep for the value**.
+- A claim in the record is not a property of the repository. An ADR whose
+  reasoning rests on an external fact should name the command that would test
+  it.
+- Deleting the code that writes a file does not delete the file.
+- The dangerous unsupported platform is not the one that fails to compile. It
+  is the one that compiles and answers as something else.

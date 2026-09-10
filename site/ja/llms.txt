@@ -1,0 +1,66 @@
+# BachelorPad+ Lite
+
+> https://bpad.prompt-forge.dev/ja/
+
+## What this is
+
+BachelorPad+ Lite は Windows と Linux 向けの無料でオープンソースのメモ帳代替エディタです。メモ帳にできることはすべてでき、そのうえメモ帳にできないことが一つあります。あなたのどのノートが同じ話題を扱っているかを知っているので、ファイル名を覚えていなくても先月の考えを取り出せます。起動は一瞬、ずっとオフラインで使え、何かを実行することも、どこかへ送ることも決してありません。
+
+Free and open source under GPL-3.0-only. Windows 10, Windows 11 and Linux,
+64-bit. There is no macOS build. Version 0.9.5.
+
+Source: https://github.com/dboles99/bachelorpluslite
+Downloads: https://github.com/dboles99/bachelorpluslite/releases/latest
+
+## What it does
+
+- 使い方はもう知っています. タブ、検索と置換、行へ移動、元に戻す、拡大縮小、UTF-8、LF または CRLF。メモ帳が使えるなら、これも使えます。大きなファイルでも軽いままです。編集の負担は変更した量で決まり、ファイルの大きさでは決まりません。
+- ファイル名を代わりに付けます. メニュー一つで「無題 3.txt」が Quarterly_Review_10SEP2026.md になります。題名は実際に書いた内容から取ります。こうしたファイルが並ぶフォルダは日付順に並び、主題の一覧のように読めます。改名はすべて、実行前にあなたが承認します。
+- 作業はクラッシュを生き延びます. 未保存の変更はクラッシュ、強制終了、停電をまたいで保持され、次に開いたときに返されます。そもそも行うかどうかは、文書ごとにあなたが選びます。
+- 「これについて他に何を書いたか」 一度クリックすれば、いま読んでいるものと同じ範囲を扱うノートがすべて、近い順に並びます。使い続ける理由はたいていこれです。三か月前の自分の考えを、どこに置いたか覚えていなくても取り出せます。
+- 同じことを前にも書いたと気づきます. すでにあるノートに近いものを保存すると教えてくれるので、中途半端なノートが四つではなく、良いノートが一つ残ります。
+
+## What it refuses to do, stated exactly
+
+- **It executes nothing.** No scripts, macros, plugins or interpreters.
+  Opening a document cannot run anything.
+- **It makes no network connection.** No telemetry, no update check, no crash
+  reporting, no AI, no account. It behaves identically offline.
+- **It launches no other program**, not even a browser for its own help.
+- **It will not seize a file association** or delete anything from a user
+  profile without showing what it would do first.
+
+## What it records on the user's machine
+
+書かれるのは二つだけです。クラッシュで作業を失わないための復旧ファイルと、ノート機能を動かすための索引の項目です。どちらも実際の取引なので、安心させる文章ではなく表を置きます。
+
+- 標準: recovery file あり、暗号化なし; records パス、題名、話題.
+- プライベート: recovery file あり、暗号化なし; records パスのみ.
+- 機密: no recovery file; records nothing.
+- 最大: no recovery file; records nothing.
+
+Nothing is encrypted in this edition, and the program says so rather than
+implying otherwise.
+
+## Downloads, and one thing to tell people
+
+The archives are **unsigned**. Windows SmartScreen warns on first run. A
+code-signing certificate has not been bought, and self-signing was refused
+because it would ask a user to install a root certificate they have no reason
+to trust. Every release ships a SHA-256 checksum file.
+
+There is no installer. Unpack the archive anywhere and run it.
+
+## The paid version
+
+BachelorPad+ is the full version: encrypted notes, runnable notebooks,
+structured-data tools, clipboard history and complete privacy controls. It
+arrives on 10 October 2026. The price is not set. Lite stays free either way.
+
+Waitlist: https://bpad.prompt-forge.dev/ja/waitlist.html
+
+## Licence
+
+GPL-3.0-only, not -or-later. The user interface is built with Slint, whose
+grant is to version 3 and no other, so "or later" would offer terms this
+project has not been granted.

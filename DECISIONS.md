@@ -78,6 +78,13 @@ Adding a decision means adding both.
 | BP-ADR-0070 | 2026-08-30 | Removing the code that writes a file does not remove the file. Leftover state -- a frozen `security-history.log`, a `recent.toml` at a location abandoned when the list stopped roaming -- stays where it is and is named rather than swept, because a product that will not seize a file association does not get to delete out of `%APPDATA%` either | Accepted | [ADR-0070](docs/decisions/ADR-0070.md) |
 | BP-ADR-0066 | 2026-08-30 | R1 answered: read-only is the save refusing, and always was. `bp_buffer::Access` guarded every edit against a condition nothing has ever set -- one production call site, in the crate ADR-0063 deleted. The refusal now stats the file rather than listing three candidate causes | Accepted | [ADR-0066](docs/decisions/ADR-0066.md) |
 | BP-ADR-0065 | 2026-08-30 | Two of the reduction's three costs were *concurrent* rather than inherent, and are repaired: `sniff` gets a test-only parser that can contradict it again, and Private keeps an honestly-labelled plaintext journal. The third -- ADR-0050's golden vectors -- is inherent and stays paid | Accepted | [ADR-0065](docs/decisions/ADR-0065.md) |
+| BP-ADR-0071 | 2026-09-10 | **GPL-3.0-only**, and the `-only` is the decision. Every manifest claimed `MIT OR Apache-2.0` while the binary statically links fourteen `i-slint-*` crates whose tri-licence this repository had never elected -- ADR-0054 asked whether there was a *text* behind the claim and nobody asked whether the claim was *true*. Slint grants version 3 and no other, so `-or-later` would offer terms this project has not been granted. Four readers now: `--version`, About, `deny.toml`, and a generated `THIRD-PARTY-NOTICES.md` the gate checks | Accepted | [ADR-0071](docs/decisions/ADR-0071.md) |
+| BP-ADR-0072 | 2026-09-10 | **macOS is declined**, with what it would cost written down. It would *compile* today -- `Platform::HOST` reports anything non-Windows as Linux -- and would then put config in `~/.config` and write `.desktop` files nothing reads. A third platform rather than a third build, plus an Apple certificate before Gatekeeper would open it, plus no Mac here to check any of it on | Accepted | [ADR-0072](docs/decisions/ADR-0072.md) |
+| BP-ADR-0073 | 2026-09-10 | **Hosted CI is restored.** ADR-0016 rested on "GitHub Actions is not available to this project" and one `gh api` call disproved it -- trap 6, and the second time. The local gate stays authoritative; Actions judges pull requests from strangers, builds a release on a machine that has never built it (trap 7), and runs the advisory database the local leg cannot assume a network for | Accepted, amends ADR-0016 | [ADR-0073](docs/decisions/ADR-0073.md) |
+| BP-ADR-0074 | 2026-09-10 | **The product is `BachelorPad+ Lite`**, and the rename found the name spelled out at *eight* sites while `DISPLAY_NAME`'s doc comment said three and a green test proved a pair agreed. The window title was a `.slint` literal no Rust test could see -- the exact site the previous rename broke. All eight read the constant now, and three tests ask at three of the sites rather than at the constant | Accepted | [ADR-0074](docs/decisions/ADR-0074.md) |
+| BP-ADR-0075 | 2026-09-10 | **One documentation source, four destinations, nothing retyped.** `docs/` is the source; `docs/generated/`, `app-help/` and `wiki/` are generated and gate-checked for staleness. The half worth the ADR: three reference pages are generated from *code*, because the flag list, the shortcuts and the menu map already have a home there. In-app help opens **as a document**, never a browser, because this product launches no programs | Accepted | [ADR-0075](docs/decisions/ADR-0075.md) |
+| BP-ADR-0076 | 2026-09-10 | **The website is static and collects nothing except the waitlist.** No analytics, no cookies, no third-party scripts -- enforced by a CSP of `self` and a build step that greps for a tracker, because a promise on a web page is trap 3 exactly as a comment in Rust is. The waitlist promises features and no dates and no prices, from the list ADR-0057 and ADR-0059--0064 removed | Accepted | [ADR-0076](docs/decisions/ADR-0076.md) |
+| BP-ADR-0077 | 2026-09-10 | **Reporting a problem composes a document**, because this product cannot open a browser (ADR-0057) or reach the network (ADR-0006). Help > Report a Problem pre-fills the issue template with the diagnostics already in it and puts the URL on the clipboard. The constraint produced the *better* feature: the fields that make a report fixable are the ones somebody filing in a browser would have gone back for and mostly would not | Accepted | [ADR-0077](docs/decisions/ADR-0077.md) |
 | BP-ADR-0017 | amended 2026-08-22 | Half of the renderer revert condition is now a number rather than a feeling: per-frame row building, and its independence from document size | Accepted, amended | [ADR-0017](docs/decisions/ADR-0017.md) |
 
 ## Decisions needed before the work they block
@@ -112,6 +119,151 @@ Adding a decision means adding both.
 - **specs.md section 22's warm-start target** (75 ms) is still unverified —
   the software renderer's time to first interaction cannot be measured, so
   half of ADR-0017's target has no number behind it.
+
+## What going public taught, 2026-09-10
+
+Six decisions in one session, and **five of the six were found by preparing to
+publish rather than by anything that could fail**. That pattern is worth more
+than any of the individual findings.
+
+### A licence claim with a text behind it is not a licence claim that is true
+
+[ADR-0054](docs/decisions/ADR-0054.md) found `MIT OR Apache-2.0` in every
+manifest with neither licence file present, and fixed it properly: correct
+SPDX expression, both texts committed, the string threaded into `--version`.
+The repository then had a licence claim that looked thoroughly handled.
+
+**Looking thoroughly handled is what kept anybody from noticing it described a
+fraction of the binary.** Slint is tri-licensed, the archives shipped no Slint
+notice at all, and the election had never been made anywhere.
+
+> **"Is there a text behind this claim?" and "is this claim true?" are
+> different questions, and answering the first one well is what stops anybody
+> asking the second.**
+
+The check is not about licences. **Name the thing the claim is about, then go
+and look at that thing.** The claim was about a 21 MB executable, and nobody
+had looked inside it.
+
+### A test that proves two things agree is evidence about two things
+
+`DISPLAY_NAME`'s doc comment says the product name "must not be spelled out at
+the three places that show it", and records that the previous rename broke
+exactly that. The test written in response --
+`version_names_the_product_the_desktop_registration_names` -- has passed every
+run since, and the comment says why: *both halves of that pair read this*.
+
+**Which is the whole defect.** Renaming to BachelorPad+ Lite found the name
+written out at **eight** sites, including the window title in `app.slint` --
+the site the previous rename actually broke, and the one no Rust test can see.
+
+> **Before trusting a constant as the one home for a value, grep for the
+> value. If the count is higher than the number of readers, the constant is a
+> convention rather than a mechanism.**
+
+Counting is the check. Testing was not: the test was green throughout.
+
+### An accepted ADR is where a false premise goes to be safe
+
+[ADR-0016](docs/decisions/ADR-0016.md) opens *"GitHub Actions is not available
+to this project"*, and everything in it follows from that sentence. One
+`gh api` call returns `{"enabled": true}`.
+
+It was almost certainly true when written. It became false silently, and a
+decision document has no mechanism that would ever say so. **This is trap 6,
+and it is the second time** -- D13 sat five sessions on a premise one
+`git merge-base` disproved. The habit was installed for questions in
+`DECISIONS_NEEDED.md` and not for premises inside decisions already accepted,
+which read as settled and are therefore never re-read looking for something to
+disprove.
+
+> **An ADR whose reasoning rests on an external fact should name the command
+> that would test it.**
+
+### A rule does not follow the product onto a new surface
+
+[ADR-0006](docs/decisions/ADR-0006.md) is about the application, and every
+crate honours it. A website is a different artefact, on different
+infrastructure, in a different language -- and the default for that artefact,
+the thing every template ships with, is an analytics tag.
+
+Nothing would have failed. No test covers a website and the gate never sees
+one.
+
+> **Ask of each new surface which of this project's existing rules it is now
+> the exception to, and answer in writing before the surface exists -- because
+> afterwards it is a change rather than a decision.**
+
+The answer here was a CSP of `self` plus a build step that greps for trackers,
+so that the promise has a reader.
+
+### The dangerous unsupported platform compiles
+
+macOS was declined ([ADR-0072](docs/decisions/ADR-0072.md)), and the reason is
+not effort. `Platform::HOST` reports any non-Windows target as Linux -- a
+deliberate, well-argued fallback for a target nobody ships.
+
+Ship one, and it becomes a working editor that puts files in the wrong place
+and reports a successful file-type registration that has done nothing. Both
+findable only by somebody sitting at a Mac.
+
+> **A target that refuses to build announces itself. One that compiles and
+> answers as something else does not, and nothing in the code marks the
+> boundary between those two states.**
+
+### A constraint can be a design brief
+
+"In-app feedback" almost always means a button that opens a browser. Two
+existing decisions made that impossible: this product launches no programs
+([ADR-0057](docs/decisions/ADR-0057.md)) and makes no network connection
+([ADR-0006](docs/decisions/ADR-0006.md)). The natural response is to record
+the feature as blocked.
+
+What the refusal actually forced was the question *what makes a bug report
+useful?* The answer is the diagnostics, which were already a menu row away and
+which most people filing in a browser would never have gone back for. So the
+version this product is allowed to build delivers better reports than the one
+it is not.
+
+> **A constraint that forecloses the obvious implementation is worth reading
+> as a design brief rather than as an obstacle** -- and the check is to ask
+> what the feature is *for*, once its usual shape is unavailable.
+
+### An absence here is not evidence the thing does not exist
+
+The website's signup was designed from scratch, with a page of reasoning about
+why holding no personal data is safest. `dboles99/af-site` sits on the same
+domain, is owned by the same person, and had solved the identical problem
+three days earlier: Azure Function, Table Storage, Kit, GDPR consent
+versioning this version had not thought about. It also had the locale
+directory shape, the sitemap naming, `llms.txt`, the PayPal handle and the
+deploy configuration.
+
+The tell was available and ignored: **the domain was already in use.**
+`bpad.prompt-forge.dev` is a subdomain of a site that exists, and asking what
+the parent site does would have produced the whole answer.
+
+> **Trap 6 says a claim in the record is not a property of the repository.
+> This is its neighbour: an absence in *this* repository is not evidence that
+> the thing does not exist.** Before designing a mechanism, look for the one
+> already running next door.
+
+### And the documentation version of trap 3
+
+The first design of the documentation pipeline had a
+`docs/reference/shortcuts.md` in it: a table of keyboard shortcuts typed out
+beside a constant that already held them, with nothing to make the two agree.
+It would have been correct on the day it was written.
+
+> **If this page and the code disagreed, what would fail?** For a page
+> describing what a tab is *for* -- nothing, and prose is the right home. For
+> a page listing the flags -- nothing either, which is precisely why that page
+> has to be generated instead.
+
+Three pages are generated from code now. Asking the question of the existing
+documentation found `MENU_MAP.md`'s Help section carrying **two rows for one
+menu**, one a subset of the other, coexisting in the file whose entire job is
+to be the one home for what each menu holds.
 
 ## Recently closed, and what each one cost to learn
 

@@ -1,0 +1,177 @@
+# Build and publish a release (ADR-0073), from a tag.
+#
+# **`scripts/New-Release.ps1` remains the definition of what a release is.**
+# This does the same work on a clean runner, and that is the point rather than
+# a convenience: every archive shipped before this file existed was built on
+# the one workstation that had been developing the product for a month. Trap 7
+# in its usual shape -- a round trip through one build says nothing about
+# another build. A release built here is the first evidence this product
+# builds anywhere else.
+#
+# **The archives are unsigned, deliberately** (ADR-0055). D15 was answered
+# "defer", and self-signing was refused outright because a self-signed
+# Authenticode certificate is only satisfied once the user installs a root
+# certificate they have no reason to trust. The release notes say so, in the
+# same words `New-Release.ps1` prints on every run, because a release that
+# stays quiet about it is asking the user to discover SmartScreen themselves.
+#
+# macOS is not built. ADR-0072 declined it, with what it would cost.
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  # So a release can be rehearsed against a branch without cutting a tag.
+  # `dry_run` defaults on: an accidental click must not publish.
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Build the archives but publish nothing
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  build:
+    name: build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: windows-x86_64
+          - os: ubuntu-latest
+            target: linux-x86_64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: System libraries (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libfontconfig1-dev \
+            libxkbcommon-dev \
+            libxcb-shape0-dev \
+            libxcb-xfixes0-dev \
+            libxcb1-dev \
+            libgl1-mesa-dev \
+            libwayland-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      # Regenerated rather than trusted. The committed file is checked by CI,
+      # and a release is the one moment where "checked on some other run" is
+      # not good enough -- this archive is what a stranger receives.
+      - name: notices
+        shell: pwsh
+        run: ./scripts/New-ThirdPartyNotices.ps1 -Check
+
+      - name: build
+        run: cargo build --release --locked -p bachelorpad
+
+      # The staging rules live in the release scripts, not here, so that a
+      # release built by hand and a release built by a runner contain the same
+      # files. `New-Release.ps1` drives Windows; `release-linux.sh` is the
+      # Linux leg and is runnable on a real Linux box, which is what this is.
+      - name: stage (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/New-Release.ps1 -AllowDirty
+
+      - name: stage (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          set -eu
+          version_lines=$(./target/release/bachelorpad --version)
+          version=$(printf '%s\n' "$version_lines" | sed -n '1s/^[^ ]* *\([^ ]*\).*/\1/p')
+          test -n "$version" || { echo '--version printed nothing; cannot name an archive' >&2; exit 1; }
+          mkdir -p artifacts/releases
+          ./scripts/release-linux.sh "$version" "${{ github.sha }}" "$PWD/artifacts/releases"
+
+      # A tag says what it is; the binary says what it is. When they disagree
+      # the tag is the thing that was typed, so the build is refused rather
+      # than published under a name it does not carry.
+      - name: the tag and the binary must agree
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}".TrimStart('v')
+          $archive = Get-ChildItem artifacts/releases -File |
+            Where-Object { $_.Name -match '^bachelorpad-lite-(.+?)-(windows|linux)-x86_64\.(zip|tar\.gz)$' } |
+            Select-Object -First 1
+          if (-not $archive) { throw 'no archive was staged' }
+          if ($archive.Name -notmatch [regex]::Escape("bachelorpad-lite-$tag-")) {
+            throw "tag v$tag does not match the archive the binary named: $($archive.Name)"
+          }
+          Write-Host "tag v$tag agrees with $($archive.Name)"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: |
+            artifacts/releases/*.zip
+            artifacts/releases/*.tar.gz
+          if-no-files-found: error
+
+  publish:
+    name: publish
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v') && !inputs.dry_run
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: staged
+          merge-multiple: true
+
+      # Written in the format `sha256sum -c` reads, so a Linux user can verify
+      # without being told how. This is the whole of what an unsigned
+      # publisher can honestly offer, and it is not nothing: it answers
+      # tampering in transit, which is the threat a certificate answers worst.
+      - name: checksums
+        run: |
+          set -eu
+          cd staged
+          sha256sum *.zip *.tar.gz > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      # The notes live in .github/release-notes-template.md rather than in a
+      # heredoc here, and that is a fix rather than tidiness. The table in
+      # them starts each line with `|` at column zero, which **terminates a
+      # YAML block scalar** -- so the whole workflow failed to parse, and the
+      # error pointed at the table rather than at the `run:` that contained
+      # it. Content that is content belongs in a file.
+      - name: release notes
+        run: |
+          set -eu
+          version="${GITHUB_REF_NAME#v}"
+          sed "s/VERSION/$version/g" .github/release-notes-template.md > notes.md
+          cat notes.md
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            staged/*.zip
+            staged/*.tar.gz
+            staged/SHA256SUMS.txt
+          body_path: notes.md
+          draft: true
+          fail_on_unmatched_files: true
+
+      # Draft, deliberately. Publishing is the one act that changes what a
+      # stranger downloads, and ADR-0053 keeps the equivalent gesture --
+      # clicking merge -- for a person. This is the same gesture wearing a
+      # different button.
+      - name: say what is left to do
+        run: echo 'The release is a DRAFT. Review the attached files, then publish it by hand.'

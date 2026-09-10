@@ -30,6 +30,96 @@ Ctrl+0          Reset zoom
 Ctrl+D          Duplicate line
 Alt+Up / Down   Move line up / down";
 
+/// The About box, as text, so the claim in it has a test behind it.
+///
+/// **The licence is read from `CARGO_PKG_LICENSE`, never written out.** It
+/// was written out until ADR-0071, while `bp_config::cli::Package`'s
+/// `license` field claimed three crates away that the workspace manifest was
+/// "the one home for this string". Both sentences were in the repository at
+/// once and neither could fail -- trap 4 -- so what actually caught it was a
+/// relicence needing to know where the string lived.
+///
+/// A function rather than a `const` because the renderer is read from the
+/// environment at click time, and separate from the match arm because a body
+/// built inside `handle_menu_action` is one no test can reach.
+fn about_text() -> String {
+    format!(
+        "{} {}\n\nNotepad when you want it. More when you need it.\n\n\
+         Renderer: {}\nLicence: {}\n\n\
+         Free software, and you may redistribute and modify it under the\n\
+         GNU General Public License version 3. It comes with NO WARRANTY.\n\
+         The full text is in LICENSE, beside this program.",
+        bp_platform::DISPLAY_NAME,
+        env!("CARGO_PKG_VERSION"),
+        std::env::var("SLINT_BACKEND").unwrap_or_else(|_| "software".to_owned()),
+        env!("CARGO_PKG_LICENSE"),
+    )
+}
+
+/// Where an issue is filed, derived from the manifest rather than written
+/// out.
+///
+/// `CARGO_PKG_REPOSITORY` is the workspace manifest's `repository` field, so
+/// a fork that changes it gets its own issues URL for free and this cannot
+/// point at somebody else's tracker. The same reasoning as the licence and
+/// the product name (ADR-0071, ADR-0074): the value has one home and this
+/// reads it.
+fn issues_url() -> String {
+    format!("{}/issues/new/choose", env!("CARGO_PKG_REPOSITORY"))
+}
+
+/// A bug report, pre-filled, ready for the user to add what they did.
+///
+/// **The diagnostics are already in it, and that is the whole point**
+/// (ADR-0077). `.github/ISSUE_TEMPLATE/bug_report.yml` asks for the version,
+/// the renderer, every resolved directory and which editor surface was in
+/// use, because reports without them cannot be acted on -- and somebody
+/// filing in a browser has to come back here, find Help > Diagnostics and
+/// copy it. Most will not. So the constraint that this product cannot open
+/// a browser produces the *better* report rather than a worse one.
+///
+/// Pure, and takes the diagnostics as a parameter, so a test can read it
+/// without a window or a real profile directory.
+fn problem_report(diagnostics: &str) -> String {
+    format!(
+        "# Problem report\n\n\
+         Fill in the three sections below, then paste the whole thing at:\n\
+         {}\n\n\
+         Nothing has been sent. This is a document; it goes nowhere until you\n\
+         put it there yourself.\n\n\
+         ## What I did\n\n\n\
+         ## What I expected\n\n\n\
+         ## What happened instead\n\n\n\
+         ## Diagnostics\n\n\
+         ```\n{}\n```\n\n\
+         ## Before you send it\n\n\
+         - An issue is public. Check the paths above are ones you are happy to\n\
+         share, and edit them if not.\n\
+         - If this is a security problem, do not open a public issue. See\n\
+         SECURITY.md in the repository.\n",
+        issues_url(),
+        diagnostics.trim_end(),
+    )
+}
+
+/// Where the shipped help is, or `None` if this build cannot work out where
+/// it is running from.
+///
+/// The path rule is `bp_platform::help`'s and the *question* -- where is this
+/// executable -- is the shell's, which is the split R011 asks for: `bp-ui`
+/// connects, and does not decide.
+///
+/// `current_exe` can fail, and the caller says so plainly rather than opening
+/// nothing. It is also the case that matters most in practice: somebody who
+/// moved `bachelorpad.exe` out of the unpacked folder has left the help
+/// behind, exactly as they would have left the icon behind (ADR-0068).
+fn user_guide_path() -> Option<PathBuf> {
+    let executable = std::env::current_exe().ok()?;
+    let path = bp_platform::help::index_beside(bp_platform::Platform::HOST, executable.to_str()?)?;
+    let path = PathBuf::from(path);
+    path.is_file().then_some(path)
+}
+
 /// A document's filename, for a row whose detail column already shows the
 /// full path -- the same reasoning `state::organize`'s own `filename_of`
 /// applies to a status-bar notice, applied here to a panel row's label.
@@ -576,15 +666,65 @@ pub fn handle_menu_action(
         action::ENCODING_UTF8 => state.borrow_mut().set_encoding(Encoding::Utf8),
         action::ENCODING_UTF8_BOM => state.borrow_mut().set_encoding(Encoding::Utf8Bom),
 
-        action::SHORTCUTS => show_info("Keyboard shortcuts", SHORTCUTS),
-        action::ABOUT => show_info(
-            "About BachelorPlusLite",
-            &format!(
-                "BachelorPlusLite {}\n\nNotepad when you want it. More when you need it.\n\n\
-                 Renderer: {}\nLicence: MIT OR Apache-2.0",
-                env!("CARGO_PKG_VERSION"),
-                std::env::var("SLINT_BACKEND").unwrap_or_else(|_| "software".to_owned()),
+        // Help ▸ User Guide. Opened as a document, which is what makes it
+        // possible at all: this product launches nothing, so a browser was
+        // never an option, and the editor already knows how to show text
+        // (ADR-0075). `bp_platform::help` decides *where* the file is,
+        // because joining a path is a platform question -- this arm only
+        // asks where the executable is, which is a shell question.
+        action::USER_GUIDE => match user_guide_path() {
+            Some(path) => state.borrow_mut().open(path),
+            None => show_info(
+                "User Guide",
+                "The help that ships beside this program could not be found.
+
+\n                 It is `app-help/index.md`, in the folder the executable is in.
+\n                 Moving the executable out of the unpacked archive leaves it
+\n                 behind -- move the whole folder instead.
+
+\n                 The same pages are at https://bpad.prompt-forge.dev/docs",
             ),
+        },
+        action::SHORTCUTS => show_info("Keyboard shortcuts", SHORTCUTS),
+        // Help ▸ Report a Problem. Composes a document and copies a URL; it
+        // opens nothing and sends nothing (ADR-0077).
+        //
+        // The borrow ends before `show_info`, because `rfd` pumps events and
+        // a re-entrant callback on a live `borrow_mut()` panics -- R011's
+        // seventh trap, and the reason this is three statements rather than
+        // one expression.
+        action::REPORT_PROBLEM => {
+            // A free function in `state`, not a method: it reads the process
+            // environment and the resolved directories rather than the open
+            // document, so it needs no `AppState` and takes no borrow. Which
+            // means the report is composed *before* any borrow is taken.
+            let report = problem_report(&crate::state::diagnostics_report());
+            {
+                let mut s = state.borrow_mut();
+                s.new_document();
+                s.edit(report);
+            }
+            let copied = crate::set_os_clipboard(&issues_url());
+            let where_to = if copied {
+                "The address is on your clipboard."
+            } else {
+                "The address is in the document; the clipboard was unavailable."
+            };
+            show_info(
+                "Report a Problem",
+                &format!(
+                    "A report has been opened in a new tab, with your diagnostics\n\
+                     already filled in.\n\n\
+                     Add what you did and what happened, then paste the whole\n\
+                     document into a new issue. {}\n\n\
+                     Nothing has been sent anywhere.",
+                    where_to
+                ),
+            );
+        }
+        action::ABOUT => show_info(
+            &format!("About {}", bp_platform::DISPLAY_NAME),
+            &about_text(),
         ),
         // Organize ▸ where documents sharing this one's tags already live.
         action::ORGANIZE_SUGGESTED_FOLDER => {
@@ -770,4 +910,98 @@ pub fn handle_menu_action(
 
     refresh(ui, &mut state.borrow_mut(), push);
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{about_text, issues_url, problem_report};
+    use bp_platform::DISPLAY_NAME;
+
+    #[test]
+    fn the_about_box_must_report_the_licence_the_manifest_declares() {
+        assert!(
+            about_text().contains(env!("CARGO_PKG_LICENSE")),
+            "About said: {}",
+            about_text()
+        );
+    }
+
+    /// The specific way this went wrong, kept as its own test.
+    ///
+    /// The previous literal outlived the licence it named, and a test
+    /// asserting only that About mentions *some* licence would have passed
+    /// over it unchanged -- `CARGO_PKG_LICENSE` was never in the string at
+    /// all. So this asserts the shape of the mistake rather than its value.
+    #[test]
+    fn no_licence_name_may_be_written_into_the_about_box_by_hand() {
+        let declared = env!("CARGO_PKG_LICENSE");
+        for spelling in ["MIT", "Apache-2.0", "BSD", "MPL"] {
+            assert!(
+                declared.contains(spelling) || !about_text().contains(spelling),
+                "About names {spelling}, which the manifest does not: {}",
+                about_text()
+            );
+        }
+    }
+
+    /// One of eight sites that spelled the product name out by hand.
+    ///
+    /// `DISPLAY_NAME` has said since it was written that the name "must not
+    /// be spelled out at the three places that show it", and there were
+    /// eight. This is the About body; `menus` asserts the About row and
+    /// `state` the diagnostics report, because a claim about eight sites
+    /// needs a reader at each of them rather than one that reads the
+    /// constant and proves only that the constant exists (ADR-0074).
+    #[test]
+    fn the_about_box_must_read_the_product_name_rather_than_spell_it() {
+        assert!(
+            about_text().starts_with(DISPLAY_NAME),
+            "About said: {}",
+            about_text()
+        );
+    }
+
+    /// The version has the same one-home rule and had never been asserted.
+    #[test]
+    fn the_about_box_must_report_the_version_the_manifest_declares() {
+        assert!(about_text().contains(env!("CARGO_PKG_VERSION")));
+    }
+
+    /// The diagnostics are the reason this row exists, so their presence is
+    /// asserted rather than assumed (ADR-0077).
+    #[test]
+    fn a_problem_report_carries_the_diagnostics_it_was_given() {
+        let report = problem_report("BachelorPad+ Lite 0.9.5\n\nRenderer: software");
+        assert!(
+            report.contains("Renderer: software"),
+            "report was: {report}"
+        );
+        assert!(report.contains("0.9.5"), "report was: {report}");
+    }
+
+    /// A report that did not say where to send it would be a document the
+    /// user has to go and look something up for, which is the friction the
+    /// whole row exists to remove.
+    #[test]
+    fn a_problem_report_says_where_to_paste_it() {
+        let report = problem_report("diagnostics");
+        assert!(report.contains(&issues_url()), "report was: {report}");
+    }
+
+    /// The issues URL is derived from the manifest, so a fork gets its own
+    /// tracker rather than sending its users here.
+    #[test]
+    fn the_issues_url_is_built_from_the_repository_the_manifest_declares() {
+        assert!(issues_url().starts_with(env!("CARGO_PKG_REPOSITORY")));
+    }
+
+    /// The one thing this row must never imply.
+    #[test]
+    fn a_problem_report_must_say_that_nothing_has_been_sent() {
+        let report = problem_report("diagnostics");
+        assert!(
+            report.to_lowercase().contains("nothing has been sent"),
+            "report was: {report}"
+        );
+    }
 }

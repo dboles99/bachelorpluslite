@@ -536,7 +536,7 @@ dependencies = [
 
 [[package]]
 name = "bachelorpad"
-version = "0.1.0"
+version = "0.9.5"
 dependencies = [
  "anyhow",
  "bp-config",
@@ -670,7 +670,7 @@ dependencies = [
 
 [[package]]
 name = "bp-buffer"
-version = "0.1.0"
+version = "0.9.5"
 dependencies = [
  "proptest",
  "ropey",
@@ -680,7 +680,7 @@ dependencies = [
 
 [[package]]
 name = "bp-config"
-version = "0.1.0"
+version = "0.9.5"
 dependencies = [
  "bp-platform",
  "serde",
@@ -690,7 +690,7 @@ dependencies = [
 
 [[package]]
 name = "bp-core"
-version = "0.1.0"
+version = "0.9.5"
 dependencies = [
  "bp-security",
  "time",
@@ -698,14 +698,14 @@ dependencies = [
 
 [[package]]
 name = "bp-editor"
-version = "0.1.0"
+version = "0.9.5"
 dependencies = [
  "bp-buffer",
 ]
 
 [[package]]
 name = "bp-files"
-version = "0.1.0"
+version = "0.9.5"
 dependencies = [
  "bp-core",
  "bp-naming",
@@ -718,11 +718,11 @@ dependencies = [
 
 [[package]]
 name = "bp-formats"
-version = "0.1.0"
+version = "0.9.5"
 
 [[package]]
 name = "bp-history"
-version = "0.1.0"
+version = "0.9.5"
 dependencies = [
  "bp-security",
  "serde",
@@ -732,7 +732,7 @@ dependencies = [
 
 [[package]]
 name = "bp-integration-tests"
-version = "0.1.0"
+version = "0.9.5"
 dependencies = [
  "bp-buffer",
  "bp-config",
@@ -756,7 +756,7 @@ dependencies = [
 
 [[package]]
 name = "bp-naming"
-version = "0.1.0"
+version = "0.9.5"
 dependencies = [
  "proptest",
  "time",
@@ -764,7 +764,7 @@ dependencies = [
 
 [[package]]
 name = "bp-platform"
-version = "0.1.0"
+version = "0.9.5"
 dependencies = [
  "bp-formats",
  "proptest",
@@ -773,7 +773,7 @@ dependencies = [
 
 [[package]]
 name = "bp-search"
-version = "0.1.0"
+version = "0.9.5"
 dependencies = [
  "bp-buffer",
  "regex",
@@ -783,7 +783,7 @@ dependencies = [
 
 [[package]]
 name = "bp-security"
-version = "0.1.0"
+version = "0.9.5"
 dependencies = [
  "serde",
  "serde_json",
@@ -791,11 +791,11 @@ dependencies = [
 
 [[package]]
 name = "bp-semantic"
-version = "0.1.0"
+version = "0.9.5"
 
 [[package]]
 name = "bp-storage"
-version = "0.1.0"
+version = "0.9.5"
 dependencies = [
  "bp-security",
  "rusqlite",
@@ -805,7 +805,7 @@ dependencies = [
 
 [[package]]
 name = "bp-theme"
-version = "0.1.0"
+version = "0.9.5"
 dependencies = [
  "serde",
  "serde_json",
@@ -813,7 +813,7 @@ dependencies = [
 
 [[package]]
 name = "bp-ui"
-version = "0.1.0"
+version = "0.9.5"
 dependencies = [
  "arboard",
  "bp-buffer",

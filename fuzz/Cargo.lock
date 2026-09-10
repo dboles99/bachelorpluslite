@@ -31,7 +31,7 @@ checksum = "b588b76d00fde79687d7646a9b5bdf3cc0f655e0bbd080335a95d7e96f3587da"
 
 [[package]]
 name = "bp-core"
-version = "0.1.0"
+version = "0.9.5"
 dependencies = [
  "bp-security",
  "time",
@@ -39,7 +39,7 @@ dependencies = [
 
 [[package]]
 name = "bp-files"
-version = "0.1.0"
+version = "0.9.5"
 dependencies = [
  "bp-core",
  "bp-naming",
@@ -50,7 +50,7 @@ dependencies = [
 
 [[package]]
 name = "bp-formats"
-version = "0.1.0"
+version = "0.9.5"
 
 [[package]]
 name = "bp-fuzz"
@@ -66,18 +66,18 @@ dependencies = [
 
 [[package]]
 name = "bp-naming"
-version = "0.1.0"
+version = "0.9.5"
 dependencies = [
  "time",
 ]
 
 [[package]]
 name = "bp-platform"
-version = "0.1.0"
+version = "0.9.5"
 
 [[package]]
 name = "bp-security"
-version = "0.1.0"
+version = "0.9.5"
 dependencies = [
  "serde",
 ]

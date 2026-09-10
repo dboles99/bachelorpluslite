@@ -1,0 +1,82 @@
+name: Feature request
+description: Something this product should do and does not.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **This product declines features on purpose and writes down why.**
+        Eleven menu rows were deleted rather than built, and five whole
+        feature areas were removed *after* they worked. That is not
+        discouragement -- it is so that a decline comes with a reason you can
+        argue with.
+
+        Three refusals are structural and a request to change one needs to
+        argue with the ADR rather than around it:
+
+        | Not going to happen | Why |
+        | --- | --- |
+        | Anything that **executes** | [ADR-0057](https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0057.md) |
+        | Anything that **reaches the network** | [ADR-0006](https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0006.md) |
+        | Anything that **launches a program** | [ADR-0075](https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0075.md) |
+
+        And four have been asked and answered, with the reason:
+
+        - **Markdown preview** -- the toolkit has no rich-text item, so inline
+          formatting cannot be rendered at all
+          ([ADR-0048](https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0048.md))
+        - **macOS** -- a third platform rather than a third build
+          ([ADR-0072](https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0072.md))
+        - **An installer** -- [ADR-0067](https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0067.md)
+        - **Encryption, notebooks, clipboard history, data operations** --
+          removed to make this Lite. They are becoming
+          [BachelorPad+](https://bpad.prompt-forge.dev/waitlist.html)
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do
+      description: >
+        The thing you are trying to get done, not the feature you have in mind
+        for it. The best requests this project has had described a problem and
+        got a different and better answer.
+    validations:
+      required: true
+
+  - type: textarea
+    id: today
+    attributes:
+      label: How you do it today
+      description: What you do instead, and why that is worse.
+    validations:
+      required: true
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you think should happen
+      description: If you have a shape in mind. Optional -- the problem matters more.
+
+  - type: dropdown
+    id: notepad
+    attributes:
+      label: Does Windows 11 Notepad do this?
+      description: >
+        The scope of this product is Notepad's feature set plus a note layer.
+        Not a veto -- but a yes makes the case much shorter.
+      options:
+        - "Yes, Notepad does this"
+        - "No, but it fits the note layer"
+        - "No, it is something else"
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: This does not need to execute anything, reach the network, or launch a program
+          required: true
+        - label: I checked the answered requests above
+          required: true

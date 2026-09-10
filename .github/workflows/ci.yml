@@ -1,56 +1,134 @@
-# DORMANT -- GitHub Actions is not available for this project.
+# The hosted half of the gate (ADR-0073).
 #
-# The authoritative gate is local: scripts/Invoke-LocalCI.ps1, wired into
-# pre-commit and pre-push by scripts/Install-GitHooks.ps1. See
-# docs/governance/LOCAL_CI.md.
+# **This file was dormant for six sessions on a premise that had stopped being
+# true.** ADR-0016 said "GitHub Actions is not available to this project" and
+# set the trigger to `workflow_dispatch` so that pushes could not queue runs
+# that could not execute. One `gh api` call disproved it. The reasoning is in
+# ADR-0073; the habit it belongs to is trap 6.
 #
-# This file is kept, and kept correct, so hosted CI can be switched back on
-# without rebuilding it. The trigger is `workflow_dispatch` only, so pushes
-# do not queue runs that cannot execute. To re-enable, restore:
+# **Keep these stages in step with scripts/Invoke-LocalCI.ps1, and keep the
+# names identical.** Two gates that disagree are worse than one -- ADR-0016
+# said so and it is still the rule. When they drift, the local one is right.
 #
-#   on:
-#     push:
-#     pull_request:
-#
-# Keep the steps below in sync with Invoke-LocalCI.ps1 -- two gates that
-# disagree are worse than one.
+# What this does that the local gate structurally cannot:
+#   * judge a pull request from somebody who is not Daniel;
+#   * build on a machine that has never built this before (trap 7);
+#   * run the RustSec advisory database, which needs a network the local gate
+#     is not allowed to assume.
 
 name: CI
 
 on:
+  push:
+    branches: ["**"]
+  pull_request:
   workflow_dispatch:
 
+# A second push to the same branch makes the first run pointless. Cancel it
+# rather than paying for both -- except on main, where a completed run is the
+# record of what that commit did.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  # A backtrace costs nothing until something fails, and when something fails
+  # on a machine nobody can log into it is the whole of the evidence.
+  RUST_BACKTRACE: 1
+
 jobs:
-  check:
+  gate:
+    name: gate (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     strategy:
+      # Both legs run to completion. A Windows failure that hides whether
+      # Linux also failed turns one red run into two.
+      fail-fast: false
       matrix:
         os: [windows-latest, ubuntu-latest]
-    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+
+      # Slint's Linux backend links against system libraries that the runner
+      # does not carry by default. Named individually rather than through a
+      # meta-package so that a future failure says which one went missing.
+      - name: System libraries (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libfontconfig1-dev \
+            libxkbcommon-dev \
+            libxcb-shape0-dev \
+            libxcb-xfixes0-dev \
+            libxcb1-dev \
+            libgl1-mesa-dev \
+            libwayland-dev
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+
       - uses: Swatinem/rust-cache@v2
-      - name: Format
+
+      # --- the stages, in Invoke-LocalCI.ps1's order and under its names ---
+
+      - name: fmt
         run: cargo fmt --all -- --check
-      - name: Check
+
+      - name: check (locked)
         run: cargo check --workspace --all-targets --locked
-      - name: Clippy
+
+      - name: clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
-      - name: Test
+
+      - name: test
         run: cargo test --workspace
+
+      - name: doctests
+        run: cargo test --workspace --doc
+
       # `fuzz/` declares its own `[workspace]`, so every `--workspace` step
-      # above walks past it. It holds the hostile-input harnesses for
-      # bp-files and bp-formats. There were five: bp-notebook's target went
-      # under ADR-0057, bp-data's YAML one under ADR-0062 and bp-crypto's
-      # envelope one under ADR-0064, each with the crate it protected.
-      - name: Format (fuzz)
+      # above walks past it. It holds the hostile-input harnesses for bp-files
+      # and bp-formats. There were five: bp-notebook's target went under
+      # ADR-0057, bp-data's YAML one under ADR-0062 and bp-crypto's envelope
+      # one under ADR-0064, each with the crate it protected.
+      - name: fuzz fmt
         working-directory: fuzz
         run: cargo fmt --all -- --check
-      - name: Clippy (fuzz)
+
+      - name: fuzz clippy
         working-directory: fuzz
         run: cargo clippy --all-targets -- -D warnings
-      - name: Test (fuzz)
+
+      - name: fuzz test
         working-directory: fuzz
         run: cargo test
+
+  # Separate job: it needs no toolchain matrix and no system libraries, and a
+  # licence failure should be legible without reading a build log.
+  licences:
+    name: licences
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+
+      # The whole of `cargo deny check`, not the `licenses` subset the local
+      # gate runs. The local one stops short on purpose -- advisories need
+      # RustSec over the network, and a gate that fails on a train is a gate
+      # people learn to skip (ADR-0073). Here a network is a promise.
+      - name: licences
+        run: cargo deny check
+
+      # THIRD-PARTY-NOTICES.md ships in both archives because GPL-3.0-only
+      # obliges this project to pass on the terms of the ~626 crates it
+      # redistributes (ADR-0071). It is generated, so its only failure mode is
+      # staleness -- which is exactly what nothing would notice.
+      - name: notices
+        shell: pwsh
+        run: ./scripts/New-ThirdPartyNotices.ps1 -Check

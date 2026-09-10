@@ -1379,7 +1379,8 @@ pub(crate) fn diagnostics_report() -> String {
         dir.map_or_else(|| "not available".to_owned(), |p| p.display().to_string())
     };
     format!(
-        "BachelorPlusLite {}\n\nRenderer: {}\n\nConfig file: {}\nState directory: {}\nData directory: {}",
+        "{} {}\n\nRenderer: {}\n\nConfig file: {}\nState directory: {}\nData directory: {}",
+        bp_platform::DISPLAY_NAME,
         env!("CARGO_PKG_VERSION"),
         std::env::var("SLINT_BACKEND").unwrap_or_else(|_| "software".to_owned()),
         named(bp_config::config_path()),
@@ -2219,6 +2220,16 @@ mod tests {
             command.get_args().count(),
             0,
             "a fresh instance opens with no file, same as launching the app fresh"
+        );
+    }
+
+    /// The third of the eight sites ADR-0074 found.
+    #[test]
+    fn the_diagnostics_report_must_read_the_product_name_rather_than_spell_it() {
+        let report = diagnostics_report();
+        assert!(
+            report.starts_with(bp_platform::DISPLAY_NAME),
+            "diagnostics said: {report}"
         );
     }
 

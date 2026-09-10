@@ -1,5 +1,23 @@
 # BachelorPlusLite Full-Product Roadmap
 
+> **The product is public, GPL-3.0-only, and version 0.9.5** as of
+> 2026-09-10. Six decisions in one session:
+> [ADR-0071](docs/decisions/ADR-0071.md) relicensed it and found the previous
+> claim described a fraction of the binary;
+> [ADR-0072](docs/decisions/ADR-0072.md) declined macOS with what it would
+> cost; [ADR-0073](docs/decisions/ADR-0073.md) restored hosted CI after one
+> `gh api` call disproved ADR-0016's premise;
+> [ADR-0074](docs/decisions/ADR-0074.md) renamed the product and found its
+> name written out at eight sites;
+> [ADR-0075](docs/decisions/ADR-0075.md) made `docs/` the one source for four
+> destinations; [ADR-0076](docs/decisions/ADR-0076.md) settled what the
+> website may collect.
+>
+> **What is left before 1.0 is a person's work, not a session's**: the manual
+> pass in `project/NEXT_SESSION.md` section 3, the Azure resource and DNS for
+> `bpad.prompt-forge.dev`, and a native review of the four translated
+> locales.
+
 This is not an MVP roadmap. Each phase contributes to the full v1 target.
 
 Status as of **2026-08-30**. Four words, meaning four different things:

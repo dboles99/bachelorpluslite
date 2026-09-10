@@ -72,6 +72,7 @@
 pub mod capabilities;
 pub mod dirs;
 pub mod editor;
+pub mod help;
 pub mod paths;
 
 pub use capabilities::{Availability, Capability};
@@ -132,7 +133,18 @@ pub const APP_ID: &str = "io.github.dboles99.BachelorPadPlus";
 /// it, because a doc comment is a wish unless something asks (trap 3) --
 /// `version_names_the_product_the_desktop_registration_names` is what asks,
 /// and it passed throughout, because both halves of *that* pair read this.
-pub const DISPLAY_NAME: &str = "BachelorPlusLite";
+///
+/// **It happened a second time, and this rename is the fix for the cause.**
+/// Going public renamed the product to `BachelorPad+ Lite` (ADR-0074), and
+/// the paragraph above was found to be false in a way its own author would
+/// have recognised: the name was spelled out at *eight* sites, not three --
+/// the window title, the About row, the About body, the recovery prompt, the
+/// diagnostics report, a log line and two module headers. The pair test
+/// covered the two it was written for and nothing asked about the rest.
+/// Every one of them now reads this constant, and
+/// `every_place_the_product_names_itself_must_read_display_name` is what
+/// asks. A rename that reaches eight of eight is the only kind worth having.
+pub const DISPLAY_NAME: &str = "BachelorPad+ Lite";
 
 /// One line, wherever the product introduces itself.
 ///

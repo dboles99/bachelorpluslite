@@ -51,9 +51,26 @@ todo = "warn"
 unimplemented = "warn"
 
 [workspace.package]
-version = "0.1.0"
+# 0.9.5, not 0.1.0: the first public release (ADR-0071). The number says
+# what the product is -- feature-complete against what it set out to be,
+# and short of 1.0 by the manual passes `project/NEXT_SESSION.md` section
+# 3 still lists as undone.
+#
+# Nothing else needs editing for a version bump: both release scripts ask
+# the binary rather than reading a manifest, so the archive name, BUILD.txt
+# and the About box all follow from this line.
+version = "0.9.5"
 edition = "2024"
-license = "MIT OR Apache-2.0"
+# GPL-3.0-only, and the `-only` is the decision (ADR-0071). Slint is
+# tri-licensed and the branch this product takes is **GPL-3.0-only**; a
+# project saying "or later" would let a recipient elect a GPLv4 that Slint's
+# grant does not cover, which is the same defect this field had before, one
+# version on.
+#
+# `--version` and the About box both print this string -- `env!("CARGO_PKG_LICENSE")`
+# -- so the claim has a reader in the shipped binary rather than living only
+# in a manifest nothing consults.
+license = "GPL-3.0-only"
 # Both lines, because this is a derived work: BachelorPlusLite is a clone of
 # BachelorPad+ and inherits its authorship rather than replacing it.
 authors = ["BachelorPlusLite contributors", "BachelorPad+ contributors"]

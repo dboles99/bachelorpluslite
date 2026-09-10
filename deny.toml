@@ -1,0 +1,85 @@
+# cargo-deny: the reader behind the licence claim.
+#
+# ADR-0071 relicensed this project to GPL-3.0-only, and the claim it rests on
+# is that every crate the binary links is compatible with those terms. That
+# claim was true when it was checked by hand, and trap 3 says a claim nothing
+# reads is a wish -- a single `cargo add` of an AGPL or SSPL crate would make
+# it false with nothing failing. `cargo deny check licenses` is what asks.
+#
+# Run by the gate (scripts/Invoke-LocalCI.ps1) and by CI.
+
+[graph]
+# Only what is actually shipped. ADR-0001 names Windows and Linux, and
+# ADR-0072 declined macOS -- a crate that is only ever compiled for a target
+# this project does not build is not part of anything anybody downloads.
+targets = [
+    "x86_64-pc-windows-msvc",
+    "x86_64-unknown-linux-gnu",
+]
+all-features = false
+
+[licenses]
+# Every licence in the tree, as measured rather than as guessed. All are
+# one-way compatible with GPL-3.0: permissive terms may be combined into a
+# GPL-3.0 work, and the combined work is distributed under GPL-3.0.
+#
+# **A licence is added here only with the reason written down.** The list is
+# the audit; a wildcard would make it a formality.
+allow = [
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "CC0-1.0",
+    "ISC",
+    "MIT",
+    "MIT-0",
+    "NCSA",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+    "0BSD",
+    # This project's own crates, and Slint's elected branch. Slint is offered
+    # as `GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR
+    # LicenseRef-Slint-Software-3.0`; the election of GPL-3.0-only is the
+    # whole reason this file's `allow` list can be this short, and it is
+    # recorded in THIRD-PARTY-NOTICES.md where a reader will find it.
+    "GPL-3.0-only",
+]
+
+# `Apache-2.0 WITH LLVM-exception` appears in the tree (the `wasi`/`compiler
+# builtins` family). The exception only *widens* Apache-2.0's grant, so it
+# cannot make a compatible licence incompatible.
+exceptions = []
+
+# An unlicensed crate is not a licence question, it is a "do not ship this"
+# question, and it should stop a build rather than be waved through.
+unused-allowed-license = "allow"
+confidence-threshold = 0.9
+
+[[licenses.clarify]]
+# `r-efi` is `MIT OR Apache-2.0 OR LGPL-2.1-or-later` and reaches the tree
+# only through `wasi` on a target this project does not build. Named rather
+# than silently matched, so that the LGPL branch never becomes the one taken
+# by accident.
+crate = "r-efi"
+expression = "MIT OR Apache-2.0"
+license-files = []
+
+[bans]
+# Not the point of this file, so warn rather than deny -- a duplicate version
+# is a size and build-time question, and ADR-0021's rule about one AEAD
+# implementation is enforced by the workspace dependency table instead.
+multiple-versions = "warn"
+wildcards = "warn"
+
+[advisories]
+# Present so `cargo deny check` runs whole rather than half. The advisory
+# database needs network access, which the gate does not always have; CI runs
+# this leg and reports it.
+yanked = "warn"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

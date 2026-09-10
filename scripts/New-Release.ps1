@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Build, stage and archive a release of BachelorPad+, for Windows and Linux.
+    Build, stage and archive a release of BachelorPad+ Lite, for Windows and Linux.
 
 .DESCRIPTION
     Phase 20's artefact. Nothing in this repository produced a shippable thing
@@ -109,18 +109,30 @@ if ($parts.Count -lt 2 -or $parts[1] -notmatch '^\d+\.\d+\.\d+') {
     throw "cannot read a version out of '$($reported[0])'"
 }
 $version = $parts[1]
+# The product name and the licence come from the same three lines, for the
+# reason the version already did: BUILD.txt used to carry both as literals,
+# and the Linux leg's literal said "BachelorPad+" while this one said
+# "BachelorPlusLite" -- the naming defect ADR-0054 fixed in `--version`,
+# still alive in the half nobody had re-read. A literal cannot disagree with
+# the binary if there is no literal.
+$displayName = $parts[0]
+$declaredLicence = if ($reported.Count -ge 3) { $reported[2].Trim() } else { throw '--version did not report a licence' }
 Write-Note "version $version, from the binary"
+Write-Note "name $displayName, licence $declaredLicence, from the same three lines"
 
 New-Item -ItemType Directory -Force -Path $Out | Out-Null
 
-$stem = "bachelorpadplus-$version"
+# The archive stem follows the public name (ADR-0074), not the repository
+# directory. `bachelorpadplus-` named neither the product nor the full
+# version it is the Lite edition of.
+$stem = "bachelorpad-lite-$version"
 $staging = Join-Path $Out "$stem-windows-x86_64"
 if (Test-Path $staging) { Remove-Item $staging -Recurse -Force }
 New-Item -ItemType Directory -Force -Path $staging | Out-Null
 
 Write-Step 'staging the Windows archive'
 Copy-Item $exe (Join-Path $staging 'bachelorpad.exe')
-foreach ($doc in 'README.md', 'LICENSE-MIT', 'LICENSE-APACHE') {
+foreach ($doc in 'README.md', 'LICENSE', 'THIRD-PARTY-NOTICES.md') {
     $source = Join-Path $Root $doc
     if (-not (Test-Path $source)) { throw "$doc is missing -- the manifests claim a licence this archive would not carry" }
     Copy-Item $source (Join-Path $staging $doc)
@@ -152,12 +164,25 @@ $windowIcon = Join-Path $Root 'assets/io.github.dboles99.BachelorPadPlus.png'
 if (-not (Test-Path $windowIcon)) { throw 'assets/io.github.dboles99.BachelorPadPlus.png is missing -- the window would show the toolkit default' }
 Copy-Item $windowIcon (Join-Path $staging 'io.github.dboles99.BachelorPadPlus.png')
 
+# The in-app help, generated from docs/ (ADR-0075). Help > User Guide opens
+# `app-help/index.md` as a document -- not in a browser, because this product
+# launches no programs. So the help has to travel in the archive: with no
+# installer there is no step that could put it anywhere else, which is the
+# same argument the icon already makes.
+$help = Join-Path $Root 'app-help'
+if (-not (Test-Path (Join-Path $help 'index.md'))) {
+    throw 'app-help/index.md is missing -- run ./scripts/Build-AppHelp.ps1; Help would open nothing'
+}
+Copy-Item $help (Join-Path $staging 'app-help') -Recurse
+
 Set-Content -Path (Join-Path $staging 'BUILD.txt') -Encoding utf8 -Value @(
-    "BachelorPlusLite $version",
+    "$displayName $version",
     "commit:   $commit",
     "target:   windows-x86_64",
     "signed:   no -- see ADR-0055",
-    "licence:  MIT OR Apache-2.0; both texts are in this archive"
+    "licence:  $declaredLicence; the text is in LICENSE, beside this file",
+    "notices:  THIRD-PARTY-NOTICES.md lists every dependency and its licence",
+    "help:     app-help/index.md, which Help > User Guide opens"
 )
 
 $windowsArchive = Join-Path $Out "$stem-windows-x86_64.zip"

@@ -1,0 +1,99 @@
+name: Bug report
+description: Something behaves differently from how it is documented.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **For a security vulnerability, close this and use
+        [private reporting](https://github.com/dboles99/bachelorpluslite/security/advisories/new)
+        instead.** See [SECURITY.md](https://github.com/dboles99/bachelorpluslite/blob/main/SECURITY.md).
+
+        Before filing, a few behaviours are deliberate and documented:
+
+        - **Windows warns before running it** -- the archives are unsigned
+          ([ADR-0055](https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0055.md)).
+        - **Duplicate line and Alt+Up do nothing** -- they need `--editor-view`
+          ([ADR-0018](https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0018.md)).
+        - **Dropping a file on the window does nothing** -- the toolkit carries no file-drop plumbing.
+        - **A `.bpadx` file opens as gibberish** -- it is encrypted and this build has no decryption
+          ([ADR-0064](https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0064.md)).
+        - **It will not start** -- most often a leftover recovery journal.
+          [Troubleshooting](https://github.com/dboles99/bachelorpluslite/wiki/Troubleshooting) has the fix.
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Help ▸ Diagnostics
+      description: >
+        Paste the whole thing. It carries the version, the renderer, and every
+        directory as resolved on your machine -- which is what most reports
+        turn out to be about. If it will not start, run
+        `bachelorpad --version` instead.
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you got instead.
+      placeholder: |
+        1. Opened a 40 MB log file
+        2. Pressed Ctrl+G, typed 900000, pressed Enter
+        3. Expected the caret at line 900000; the window went blank instead
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Windows 11
+        - Windows 10
+        - Linux (X11)
+        - Linux (Wayland)
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: distro
+    attributes:
+      label: Distribution and desktop, on Linux
+      placeholder: Ubuntu 24.04, GNOME 46
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Which editor surface
+      description: >
+        `--editor-view` switches to this product's own editor surface. Several
+        behaviours differ between the two, so this narrows a report a long way.
+      options:
+        - The default (no flag)
+        - --editor-view
+        - Both -- I checked
+        - I do not know
+    validations:
+      required: true
+
+  - type: textarea
+    id: file
+    attributes:
+      label: A file that triggers it, if there is one
+      description: >
+        Attach it if you can share it. **Please check it holds nothing private
+        first** -- an issue is public and cannot be properly un-published.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: This is not a security vulnerability (those go through private reporting)
+          required: true
+        - label: I checked the deliberate behaviours listed at the top
+          required: true

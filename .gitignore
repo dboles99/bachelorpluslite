@@ -46,6 +46,18 @@ artifacts/releases/SHA256SUMS.txt
 !/PROJECT_MEMORY.md
 !/ROADMAP.md
 !/specs.md
+# The three a public repository needs, added 2026-09-10 -- and every one of
+# them was written, staged and *silently dropped* by the rule above before
+# anybody checked. `git status` does not list an ignored file, so the failure
+# is invisible in exactly the place somebody would look for it.
+#
+# The general form, which is why this comment is longer than the lines: a
+# deny-by-default rule with an allowlist is safe and **its failure mode is
+# silence**. Any new file at the root has to be added here or it does not
+# exist as far as the repository is concerned.
+!/CONTRIBUTING.md
+!/SECURITY.md
+!/THIRD-PARTY-NOTICES.md
 
 # Agent worktrees. A subagent working in isolation gets a git worktree here,
 # which is a repository inside this one -- `git add -A` sweeps it into a
@@ -58,3 +70,19 @@ artifacts/releases/SHA256SUMS.txt
 # the root also blocks `New-Release.ps1`, which refuses to build a release
 # from a tree nobody can check out again.
 /*.code-workspace
+
+# Playwright MCP scratch output -- screenshots and page snapshots taken while
+# checking the site renders. Evidence for one session, not part of the repo.
+/.playwright-mcp/
+
+# The signup function's dependencies. Azure Static Web Apps installs them at
+# deploy time from api/package.json; a committed node_modules would be tens of
+# megabytes of somebody else's code in a repository whose whole licence story
+# is about knowing exactly what it ships.
+/site/api/node_modules/
+
+# The manual, staged into the site by .github/workflows/site.yml at deploy
+# time. `docs/generated/manual.html` is the committed copy with a staleness
+# check over it; a second one here would be a third home for the same bytes
+# and the one nothing checks.
+/site/docs/

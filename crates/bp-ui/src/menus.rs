@@ -135,8 +135,18 @@ pub mod action {
     pub const TOOLS_FILE_ANALYSIS: i32 = 722;
     pub const TOOLS_CONFIGURATION: i32 = 723;
 
-    /// Help ▸ Diagnostics. A block of its own -- 730-739, 731-739 free.
+    /// Help ▸ Diagnostics. A block of its own -- 730-739, 733-739 free.
     pub const DIAGNOSTICS: i32 = 730;
+    /// Help ▸ User Guide (ADR-0075). Opens the shipped `app-help/index.md`
+    /// **as a document**, in a new tab -- never in a browser, because this
+    /// product launches no programs (ADR-0057).
+    pub const USER_GUIDE: i32 = 731;
+    /// Help ▸ Report a Problem (ADR-0077). Composes a pre-filled bug report
+    /// **as a document**, with Help ▸ Diagnostics already in it, and puts the
+    /// issues URL on the clipboard. It opens no browser and sends nothing:
+    /// this product launches no programs (ADR-0057) and makes no network
+    /// connection (ADR-0006).
+    pub const REPORT_PROBLEM: i32 = 732;
 
     /// Research ▸ Research Report (ADR-0041). A block of its own -- 740-749,
     /// 747-749 free.
@@ -780,8 +790,17 @@ pub fn tools(has_content: bool) -> Vec<MenuItem> {
 
 pub fn help() -> Vec<MenuItem> {
     vec![
+        // First, because it is the row somebody who has just installed
+        // this is looking for. It opens a document rather than a browser
+        // (ADR-0075).
+        row("User Guide", "", action::USER_GUIDE),
         row("Keyboard Shortcuts", "", action::SHORTCUTS),
-        row("About BachelorPlusLite", "", action::ABOUT),
+        row("Report a Problem", "", action::REPORT_PROBLEM),
+        row(
+            &format!("About {}", bp_platform::DISPLAY_NAME),
+            "",
+            action::ABOUT,
+        ),
         row_end("Diagnostics", "", action::DIAGNOSTICS),
     ]
 }
@@ -2064,6 +2083,25 @@ mod tests {
         assert!(
             items.iter().any(|i| i.label == "Paste"),
             "Paste is the OS clipboard and stays"
+        );
+    }
+    /// The About row, the second of the eight sites ADR-0074 found.
+    ///
+    /// Asserted here rather than trusted, because this row is built by a
+    /// `format!` a rename could quietly replace with a literal again -- and
+    /// the previous rename did exactly that in `app.slint`.
+    #[test]
+    fn the_about_row_must_read_the_product_name_rather_than_spell_it() {
+        let about = every_menu()
+            .into_iter()
+            .flat_map(|(_, rows)| rows)
+            .find(|r| r.action == action::ABOUT)
+            .expect("no menu holds the About row");
+        assert!(
+            about.label.contains(bp_platform::DISPLAY_NAME),
+            "About row reads {:?}, which does not name {}",
+            about.label,
+            bp_platform::DISPLAY_NAME
         );
     }
 }

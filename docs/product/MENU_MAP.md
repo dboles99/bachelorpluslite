@@ -199,10 +199,17 @@ decision.**
 
 ## Help
 
+**This section had two rows for one menu**, one of them a subset of the other,
+and they had coexisted for as long as nothing asked -- trap 4, in the file
+whose whole job is to be the one home for what each menu holds. One row now.
+
 | Row | State |
 | --- | --- |
-| Keyboard Shortcuts, About | **live** |
-| Keyboard Shortcuts, About, Diagnostics | **live** — Diagnostics names the version, the renderer and every resolved directory |
+| User Guide | **live** ([ADR-0075](../decisions/ADR-0075.md)). Opens `app-help/index.md`, shipped beside the executable, **as a document in a new tab** -- never in a browser, because this product launches no programs ([ADR-0057](../decisions/ADR-0057.md)). Reports where it looked if the executable has been moved out of the unpacked folder, which is the same way the icon breaks ([ADR-0068](../decisions/ADR-0068.md)) |
+| Report a Problem | **live** ([ADR-0077](../decisions/ADR-0077.md)). Composes a pre-filled bug report **as a document in a new tab**, with Help > Diagnostics already in it, and puts the issues URL on the clipboard. It opens no browser and sends nothing: the product launches no programs ([ADR-0057](../decisions/ADR-0057.md)) and makes no network connection ([ADR-0006](../decisions/ADR-0006.md)). The third row of this shape, after Set as Default Editor and User Guide: prepare the artefact, name the step, let the person take it |
+| Keyboard Shortcuts | **live**. The same string `docs/generated/reference/shortcuts.md` is generated from, so the dialog and the documentation cannot disagree |
+| About | **live**. Names the product, version, renderer and licence -- every one of them read from a constant or the manifest rather than written out ([ADR-0071](../decisions/ADR-0071.md), [ADR-0074](../decisions/ADR-0074.md)) |
+| Diagnostics | **live**. The version, the renderer and every resolved directory |
 
 ## Find bar
 
