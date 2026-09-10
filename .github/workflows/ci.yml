@@ -19,8 +19,11 @@
 name: CI
 
 on:
+  # `push` covers only `main`, and `pull_request` covers everything
+  # else. A branch with an open PR matched both, so every push queued
+  # two identical runs -- correct, and twice the cost, forever.
   push:
-    branches: ["**"]
+    branches: [main]
   pull_request:
   workflow_dispatch:
 

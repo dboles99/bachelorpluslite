@@ -17,7 +17,10 @@
 name: Docs
 
 on:
+  # `main` only. `pull_request` below covers every other branch, and a
+  # branch with an open PR otherwise matched both and ran twice.
   push:
+    branches: [main]
     paths:
       - "docs/**"
       - "app-help/**"
