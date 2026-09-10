@@ -1822,6 +1822,7 @@ that would test it.**
 | [ADR-0075](../decisions/ADR-0075.md) | One documentation source, four destinations |
 | [ADR-0076](../decisions/ADR-0076.md) | The website: what it may collect, and why it does not follow af-site on analytics |
 | [ADR-0077](../decisions/ADR-0077.md) | Reporting a problem composes a document, because this product opens no browser |
+| [ADR-0078](../decisions/ADR-0078.md) | Three unmaintained dependencies accepted by name, never as a category |
 
 ### Writing an ADR
 

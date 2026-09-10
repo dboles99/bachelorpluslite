@@ -85,6 +85,7 @@ Adding a decision means adding both.
 | BP-ADR-0075 | 2026-09-10 | **One documentation source, four destinations, nothing retyped.** `docs/` is the source; `docs/generated/`, `app-help/` and `wiki/` are generated and gate-checked for staleness. The half worth the ADR: three reference pages are generated from *code*, because the flag list, the shortcuts and the menu map already have a home there. In-app help opens **as a document**, never a browser, because this product launches no programs | Accepted | [ADR-0075](docs/decisions/ADR-0075.md) |
 | BP-ADR-0076 | 2026-09-10 | **The website is static and collects nothing except the waitlist.** No analytics, no cookies, no third-party scripts -- enforced by a CSP of `self` and a build step that greps for a tracker, because a promise on a web page is trap 3 exactly as a comment in Rust is. The waitlist promises features and no dates and no prices, from the list ADR-0057 and ADR-0059--0064 removed | Accepted | [ADR-0076](docs/decisions/ADR-0076.md) |
 | BP-ADR-0077 | 2026-09-10 | **Reporting a problem composes a document**, because this product cannot open a browser (ADR-0057) or reach the network (ADR-0006). Help > Report a Problem pre-fills the issue template with the diagnostics already in it and puts the URL on the clipboard. The constraint produced the *better* feature: the fields that make a report fixable are the ones somebody filing in a browser would have gone back for and mostly would not | Accepted | [ADR-0077](docs/decisions/ADR-0077.md) |
+| BP-ADR-0078 | 2026-09-10 | **Three unmaintained dependencies accepted by name, never as a category.** The first hosted CI run failed on three RustSec advisories the local gate had never been in a position to see, which is the case ADR-0073 made for hosted CI, demonstrated the same day. All three are `unmaintained` rather than `vulnerability`, and all three arrive through Slint. Ignored by id with a reason each, because `unmaintained = "warn"` would silence the next one too, and the next one is the one nobody has looked at | Accepted | [ADR-0078](docs/decisions/ADR-0078.md) |
 | BP-ADR-0017 | amended 2026-08-22 | Half of the renderer revert condition is now a number rather than a feeling: per-frame row building, and its independence from document size | Accepted, amended | [ADR-0017](docs/decisions/ADR-0017.md) |
 
 ## Decisions needed before the work they block
@@ -210,6 +211,48 @@ findable only by somebody sitting at a Mac.
 > **A target that refuses to build announces itself. One that compiles and
 > answers as something else does not, and nothing in the code marks the
 > boundary between those two states.**
+
+### A gate pinned to one machine ages with that machine
+
+Hosted CI failed on its first run for two reasons, and the second was not one
+ADR-0073 had anticipated. `clippy::chunks_exact_to_as_chunks` fired in
+`bp-files` on the runners and fires nowhere on this workstation, because the
+local toolchain is 1.97.1 and `dtolnay/rust-toolchain@stable` takes whatever
+stable is that morning.
+
+The local gate is thorough, and it had been green on both legs minutes
+earlier. **It cannot report a lint it does not have.**
+
+> **A gate that runs only where it was written cannot tell you the world has
+> moved.** New lints, new advisories, and a dependency that stops compiling on
+> a newer compiler all arrive from outside the repository, and nothing inside
+> it changes when they do.
+
+The fix was one line and better code -- `as_chunks::<2>()` hands back real
+arrays instead of slices that must be indexed back into one -- which is the
+usual shape of a new lint. That is not the point. The point is that nobody
+here would have seen it until a contributor did, and a contributor's first
+experience of the project would have been a red build they did not cause.
+
+### Two failures in the same red are not the same failure
+
+`cargo deny` reports an unmaintained crate and a vulnerable one identically:
+same `error`, same colour, same exit code. Both symmetric responses are wrong.
+Treat them all as blocking and you cannot ship over a crate that works and
+simply has nobody watching it; treat them all as noise and one day you ship
+over a real one.
+
+Of the three this project accepted
+([ADR-0078](docs/decisions/ADR-0078.md)), two have no runtime surface worth
+worrying about and the third parses fonts, which are untrusted input. That is
+not a distinction a category setting can make.
+
+> **Ask what would have to be true for this to hurt somebody, and answer it
+> per item rather than per category.**
+
+And the smaller, more repeatable half: **when a tool offers to silence a
+category, enumerate the instances instead.** The category setting is a
+statement about things nobody has seen yet, and there are no grounds for one.
 
 ### A constraint can be a design brief
 

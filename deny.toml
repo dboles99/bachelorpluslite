@@ -74,10 +74,44 @@ multiple-versions = "warn"
 wildcards = "warn"
 
 [advisories]
-# Present so `cargo deny check` runs whole rather than half. The advisory
-# database needs network access, which the gate does not always have; CI runs
-# this leg and reports it.
+# The advisory database needs network access, which the local gate is not
+# allowed to assume -- a gate that fails on a train is a gate people learn to
+# skip -- so the gate runs `check licenses` and CI runs `check` whole
+# (ADR-0073).
+#
+# **That arrangement paid for itself on its first hosted run**, which failed
+# on three advisories the local gate had never been in a position to see.
 yanked = "warn"
+
+# Three unmaintained crates, accepted individually and never as a category
+# (ADR-0078).
+#
+# **`unmaintained` is not `vulnerability`.** None of these three has a known
+# defect; each is a crate whose author has said they will not maintain it. All
+# three arrive through Slint's text and image handling, so this project cannot
+# upgrade away from them without leaving the toolkit -- and Slint 1.17.1 is
+# what draws every glyph in the product.
+#
+# **Listed by id rather than by setting `unmaintained = "warn"`**, which is
+# the whole point. Silencing the category would silence the *next* one too,
+# and the next one is the one nobody has looked at. A new unmaintained
+# dependency still fails this build.
+#
+# Re-ask condition: any of these becoming a `vulnerability` rather than an
+# `unmaintained` advisory, or Slint moving off them in a later release. The
+# command that checks is `cargo deny check advisories`.
+ignore = [
+    # `paste`, through image -> exr -> pulp, in Slint's compiler. A
+    # proc-macro for pasting identifiers together; no runtime surface.
+    { id = "RUSTSEC-2024-0436", reason = "unmaintained, not vulnerable; reaches us only through i-slint-compiler's image support, and has no runtime code" },
+    # `rustybuzz`, through usvg -> resvg, in Slint's SVG rendering. Text
+    # shaping.
+    { id = "RUSTSEC-2026-0206", reason = "unmaintained, not vulnerable; Slint's SVG text shaping, replaceable only by Slint" },
+    # `ttf-parser`, the same path plus font loading. It parses fonts, which
+    # *is* hostile input -- so this is the one of the three worth re-reading
+    # if it ever gains a vulnerability advisory.
+    { id = "RUSTSEC-2026-0192", reason = "unmaintained, not vulnerable; font parsing inside Slint. The one to watch, since fonts are untrusted input" },
+]
 
 [sources]
 unknown-registry = "deny"
