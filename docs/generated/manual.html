@@ -1891,6 +1891,15 @@ fails; a manual one that is wrong quietly hands you a finding.</p>
 <p><code>fuzz/</code> is a separate workspace holding hostile-input harnesses for <code>bp-files</code>
 and <code>bp-formats</code>, plus a corpus. The gate runs its <code>fmt</code>, <code>clippy</code> and <code>test</code>
 stages; it is not run continuously.</p>
+<p><strong>The harness silences the panic hook for its own probe threads</strong>, and that is
+deliberate rather than leftover. <code>catch_unwind</code> does not return until the hook
+has finished, so with <code>RUST_BACKTRACE=1</code> the hook symbolising a backtrace was
+being charged to the hang budget -- a hosted Windows runner reported a probe
+whose body is <code>panic!()</code> as a hang and threw the message away
+(<a href="../decisions/ADR-0079.md">ADR-0079</a>).</p>
+<p>If you remove it, two tests fail by name. The trade is the automatic backtrace
+on a finding, which you can get back by dropping the hook locally; the corpus
+entry is checked in and the failure names it.</p>
 <h2 id="cutting-a-release">Cutting a release</h2>
 <p>Two ways, producing the same archives. The scripts are the definition; the
 workflow runs them on a clean machine (<a href="../decisions/ADR-0073.md">ADR-0073</a>).</p>

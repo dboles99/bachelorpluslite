@@ -86,6 +86,7 @@ Adding a decision means adding both.
 | BP-ADR-0076 | 2026-09-10 | **The website is static and collects nothing except the waitlist.** No analytics, no cookies, no third-party scripts -- enforced by a CSP of `self` and a build step that greps for a tracker, because a promise on a web page is trap 3 exactly as a comment in Rust is. The waitlist promises features and no dates and no prices, from the list ADR-0057 and ADR-0059--0064 removed | Accepted | [ADR-0076](docs/decisions/ADR-0076.md) |
 | BP-ADR-0077 | 2026-09-10 | **Reporting a problem composes a document**, because this product cannot open a browser (ADR-0057) or reach the network (ADR-0006). Help > Report a Problem pre-fills the issue template with the diagnostics already in it and puts the URL on the clipboard. The constraint produced the *better* feature: the fields that make a report fixable are the ones somebody filing in a browser would have gone back for and mostly would not | Accepted | [ADR-0077](docs/decisions/ADR-0077.md) |
 | BP-ADR-0078 | 2026-09-10 | **Three unmaintained dependencies accepted by name, never as a category.** The first hosted CI run failed on three RustSec advisories the local gate had never been in a position to see, which is the case ADR-0073 made for hosted CI, demonstrated the same day. All three are `unmaintained` rather than `vulnerability`, and all three arrive through Slint. Ignored by id with a reason each, because `unmaintained = "warn"` would silence the next one too, and the next one is the one nobody has looked at | Accepted | [ADR-0078](docs/decisions/ADR-0078.md) |
+| BP-ADR-0079 | 2026-09-10 | **The fuzz harness silences the panic hook, because the hang budget was timing it.** `catch_unwind` does not return until the hook has finished, so with `RUST_BACKTRACE=1` a hosted Windows runner spent the whole 20 second budget symbolising a backtrace and reported an instant panic as a hang, discarding the message. A quiet hook for probe threads only; every other thread keeps the one it had. Raising the budget was rejected -- twenty seconds is not too short, the budget was measuring the wrong thing | Accepted | [ADR-0079](docs/decisions/ADR-0079.md) |
 | BP-ADR-0017 | amended 2026-08-22 | Half of the renderer revert condition is now a number rather than a feeling: per-frame row building, and its independence from document size | Accepted, amended | [ADR-0017](docs/decisions/ADR-0017.md) |
 
 ## Decisions needed before the work they block
@@ -307,6 +308,37 @@ Three pages are generated from code now. Asking the question of the existing
 documentation found `MENU_MAP.md`'s Help section carrying **two rows for one
 menu**, one a subset of the other, coexisting in the file whose entire job is
 to be the one home for what each menu holds.
+
+### And the stopwatch version of it
+
+The fuzz harness gave every input a twenty second budget and called anything
+past it a hang. On a hosted Windows runner it reported `Hang { budget: 20s }`
+for a probe whose entire body is `panic!("the message")`.
+
+`catch_unwind` does not return until the panic hook has finished. The hook
+runs inside the window the parent is timing, and with `RUST_BACKTRACE=1` it
+was symbolising a backtrace against the PDBs of a large debug binary. So the
+harness was timing itself reporting on the input, and calling the number a
+property of the input ([ADR-0079](docs/decisions/ADR-0079.md)).
+
+> **A timeout measures everything inside it, including the code that reports
+> the result.** The comment above the constant said "a slow machine under a
+> cold cache is not a defect. Anything past this is not slow, it is stuck."
+> Nothing about reading it would have found the error, because the sentence is
+> about the input and the budget was not.
+
+The fix that was *available* was to raise the number, and it would have turned
+the run green. It was rejected for the reason worth keeping: twenty seconds is
+not too short. **The budget was measuring the wrong thing, and a bigger number
+measures the wrong thing for longer.**
+
+And the half that keeps recurring: **the local gate is not the hosted gate.**
+Twice in one day the difference was the whole point --
+[ADR-0078](docs/decisions/ADR-0078.md) found three advisories a machine with
+no network can never see, and this found a cost that only appears on a machine
+with cold symbols. [ADR-0073](docs/decisions/ADR-0073.md) argued for hosted CI
+on the grounds that it would see things the local gate cannot. It has now done
+so twice before anyone downloaded a release.
 
 ## Recently closed, and what each one cost to learn
 

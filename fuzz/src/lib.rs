@@ -40,6 +40,9 @@
 //! * **Panic** -- [`catch_unwind`](std::panic::catch_unwind) around every
 //!   call, so one bad input is a named failure with its input reported rather
 //!   than an anonymous test abort, and the rest of the corpus still runs.
+//!   The default panic hook is silenced for probe threads, because
+//!   `catch_unwind` does not return until the hook has finished and the hook
+//!   printing a backtrace was being charged to the hang budget (ADR-0079).
 //! * **Abort** -- cannot be caught by anything, by definition. A stack
 //!   overflow kills the process and the test binary dies. That is the
 //!   detection: the run reports a crashed test binary, which is the honest
@@ -61,13 +64,20 @@
 //! [`MAIN_THREAD_STACK`] so the recursion probes are asked the question the
 //! application will be asked.
 
-use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::panic::{self, AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
-use std::sync::mpsc;
+use std::sync::{Once, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
 
 pub mod strategies;
+
+/// What every probe thread is named, and what the panic hook keys on.
+///
+/// One constant rather than two literals, because the hook staying quiet
+/// depends on the two agreeing and nothing else would notice if they stopped
+/// (ADR-0074).
+const PROBE_THREAD_PREFIX: &str = "probe:";
 
 /// The stack the application parses on.
 ///
@@ -81,6 +91,10 @@ pub const MAIN_THREAD_STACK: usize = 1024 * 1024;
 /// Generous on purpose. Argon2id at a document's own declared cost is
 /// legitimately slow, and a slow machine under a cold cache is not a defect.
 /// Anything past this is not "slow", it is stuck.
+///
+/// That sentence was false for one reason and a hosted runner found it: the
+/// budget was also timing the harness reporting on the input, not just the
+/// input. [`quieten_probe_panics`] is what makes it true (ADR-0079).
 pub const DEFAULT_BUDGET: Duration = Duration::from_secs(20);
 
 /// How an input broke the invariant.
@@ -161,11 +175,12 @@ impl Probe {
         F: FnOnce() + Send + 'static,
     {
         let name = name.into();
+        quieten_probe_panics();
         let (tx, rx) = mpsc::channel();
         let started = Instant::now();
 
         let spawned = thread::Builder::new()
-            .name(format!("probe:{name}"))
+            .name(format!("{PROBE_THREAD_PREFIX}{name}"))
             .stack_size(self.stack_size)
             .spawn(move || {
                 let result = catch_unwind(AssertUnwindSafe(body));
@@ -242,6 +257,45 @@ where
         elapsed: started.elapsed(),
         violation,
     }
+}
+
+/// Keep the panic hook out of a probe's time budget.
+///
+/// `catch_unwind` does not return until the panic hook has run, so whatever
+/// the hook does is charged to [`Probe::budget`] and reported as a property
+/// of the *input*. With `RUST_BACKTRACE=1` -- which `.github/workflows/ci.yml`
+/// sets -- the default hook symbolises a backtrace, and the first one in a
+/// Windows process pays for dbghelp loading the PDBs of a debug binary this
+/// large. On a cold hosted runner it took over 20 seconds, so a probe that
+/// panicked instantly was reported as `Hang` and the message was thrown away
+/// (ADR-0079).
+///
+/// Over 20 is not an estimate. `Hang` is only produced when `recv_timeout`
+/// expires, the only work between the spawn and the send is the
+/// `catch_unwind`, and the budget was 20 seconds.
+///
+/// Only threads this harness spawned go quiet, because those are the ones it
+/// reports on itself, with the message, out of the payload. Every other
+/// thread -- including the test thread when an assertion in this crate fails
+/// -- keeps the hook it had.
+///
+/// The trade is the automatic backtrace on a real finding. It is worth it:
+/// the corpus entry is checked in and its name is in the failure, so the
+/// backtrace can be had again on demand, whereas a panic misreported as a
+/// hang has lost the message for good.
+fn quieten_probe_panics() {
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| {
+        let previous = panic::take_hook();
+        panic::set_hook(Box::new(move |info| {
+            let on_a_probe = thread::current()
+                .name()
+                .is_some_and(|name| name.starts_with(PROBE_THREAD_PREFIX));
+            if !on_a_probe {
+                previous(info);
+            }
+        }));
+    });
 }
 
 /// Turn a panic payload into something printable.
@@ -420,10 +474,11 @@ mod tests {
     //!
     //! A detector nobody has ever seen fire is indistinguishable from one
     //! that cannot. Every target in `tests/` reports "no violations", and
-    //! that sentence is only worth something if these three pass -- they are
-    //! what makes a green run evidence rather than a tautology.
+    //! that sentence is only worth something if these pass -- they are what
+    //! makes a green run evidence rather than a tautology.
 
     use super::*;
+    use std::sync::{Arc, Mutex};
 
     #[test]
     fn a_clean_run_reports_no_violation() {
@@ -439,6 +494,54 @@ mod tests {
             Some(Violation::Panic {
                 message: "the message".to_string()
             })
+        );
+    }
+
+    #[test]
+    fn a_panic_is_reported_as_a_panic_on_a_budget_that_leaves_no_room_to_print() {
+        // The budget is meant to measure the input. It was measuring the
+        // harness reporting on the input as well, and a hosted Windows
+        // runner spent its whole 20 second budget symbolising a backtrace --
+        // so an instant panic came back as a hang (ADR-0079).
+        //
+        // Half a second is enough for a thread spawn and a channel send on
+        // any machine that can run the suite at all, and nowhere near enough
+        // for a hook that does real work. A regression fails here rather
+        // than on a runner nobody has in front of them.
+        let outcome = Probe::new()
+            .budget(Duration::from_millis(500))
+            .run("panics-fast", || panic!("the message"));
+
+        assert_eq!(
+            outcome.violation,
+            Some(Violation::Panic {
+                message: "the message".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn a_probe_thread_carries_the_prefix_the_panic_hook_keys_on() {
+        // The hook decides whether to stay quiet by reading the thread name.
+        // If the spawn site and the hook stopped agreeing, the hook would go
+        // quiet for nothing, the budget would start timing backtraces again,
+        // and every other test here would still pass.
+        let seen = Arc::new(Mutex::new(None));
+        let recorder = Arc::clone(&seen);
+
+        let outcome = Probe::new().run("named", move || {
+            *recorder.lock().unwrap() = thread::current().name().map(str::to_string);
+        });
+
+        assert!(outcome.violation.is_none());
+        let name = seen
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("a probe thread is named");
+        assert!(
+            name.starts_with(PROBE_THREAD_PREFIX),
+            "a probe thread was named {name:?}, which the hook will not recognise"
         );
     }
 

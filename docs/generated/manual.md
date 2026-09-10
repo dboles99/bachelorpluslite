@@ -1666,6 +1666,17 @@ fails; a manual one that is wrong quietly hands you a finding.
 and `bp-formats`, plus a corpus. The gate runs its `fmt`, `clippy` and `test`
 stages; it is not run continuously.
 
+**The harness silences the panic hook for its own probe threads**, and that is
+deliberate rather than leftover. `catch_unwind` does not return until the hook
+has finished, so with `RUST_BACKTRACE=1` the hook symbolising a backtrace was
+being charged to the hang budget -- a hosted Windows runner reported a probe
+whose body is `panic!()` as a hang and threw the message away
+([ADR-0079](../decisions/ADR-0079.md)).
+
+If you remove it, two tests fail by name. The trade is the automatic backtrace
+on a finding, which you can get back by dropping the hook locally; the corpus
+entry is checked in and the failure names it.
+
 ## Cutting a release
 
 Two ways, producing the same archives. The scripts are the definition; the
