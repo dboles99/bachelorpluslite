@@ -36,7 +36,7 @@
   "card3P": "Unsaved changes are kept through a crash, a forced quit or a power cut, and offered back to you next time you open the program. You choose, per document, whether it does this at all.",
   "card4Tag": "Speed",
   "card4H": "It opens instantly and stays out of the way",
-  "card4P": "One 21 MB download, no runtime to install, no splash screen, no first-run wizard. Unpack it and it runs. Its settings, recent files and recovery journal live in your user profile, so removing it is deleting the folder and <a href=\"https://github.com/dboles99/bachelorpluslite/wiki/Installation#where-it-puts-things\" rel=\"noopener\">the three directories the manual lists</a>.",
+  "card4P": "One 21 MB download, no runtime to install, no splash screen, no first-run wizard. Unpack it and it runs. Its settings, recent files and recovery journal live in your user profile, so removing it is deleting the folder and <a href=\"https://github.com/dboles99/bachelorpluslite/wiki/Installation#where-it-puts-things\" rel=\"noopener\">the three directories the manual lists</a>, after undoing any file types you made it the default editor for.",
   "card5Tag": "Trust",
   "card5H": "Nothing you type ever leaves your computer",
   "card5P": "No telemetry, no update checks, no crash reports, no AI, no account. It behaves identically with the network cable pulled out, and because the source is public you can check that rather than take our word for it.",

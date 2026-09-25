@@ -7,11 +7,18 @@
 A document can also be opened in **UTF-16**, with a byte-order mark, and is
 saved back that way.
 
-**A file in a legacy code page is refused today** -- Windows-1252, Shift-JIS,
-GBK, and UTF-16 with no byte-order mark all stop at *not valid UTF-8*. Notepad
-opens them. Reading them, and saving them back in the encoding they came in,
-is decided and not yet built ([ADR-0085](../decisions/ADR-0085.md)). Until it
-is, open such a file in Notepad and save it as UTF-8 there.
+**A file in a legacy code page is refused today.** Windows-1252, Shift-JIS
+and GBK text with any accented or non-Latin character stops at *not valid
+UTF-8*. Notepad opens them.
+
+**UTF-16 with no byte-order mark is worse: it is taken for UTF-8.** Mostly
+Latin text in it is valid UTF-8 byte for byte, so it opens with an invisible
+NUL between every character. Saving writes back exactly what was read, so
+nothing is lost, but it is not readable here.
+
+Reading both properly, and saving them back in the encoding they came in, is
+decided and not yet built ([ADR-0085](../decisions/ADR-0085.md)). Until it is,
+open such a file in Notepad and save it as UTF-8 there.
 
 The BOM variant exists because some Windows tools still want it.
 

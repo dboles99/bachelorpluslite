@@ -36,7 +36,7 @@
   "card3P": "尚未儲存的變更會在當機、強制關閉或停電後保留下來，下次開啟程式時再交還給你。要不要這麼做，由你逐份文件決定。",
   "card4Tag": "速度",
   "card4H": "開啟很快，也不礙事",
-  "card4P": "單一個 21 MB 的下載檔，不必安裝執行環境，沒有啟動畫面，沒有首次設定精靈。解壓縮就能執行。設定、最近開啟的檔案與復原日誌存放在你的使用者設定檔中；要移除，刪掉資料夾以及<a href=\"https://github.com/dboles99/bachelorpluslite/wiki/Installation#where-it-puts-things\" rel=\"noopener\">使用手冊列出的三個目錄</a>即可。",
+  "card4P": "單一個 21 MB 的下載檔，不必安裝執行環境，沒有啟動畫面，沒有首次設定精靈。解壓縮就能執行。設定、最近開啟的檔案與復原日誌存放在你的使用者設定檔中；要移除，先還原你設為由它預設開啟的檔案類型，再刪掉資料夾以及<a href=\"https://github.com/dboles99/bachelorpluslite/wiki/Installation#where-it-puts-things\" rel=\"noopener\">使用手冊列出的三個目錄</a>即可。",
   "card5Tag": "信任",
   "card5H": "你打的字永遠不會離開你的電腦",
   "card5P": "沒有遙測、沒有更新檢查、沒有當機回報、沒有 AI、不需要帳號。拔掉網路線它的行為完全一樣，而且原始碼公開，你可以自己確認，不必只聽我們說。",
