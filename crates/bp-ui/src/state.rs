@@ -340,8 +340,8 @@ impl AppState {
     /// save would rewrite the file in whatever the platform default happens
     /// to be rather than the convention it was actually in (the bug this
     /// guards against: an LF file coming back reporting CRLF on Windows).
-    pub(crate) fn restore(&mut self, entries: Vec<(u64, bp_history::Checkpoint)>) {
-        for (_, entry) in entries {
+    pub(crate) fn restore(&mut self, entries: impl IntoIterator<Item = bp_history::Checkpoint>) {
+        for entry in entries {
             let id = match entry.path {
                 Some(path) => self.workspace.open_path(path, now()),
                 None => self.workspace.open_new(now()),
@@ -1050,6 +1050,10 @@ impl AppState {
         if self.workspace.close(id).is_some() {
             self.editors.remove(&id);
         }
+        // A closed document is either saved, which already discarded its
+        // checkpoint, or closed with Don't Save. Left on disk, the next launch
+        // would offer to recover the work somebody deliberately threw away.
+        let _ = self.journal.discard(id.get());
         // Never leave the user staring at an empty frame with no way back.
         if self.workspace.is_empty() {
             self.new_document();
@@ -1613,7 +1617,7 @@ mod tests {
             encoding: bp_history::CheckpointEncoding::Utf16Le,
             line_ending: Some(bp_history::CheckpointLineEnding::Lf),
         };
-        state.restore(vec![(1, entry)]);
+        state.restore([entry]);
 
         let doc = state
             .workspace
@@ -1641,7 +1645,7 @@ mod tests {
             encoding: bp_history::CheckpointEncoding::default(),
             line_ending: None,
         };
-        state.restore(vec![(1, entry)]);
+        state.restore([entry]);
 
         let doc = state
             .workspace

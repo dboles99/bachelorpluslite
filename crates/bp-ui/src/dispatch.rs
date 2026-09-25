@@ -10,10 +10,12 @@ use std::rc::Rc;
 use bp_core::{Document, DocumentId, Encoding, LineEnding};
 use bp_platform::editor::{Consent, InstallRefusal, RegistrationPlan};
 use bp_theme::ThemeId;
+use slint::ComponentHandle;
 
 use crate::AppWindow;
+use crate::dialog::{Dialogs, Question};
 use crate::menus::{self, action};
-use crate::state::{AppState, NoteOutcome, PushText, SaveResult};
+use crate::state::{AppState, NoteOutcome, PushText};
 
 const SHORTCUTS: &str = "\
 Ctrl+N          New
@@ -133,33 +135,6 @@ fn filename(path: &str) -> &str {
         .unwrap_or(path)
 }
 
-/// Static information, shown in a native dialog rather than built as a
-/// bespoke window.
-fn show_info(title: &str, body: &str) {
-    rfd::MessageDialog::new()
-        .set_level(rfd::MessageLevel::Info)
-        .set_title(title)
-        .set_description(body)
-        .set_buttons(rfd::MessageButtons::Ok)
-        .show();
-}
-
-/// Ask about unsaved work before discarding it.
-///
-/// Blocking and native. The three-way answer matters: "Cancel" has to be
-/// distinguishable from "Discard", or the safe choice becomes the
-/// destructive one.
-pub(crate) fn ask_about_unsaved(name: &str) -> rfd::MessageDialogResult {
-    rfd::MessageDialog::new()
-        .set_level(rfd::MessageLevel::Warning)
-        .set_title("Unsaved changes")
-        .set_description(format!(
-            "{name} has unsaved changes.\n\nSave before closing?"
-        ))
-        .set_buttons(rfd::MessageButtons::YesNoCancel)
-        .show()
-}
-
 /// Open a file, starting in a sensible directory.
 pub(crate) fn pick_file(state: &crate::state::AppState) -> Option<PathBuf> {
     rfd::FileDialog::new()
@@ -195,47 +170,54 @@ fn pick_registry_script(state: &AppState, plan: &RegistrationPlan) -> Option<Pat
         .save_file()
 }
 
-/// Show what registration would do, and ask before doing any of it.
+/// Carry out a registration the user has just answered, and say what
+/// happened.
 ///
-/// The body is built in `default_editor`, which puts the current
-/// associations above the plan: ADR-0012 is about the user keeping control,
-/// and a user cannot keep control of a change they were not shown the
-/// starting point of. The answer becomes the `Consent` value
-/// `bp_platform::editor::install` refuses to act without.
-fn confirm_registration(body: &str) -> Consent {
-    if rfd::MessageDialog::new()
-        .set_level(rfd::MessageLevel::Warning)
-        .set_title("Set as default editor")
-        .set_description(body)
-        .set_buttons(rfd::MessageButtons::OkCancel)
-        .show()
-        == rfd::MessageDialogResult::Ok
-    {
-        Consent::Granted
-    } else {
-        Consent::Withheld
+/// Runs from the answer to the consent question, which is drawn in the window
+/// and so arrives after `handle_menu_action` has returned (ADR-0084).
+fn register(
+    state: &Rc<RefCell<AppState>>,
+    dialogs: &Dialogs,
+    offer: &crate::default_editor::Offer,
+    consent: Consent,
+) -> String {
+    match (consent, offer.root.as_deref()) {
+        (Consent::Withheld, _) => InstallRefusal::ConsentWithheld.describe(),
+        // The only call in this application that writes into a directory the
+        // desktop environment reads. It takes the root `bp-platform` named and
+        // the consent the user just gave, and neither has a default.
+        (Consent::Granted, Some(root)) => {
+            let (status, body) = crate::default_editor::install_outcome(
+                bp_platform::editor::install(&offer.plan, root, consent),
+                &offer.plan.handoff,
+                root,
+            );
+            if let Some(body) = body {
+                dialogs.inform("Set as default editor", &body);
+            }
+            status
+        }
+        // No install root means this platform has no supported install --
+        // Windows. The `.reg` script is what ADR-0012 leaves in its place: a
+        // file the user chose the location of and can read before running.
+        (Consent::Granted, None) => {
+            let chosen = pick_registry_script(&state.borrow(), &offer.plan);
+            match chosen {
+                Some(path) => {
+                    match crate::default_editor::save_registry_script(&offer.plan, &path) {
+                        Ok(status) => {
+                            let note = crate::default_editor::handoff_note(&offer.plan.handoff);
+                            dialogs.inform("Set as default editor", &format!("{status}\n\n{note}"));
+                            status
+                        }
+                        Err(refusal) => refusal,
+                    }
+                }
+                None => "nothing was written — no location was chosen for the registry script"
+                    .to_owned(),
+            }
+        }
     }
-}
-
-/// Show what Replace All would do, and ask before doing it.
-///
-/// specs.md section 6 wants the changes visible before they are applied.
-/// Replace All is the one search operation that rewrites the document in
-/// places the user cannot see, so it is also the one worth confirming --
-/// undo covers a mistake, but only if you notice you made one.
-///
-/// The listing is bounded: a preview of forty thousand replacements is not a
-/// preview, and a dialog taller than the screen has no buttons on it.
-pub(crate) fn confirm_replace(plan: &bp_search::ReplacePlan) -> bool {
-    const SHOWN: usize = 12;
-
-    rfd::MessageDialog::new()
-        .set_level(rfd::MessageLevel::Warning)
-        .set_title("Replace All")
-        .set_description(format!("{}\n\n{}", plan.summary(), plan.preview(SHOWN)))
-        .set_buttons(rfd::MessageButtons::OkCancel)
-        .show()
-        == rfd::MessageDialogResult::Ok
 }
 
 /// Select a character range in the editor **and take the caret with it**.
@@ -315,10 +297,11 @@ pub(crate) fn reveal(ui: &AppWindow, state: &mut AppState, range: &std::ops::Ran
 pub fn handle_menu_action(
     ui: &AppWindow,
     state: &Rc<RefCell<AppState>>,
+    dialogs: &Rc<Dialogs>,
     id: i32,
 ) -> Option<PushText> {
     use crate::editor_view::apply_editor_command;
-    use crate::{close_with_prompt, refresh, save_with_prompt};
+    use crate::{close_with_prompt, refresh, save_all, save_with_prompt};
 
     let mut push = PushText::Yes;
     match id {
@@ -332,7 +315,7 @@ pub fn handle_menu_action(
         action::SAVE => {
             let id = state.borrow().workspace.active_id();
             if let Some(id) = id {
-                save_with_prompt(&mut state.borrow_mut(), id);
+                save_with_prompt(&ui.as_weak(), state, dialogs, id, |_| {});
             }
         }
         action::SAVE_AS => {
@@ -345,15 +328,8 @@ pub fn handle_menu_action(
             }
         }
         action::SAVE_ALL => {
-            let dirty: Vec<DocumentId> =
-                state.borrow().workspace.dirty().map(Document::id).collect();
-            for id in dirty {
-                // Stop at the first refusal rather than firing a
-                // dialog per document at someone who just cancelled.
-                if save_with_prompt(&mut state.borrow_mut(), id) != SaveResult::Saved {
-                    break;
-                }
-            }
+            let dirty = state.borrow().workspace.dirty().map(Document::id).collect();
+            save_all(ui.as_weak(), Rc::clone(state), Rc::clone(dialogs), dirty);
         }
         action::RELOAD => {
             let (dirty, name) = {
@@ -364,8 +340,18 @@ pub fn handle_menu_action(
                     id.map(|i| s.display_name(i)).unwrap_or_default(),
                 )
             };
-            // Reloading discards edits, so it asks like closing does.
-            if dirty && ask_about_unsaved(&name) != rfd::MessageDialogResult::No {
+            // Reloading discards edits, so it asks, and only an explicit
+            // yes reloads (ADR-0084).
+            if dirty {
+                let (weak, cell) = (ui.as_weak(), Rc::clone(state));
+                dialogs.ask(Question::reload(&name), move |answer| {
+                    if crate::dialog::confirmed(answer) {
+                        cell.borrow_mut().reload();
+                        if let Some(ui) = weak.upgrade() {
+                            refresh(&ui, &mut cell.borrow_mut(), PushText::Yes);
+                        }
+                    }
+                });
                 return None;
             }
             state.borrow_mut().reload();
@@ -373,7 +359,7 @@ pub fn handle_menu_action(
         action::CLOSE_TAB => {
             let id = state.borrow().workspace.active_id();
             if let Some(id) = id {
-                close_with_prompt(state, id);
+                close_with_prompt(&ui.as_weak(), state, dialogs, id);
             }
         }
 
@@ -457,12 +443,9 @@ pub fn handle_menu_action(
         }
 
         action::TOOLS_INSPECTOR => {
-            // The borrow ends with the statement, before the dialog opens:
-            // `rfd` pumps events, and a re-entrant callback on a live
-            // `borrow_mut()` panics.
             let report = state.borrow().inspector_report();
             if let Some(report) = report {
-                show_info("Document Inspector", &report);
+                dialogs.inform("Document Inspector", &report);
             }
             push = PushText::No;
         }
@@ -484,7 +467,7 @@ pub fn handle_menu_action(
             // `close_with_prompt` for each, so unsaved work still asks --
             // closing several tabs is exactly when losing one would hurt.
             for id in doomed {
-                close_with_prompt(state, id);
+                close_with_prompt(&ui.as_weak(), state, dialogs, id);
             }
             refresh(ui, &mut state.borrow_mut(), PushText::Yes);
             return None;
@@ -528,61 +511,25 @@ pub fn handle_menu_action(
 
         action::SET_DEFAULT_EDITOR => {
             push = PushText::No;
-            // Nothing is borrowed while a dialog is up: `rfd` pumps events,
-            // and a re-entrant callback on a live `borrow_mut()` panics.
             match crate::default_editor::offer() {
                 Err(reason) => state.borrow_mut().error = Some(reason),
                 Ok(offer) => {
-                    let consent = confirm_registration(&offer.body);
-                    let message = match (consent, offer.root.as_deref()) {
-                        (Consent::Withheld, _) => InstallRefusal::ConsentWithheld.describe(),
-                        // The only call in this application that writes into
-                        // a directory the desktop environment reads. It takes
-                        // the root `bp-platform` named and the consent the
-                        // user just gave, and neither has a default.
-                        (Consent::Granted, Some(root)) => {
-                            let (status, body) = crate::default_editor::install_outcome(
-                                bp_platform::editor::install(&offer.plan, root, consent),
-                                &offer.plan.handoff,
-                                root,
-                            );
-                            if let Some(body) = body {
-                                show_info("Set as default editor", &body);
-                            }
-                            status
+                    let (weak, cell, d) = (ui.as_weak(), Rc::clone(state), Rc::clone(dialogs));
+                    // The answer becomes the `Consent` value
+                    // `bp_platform::editor::install` refuses to act without.
+                    // Only the Continue button grants it.
+                    dialogs.ask(Question::registration(&offer.body), move |answer| {
+                        let consent = if crate::dialog::confirmed(answer) {
+                            Consent::Granted
+                        } else {
+                            Consent::Withheld
+                        };
+                        let message = register(&cell, &d, &offer, consent);
+                        cell.borrow_mut().error = Some(message);
+                        if let Some(ui) = weak.upgrade() {
+                            refresh(&ui, &mut cell.borrow_mut(), PushText::No);
                         }
-                        // No install root means this platform has no
-                        // supported install -- Windows. The `.reg` script is
-                        // what ADR-0012 leaves in its place: a file the user
-                        // chose the location of and can read before running.
-                        (Consent::Granted, None) => {
-                            let chosen = pick_registry_script(&state.borrow(), &offer.plan);
-                            match chosen {
-                                Some(path) => {
-                                    match crate::default_editor::save_registry_script(
-                                        &offer.plan,
-                                        &path,
-                                    ) {
-                                        Ok(status) => {
-                                            let note = crate::default_editor::handoff_note(
-                                                &offer.plan.handoff,
-                                            );
-                                            show_info(
-                                                "Set as default editor",
-                                                &format!("{status}\n\n{note}"),
-                                            );
-                                            status
-                                        }
-                                        Err(refusal) => refusal,
-                                    }
-                                }
-                                None => "nothing was written — no location was chosen for the \
-                                         registry script"
-                                    .to_owned(),
-                            }
-                        }
-                    };
-                    state.borrow_mut().error = Some(message);
+                    });
                 }
             }
         }
@@ -677,7 +624,7 @@ pub fn handle_menu_action(
         // asks where the executable is, which is a shell question.
         action::USER_GUIDE => match user_guide_path() {
             Some(path) => state.borrow_mut().open(path),
-            None => show_info(
+            None => dialogs.inform(
                 "User Guide",
                 "The help that ships beside this program could not be found.
 
@@ -688,14 +635,9 @@ pub fn handle_menu_action(
 \n                 The same pages are at https://bpad.prompt-forge.dev/docs",
             ),
         },
-        action::SHORTCUTS => show_info("Keyboard shortcuts", SHORTCUTS),
+        action::SHORTCUTS => dialogs.inform("Keyboard shortcuts", SHORTCUTS),
         // Help ▸ Report a Problem. Composes a document and copies a URL; it
         // opens nothing and sends nothing (ADR-0077).
-        //
-        // The borrow ends before `show_info`, because `rfd` pumps events and
-        // a re-entrant callback on a live `borrow_mut()` panics -- R011's
-        // seventh trap, and the reason this is three statements rather than
-        // one expression.
         action::REPORT_PROBLEM => {
             // A free function in `state`, not a method: it reads the process
             // environment and the resolved directories rather than the open
@@ -713,7 +655,7 @@ pub fn handle_menu_action(
             } else {
                 "The address is in the document; the clipboard was unavailable."
             };
-            show_info(
+            dialogs.inform(
                 "Report a Problem",
                 &format!(
                     "A report has been opened in a new tab, with your diagnostics\n\
@@ -725,7 +667,7 @@ pub fn handle_menu_action(
                 ),
             );
         }
-        action::ABOUT => show_info(
+        action::ABOUT => dialogs.inform(
             &format!("About {}", bp_platform::DISPLAY_NAME),
             &about_text(),
         ),
@@ -733,7 +675,7 @@ pub fn handle_menu_action(
         action::ORGANIZE_SUGGESTED_FOLDER => {
             let report = state.borrow().suggested_folder_report();
             push = PushText::No;
-            show_info("Suggested Folder", &report);
+            dialogs.inform("Suggested Folder", &report);
         }
 
         // Note ▸ the store's view of this document, and the journal's
@@ -741,38 +683,36 @@ pub fn handle_menu_action(
         action::NOTE_TAGS => {
             let report = state.borrow().tags_report();
             push = PushText::No;
-            show_info("Tags", &report);
+            dialogs.inform("Tags", &report);
         }
         action::NOTE_RECOVERY => {
             let report = state.borrow().recovery_report();
             push = PushText::No;
-            show_info("Recovery Checkpoints", &report);
+            dialogs.inform("Recovery Checkpoints", &report);
         }
 
-        // Tools ▸ the three readouts ADR-0048 added. Same borrow discipline
-        // as `TOOLS_INSPECTOR` above: the borrow ends with the statement,
-        // before `rfd` pumps events.
+        // Tools ▸ the three readouts ADR-0048 added.
         action::TOOLS_SECURITY_INSPECTOR => {
             let report = state.borrow().security_inspector_report();
             push = PushText::No;
-            show_info("Security Inspector", &report);
+            dialogs.inform("Security Inspector", &report);
         }
         action::TOOLS_FILE_ANALYSIS => {
             let report = state.borrow().file_analysis_report();
             push = PushText::No;
-            show_info("File Analysis", &report);
+            dialogs.inform("File Analysis", &report);
         }
         action::TOOLS_CONFIGURATION => {
             let report = state.borrow().configuration_report();
             push = PushText::No;
-            show_info("Configuration", &report);
+            dialogs.inform("Configuration", &report);
         }
 
         // What the application thinks its environment is, not a file
         // browser: no document content, no passphrase, no listing of what is
         // in the directories it names -- only where it resolved them to.
         action::DIAGNOSTICS => {
-            show_info("Diagnostics", &crate::state::diagnostics_report());
+            dialogs.inform("Diagnostics", &crate::state::diagnostics_report());
             push = PushText::No;
         }
 
@@ -795,7 +735,7 @@ pub fn handle_menu_action(
         id if (action::NOTE_TITLE..=action::NOTE_OUTLINE).contains(&id) => {
             let outcome = state.borrow().note_action(id);
             match outcome {
-                NoteOutcome::Show { title, body } => show_info(&title, &body),
+                NoteOutcome::Show { title, body } => dialogs.inform(&title, &body),
                 NoteOutcome::SaveAs => {
                     let target = state.borrow().workspace.active_id();
                     if let Some(doc_id) = target {
@@ -854,17 +794,14 @@ pub fn handle_menu_action(
         action::ORGANIZE_DUPLICATE_DETECTION => {
             let report = state.borrow().duplicate_detection_report();
             push = PushText::No;
-            show_info("Duplicate Detection", &report);
+            dialogs.inform("Duplicate Detection", &report);
         }
 
-        // Research ▸ Research Report (ADR-0041). The borrow ends with the
-        // statement, before the dialog opens -- the same reason
-        // `TOOLS_INSPECTOR`'s own arm gives: `rfd` pumps events, and a
-        // re-entrant callback on a live `borrow_mut()` panics.
+        // Research ▸ Research Report (ADR-0041).
         action::RESEARCH_REPORT => {
             let report = state.borrow().research_report();
             push = PushText::No;
-            show_info("Research Report", &report);
+            dialogs.inform("Research Report", &report);
         }
 
         // Research ▸ what the active document asks, and what the store holds
@@ -872,12 +809,12 @@ pub fn handle_menu_action(
         action::OPEN_QUESTIONS => {
             let report = state.borrow().open_questions_report();
             push = PushText::No;
-            show_info("Open Questions", &report);
+            dialogs.inform("Open Questions", &report);
         }
         action::STORE_CONTENTS => {
             let report = state.borrow().store_contents_report();
             push = PushText::No;
-            show_info("What the Store Holds", &report);
+            dialogs.inform("What the Store Holds", &report);
         }
 
         id if (action::LINES_SORT_ASC..=action::LINES_TRIM).contains(&id) => {

@@ -1,0 +1,197 @@
+// The window's own message box (ADR-0084).
+//
+// Every question this product asks -- save before closing, recover last
+// session's work, overwrite a file that changed on disk, replace every match
+// -- used to be an `rfd` dialog. On Linux `rfd` draws none of them itself: it
+// runs `zenity`, and when `zenity` is missing it answers *Cancel* for the user.
+// The recovery prompt read that as "discard the journal", so a machine without
+// one package deleted the work the journal exists to keep. Drawing the dialog
+// here means there is nothing to be missing.
+//
+// It owns the look and the keys, and nothing else. What an answer *means* is
+// `dialog.rs`'s, where it can be tested without a window; this reports which
+// button was chosen and never decides what follows.
+//
+// **It must sit outside the shortcut `FocusScope` in `app.slint`.** Shortcuts
+// are matched on the way down from the window to the focused element, so a
+// dialog inside that scope would let Ctrl+W close the tab behind it.
+
+import { Palette } from "types.slint";
+
+component DialogButton inherits Rectangle {
+    in property <string> label;
+    /// Where Enter goes. Drawn in the accent, so the keyboard's choice is
+    /// visible before it is made.
+    in property <bool> highlighted;
+    callback chosen();
+
+    height: 28px;
+    width: max(84px, txt.preferred-width + 28px);
+    background: ta.has-hover ? Palette.edge : Palette.panel;
+    border-width: root.highlighted ? 2px : 1px;
+    border-color: root.highlighted ? Palette.accent : Palette.edge;
+
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-action-default => {
+        root.chosen();
+    }
+
+    txt := Text {
+        text: root.label;
+        color: Palette.ink;
+        font-size: 13px;
+        vertical-alignment: center;
+        horizontal-alignment: center;
+    }
+
+    ta := TouchArea {
+        clicked => {
+            root.chosen();
+        }
+    }
+}
+
+export component MessageDialog inherits Rectangle {
+    in property <bool> open;
+    in property <string> heading;
+    in property <string> body;
+    /// Drawn with the accent border. A question about losing work should not
+    /// look like one about which theme is in use.
+    in property <bool> warning;
+    /// Button labels. An empty label is a button this question does not
+    /// have; only `accept-label` is always present.
+    in property <string> accept-label;
+    in property <string> decline-label;
+    in property <string> cancel-label;
+    /// Which button Enter chooses when the dialog opens: 0 accept, 1 decline,
+    /// 2 cancel. Set per question, because for "save anyway over somebody
+    /// else's changes" the safe choice is not the first button.
+    in property <int> default-choice;
+
+    /// 0 accept, 1 decline, 2 cancel. Escape reports 2 even when there is no
+    /// Cancel button: dismissing a question is never an answer to it.
+    callback answered(int);
+
+    /// The button the keyboard is on. Reset from `default-choice` each time a
+    /// question arrives, by `take-focus`.
+    private property <int> highlight: 0;
+
+    public function take-focus() {
+        root.highlight = root.default-choice;
+        keys.focus();
+    }
+
+    function has(choice: int) -> bool {
+        if (choice == 0) {
+            return true;
+        }
+        if (choice == 1) {
+            return root.decline-label != "";
+        }
+        return root.cancel-label != "";
+    }
+
+    // Left and right through the buttons that exist, wrapping.
+    function step(by: int) {
+        root.highlight = Math.mod(root.highlight + by + 3, 3);
+        if (!root.has(root.highlight)) {
+            root.highlight = Math.mod(root.highlight + by + 3, 3);
+        }
+        if (!root.has(root.highlight)) {
+            root.highlight = Math.mod(root.highlight + by + 3, 3);
+        }
+    }
+
+    visible: root.open;
+    background: Palette.shell.with-alpha(0.72);
+
+    // Clicks on the scrim land here rather than on the document behind it.
+    TouchArea { }
+
+    card := Rectangle {
+        width: min(root.width - 48px, 560px);
+        height: min(root.height - 48px, layout.preferred-height);
+        x: (root.width - self.width) / 2;
+        y: (root.height - self.height) / 2;
+        background: Palette.panel;
+        border-width: root.warning ? 2px : 1px;
+        border-color: root.warning ? Palette.accent : Palette.edge;
+
+        keys := FocusScope {
+            // Every key is claimed. A key this does not use must not reach
+            // the document underneath -- typing into a file while being asked
+            // whether to save it is exactly the confusion a modal exists to
+            // prevent.
+            key-pressed(event) => {
+                if (event.text == Key.Escape) {
+                    root.answered(2);
+                } else if (event.text == Key.Return || event.text == " ") {
+                    root.answered(root.highlight);
+                } else if (event.text == Key.LeftArrow || event.text == Key.Backtab) {
+                    // Slint reports Shift+Tab as its own key rather than as
+                    // Tab with a modifier.
+                    root.step(-1);
+                } else if (event.text == Key.RightArrow || event.text == Key.Tab) {
+                    root.step(1);
+                }
+                accept
+            }
+
+            layout := VerticalLayout {
+                padding: 18px;
+                spacing: 12px;
+
+                Text {
+                    text: root.heading;
+                    color: Palette.ink;
+                    font-size: 15px;
+                    font-weight: 700;
+                    wrap: word-wrap;
+                }
+
+                flick := Flickable {
+                    // As tall as the text, until the window runs out. The
+                    // Diagnostics and Keyboard Shortcuts reports are longer
+                    // than a small window, and a dialog taller than the
+                    // screen has no buttons on it.
+                    preferred-height: min(body-text.preferred-height, root.height - 180px);
+                    content-height: body-text.preferred-height;
+                    body-text := Text {
+                        width: flick.width;
+                        text: root.body;
+                        color: Palette.ink;
+                        font-size: 13px;
+                        wrap: word-wrap;
+                    }
+                }
+
+                HorizontalLayout {
+                    alignment: end;
+                    spacing: 8px;
+                    DialogButton {
+                        label: root.accept-label;
+                        highlighted: root.highlight == 0;
+                        chosen => {
+                            root.answered(0);
+                        }
+                    }
+                    if root.decline-label != "": DialogButton {
+                        label: root.decline-label;
+                        highlighted: root.highlight == 1;
+                        chosen => {
+                            root.answered(1);
+                        }
+                    }
+                    if root.cancel-label != "": DialogButton {
+                        label: root.cancel-label;
+                        highlighted: root.highlight == 2;
+                        chosen => {
+                            root.answered(2);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
