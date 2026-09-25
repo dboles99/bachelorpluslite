@@ -487,15 +487,25 @@ mod tests {
         // a space (ADR-0074): every archive was named "Lite" and no release
         // could be built. This is the contract they rely on, asked here
         // because no script test runs on every commit.
-        let rendered = version(PACKAGE);
+        //
+        // Asked of the version that will actually ship, not a test constant:
+        // a release candidate is cut by bumping it to `x.y.z-rc.n`, and that
+        // is the string the scripts will be handed.
+        let shipping = Package {
+            version: env!("CARGO_PKG_VERSION"),
+            license: PACKAGE.license,
+        };
+        let rendered = version(shipping);
         let first = rendered.lines().next().unwrap_or_default();
         let (name, number) = first.rsplit_once(' ').unwrap_or_default();
         assert_eq!(name, bp_platform::DISPLAY_NAME, "got {first:?}");
-        assert_eq!(number, PACKAGE.version, "got {first:?}");
+        assert_eq!(number, shipping.version, "got {first:?}");
+        // The scripts match `^\d+\.\d+\.\d+`: a pre-release suffix may
+        // follow it, and a name-shaped word may not.
+        let core = number.split('-').next().unwrap_or_default();
         assert!(
-            number.split('.').count() == 3
-                && number.split('.').all(|part| part.parse::<u32>().is_ok()),
-            "the release scripts refuse anything but semver: {number:?}"
+            core.split('.').count() == 3 && core.split('.').all(|part| part.parse::<u32>().is_ok()),
+            "the release scripts refuse a version that does not start x.y.z: {number:?}"
         );
     }
 
