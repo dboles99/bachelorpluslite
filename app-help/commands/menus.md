@@ -94,7 +94,7 @@ because it has to know where the caret is (ADR-0018).
 | Suggested Folder | **live** — where documents sharing this one's tags already live, counted from what the user has filed rather than a scheme imposed on them. **It never moves a file**; File ▸ Save a Copy is where that already lives |
 | Project | Not a row. Nothing in this product has a concept of a project, and inventing one to fill a menu row is how a feature nobody asked for gets built ([ADR-0048](https://bpad.prompt-forge.dev/docs)) |
 | Topics | Not a row — already in two places: Note ▸ Tags for the document, Research ▸ Research Report's dominant themes for the store |
-| Semantic search | Not a row. It needs embeddings; `bp-security`'s policy has an `Embeddings` axis and nothing computes one, so building it reaches [ADR-0033](https://bpad.prompt-forge.dev/docs). Search ▸ cross-file search is the honest thing that exists |
+| Semantic search | **Declined** with phase 10 ([ADR-0082](https://bpad.prompt-forge.dev/docs)). Find ▸ In Folder searches the text of every note and Related Notes answers *what else is about this*; ranking by meaning is the part that would need a model, and a model is what this product declined |
 | Entities, smart collections | Not rows. Both need a data model nothing has decided |
 
 ## Research

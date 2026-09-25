@@ -127,10 +127,12 @@ profiles and a toggle is a label that reads as a promise.
 | Privacy Mode | **live** — a session-wide override that can only tighten, and it *acts*: journals already written are removed |
 | Encrypt Document, Scan for Secrets, Redact, Inspect Metadata, Hash, Sign, Verify, Security History, Lock Document | **Removed** ([ADR-0064](../decisions/ADR-0064.md)). All nine were live. `.bpadx` documents already on a disk cannot be opened by this build, and there is no migration — the ADR says why |
 
-**Only two of the six policy axes have an enforcing reader**, and those are the
-two with a row here. `embeddings`, `network`, `temporary_files` and `zeroise`
-are reported by Tools ▸ Security Inspector and consulted by nothing
-([ADR-0059](../decisions/ADR-0059.md) §4).
+**The policy has two axes, and those are the two with a row here.** There were
+six. `embeddings`, `network`, `temporary_files` and `zeroise` were reported by
+Tools ▸ Security Inspector as the policy in force and consulted by nothing --
+so a Confidential document was shown *"Temporary files: never written"* while
+every save wrote one. They left under [ADR-0082](../decisions/ADR-0082.md),
+which carried out what [ADR-0059](../decisions/ADR-0059.md) had decided.
 
 ## Organize
 
@@ -144,7 +146,7 @@ wired ([ADR-0037](../decisions/ADR-0037.md)).
 | Suggested Folder | **live** — where documents sharing this one's tags already live, counted from what the user has filed rather than a scheme imposed on them. **It never moves a file**; File ▸ Save a Copy is where that already lives |
 | Project | Not a row. Nothing in this product has a concept of a project, and inventing one to fill a menu row is how a feature nobody asked for gets built ([ADR-0048](../decisions/ADR-0048.md)) |
 | Topics | Not a row — already in two places: Note ▸ Tags for the document, Research ▸ Research Report's dominant themes for the store |
-| Semantic search | Not a row. It needs embeddings; `bp-security`'s policy has an `Embeddings` axis and nothing computes one, so building it reaches [ADR-0033](../decisions/ADR-0033.md). Search ▸ cross-file search is the honest thing that exists |
+| Semantic search | **Declined** with phase 10 ([ADR-0082](../decisions/ADR-0082.md)). Find ▸ In Folder searches the text of every note and Related Notes answers *what else is about this*; ranking by meaning is the part that would need a model, and a model is what this product declined |
 | Entities, smart collections | Not rows. Both need a data model nothing has decided |
 
 ## Research

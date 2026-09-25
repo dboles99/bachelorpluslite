@@ -59,16 +59,22 @@ on.
 There is no setting that gives you crash recovery without writing your text
 somewhere, because that is not a thing that can exist.
 
-### The four axes that govern nothing
+### Two controls, both real
 
-`Policy` carries six axes and **only two have an enforcing reader** -- the two
-above. `embeddings`, `network`, `temporary_files` and `zeroise` are reported
-by Tools > Security Inspector and consulted by nothing
-([ADR-0059](https://bpad.prompt-forge.dev/docs)).
+A profile decides two things -- the two above -- and nothing else, and every
+line in Tools > Security Inspector is something the program actually does.
 
-That is written here rather than left out because a settings screen listing
-six controls when four of them do nothing is worse than a screen listing two.
-They survive as a record of what the full BachelorPad+ governs.
+It used to list six. Four of them -- embeddings, leaving the machine,
+temporary files and wiping memory -- were shown as the policy in force and
+enforced by nothing, so a Confidential document was told *"Temporary files:
+never written"* while every save wrote one. They were removed rather than
+explained ([ADR-0082](https://bpad.prompt-forge.dev/docs)). Nothing leaves the machine
+under any profile, because this product has no network code at all; and a
+save writes a temporary file beside the document and renames it into place,
+under every profile, because that is what makes a save survive a crash.
+
+**Confidential and Maximum now do exactly the same thing**, and did before:
+only the four removed lines ever told them apart.
 
 ## What is deliberately absent
 

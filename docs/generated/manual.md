@@ -1094,16 +1094,22 @@ on.
 There is no setting that gives you crash recovery without writing your text
 somewhere, because that is not a thing that can exist.
 
-#### The four axes that govern nothing
+#### Two controls, both real
 
-`Policy` carries six axes and **only two have an enforcing reader** -- the two
-above. `embeddings`, `network`, `temporary_files` and `zeroise` are reported
-by Tools > Security Inspector and consulted by nothing
-([ADR-0059](../decisions/ADR-0059.md)).
+A profile decides two things -- the two above -- and nothing else, and every
+line in Tools > Security Inspector is something the program actually does.
 
-That is written here rather than left out because a settings screen listing
-six controls when four of them do nothing is worse than a screen listing two.
-They survive as a record of what the full BachelorPad+ governs.
+It used to list six. Four of them -- embeddings, leaving the machine,
+temporary files and wiping memory -- were shown as the policy in force and
+enforced by nothing, so a Confidential document was told *"Temporary files:
+never written"* while every save wrote one. They were removed rather than
+explained ([ADR-0082](../decisions/ADR-0082.md)). Nothing leaves the machine
+under any profile, because this product has no network code at all; and a
+save writes a temporary file beside the document and renames it into place,
+under every profile, because that is what makes a save survive a crash.
+
+**Confidential and Maximum now do exactly the same thing**, and did before:
+only the four removed lines ever told them apart.
 
 ### What is deliberately absent
 
@@ -1446,7 +1452,7 @@ because it has to know where the caret is (ADR-0018).
 | Suggested Folder | **live** — where documents sharing this one's tags already live, counted from what the user has filed rather than a scheme imposed on them. **It never moves a file**; File ▸ Save a Copy is where that already lives |
 | Project | Not a row. Nothing in this product has a concept of a project, and inventing one to fill a menu row is how a feature nobody asked for gets built ([ADR-0048](../decisions/ADR-0048.md)) |
 | Topics | Not a row — already in two places: Note ▸ Tags for the document, Research ▸ Research Report's dominant themes for the store |
-| Semantic search | Not a row. It needs embeddings; `bp-security`'s policy has an `Embeddings` axis and nothing computes one, so building it reaches [ADR-0033](../decisions/ADR-0033.md). Search ▸ cross-file search is the honest thing that exists |
+| Semantic search | **Declined** with phase 10 ([ADR-0082](../decisions/ADR-0082.md)). Find ▸ In Folder searches the text of every note and Related Notes answers *what else is about this*; ranking by meaning is the part that would need a model, and a model is what this product declined |
 | Entities, smart collections | Not rows. Both need a data model nothing has decided |
 
 ### Research

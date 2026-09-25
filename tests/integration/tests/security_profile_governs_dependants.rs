@@ -26,9 +26,7 @@ use common::no_files;
 use std::path::{Path, PathBuf};
 
 use bp_history::{Checkpoint, Journal, Refusal, Written};
-use bp_security::{
-    Metadata, Policy, Privacy, Profile, Recovery, Security, TemporaryFiles, Zeroise,
-};
+use bp_security::{Metadata, Policy, Privacy, Profile, Recovery, Security};
 use bp_storage::Store;
 use proptest::prelude::*;
 use tempfile::TempDir;
@@ -295,14 +293,7 @@ fn any_policy() -> impl Strategy<Value = Policy> {
             Just(Metadata::Disabled)
         ],
     )
-        .prop_map(|(recovery, metadata)| Policy {
-            recovery,
-            metadata,
-            embeddings: bp_security::Embeddings::Local,
-            network: bp_security::Network::Allowed,
-            temporary_files: TemporaryFiles::Allowed,
-            zeroise: Zeroise::Off,
-        })
+        .prop_map(|(recovery, metadata)| Policy { recovery, metadata })
 }
 
 proptest! {

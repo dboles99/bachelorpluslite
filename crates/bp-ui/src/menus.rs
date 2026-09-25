@@ -837,10 +837,10 @@ pub fn organize(has_content: bool) -> Vec<MenuItem> {
     // - *Topics* -- what it would show is already in two places: Note ▸ Tags
     //   for this document, and Research ▸ Research Report's dominant themes
     //   for the store.
-    // - *Semantic Search* -- needs embeddings. `bp-security`'s policy has an
-    //   `Embeddings` axis and nothing computes one; doing so reaches ADR-0033
-    //   and is a decision rather than a row. Search ▸ cross-file search is the
-    //   honest thing that exists.
+    // - *Semantic Search* -- declined with phase 10 (ADR-0082), and the
+    //   `Embeddings` policy axis with it. Find ▸ In Folder searches the text
+    //   of every note, and Related Notes answers "what else is about this";
+    //   ranking by meaning is the part that would need a model.
     items
 }
 

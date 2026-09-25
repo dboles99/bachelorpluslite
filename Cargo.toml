@@ -107,5 +107,4 @@ sha2 = "0.10"
 # the conventional choice; composed, never reimplemented (ADR-0011).
 ed25519-dalek = { version = "2", features = ["rand_core"] }
 rand_core = { version = "0.6", features = ["getrandom"] }
-zeroize = { version = "1", features = ["zeroize_derive"] }
 

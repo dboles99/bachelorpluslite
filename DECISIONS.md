@@ -63,7 +63,7 @@ Adding a decision means adding both.
 | BP-ADR-0053 | 2026-08-22 | `main` advances by pull request; opening one is an agent's job, merging is not. D13 closed after six sessions | Accepted | [ADR-0053](docs/decisions/ADR-0053.md) |
 | BP-ADR-0054 | 2026-08-23 | The command line becomes an interface: `--help`, `--version`, `--line=N`, a reported typo, and the licences every manifest already claimed | Accepted, shipped, confirmed at the window | [ADR-0054](docs/decisions/ADR-0054.md) |
 | BP-ADR-0055 | 2026-08-23 | Signing is deferred and self-signing refused outright; the archive, the checksums and a one-command signing step are built anyway. D15 closed | Accepted | [ADR-0055](docs/decisions/ADR-0055.md) |
-| BP-ADR-0056 | 2026-08-23 | All three embedding sources, as choices, with the profile as a ceiling and `Cloud` behind a per-use gesture — and the axis for them had existed since ADR-0020. D16 closed | Accepted | [ADR-0056](docs/decisions/ADR-0056.md) |
+| BP-ADR-0056 | 2026-08-23 | All three embedding sources, as choices, with the profile as a ceiling and `Cloud` behind a per-use gesture — and the axis for them had existed since ADR-0020. D16 closed | Superseded by [ADR-0082](docs/decisions/ADR-0082.md) | [ADR-0056](docs/decisions/ADR-0056.md) |
 | BP-ADR-0057 | 2026-08-29 | Executing anything is removed, and notebooks with it. Neither crate depended on the other; one shell module was the whole seam. ADR-0011's "never auto-runs" becomes vacuous rather than enforced | Accepted | [ADR-0057](docs/decisions/ADR-0057.md) |
 | BP-ADR-0058 | 2026-08-29 | `metadata/repository_manifest.json` is deleted rather than regenerated: 102 of its 181 hashes were wrong, 275 tracked files were never in it, and nothing read it. Git already content-addresses the tree | Accepted | [ADR-0058](docs/decisions/ADR-0058.md) |
 | BP-ADR-0059 | 2026-08-29 | The reduction is scoped: eight crates and huge-file mode leave in five ADRs, least-entangled first, 67,316 lines to ~40,000. `bp-security` is **kept and narrowed** -- it is the store's off switch, and four of its seven policy axes turned out to have no enforcing reader at all | Accepted | [ADR-0059](docs/decisions/ADR-0059.md) |
@@ -90,6 +90,7 @@ Adding a decision means adding both.
 | BP-ADR-0080 | 2026-09-25 | **The Insert key overtypes, and two surfaces stop mishandling named keys.** Found by driving the window under Xvfb with a marker after every key: Page Up and Page Down did nothing in the default surface, because `TextInput` pages by a `page-height` that defaults to zero and nothing set it; and in `--editor-view` F5, Insert and every unnamed key typed a private-use character into the document. Overtype's rule lives in `bp-editor` and both surfaces ask it -- the line break is never overtyped, a run undoes in one step. Conceded: two Ctrl+Z per character under `TextInput`, and caret offsets Slint marks internal | Accepted | [ADR-0080](docs/decisions/ADR-0080.md) |
 | BP-ADR-0081 | 2026-09-25 | **Two of the three Slint blockers were never blocked.** Checked against both 1.17.1 and 1.18.1 source: input-method composition is still refused by `FocusScope`. But `StyledText` has been public since Slint 1.15, with `StyledText::from_markdown` at runtime, so D14's premise was false the day it was answered; and a dropped file reaches the application through `slint::winit_030::WinitWindowAccessor::on_winit_window_event` without the backend, on Windows and X11 though not native Wayland. The record is corrected, drag and drop is queued, and D14 goes back to Daniel as a question | Accepted | [ADR-0081](docs/decisions/ADR-0081.md) |
 | BP-ADR-0048 | amended 2026-09-25 | Its answer to D14 rested on *"Slint 1.17.1 has no rich-text item"*, which was false -- `StyledText` shipped in 1.15. The answer stands withdrawn and the question is open again ([ADR-0081](docs/decisions/ADR-0081.md)) | Accepted | [ADR-0048](docs/decisions/ADR-0048.md) |
+| BP-ADR-0082 | 2026-09-25 | **Phase 10 is declined, and four policy axes nothing enforced leave with it.** `Cloud` embeddings contradict a product published as having no network, a `Local` model puts weights on a Notepad's startup path, and the need is met by Find ▸ In Folder and Related Notes. Removing `embeddings` meant counting readers: `network`, `temporary_files` and `zeroise` had none but the Security Inspector, which told a Confidential document *"Temporary files: never written"* while every save wrote one. ADR-0059 had decided all four would go; ADR-0064 deferred it on the ground that a doc comment admitted it. `Policy` is two axes, and `zeroize` leaves the graph. Confidential and Maximum are now visibly the same policy, which they always were -- Daniel's question | Accepted | [ADR-0082](docs/decisions/ADR-0082.md) |
 | BP-ADR-0017 | amended 2026-08-22 | Half of the renderer revert condition is now a number rather than a feeling: per-frame row building, and its independence from document size | Accepted, amended | [ADR-0017](docs/decisions/ADR-0017.md) |
 
 ## Decisions needed before the work they block
@@ -177,6 +178,30 @@ before recording a dependency as blocking something, grep its public API for
 the noun -- `StyledText`, `winit_window_event` -- rather than for the
 mechanism you had in mind. And recheck against the *old* version as well as
 the new one, or a blocker that never existed reads as one that lifted.
+
+## What declining phase 10 taught, 2026-09-25
+
+### A true comment does not make a false screen honest
+
+ADR-0064 had the facts: it named the four policy axes nothing enforced, and
+left them in place because *"the doc comment on `security_inspector_report`
+names which three govern nothing, so the readout is not a claim the code fails
+to keep."* The readout was exactly such a claim. A Confidential document's
+owner opened Tools ▸ Security Inspector and read *"Temporary files: never
+written"* and *"buffers are overwritten when a document closes"*, and neither
+was true. **A claim is kept or broken where it is read**, and a doc comment is
+read by a developer while a readout is read by the person the claim is about.
+Trap 3 is about a comment claiming something of the code; this is its mirror,
+a comment conceding something the product still claims.
+
+### Take the inventory before the recommendation, too
+
+The plan that opened this session recommended *lexical search over the note
+store* as phase 10's replacement. One `CREATE TABLE` would have shown that the
+store holds paths, titles and tags and never content, so it could not have
+searched what the recommendation assumed. `WORK_QUEUE.md`'s rule --
+*take the inventory before the estimate* -- applies to a recommendation as
+much as to a queue item. The need turned out to be met already.
 
 ## What the gate taught, 2026-09-25
 

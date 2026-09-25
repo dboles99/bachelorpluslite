@@ -20,7 +20,7 @@
 
 This is not an MVP roadmap. Each phase contributes to the full v1 target.
 
-Status as of **2026-08-30**. Four words, meaning four different things:
+Status as of **2026-09-25**. Five words, meaning five different things:
 
 - **Done** — the phase's work is finished.
 - **Started** — a real, tested slice exists *and is reachable from the
@@ -44,6 +44,9 @@ Status as of **2026-08-30**. Four words, meaning four different things:
   names the crates that remain. It is a status rather than a deleted
   row because a phase number is what `specs.md` and every ADR refer to, and a
   table that renumbers around a removal breaks all of them.
+- **Declined** — decided against before anything was built, with an ADR
+  saying why and what it would cost to change the answer. One phase carries
+  it: 10, under [ADR-0082](docs/decisions/ADR-0082.md).
 
 | # | Phase | Status | Tasks | Crates |
 | --- | --- | --- | --- | --- |
@@ -56,7 +59,7 @@ Status as of **2026-08-30**. Four words, meaning four different things:
 | 7 | Search engine | **Started** | `project/tasks/06-search` | `bp-search` |
 | 8 | Semantic foundation and naming | **Started** | `project/tasks/07-semantic` | `bp-semantic`, `bp-naming` |
 | 9 | Organization and related-note graph | **Started** | `project/tasks/07-semantic` | `bp-storage` |
-| 10 | Semantic/hybrid search | Not started, **decided** | `project/tasks/07-semantic` | — |
+| 10 | Semantic/hybrid search | **Declined** | [ADR-0082](docs/decisions/ADR-0082.md) | — |
 | 11 | Clipboard system | **Removed** | [ADR-0061](docs/decisions/ADR-0061.md) | — |
 | 12 | Notebook/execution system | **Removed** | [ADR-0057](docs/decisions/ADR-0057.md) | — |
 | 13 | Research mode | **Removed**, in part | [ADR-0060](docs/decisions/ADR-0060.md) | `bp-storage`, `bp-semantic` |
@@ -110,14 +113,14 @@ exist ([ADR-0068](docs/decisions/ADR-0068.md)), and every preset registered
 `.bpadx`, which this build opens as ciphertext
 ([ADR-0069](docs/decisions/ADR-0069.md)).
 
-**Phase 10 was decided on 2026-08-23 without being started, which is a state
-this table needs a word for.** D16 asked what should compute an embedding;
-the answer is all three sources as choices, with the profile as a ceiling and
-`Cloud` behind a per-use gesture ([ADR-0056](docs/decisions/ADR-0056.md)) --
-and the axis carrying those three values had existed since ADR-0020. The
-phase is now **three queue items rather than one large thing**, listed in
-`project/WORK_QUEUE.md`, and the first of them needs neither provider to
-exist.
+**Phase 10 is declined** ([ADR-0082](docs/decisions/ADR-0082.md)). It was
+decided on 2026-08-23 without being started -- all three embedding sources as
+choices ([ADR-0056](docs/decisions/ADR-0056.md)) -- and then the product was
+reduced to Notepad and published as having no network. A `Cloud` source
+contradicts that, a `Local` one puts a model on the startup path of a
+Notepad, and the need it served is met by Find > In Folder and Related Notes.
+The `Embeddings` policy axis left with it, and so did the three other axes
+nothing enforced, which ADR-0059 had already decided to remove.
 
 ## Two numbering schemes, reconciled
 

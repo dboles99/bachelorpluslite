@@ -1106,14 +1106,19 @@ loosen -- and it <em>acts</em>: journals already written are removed when you tu
 on.</p>
 <p>There is no setting that gives you crash recovery without writing your text
 somewhere, because that is not a thing that can exist.</p>
-<h4 id="the-four-axes-that-govern-nothing">The four axes that govern nothing</h4>
-<p><code>Policy</code> carries six axes and <strong>only two have an enforcing reader</strong> -- the two
-above. <code>embeddings</code>, <code>network</code>, <code>temporary_files</code> and <code>zeroise</code> are reported
-by Tools &gt; Security Inspector and consulted by nothing
-(<a href="../decisions/ADR-0059.md">ADR-0059</a>).</p>
-<p>That is written here rather than left out because a settings screen listing
-six controls when four of them do nothing is worse than a screen listing two.
-They survive as a record of what the full BachelorPad+ governs.</p>
+<h4 id="two-controls-both-real">Two controls, both real</h4>
+<p>A profile decides two things -- the two above -- and nothing else, and every
+line in Tools &gt; Security Inspector is something the program actually does.</p>
+<p>It used to list six. Four of them -- embeddings, leaving the machine,
+temporary files and wiping memory -- were shown as the policy in force and
+enforced by nothing, so a Confidential document was told <em>&quot;Temporary files:
+never written&quot;</em> while every save wrote one. They were removed rather than
+explained (<a href="../decisions/ADR-0082.md">ADR-0082</a>). Nothing leaves the machine
+under any profile, because this product has no network code at all; and a
+save writes a temporary file beside the document and renames it into place,
+under every profile, because that is what makes a save survive a crash.</p>
+<p><strong>Confidential and Maximum now do exactly the same thing</strong>, and did before:
+only the four removed lines ever told them apart.</p>
 <h3 id="what-is-deliberately-absent">What is deliberately absent</h3>
 <p><strong>No encryption.</strong> <code>.bpadx</code> encrypted documents, the audit log, secret
 scanning, metadata redaction and document signing were all in this product and
@@ -1607,7 +1612,7 @@ because it has to know where the caret is (ADR-0018).</p>
 </tr>
 <tr>
 <td>Semantic search</td>
-<td>Not a row. It needs embeddings; <code>bp-security</code>'s policy has an <code>Embeddings</code> axis and nothing computes one, so building it reaches <a href="../decisions/ADR-0033.md">ADR-0033</a>. Search ▸ cross-file search is the honest thing that exists</td>
+<td><strong>Declined</strong> with phase 10 (<a href="../decisions/ADR-0082.md">ADR-0082</a>). Find ▸ In Folder searches the text of every note and Related Notes answers <em>what else is about this</em>; ranking by meaning is the part that would need a model, and a model is what this product declined</td>
 </tr>
 <tr>
 <td>Entities, smart collections</td>

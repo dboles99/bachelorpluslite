@@ -5,7 +5,7 @@ The gate regenerates it and fails if this file has drifted, so an edit here
 is a change that will be reverted by the next run rather than kept.
 
 BachelorPad+ Lite is distributed under GPL-3.0-only (ADR-0071). It statically
-links the 626 crates below, and this file passes on their terms as that
+links the 624 crates below, and this file passes on their terms as that
 licence requires. Listed here is what is actually shipped: the dependency
 graph walked from the `bachelorpad` binary along normal and build edges only,
 never dev edges -- a test-only crate is in no artefact anybody downloads.
@@ -500,8 +500,6 @@ offering "or later" would be offering terms it has not been granted.
 | `uuid` | 1.24.1 | https://github.com/uuid-rs/uuid |
 | `yazi` | 0.2.1 | https://github.com/dfrg/yazi |
 | `zeno` | 0.3.3 | https://github.com/dfrg/zeno |
-| `zeroize` | 1.9.0 | https://github.com/RustCrypto/utils |
-| `zeroize_derive` | 1.5.0 | https://github.com/RustCrypto/utils |
 
 ### Unicode-3.0
 

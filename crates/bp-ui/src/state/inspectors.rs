@@ -21,7 +21,7 @@
 //! config file, four environment variables and a command line make worth
 //! asking. Configuration reads; it does not write, and it says so.
 
-use bp_security::{Embeddings, Metadata, Network, Recovery, TemporaryFiles, Zeroise};
+use bp_security::{Metadata, Recovery};
 
 use super::AppState;
 
@@ -29,18 +29,13 @@ impl AppState {
     /// Tools ▸ Security Inspector: the policy actually in force, axis by
     /// axis.
     ///
-    /// **The Privacy menu shows two of these six and the rest are
-    /// invisible**, which is the gap this fills: the menu has room for
-    /// recovery and network, and a user has no way to discover that
-    /// embeddings, temporary files and zeroising are governed at all.
-    ///
-    /// **Three of the six govern nothing**, which ADR-0059 found by counting
-    /// enforcing readers and this readout is why it matters: a line here
-    /// reads as *the policy in force*, and for `embeddings`, `temporary_files`
-    /// and `zeroise` nothing consults the value before acting. They leave
-    /// under ADR-0059's R5 with the rest of the stack; until then this
-    /// comment is the honest label, because a readout that reports an
-    /// unenforced axis is a claim the code does not keep.
+    /// **Every line is a policy something enforces.** It used to print six
+    /// axes, and four of them -- embeddings, leaving the machine, temporary
+    /// files and zeroising -- were enforced by nothing, so a Confidential
+    /// document was shown *"Temporary files: never written"* while every save
+    /// wrote one. A readout reads as *the policy in force*; a line nothing
+    /// keeps is a claim to the user, however honestly a doc comment in here
+    /// admits it. They left with their axes (ADR-0082).
     ///
     /// Reports the policy *under Privacy Mode*, not the document's own, for
     /// the reason `menus::security` gives about its own readouts: showing the
@@ -85,26 +80,6 @@ impl AppState {
             "Metadata store",
             metadata(policy.metadata),
             metadata(unclamped.metadata),
-        );
-        axis(
-            "Embeddings",
-            embeddings(policy.embeddings),
-            embeddings(unclamped.embeddings),
-        );
-        axis(
-            "Leaves this machine",
-            network(policy.network),
-            network(unclamped.network),
-        );
-        axis(
-            "Temporary files",
-            temporary(policy.temporary_files),
-            temporary(unclamped.temporary_files),
-        );
-        axis(
-            "Zeroise on close",
-            zeroise(policy.zeroise),
-            zeroise(unclamped.zeroise),
         );
 
         lines.push(String::new());
@@ -352,39 +327,6 @@ fn metadata(value: Metadata) -> String {
     .to_owned()
 }
 
-fn embeddings(value: Embeddings) -> String {
-    match value {
-        Embeddings::Cloud => "permitted, including a cloud provider",
-        Embeddings::Local => "permitted, on this machine only",
-        Embeddings::None => "never computed",
-    }
-    .to_owned()
-}
-
-fn network(value: Network) -> String {
-    match value {
-        Network::Allowed => "permitted",
-        Network::Denied => "never",
-    }
-    .to_owned()
-}
-
-fn temporary(value: TemporaryFiles) -> String {
-    match value {
-        TemporaryFiles::Allowed => "permitted",
-        TemporaryFiles::Denied => "never written",
-    }
-    .to_owned()
-}
-
-fn zeroise(value: Zeroise) -> String {
-    match value {
-        Zeroise::Off => "buffers are dropped normally",
-        Zeroise::On => "buffers are overwritten when a document closes",
-    }
-    .to_owned()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -396,20 +338,21 @@ mod tests {
         // on purpose: this test exists to catch an axis that exists and is
         // never shown, and a list generated from the same type could not.
         let report = AppState::new().security_inspector_report();
-        for axis in [
-            "Recovery journal",
-            "Metadata store",
+        for axis in ["Recovery journal", "Metadata store"] {
+            assert!(report.contains(axis), "{axis} is missing from {report}");
+        }
+        for gone in [
+            "Clipboard",
             "Embeddings",
             "Leaves this machine",
             "Temporary files",
-            "Zeroise on close",
+            "Zeroise",
         ] {
-            assert!(report.contains(axis), "{axis} is missing from {report}");
+            assert!(
+                !report.contains(gone),
+                "the inspector still reports {gone}, an axis the policy no longer has: {report}"
+            );
         }
-        assert!(
-            !report.contains("Clipboard"),
-            "the inspector still reports an axis the policy no longer has: {report}"
-        );
     }
 
     #[test]
