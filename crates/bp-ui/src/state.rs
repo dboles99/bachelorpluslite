@@ -122,6 +122,13 @@ pub struct AppState {
     /// one taller than the window has to be scrollable through, and a
     /// line-only anchor could only jump over it.
     pub(crate) anchor: bp_editor::view::Anchor,
+    /// Whether typing replaces what follows the caret -- the Insert key.
+    ///
+    /// The window's, not a document's: Notepad keeps the mode across tabs,
+    /// and it is what the next keystroke does wherever it lands. Never
+    /// persisted either, for the same reason no editor persists it -- a mode
+    /// that survives a restart is one the user has forgotten switching on.
+    pub(crate) overwrite: bool,
     /// How many rows fit in it. Slint measures and tells us.
     pub(crate) visible_rows: usize,
     /// How many characters fit across it, for wrapping. Slint measures this
@@ -241,6 +248,7 @@ impl AppState {
             editors,
             editor_view: false,
             anchor: bp_editor::view::Anchor::default(),
+            overwrite: false,
             // Replaced by Slint's own measurement as soon as the surface has
             // a height; only Page Up before the first frame would see this.
             visible_rows: 30,

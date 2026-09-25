@@ -82,6 +82,22 @@ impl Buffer {
         self.rope.len_chars() == 0
     }
 
+    /// The character index of a UTF-8 byte offset, clamped to the end.
+    ///
+    /// For the one caller that is handed bytes: Slint's `TextInput` reports
+    /// its caret as a byte offset, and everything in this workspace counts in
+    /// characters. A byte offset inside a character resolves to that
+    /// character, which is ropey's rule and the safe one -- it can only ever
+    /// name a real boundary.
+    pub fn byte_to_char(&self, byte_idx: usize) -> usize {
+        self.rope.byte_to_char(byte_idx.min(self.len_bytes()))
+    }
+
+    /// The UTF-8 byte offset of a character index, clamped to the end.
+    pub fn char_to_byte(&self, char_idx: usize) -> usize {
+        self.rope.char_to_byte(char_idx.min(self.len_chars()))
+    }
+
     /// Number of lines, counting the empty line after a trailing newline.
     ///
     /// This differs from `str::lines()`, which reports `"a\n"` as one line.
@@ -356,5 +372,14 @@ mod tests {
         assert_eq!(b.line(2), "three");
         assert_eq!(b.line(99), "");
         assert_eq!(b.slice(0..999), "one\ntwo\nthree");
+    }
+
+    #[test]
+    fn byte_and_character_offsets_round_trip_across_multibyte_text() {
+        let buffer = Buffer::from_text("a日b");
+        assert_eq!(buffer.char_to_byte(2), 4, "日 is three bytes");
+        assert_eq!(buffer.byte_to_char(4), 2);
+        assert_eq!(buffer.byte_to_char(99), 3, "past the end clamps");
+        assert_eq!(buffer.char_to_byte(99), 5, "past the end clamps");
     }
 }

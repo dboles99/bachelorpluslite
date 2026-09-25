@@ -87,6 +87,7 @@ Adding a decision means adding both.
 | BP-ADR-0077 | 2026-09-10 | **Reporting a problem composes a document**, because this product cannot open a browser (ADR-0057) or reach the network (ADR-0006). Help > Report a Problem pre-fills the issue template with the diagnostics already in it and puts the URL on the clipboard. The constraint produced the *better* feature: the fields that make a report fixable are the ones somebody filing in a browser would have gone back for and mostly would not | Accepted | [ADR-0077](docs/decisions/ADR-0077.md) |
 | BP-ADR-0078 | 2026-09-10 | **Three unmaintained dependencies accepted by name, never as a category.** The first hosted CI run failed on three RustSec advisories the local gate had never been in a position to see, which is the case ADR-0073 made for hosted CI, demonstrated the same day. All three are `unmaintained` rather than `vulnerability`, and all three arrive through Slint. Ignored by id with a reason each, because `unmaintained = "warn"` would silence the next one too, and the next one is the one nobody has looked at | Accepted | [ADR-0078](docs/decisions/ADR-0078.md) |
 | BP-ADR-0079 | 2026-09-10 | **The fuzz harness silences the panic hook, because the hang budget was timing it.** `catch_unwind` does not return until the hook has finished, so with `RUST_BACKTRACE=1` a hosted Windows runner spent the whole 20 second budget symbolising a backtrace and reported an instant panic as a hang, discarding the message. A quiet hook for probe threads only; every other thread keeps the one it had. Raising the budget was rejected -- twenty seconds is not too short, the budget was measuring the wrong thing | Accepted | [ADR-0079](docs/decisions/ADR-0079.md) |
+| BP-ADR-0080 | 2026-09-25 | **The Insert key overtypes, and two surfaces stop mishandling named keys.** Found by driving the window under Xvfb with a marker after every key: Page Up and Page Down did nothing in the default surface, because `TextInput` pages by a `page-height` that defaults to zero and nothing set it; and in `--editor-view` F5, Insert and every unnamed key typed a private-use character into the document. Overtype's rule lives in `bp-editor` and both surfaces ask it -- the line break is never overtyped, a run undoes in one step. Conceded: two Ctrl+Z per character under `TextInput`, and caret offsets Slint marks internal | Accepted | [ADR-0080](docs/decisions/ADR-0080.md) |
 | BP-ADR-0017 | amended 2026-08-22 | Half of the renderer revert condition is now a number rather than a feeling: per-frame row building, and its independence from document size | Accepted, amended | [ADR-0017](docs/decisions/ADR-0017.md) |
 
 ## Decisions needed before the work they block
@@ -121,6 +122,42 @@ Adding a decision means adding both.
 - **specs.md section 22's warm-start target** (75 ms) is still unverified —
   the software renderer's time to first interaction cannot be measured, so
   half of ADR-0017's target has no number behind it.
+
+## What the keyboard taught, 2026-09-25
+
+Three things, all from pressing keys nobody had listed as worth pressing
+([ADR-0080](docs/decisions/ADR-0080.md)).
+
+### A default of zero is a feature switched off, and nothing reports it
+
+Page Up and Page Down did nothing in the default surface for the whole life of
+the product. `TextInput` pages by `page-height`, returns `false` when that is
+not taller than a line, and defaults it to zero. A refusal from inside a
+toolkit looks exactly like a key the product never claimed, so no test and no
+log could see it. **Five manual passes missed it because none of them pressed
+Page Down** -- a checklist of features does not list the keys everybody
+assumes work. When a toolkit property has a default, ask what the feature does
+at that default.
+
+### A comment that names a failure mode is not a test for it
+
+The test beside `translate_key` said a mismatch "would type invisible glyphs
+into the document", and asserted only the keys already on its list. F5 was
+not on it, and F5 typed U+F708 into the saved file. The comment was right
+about the failure and the test asked about the wrong keys: **it checked the
+ones that were handled, and the defect lived in the ones that were not.** The
+replacement sweeps the whole private-use block Slint borrows, which is the
+question the comment was actually asking. This is trap 3 from a new side: the
+claim was true, and still nothing would have failed if it stopped being.
+
+### Suspect the probe, and here is a new way the probe lies
+
+The first undo probe typed a marker straight after Ctrl+Z and read as data
+loss. Slint re-selects what an undo restores; the marker replaced it. The
+defect vanished when the marker moved to the end of the line, because it had
+never been one. `project/NEXT_SESSION.md` already said to suspect a manual pass
+before the product; the same holds for a scripted one, and **a probe that
+types is an edit, with every consequence an edit has.**
 
 ## What the gate taught, 2026-09-25
 

@@ -23,6 +23,7 @@ pub enum Key {
     End,
     PageUp,
     PageDown,
+    Insert,
     Backspace,
     Delete,
     Enter,
@@ -78,6 +79,13 @@ pub enum Command {
     Copy,
     Cut,
     Paste,
+    /// The Insert key, between inserting and overtyping.
+    ///
+    /// Leaves the editor like the clipboard commands do, because the mode is
+    /// the window's rather than a document's: Notepad keeps it across tabs,
+    /// and an editor per document holding its own copy would let two tabs
+    /// disagree about what the next keystroke does.
+    ToggleOverwrite,
     /// Not ours. The view must let it through rather than swallowing it.
     Ignore,
 }
@@ -106,6 +114,14 @@ pub fn command_for(key: Key, modifiers: Modifiers, page_rows: usize) -> Command 
 
         Key::PageUp => move_to(Motion::PageUp(page_rows)),
         Key::PageDown => move_to(Motion::PageDown(page_rows)),
+
+        // Ctrl+Insert and Shift+Insert are the older copy and paste, and
+        // Notepad still honours both. Only a bare Insert changes the mode: a
+        // Shift+Insert that flipped it instead of pasting would change what
+        // every later keystroke does, and say nothing.
+        Key::Insert if modifiers.is_chord() => Command::Copy,
+        Key::Insert if modifiers.shift => Command::Paste,
+        Key::Insert => Command::ToggleOverwrite,
 
         Key::Backspace if modifiers.is_chord() => Command::DeleteWordBackward,
         Key::Delete if modifiers.is_chord() => Command::DeleteWordForward,
@@ -327,5 +343,38 @@ mod tests {
         // Alt is the menu-bar modifier; typing under it still inserts, which
         // matches every other plain-text field.
         assert_eq!(cmd(Key::Char('f'), alt), Command::Insert("f".to_owned()));
+    }
+
+    #[test]
+    fn a_bare_insert_toggles_overwrite_and_its_chords_are_copy_and_paste() {
+        // Notepad's older clipboard keys. A Shift+Insert that flipped the
+        // mode instead would silently change what every later keystroke does.
+        assert_eq!(cmd(Key::Insert, NONE), Command::ToggleOverwrite);
+        assert_eq!(cmd(Key::Insert, CTRL), Command::Copy);
+        assert_eq!(cmd(Key::Insert, SHIFT), Command::Paste);
+    }
+
+    #[test]
+    fn every_navigation_key_moves_the_caret() {
+        // The keys a user reported as not working, pinned in one place.
+        for (key, motion) in [
+            (Key::Left, Motion::Left),
+            (Key::Right, Motion::Right),
+            (Key::Up, Motion::Up),
+            (Key::Down, Motion::Down),
+            (Key::Home, Motion::LineStart),
+            (Key::End, Motion::LineEnd),
+            (Key::PageUp, Motion::PageUp(20)),
+            (Key::PageDown, Motion::PageDown(20)),
+        ] {
+            assert_eq!(
+                cmd(key, NONE),
+                Command::Move {
+                    motion,
+                    select: false
+                },
+                "{key:?}"
+            );
+        }
     }
 }

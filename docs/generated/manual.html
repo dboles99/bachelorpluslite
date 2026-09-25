@@ -402,6 +402,22 @@ so the two cannot disagree.</p>
 <p><strong>These need the custom editor surface</strong>, which is off by default -- start
 with <code>--editor-view</code> to get it. See
 <a href="#the-two-editor-surfaces">The two editor surfaces</a> below.</p>
+<h3 id="overtype">Overtype</h3>
+<p><strong>Insert</strong> switches between inserting and overtyping, as it does in Notepad.
+While overtype is on, the status bar says <strong>Overtype</strong>, the caret is drawn
+heavier, and each character you type replaces the one after the caret.</p>
+<p>It never replaces the end of a line. Typing past it adds to the line rather
+than pulling the next one up, and Enter still splits the line. A selection is
+replaced whole, in either mode.</p>
+<p><code>Ctrl+Insert</code> and <code>Shift+Insert</code> are copy and paste, and leave the mode alone.
+The mode belongs to the window, not to a document: it stays as it is when you
+switch tabs, and it is off whenever the program starts.</p>
+<p>It works in both <a href="#the-two-editor-surfaces">editor surfaces</a>, with one
+difference in undo. In the default surface each overtyped character takes two
+presses of <code>Ctrl+Z</code> to undo, because the toolkit's text widget records a
+replacement as a removal and an insertion. Nothing is lost -- it is only
+slower. Under <code>--editor-view</code> a run of overtyping undoes in one step, the way
+a run of typing does.</p>
 <h3 id="zoom">Zoom</h3>
 <p><code>Ctrl+=</code> and <code>Ctrl+-</code> change the editor font size; <code>Ctrl+0</code> puts it back.
 This is the same setting as <code>font_size</code> in the config file, so a zoom you
@@ -1239,6 +1255,18 @@ this page cannot disagree.</p>
 <tr>
 <td><code>Ctrl+A</code></td>
 <td>Select all</td>
+</tr>
+<tr>
+<td><code>Insert</code></td>
+<td>Overtype on / off</td>
+</tr>
+<tr>
+<td><code>Ctrl+Insert</code></td>
+<td>Copy</td>
+</tr>
+<tr>
+<td><code>Shift+Insert</code></td>
+<td>Paste</td>
 </tr>
 <tr>
 <td><code>Ctrl+= / Ctrl+-</code></td>

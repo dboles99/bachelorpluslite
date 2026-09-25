@@ -151,6 +151,7 @@ fn refresh(ui: &AppWindow, state: &mut state::AppState, push_text: state::PushTe
         ui.set_format_label(format.label().into());
         ui.set_cursor_label(cursor.as_str().into());
     }
+    ui.set_overwrite(state.overwrite);
 
     // Something that just failed outranks a standing warning about the file.
     let notice = state
@@ -658,6 +659,40 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
         ui.on_menu_action(move |id| {
             let Some(ui) = weak.upgrade() else { return };
             let _ = dispatch::handle_menu_action(&ui, &cell, id);
+        });
+    }
+
+    // --- the Insert key, under `TextInput` -----------------------------
+    // The custom surface reaches the same two decisions through
+    // `editor_key`; these are how the widget asks for them.
+    {
+        let cell = Rc::clone(&state);
+        let weak = ui.as_weak();
+        ui.on_insert_key(move |control, shift, alt| {
+            let modifiers = bp_editor::Modifiers {
+                control,
+                shift,
+                alt,
+            };
+            let what = editor_view::insert_key(&mut cell.borrow_mut(), modifiers);
+            if what == editor_view::InsertKey::Toggled
+                && let Some(ui) = weak.upgrade()
+            {
+                refresh(&ui, &mut cell.borrow_mut(), state::PushText::No);
+            }
+            what.name().into()
+        });
+    }
+    {
+        let cell = Rc::clone(&state);
+        ui.on_overtype_end(move |cursor, anchor, text, control, shift, alt| {
+            let modifiers = bp_editor::Modifiers {
+                control,
+                shift,
+                alt,
+            };
+            editor_view::overtype_end(&cell.borrow(), cursor, anchor, &text, modifiers)
+                .unwrap_or(-1)
         });
     }
 

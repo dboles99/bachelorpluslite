@@ -12,11 +12,23 @@ pub(crate) fn clamp_i32(value: usize) -> i32 {
     i32::try_from(value).unwrap_or(i32::MAX)
 }
 
+/// The private-use block Slint takes its named-key code points from.
+///
+/// Apple's function-key range, which Slint borrows: F1 is U+F704, Insert
+/// U+F727, Page Up U+F72C. Every code point in it is a key rather than a
+/// character, so none may reach the document.
+const NAMED_KEYS: std::ops::RangeInclusive<char> = '\u{F700}'..='\u{F8FF}';
+
 /// Slint's key text as the editor understands it.
 ///
 /// Slint reports named keys as private-use characters. `slint::platform::Key`
 /// gives them names, so this stays a readable list rather than a table of
 /// code points that nobody can check.
+///
+/// A named key this list does not know is `None`, not `Key::Char`. It used
+/// to fall through as a character, and `command_for` inserts any character
+/// that is not a control character -- so F5 typed U+F708 into the document,
+/// and until it had a name so did Insert. Found by driving the window.
 pub(crate) fn translate_key(text: &str) -> Option<bp_editor::Key> {
     use bp_editor::Key as Editor;
     use slint::platform::Key as Slint;
@@ -40,6 +52,8 @@ pub(crate) fn translate_key(text: &str) -> Option<bp_editor::Key> {
         Editor::PageUp
     } else if is(Slint::PageDown) {
         Editor::PageDown
+    } else if is(Slint::Insert) {
+        Editor::Insert
     } else if is(Slint::Backspace) {
         Editor::Backspace
     } else if is(Slint::Delete) {
@@ -50,9 +64,87 @@ pub(crate) fn translate_key(text: &str) -> Option<bp_editor::Key> {
         Editor::Tab
     } else if is(Slint::Escape) {
         Editor::Escape
+    } else if NAMED_KEYS.contains(&ch) {
+        return None;
     } else {
         Editor::Char(ch)
     })
+}
+
+/// What the Insert key does under `TextInput`, which owns the clipboard
+/// calls there and has no overtype mode of its own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum InsertKey {
+    Toggled,
+    Copy,
+    Paste,
+}
+
+impl InsertKey {
+    /// The name `app.slint` matches on. A string rather than an int so the
+    /// `.slint` side reads as what it does.
+    pub(crate) const fn name(self) -> &'static str {
+        match self {
+            Self::Toggled => "toggled",
+            Self::Copy => "copy",
+            Self::Paste => "paste",
+        }
+    }
+}
+
+/// The Insert key, asked of `bp_editor::keys` rather than decided here, so
+/// the two editor surfaces cannot come to disagree about what Shift+Insert
+/// means.
+pub(crate) fn insert_key(state: &mut AppState, modifiers: bp_editor::Modifiers) -> InsertKey {
+    match bp_editor::keys::command_for(bp_editor::Key::Insert, modifiers, state.visible_rows) {
+        bp_editor::Command::Copy => InsertKey::Copy,
+        bp_editor::Command::Paste => InsertKey::Paste,
+        _ => {
+            state.overwrite = !state.overwrite;
+            InsertKey::Toggled
+        }
+    }
+}
+
+/// Under `TextInput`, the byte offset to extend the selection to before a
+/// keystroke, so that the widget's own insertion replaces what overtype
+/// mode should -- or `None` to let the key through untouched.
+///
+/// `TextInput` has no overtype mode, and the only way in is to select what
+/// the keystroke will replace and let the widget replace a selection, which
+/// it already does correctly and undoably. What to select is
+/// `bp_editor::overtype_span`'s decision, so the rule is the one the custom
+/// surface follows too.
+///
+/// Reads the rope, never the widget's text: under `TextInput` the rope is
+/// kept equal to it on every edit, and asking for the document as a string
+/// here would copy all of it on every keystroke (R011, trap 5).
+pub(crate) fn overtype_end(
+    state: &AppState,
+    cursor_byte: i32,
+    anchor_byte: i32,
+    text: &str,
+    modifiers: bp_editor::Modifiers,
+) -> Option<i32> {
+    if !state.overwrite || cursor_byte != anchor_byte {
+        return None;
+    }
+    let key = translate_key(text)?;
+    let bp_editor::Command::Insert(typed) =
+        bp_editor::keys::command_for(key, modifiers, state.visible_rows)
+    else {
+        return None;
+    };
+    if typed.contains(['\n', '\r']) {
+        return None;
+    }
+    let buffer = state.active_editor()?.buffer();
+    let at = buffer.byte_to_char(usize::try_from(cursor_byte).ok()?);
+    let span = bp_editor::overtype_span(buffer, at, typed.chars().count());
+    if span.is_empty() {
+        return None;
+    }
+    i32::try_from(buffer.char_to_byte(span.end)).ok()
 }
 
 /// What a double- or triple-click selects.
@@ -258,6 +350,19 @@ pub(crate) fn apply_editor_command(state: &mut AppState, command: &bp_editor::Co
     match command {
         bp_editor::Command::Ignore => false,
 
+        bp_editor::Command::ToggleOverwrite => {
+            state.overwrite = !state.overwrite;
+            true
+        }
+
+        bp_editor::Command::Insert(text) if state.overwrite => {
+            if let Some(editor) = state.active_editor_mut() {
+                editor.overtype(text);
+            }
+            state.mark_edited();
+            true
+        }
+
         bp_editor::Command::Copy => {
             let selected = state
                 .active_editor()
@@ -334,6 +439,45 @@ mod tests {
     }
 
     #[test]
+    fn no_named_key_can_reach_the_document_as_a_character() {
+        // F5 used to type U+F708, and Insert U+F727, because a named key this
+        // list did not know fell through as `Key::Char` and `command_for`
+        // inserts any character that is not a control one. The whole block,
+        // not the keys Slint has today, so the next one it adds is covered.
+        for code in 0xF700..=0xF8FF_u32 {
+            let ch = char::from_u32(code).unwrap_or_default();
+            assert!(
+                !matches!(
+                    translate_key(&ch.to_string()),
+                    Some(bp_editor::Key::Char(_))
+                ),
+                "U+{code:04X} would be typed into the document"
+            );
+        }
+        use slint::platform::Key as Slint;
+        assert_eq!(
+            translate_key(&char::from(Slint::Insert).to_string()),
+            Some(bp_editor::Key::Insert)
+        );
+        assert_eq!(translate_key(&char::from(Slint::F5).to_string()), None);
+    }
+
+    #[test]
+    fn text_input_is_given_a_page_height_so_page_up_and_down_move() {
+        // `TextInput` refuses to page when `page-height` is not taller than
+        // a line, and it defaults to zero -- so for as long as nothing set
+        // it, Page Up and Page Down did nothing at all in the default
+        // surface. No Rust test can see a `.slint` property, so this reads
+        // the source, as `menus.rs` does for the menu bar. Found by driving
+        // the window; confirmed there after the fix.
+        const SOURCE: &str = include_str!("../ui/app.slint");
+        assert!(
+            SOURCE.contains("page-height: editor-scroll.height;"),
+            "the document's TextInput has lost its page height"
+        );
+    }
+
+    #[test]
     fn ordinary_text_is_not_mistaken_for_a_named_key() {
         assert_eq!(translate_key("a"), Some(bp_editor::Key::Char('a')));
         assert_eq!(translate_key("日"), Some(bp_editor::Key::Char('日')));
@@ -352,6 +496,97 @@ mod tests {
 
         assert_eq!(state.active_text(), "hi");
         assert!(state.workspace.active().unwrap().is_dirty());
+    }
+
+    #[test]
+    fn the_insert_key_toggles_overtype_and_typing_then_replaces() {
+        let mut state = AppState::new();
+        state.editor_view = true;
+        state.edit("cat".to_owned());
+        if let Some(editor) = state.active_editor_mut() {
+            editor.set_cursor(1);
+        }
+
+        assert!(apply_editor_command(
+            &mut state,
+            &bp_editor::Command::ToggleOverwrite
+        ));
+        assert!(state.overwrite);
+        assert!(apply_editor_command(
+            &mut state,
+            &bp_editor::Command::Insert("u".to_owned())
+        ));
+        assert_eq!(state.active_text(), "cut");
+
+        assert!(apply_editor_command(
+            &mut state,
+            &bp_editor::Command::ToggleOverwrite
+        ));
+        assert!(!state.overwrite, "a second press turns it back off");
+        apply_editor_command(&mut state, &bp_editor::Command::Insert("s".to_owned()));
+        assert_eq!(state.active_text(), "cust", "and typing inserts again");
+    }
+
+    #[test]
+    fn shift_and_ctrl_insert_are_the_clipboard_and_leave_the_mode_alone() {
+        let mut state = AppState::new();
+        let shift = bp_editor::Modifiers {
+            shift: true,
+            ..bp_editor::Modifiers::default()
+        };
+        let ctrl = bp_editor::Modifiers {
+            control: true,
+            ..bp_editor::Modifiers::default()
+        };
+        assert_eq!(insert_key(&mut state, shift), InsertKey::Paste);
+        assert_eq!(insert_key(&mut state, ctrl), InsertKey::Copy);
+        assert!(!state.overwrite);
+        assert_eq!(
+            insert_key(&mut state, bp_editor::Modifiers::default()),
+            InsertKey::Toggled
+        );
+        assert!(state.overwrite);
+    }
+
+    #[test]
+    fn under_text_input_overtype_selects_exactly_what_the_keystroke_replaces() {
+        use slint::platform::Key as Slint;
+
+        let none = bp_editor::Modifiers::default();
+        let mut state = AppState::new();
+        state.edit("日本語\nx".to_owned());
+
+        assert_eq!(
+            overtype_end(&state, 3, 3, "a", none),
+            None,
+            "nothing while the mode is off"
+        );
+        state.overwrite = true;
+        // Byte 3 is after 日; the keystroke replaces 本, which ends at 6.
+        assert_eq!(overtype_end(&state, 3, 3, "a", none), Some(6));
+        assert_eq!(
+            overtype_end(&state, 9, 9, "a", none),
+            None,
+            "the line break is never overtyped"
+        );
+        assert_eq!(
+            overtype_end(&state, 0, 3, "a", none),
+            None,
+            "a selection is replaced as it stands"
+        );
+        let enter = char::from(Slint::Return).to_string();
+        assert_eq!(overtype_end(&state, 3, 3, &enter, none), None);
+        let left = char::from(Slint::LeftArrow).to_string();
+        assert_eq!(overtype_end(&state, 3, 3, &left, none), None);
+        let ctrl = bp_editor::Modifiers {
+            control: true,
+            ..none
+        };
+        assert_eq!(
+            overtype_end(&state, 3, 3, "s", ctrl),
+            None,
+            "Ctrl+S must save, not eat a character"
+        );
     }
 
     #[test]

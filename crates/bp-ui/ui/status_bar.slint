@@ -19,6 +19,10 @@ export component StatusBar inherits Rectangle {
     in property <string> encoding-label;
     in property <string> line-ending-label;
     in property <string> cursor-label;
+    /// Overtype mode. Shown only while it is on, like the security label:
+    /// insert is the ordinary case, and a mode that changes what every
+    /// keystroke does is the one thing a reader must be able to see.
+    in property <bool> overwrite;
     in property <string> theme-name;
     /// The active document's security profile, or empty under the default.
     ///
@@ -63,6 +67,12 @@ export component StatusBar inherits Rectangle {
             StatusText { text: "│ " + root.encoding-label; }
             StatusText { text: "│ " + root.line-ending-label; }
             StatusText { text: "│ " + root.cursor-label; }
+            if root.overwrite: Text {
+                text: "│ Overtype";
+                color: Palette.accent;
+                font-size: 12px;
+                vertical-alignment: center;
+            }
             // In the accent, like the theme name and the dirty marker: it
             // only appears when it has something to say, and when it does it
             // is a statement about where this document's data may go.

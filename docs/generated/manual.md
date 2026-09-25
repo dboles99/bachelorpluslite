@@ -356,6 +356,27 @@ so the two cannot disagree.
 with `--editor-view` to get it. See
 [The two editor surfaces](#the-two-editor-surfaces) below.
 
+### Overtype
+
+**Insert** switches between inserting and overtyping, as it does in Notepad.
+While overtype is on, the status bar says **Overtype**, the caret is drawn
+heavier, and each character you type replaces the one after the caret.
+
+It never replaces the end of a line. Typing past it adds to the line rather
+than pulling the next one up, and Enter still splits the line. A selection is
+replaced whole, in either mode.
+
+`Ctrl+Insert` and `Shift+Insert` are copy and paste, and leave the mode alone.
+The mode belongs to the window, not to a document: it stays as it is when you
+switch tabs, and it is off whenever the program starts.
+
+It works in both [editor surfaces](#the-two-editor-surfaces), with one
+difference in undo. In the default surface each overtyped character takes two
+presses of `Ctrl+Z` to undo, because the toolkit's text widget records a
+replacement as a removal and an insertion. Nothing is lost -- it is only
+slower. Under `--editor-view` a run of overtyping undoes in one step, the way
+a run of typing does.
+
 ### Zoom
 
 `Ctrl+=` and `Ctrl+-` change the editor font size; `Ctrl+0` puts it back.
@@ -1246,6 +1267,9 @@ this page cannot disagree.
 | `Ctrl+Z / Ctrl+Y` | Undo / Redo |
 | `Ctrl+X/C/V` | Cut / Copy / Paste |
 | `Ctrl+A` | Select all |
+| `Insert` | Overtype on / off |
+| `Ctrl+Insert` | Copy |
+| `Shift+Insert` | Paste |
 | `Ctrl+= / Ctrl+-` | Zoom in / out |
 | `Ctrl+0` | Reset zoom |
 | `Ctrl+D` | Duplicate line |

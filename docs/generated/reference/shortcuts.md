@@ -17,6 +17,9 @@ this page cannot disagree.
 | `Ctrl+Z / Ctrl+Y` | Undo / Redo |
 | `Ctrl+X/C/V` | Cut / Copy / Paste |
 | `Ctrl+A` | Select all |
+| `Insert` | Overtype on / off |
+| `Ctrl+Insert` | Copy |
+| `Shift+Insert` | Paste |
 | `Ctrl+= / Ctrl+-` | Zoom in / out |
 | `Ctrl+0` | Reset zoom |
 | `Ctrl+D` | Duplicate line |

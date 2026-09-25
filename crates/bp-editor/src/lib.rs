@@ -52,6 +52,10 @@ struct Transaction {
 enum Coalesce {
     /// A run of ordinary typing is in progress.
     Typing,
+    /// A run of overtyping is in progress. Kept apart from `Typing` because
+    /// the two merge differently: typing extends one `Insert`, while each
+    /// overtyped character is a removal *and* an insertion.
+    Overtyping,
     /// The run ended; the next edit starts a new undo entry.
     Closed,
 }
@@ -172,6 +176,29 @@ impl Default for Editor {
     fn default() -> Self {
         Self::new("")
     }
+}
+
+/// What typing `count` characters at `at` replaces in overtype mode.
+///
+/// One character per character typed, stopping at the end of the line. The
+/// line break is never overtyped: typing past the end of a line would
+/// otherwise pull the next line up onto it, one keystroke at a time, which
+/// no editor with the mode does and no user means. Past that point the
+/// typing is ordinary insertion -- the span is simply shorter than `count`.
+///
+/// A free function over a [`Buffer`] rather than a method, because the shell
+/// asks it too: under `TextInput` the widget does the typing, and all this
+/// crate can do is say what to select first so the widget replaces it.
+pub fn overtype_span(buffer: &Buffer, at: usize, count: usize) -> Range<usize> {
+    let mut end = at;
+    while end < at.saturating_add(count)
+        && buffer
+            .char_at(end)
+            .is_some_and(|ch| ch != '\n' && ch != '\r')
+    {
+        end += 1;
+    }
+    at..end
 }
 
 impl Editor {
@@ -630,6 +657,45 @@ impl Editor {
         self.commit(ops, cursor_before, typing);
     }
 
+    /// Type `text` over what follows the caret, as the Insert key's other
+    /// mode does.
+    ///
+    /// Falls back to [`insert`](Self::insert) for a selection and for a line
+    /// break. A selection is replaced whichever mode is on -- that is what
+    /// typing over a selection already means -- and Enter in overtype mode
+    /// splits the line rather than eating the character after the caret,
+    /// which is what every editor with the mode does and what a user
+    /// pressing Enter expects.
+    ///
+    /// What is overtyped stops at the end of the line: see [`overtype_span`].
+    pub fn overtype(&mut self, text: &str) {
+        if text.is_empty() {
+            return;
+        }
+        if self.selection().is_some() || text.contains(['\n', '\r']) {
+            self.insert(text);
+            return;
+        }
+        let cursor_before = self.cursor;
+        let at = self.cursor;
+        let span = overtype_span(&self.buffer, at, text.chars().count());
+
+        let mut ops = Vec::new();
+        if !span.is_empty() {
+            let removed = self.buffer.slice(span.clone());
+            self.buffer.remove(span);
+            ops.push(Op::Remove { at, text: removed });
+        }
+        self.buffer.insert(at, text);
+        self.cursor = at + text.chars().count();
+        self.anchor = self.cursor;
+        ops.push(Op::Insert {
+            at,
+            text: text.to_owned(),
+        });
+        self.commit_overtype(ops, cursor_before);
+    }
+
     /// Backspace. Deletes the selection if there is one.
     pub fn delete_backward(&mut self) {
         if self.selection().is_some() {
@@ -901,6 +967,34 @@ impl Editor {
         };
     }
 
+    /// Record an overtyped keystroke, folding it into the run before it.
+    ///
+    /// Not [`commit`](Self::commit)'s merge, which extends the last `Insert`
+    /// in place: an overtyped character also removed one, and an undo that
+    /// put back the typing without the text it replaced would lose that text.
+    /// So the run keeps every op, in order, and `undo` already inverts a
+    /// transaction back to front.
+    fn commit_overtype(&mut self, ops: Vec<Op>, cursor_before: usize) {
+        self.redo.clear();
+        self.goal_column = None;
+
+        if self.coalesce == Coalesce::Overtyping
+            && let Some(last) = self.undo.last_mut()
+            && last.cursor_after == cursor_before
+        {
+            last.ops.extend(ops);
+            last.cursor_after = self.cursor;
+            return;
+        }
+
+        self.undo.push(Transaction {
+            ops,
+            cursor_before,
+            cursor_after: self.cursor,
+        });
+        self.coalesce = Coalesce::Overtyping;
+    }
+
     pub fn can_undo(&self) -> bool {
         !self.undo.is_empty()
     }
@@ -1005,7 +1099,11 @@ impl Editor {
                 self.select_all();
                 false
             }
-            Command::Copy | Command::Cut | Command::Paste | Command::Ignore => false,
+            Command::Copy
+            | Command::Cut
+            | Command::Paste
+            | Command::ToggleOverwrite
+            | Command::Ignore => false,
         }
     }
 
@@ -2222,5 +2320,137 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn overtyping_replaces_the_character_after_the_caret() {
+        let mut e = Editor::new("cat");
+        e.set_cursor(1);
+        e.overtype("u");
+        assert_eq!(e.text(), "cut");
+        assert_eq!(e.cursor(), 2, "the caret moves past what it typed");
+    }
+
+    #[test]
+    fn overtyping_never_eats_the_line_break() {
+        // Typing past the end of a line must not pull the next line up.
+        let mut e = Editor::new("ab\ncd");
+        e.set_cursor(1);
+        for ch in "xyz".chars() {
+            e.overtype(&ch.to_string());
+        }
+        assert_eq!(e.text(), "axyz\ncd");
+    }
+
+    #[test]
+    fn overtyping_stops_at_a_crlf_as_well_as_a_bare_lf() {
+        let mut e = Editor::new("ab\r\ncd");
+        e.set_cursor(2);
+        e.overtype("x");
+        assert_eq!(e.text(), "abx\r\ncd");
+    }
+
+    #[test]
+    fn overtyping_at_the_end_of_the_document_appends() {
+        let mut e = Editor::new("ab");
+        e.set_cursor(2);
+        e.overtype("c");
+        assert_eq!(e.text(), "abc");
+    }
+
+    #[test]
+    fn enter_in_overtype_mode_splits_the_line_rather_than_replacing() {
+        let mut e = Editor::new("abc");
+        e.set_cursor(1);
+        e.overtype("\n");
+        assert_eq!(e.text(), "a\nbc", "nothing after the caret may be lost");
+    }
+
+    #[test]
+    fn overtyping_a_selection_replaces_the_selection_only() {
+        let mut e = Editor::new("hello world");
+        e.select(0, 5);
+        e.overtype("J");
+        assert_eq!(
+            e.text(),
+            "J world",
+            "a selection is replaced whole, and the character after it survives"
+        );
+    }
+
+    #[test]
+    fn an_overtyped_word_undoes_as_one_step_and_restores_what_it_covered() {
+        // The removal half is what an Insert-only merge would have lost.
+        let mut e = Editor::new("hello");
+        e.set_cursor(0);
+        for ch in "jelly".chars() {
+            e.overtype(&ch.to_string());
+        }
+        assert_eq!(e.text(), "jelly");
+        assert!(e.undo());
+        assert_eq!(
+            e.text(),
+            "hello",
+            "one undo puts back every replaced character"
+        );
+        assert_eq!(e.cursor(), 0);
+        assert!(!e.can_undo(), "the whole run was one entry");
+        assert!(e.redo());
+        assert_eq!(e.text(), "jelly");
+    }
+
+    #[test]
+    fn an_overtyping_run_that_crosses_the_end_of_the_line_is_still_one_step() {
+        let mut e = Editor::new("ab");
+        e.set_cursor(0);
+        for ch in "wxyz".chars() {
+            e.overtype(&ch.to_string());
+        }
+        assert_eq!(e.text(), "wxyz");
+        assert!(e.undo());
+        assert_eq!(e.text(), "ab");
+        assert!(!e.can_undo());
+    }
+
+    #[test]
+    fn moving_the_caret_ends_an_overtyping_run() {
+        let mut e = Editor::new("abcd");
+        e.set_cursor(0);
+        e.overtype("x");
+        e.set_cursor(3);
+        e.overtype("y");
+        assert_eq!(e.text(), "xbcy");
+        assert!(e.undo());
+        assert_eq!(e.text(), "xbcd", "the second run undoes on its own");
+    }
+
+    #[test]
+    fn overtyping_does_not_merge_into_ordinary_typing() {
+        let mut e = Editor::new("abc");
+        e.set_cursor(0);
+        e.insert("x");
+        e.overtype("y");
+        assert_eq!(e.text(), "xybc");
+        assert!(e.undo());
+        assert_eq!(e.text(), "xabc", "switching mode starts a new entry");
+    }
+
+    #[test]
+    fn the_overtype_span_is_counted_in_characters_not_bytes() {
+        let buffer = Buffer::from_text("日本語\n");
+        assert_eq!(overtype_span(&buffer, 1, 5), 1..3);
+        assert_eq!(
+            overtype_span(&buffer, 3, 1),
+            3..3,
+            "the line break is never in it"
+        );
+    }
+
+    #[test]
+    fn toggling_overwrite_is_not_an_edit() {
+        let mut e = Editor::new("abc");
+        assert!(!e.apply(&Command::ToggleOverwrite));
+        assert_eq!(e.text(), "abc");
+        assert!(!e.can_undo());
     }
 }

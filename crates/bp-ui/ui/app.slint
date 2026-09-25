@@ -146,6 +146,17 @@ export component AppWindow inherits Window {
     in property <int> caret-column;
 
     callback editor-key(string, bool, bool, bool) -> bool;
+
+    /// Overtype mode -- the Insert key. Both surfaces read it; Rust owns it.
+    in property <bool> overwrite;
+    /// The Insert key under `TextInput`, which answers "toggled", "copy" or
+    /// "paste" -- `bp_editor::keys` decides, so Shift+Insert means the same
+    /// thing on both surfaces.
+    callback insert-key(bool, bool, bool) -> string;
+    /// Under `TextInput`: where to extend the selection before a keystroke so
+    /// the widget's own insertion overtypes, or -1 to leave it alone. Takes
+    /// the caret and anchor as the widget reports them, in UTF-8 bytes.
+    callback overtype-end(int, int, string, bool, bool, bool) -> int;
     callback editor-pressed(int, int, bool);
     /// Double- and triple-click. `EditorSurface` decides which a press was;
     /// these only carry the answer, so the counting lives in one place rather
@@ -652,6 +663,7 @@ export component AppWindow inherits Window {
                     caret-column: root.caret-column;
                     show-gutter: root.show-gutter;
                     font-size: root.font-size;
+                    overwrite: root.overwrite;
 
                     key(text, control, shift, alt) => {
                         return root.editor-key(text, control, shift, alt);
@@ -705,8 +717,51 @@ export component AppWindow inherits Window {
                             single-line: false;
                             wrap: root.wrap-text ? word-wrap : no-wrap;
                             horizontal-stretch: 1;
+                            // **Page Up and Page Down did nothing without
+                            // this.** `TextInput` pages by `page-height` and
+                            // refuses to move when it is not taller than a
+                            // line -- and it defaults to zero. Inside a
+                            // `Flickable` the widget is as tall as the whole
+                            // document, so its own height would page to the
+                            // end; the page is what the reader can see.
+                            // Slint's `TextEdit` sets it the same way.
+                            page-height: editor-scroll.height;
+                            // A thicker bar in overtype mode rather than a
+                            // block: this caret is drawn in the text colour,
+                            // so a block would hide the character it is about
+                            // to replace. 1px is the Fluent style's default,
+                            // which is the style this crate compiles with.
+                            text-cursor-width: root.overwrite ? max(3px, root.font-size * 0.2) : 1px;
                             edited => {
                                 root.text-edited(self.text);
+                            }
+
+                            // Insert, and overtyping, which `TextInput` has
+                            // no mode for. This handler runs before the
+                            // widget's own; rejecting lets the key through.
+                            key-pressed(event) => {
+                                if (event.text == Key.Insert) {
+                                    let what = root.insert-key(event.modifiers.control, event.modifiers.shift, event.modifiers.alt);
+                                    if (what == "copy") {
+                                        self.copy();
+                                    } else if (what == "paste") {
+                                        self.paste();
+                                    }
+                                    return accept;
+                                }
+                                if (root.overwrite) {
+                                    let end = root.overtype-end(
+                                        self.cursor-position-byte-offset,
+                                        self.anchor-position-byte-offset,
+                                        event.text,
+                                        event.modifiers.control,
+                                        event.modifiers.shift,
+                                        event.modifiers.alt);
+                                    if (end >= 0) {
+                                        self.set-selection-offsets(self.cursor-position-byte-offset, end);
+                                    }
+                                }
+                                return reject;
                             }
 
                             // **Scroll the caret into view.** `TextInput`
@@ -842,6 +897,7 @@ export component AppWindow inherits Window {
                 encoding-label: root.encoding-label;
                 line-ending-label: root.line-ending-label;
                 cursor-label: root.cursor-label;
+                overwrite: root.overwrite;
                 security-label: root.security-profile;
                 theme-name: root.theme-name;
                 location: root.location;

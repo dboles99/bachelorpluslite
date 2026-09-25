@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+# Drive the Linux build's window with no display and no person, and report
+# where the caret went as a diff rather than a picture (ADR-0080).
+#
+# Opens a 200-line fixture, clicks into it, presses each key in KEYS, saves
+# with Ctrl+S, and prints what changed. Put a marker letter after the key
+# under test -- "ctrl+Home A Page_Down F" -- and where F lands in the saved
+# file is where Page Down put the caret. Evidence in bytes: nothing to
+# interpret.
+#
+#   scripts/drive-window-xvfb.sh "ctrl+Home A Page_Down F"
+#   scripts/drive-window-xvfb.sh "ctrl+Home Insert X Y" --editor-view
+#
+# Needs Xvfb, xdotool, imagemagick (for the screenshot) and libxkbcommon-x11
+# -- `apt-get install xvfb xdotool imagemagick libxkbcommon-x11-0`. Builds
+# nothing; run `cargo build -p bachelorpad` first.
+#
+# **A run where nothing at all changed is the harness, not the product.** With
+# no window manager the first input after the window maps is sometimes lost,
+# and then every key after it is too. Rerun it before believing it.
+#
+# **And suspect the probe before the product.** Slint re-selects the text an
+# undo restores, so a marker typed straight after Ctrl+Z replaces what came
+# back and reads as data loss. Send the marker somewhere neutral -- End, then
+# the letter -- whenever the key under test can leave a selection behind.
+set -u
+
+keys=${1:?usage: drive-window-xvfb.sh "<xdotool keys>" [flag]}
+flag=${2:-}
+root=$(cd "$(dirname "$0")/.." && pwd)
+bin="$root/target/debug/bachelorpad"
+[ -x "$bin" ] || { echo "no $bin -- run: cargo build -p bachelorpad" >&2; exit 2; }
+
+# A throwaway profile, so a run never writes to the real one (trap 1) and
+# never meets a recovery journal an earlier run left behind.
+run=$(mktemp -d)
+trap 'rm -rf "$run"' EXIT
+export HOME=$run/home XDG_CONFIG_HOME=$run/config XDG_DATA_HOME=$run/data \
+    XDG_STATE_HOME=$run/state XDG_CACHE_HOME=$run/cache
+mkdir -p "$HOME" "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME"
+
+fixture() { for i in $(seq -w 1 200); do echo "line $i abcdefghij"; done; }
+fixture > "$run/doc.txt"
+
+export DISPLAY=${XVFB_DISPLAY:-:99}
+unset WAYLAND_DISPLAY
+export SLINT_BACKEND=${SLINT_BACKEND:-winit-software}
+if ! xdotool getmouselocation >/dev/null 2>&1; then
+    Xvfb "$DISPLAY" -screen 0 1280x900x24 >/dev/null 2>&1 &
+    sleep 2
+fi
+# Two instances at the same origin take each other's clicks.
+for p in $(pgrep -x bachelorpad); do kill "$p"; done
+
+# shellcheck disable=SC2086 -- an empty flag must vanish, not become "".
+"$bin" $flag "$run/doc.txt" >"$run/app.log" 2>&1 &
+app=$!
+window=
+for _ in $(seq 1 60); do
+    window=$(xdotool search --pid "$app" 2>/dev/null | tail -1)
+    [ -n "$window" ] && break
+    sleep 0.5
+done
+[ -n "$window" ] || { echo "no window appeared" >&2; cat "$run/app.log" >&2; kill "$app"; exit 1; }
+sleep 6
+
+xdotool windowfocus "$window"
+sleep 0.3
+xdotool mousemove 100 70 click 1
+sleep 1
+xdotool windowfocus "$window"
+xdotool click 1
+sleep 1
+for key in $keys; do
+    xdotool key --delay 80 "$key"
+    sleep 0.25
+done
+xdotool key ctrl+s
+sleep 1.5
+import -window root "${SCREENSHOT:-/dev/null}" 2>/dev/null || true
+kill "$app" 2>/dev/null
+wait "$app" 2>/dev/null
+
+diff <(fixture) "$run/doc.txt" | cat -A | sed 's/\$$//'
+exit 0
