@@ -265,40 +265,6 @@ pre {
 }
 pre code { background: none; padding: 0; }
 
-/* --- the countdown ----------------------------------------------------- */
-
-.countdown {
-  display: flex;
-  gap: .8rem;
-  flex-wrap: wrap;
-  margin: 1.4rem 0 1.8rem;
-}
-.dial {
-  background: var(--panel);
-  border: 3px solid var(--rule);
-  border-radius: 6px;
-  box-shadow: var(--shadow);
-  padding: .8rem 1rem;
-  min-width: 5.2rem;
-  text-align: center;
-}
-.dial .n {
-  display: block;
-  font-family: var(--mono);
-  font-size: 2rem;
-  font-weight: 700;
-  line-height: 1;
-  font-variant-numeric: tabular-nums;
-  color: var(--amber-deep);
-}
-.dial .l {
-  font-family: var(--mono);
-  font-size: .7rem;
-  letter-spacing: .12em;
-  text-transform: uppercase;
-  color: var(--ink-soft);
-}
-
 /* --- the form ---------------------------------------------------------- */
 
 form.waitlist { margin: 1.5rem 0 0; }

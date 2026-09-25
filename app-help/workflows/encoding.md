@@ -4,10 +4,21 @@
 
 **Format > Encoding** offers **UTF-8** and **UTF-8 with BOM**.
 
-That is the whole list, and it is a decision rather than an unfinished one.
-Legacy code pages are a way to lose text: a document saved as one and opened
-as another is silently wrong, and nothing in the file says which it was. UTF-8
-is what everything else on both supported platforms now writes.
+A document can also be opened in **UTF-16**, with a byte-order mark, and is
+saved back that way.
+
+**A file in a legacy code page is refused today.** Windows-1252, Shift-JIS
+and GBK text with any accented or non-Latin character stops at *not valid
+UTF-8*. Notepad opens them.
+
+**UTF-16 with no byte-order mark is worse: it is taken for UTF-8.** Mostly
+Latin text in it is valid UTF-8 byte for byte, so it opens with an invisible
+NUL between every character. Saving writes back exactly what was read, so
+nothing is lost, but it is not readable here.
+
+Reading both properly, and saving them back in the encoding they came in, is
+decided and not yet built ([ADR-0085](https://bpad.prompt-forge.dev/docs)). Until it is,
+open such a file in Notepad and save it as UTF-8 there.
 
 The BOM variant exists because some Windows tools still want it.
 

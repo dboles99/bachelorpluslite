@@ -5,8 +5,9 @@ macOS is not built, and [ADR-0072](https://bpad.prompt-forge.dev/docs) says why.
 
 **There is no installer, and that is a decision**
 ([ADR-0067](https://bpad.prompt-forge.dev/docs)). You unpack an archive wherever you
-want the program to live and run it. Nothing is written outside that folder
-until you ask for it.
+want the program to live and run it. Nothing is written into that folder;
+what the product keeps about itself goes in your user profile, and
+[Where it puts things](#where-it-puts-things) lists every directory.
 
 ## Download
 
@@ -80,7 +81,9 @@ symlink are both set inside the archive, so neither needs restoring.
 ## First launch
 
 The window opens on an empty, unsaved document called *Untitled*. Nothing has
-been written anywhere yet, and nothing will be until you save.
+been written anywhere yet. Once you type, the recovery journal starts keeping
+a copy of the unsaved work in your profile, so a crash does not cost it --
+see [Undo and recovery](../troubleshooting/recovery.md).
 
 Three things worth doing once:
 

@@ -4,7 +4,7 @@
 
 ## What this is
 
-BachelorPad+ Lite ist ein kostenloser, quelloffener Notepad-Ersatz für Windows und Linux. Alles, was Notepad kann, und eine Sache, die es nicht kann: es weiss, welche Ihrer Notizen dasselbe Thema behandeln, also finden Sie Ihre Überlegungen vom letzten Monat wieder, ohne sich an den Dateinamen zu erinnern. Es startet sofort, arbeitet dauerhaft offline, und es wird nie etwas ausführen oder irgendwohin senden.
+BachelorPad+ Lite ist ein kostenloser, quelloffener Notepad-Ersatz für Windows und Linux. Es bearbeitet reinen Text so wie Notepad und kann dazu eine Sache, die Notepad nicht kann: es weiß, welche Ihrer Notizen dasselbe Thema behandeln, also finden Sie Ihre Überlegungen vom letzten Monat wieder, ohne sich an den Dateinamen zu erinnern. Es startet sofort, arbeitet dauerhaft offline, und es wird nie etwas ausführen oder irgendwohin senden.
 
 Free and open source under GPL-3.0-only. Windows 10, Windows 11 and Linux,
 64-bit. There is no macOS build. Version 0.9.5.
@@ -49,13 +49,16 @@ code-signing certificate has not been bought, and self-signing was refused
 because it would ask a user to install a root certificate they have no reason
 to trust. Every release ships a SHA-256 checksum file.
 
-There is no installer. Unpack the archive anywhere and run it.
+There is no installer. Unpack the archive anywhere and run it. Settings, recent
+files and recovery journals are written to the per-user profile directories,
+not beside the program; the Installation page of the manual lists them.
 
 ## The paid version
 
 BachelorPad+ is the full version: encrypted notes, runnable notebooks,
-structured-data tools, clipboard history and complete privacy controls. It
-arrives on 10 October 2026. The price is not set. Lite stays free either way.
+structured-data tools, clipboard history and complete privacy controls. It is
+in development and has no date. The price is not set. Lite stays free either
+way.
 
 Waitlist: https://bpad.prompt-forge.dev/de/waitlist.html
 
