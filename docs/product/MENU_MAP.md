@@ -83,7 +83,7 @@ asks, so that a menu cannot be added or removed without this line failing.
 | Line Numbers, Word Wrap | **live** |
 | Zoom In / Zoom Out / Reset Zoom | **live** — Ctrl+= / Ctrl+- / Ctrl+0, bounded by `bp_config::{MIN,MAX}_FONT_SIZE`; the rows grey at the bound and the reset row names the size in force |
 | Follow System | **live** — `ThemeId::for_system` resolves the desktop's preference to Light or Dark; a desktop that will not say leaves the theme alone and says so |
-| Split / Preview | **Not a row, and this answers D14** ([ADR-0048](../decisions/ADR-0048.md)). Slint 1.17.1 has no rich-text item — no styled runs, no spans — so bold inside a sentence is not representable, and a preview that silently dropped inline formatting would be worse than none. Handing HTML to the system browser means writing the document's text to a temporary file in plaintext, which is what `Policy::temporary_files` exists to forbid for a Confidential document. Most of what a reader wanted is elsewhere: Note ▸ Outline. Revisit if Slint ships styled text; *Split* was never the hard half |
+| Split / Preview | **Not a row, and D14 is open again** ([ADR-0081](../decisions/ADR-0081.md)). [ADR-0048](../decisions/ADR-0048.md) answered it on the premise that Slint 1.17.1 had no rich-text item; it had one, `StyledText`, public since Slint 1.15, which renders emphasis, links, lists and inline code but not headings, tables or images. Handing HTML to the system browser is still ruled out -- this product launches no programs (ADR-0075). Whether a product reduced to Notepad wants a preview at all is Daniel's question. *Split* -- two panes over one document -- is a separate feature and was never the hard half |
 
 ## Insert
 
@@ -241,8 +241,11 @@ separate event, by which time the pointer has moved.
 
 ## Drag and drop to open
 
-**Blocked on Slint, not on effort.** specs §4 wants files dropped onto the
-window to open. `DropArea` exists and compiles, but on Slint 1.17.1 the winit
-backend has no file-drop plumbing and `DataTransfer` carries only plain text
-or an image — there is no channel a file path could arrive through. It works
-for drags that start inside a Slint window and nowhere else.
+**Not built, and not blocked** ([ADR-0081](../decisions/ADR-0081.md)). specs §4
+wants files dropped onto the window to open. This section said for a month
+that Slint had no channel for it. Slint's winit backend really does not turn
+an OS drop into anything `DropArea` sees -- but the application does not need
+it to: `slint::winit_030::WinitWindowAccessor::on_winit_window_event` hands it
+every winit window event, and `WindowEvent::DroppedFile` is one. It needs the
+`unstable-winit-030` feature, and winit 0.30 reports drops on Windows and X11
+but not on native Wayland.

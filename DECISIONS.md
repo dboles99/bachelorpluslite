@@ -88,6 +88,8 @@ Adding a decision means adding both.
 | BP-ADR-0078 | 2026-09-10 | **Three unmaintained dependencies accepted by name, never as a category.** The first hosted CI run failed on three RustSec advisories the local gate had never been in a position to see, which is the case ADR-0073 made for hosted CI, demonstrated the same day. All three are `unmaintained` rather than `vulnerability`, and all three arrive through Slint. Ignored by id with a reason each, because `unmaintained = "warn"` would silence the next one too, and the next one is the one nobody has looked at | Accepted | [ADR-0078](docs/decisions/ADR-0078.md) |
 | BP-ADR-0079 | 2026-09-10 | **The fuzz harness silences the panic hook, because the hang budget was timing it.** `catch_unwind` does not return until the hook has finished, so with `RUST_BACKTRACE=1` a hosted Windows runner spent the whole 20 second budget symbolising a backtrace and reported an instant panic as a hang, discarding the message. A quiet hook for probe threads only; every other thread keeps the one it had. Raising the budget was rejected -- twenty seconds is not too short, the budget was measuring the wrong thing | Accepted | [ADR-0079](docs/decisions/ADR-0079.md) |
 | BP-ADR-0080 | 2026-09-25 | **The Insert key overtypes, and two surfaces stop mishandling named keys.** Found by driving the window under Xvfb with a marker after every key: Page Up and Page Down did nothing in the default surface, because `TextInput` pages by a `page-height` that defaults to zero and nothing set it; and in `--editor-view` F5, Insert and every unnamed key typed a private-use character into the document. Overtype's rule lives in `bp-editor` and both surfaces ask it -- the line break is never overtyped, a run undoes in one step. Conceded: two Ctrl+Z per character under `TextInput`, and caret offsets Slint marks internal | Accepted | [ADR-0080](docs/decisions/ADR-0080.md) |
+| BP-ADR-0081 | 2026-09-25 | **Two of the three Slint blockers were never blocked.** Checked against both 1.17.1 and 1.18.1 source: input-method composition is still refused by `FocusScope`. But `StyledText` has been public since Slint 1.15, with `StyledText::from_markdown` at runtime, so D14's premise was false the day it was answered; and a dropped file reaches the application through `slint::winit_030::WinitWindowAccessor::on_winit_window_event` without the backend, on Windows and X11 though not native Wayland. The record is corrected, drag and drop is queued, and D14 goes back to Daniel as a question | Accepted | [ADR-0081](docs/decisions/ADR-0081.md) |
+| BP-ADR-0048 | amended 2026-09-25 | Its answer to D14 rested on *"Slint 1.17.1 has no rich-text item"*, which was false -- `StyledText` shipped in 1.15. The answer stands withdrawn and the question is open again ([ADR-0081](docs/decisions/ADR-0081.md)) | Accepted | [ADR-0048](docs/decisions/ADR-0048.md) |
 | BP-ADR-0017 | amended 2026-08-22 | Half of the renderer revert condition is now a number rather than a feeling: per-frame row building, and its independence from document size | Accepted, amended | [ADR-0017](docs/decisions/ADR-0017.md) |
 
 ## Decisions needed before the work they block
@@ -158,6 +160,23 @@ defect vanished when the marker moved to the end of the line, because it had
 never been one. `project/NEXT_SESSION.md` already said to suspect a manual pass
 before the product; the same holds for a scripted one, and **a probe that
 types is an edit, with every consequence an edit has.**
+
+## What re-checking the toolkit taught, 2026-09-25
+
+### A check answers the question it was asked
+
+Drag and drop and Markdown preview were each recorded as *blocked on Slint,
+checked in its source*, and both checks were honest. The drag-and-drop one
+proved that the winit **backend** had no file-drop plumbing, which was true,
+and concluded that the **application** had no route, which was not -- winit's
+events reach it directly ([ADR-0081](docs/decisions/ADR-0081.md)). The preview
+one looked for rich text where `Text` lives and did not find it, while
+`StyledText` had been public for seven months. **Each check looked where the
+author expected the feature to be.** The habit that catches both is cheap:
+before recording a dependency as blocking something, grep its public API for
+the noun -- `StyledText`, `winit_window_event` -- rather than for the
+mechanism you had in mind. And recheck against the *old* version as well as
+the new one, or a blocker that never existed reads as one that lifted.
 
 ## What the gate taught, 2026-09-25
 

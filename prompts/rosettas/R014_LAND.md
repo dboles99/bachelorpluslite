@@ -40,6 +40,14 @@ this way — drag-and-drop and input-method composition — and both name the fi
 and function in the dependency that proves it. A blocker without evidence is a
 guess that will cost somebody an afternoon.
 
+**And checked means the question was the right one.** Drag-and-drop was
+checked, and the check was true -- the winit backend really has no file-drop
+plumbing -- and it was still not a blocker, because the application can take
+winit's events directly ([ADR-0081](../../docs/decisions/ADR-0081.md)). Before
+recording a dependency as blocking something, search its public API for the
+*noun*, not for the mechanism you expected: `grep -rn StyledText` would have
+found the rich-text item that D14 was answered as lacking.
+
 ## Commit
 
 Say *why*, at whatever length that takes. This repository's log is a design

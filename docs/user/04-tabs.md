@@ -25,11 +25,12 @@ answer, and it is the one that works with the window manager you already use.
 
 ## Drag and drop
 
-**Dropping a file on the window does not open it**, and that is a limitation
-rather than a choice. The toolkit's backend carries no file-drop plumbing --
-what it can hand over is plain text or an image, not a path. It is checked
-against each toolkit upgrade and will be built the moment it becomes
-possible.
+**Dropping a file on the window does not open it yet.** This page used to
+call that a toolkit limitation, and it was not one: the drop reaches the
+application through the windowing layer beneath the toolkit, on Windows and on
+an X11 Linux session ([ADR-0081](../decisions/ADR-0081.md)). It is queued. On a
+native Wayland session it will not work even once it is built, because that
+layer does not report a dropped file there.
 
 Use File > Open, Open Recent, or the command line.
 

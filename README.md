@@ -68,10 +68,10 @@ XML and source code. The operations over them left under
 ### What it does not have
 
 No macOS build ([ADR-0072](docs/decisions/ADR-0072.md), which says what it
-would cost). No printing. No Markdown preview -- the toolkit has no rich-text
-item, so inline formatting cannot be rendered at all
-([ADR-0048](docs/decisions/ADR-0048.md)). No drag and drop to open -- the
-toolkit's backend carries no file-drop plumbing. No encryption; that left with
+would cost). No printing. No Markdown preview, which is undecided rather than
+impossible ([ADR-0081](docs/decisions/ADR-0081.md)). No drag and drop to open
+yet -- it is buildable, and does not work on a native Wayland session when it
+is (the same ADR). No encryption; that left with
 [ADR-0064](docs/decisions/ADR-0064.md).
 
 Duplicate line, move line and the Insert menu need `--editor-view`, because

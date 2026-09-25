@@ -248,7 +248,7 @@ storage question is settled independently of which view draws.
 **The parity question is settled, and not in the view's favour.** Word wrap
 is done: a document line can occupy several visual rows, Up and Down move by
 row, and scrolling is anchored to a line *and* a row within it. Input-method
-composition cannot be done at all on Slint 1.17.1 — `FocusScope` rejects
+composition cannot be done at all on Slint 1.17.1 or 1.18.1 ([ADR-0081](docs/decisions/ADR-0081.md)) — `FocusScope` rejects
 `UpdateComposition` and `CommitComposition` and exposes no callback for
 either, and `TextInput` is the only item in the toolkit that consumes them.
 Without it CJK entry does not work, so `--editor-view` stays opt-in and the

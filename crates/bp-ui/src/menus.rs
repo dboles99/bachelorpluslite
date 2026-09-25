@@ -484,24 +484,18 @@ pub fn view(
                 font_size != bp_config::DEFAULT_FONT_SIZE,
             )
         },
-        // **"Split / Preview" is not here, and its absence is the decision**
-        // (ADR-0048, answering D14). Slint 1.17.1 has no rich-text item --
-        // no styled runs, no spans -- so bold inside a sentence is not
-        // representable at all, and a Markdown preview that silently dropped
-        // inline formatting would be worse than none. The alternative, an
-        // HTML file handed to the system browser, means writing the
-        // document's text to a temporary file in plaintext, which is exactly
-        // what `Policy::temporary_files` exists to forbid for a Confidential
-        // document.
+        // **"Split / Preview" is not here, and that is undecided rather than
+        // impossible** (ADR-0081, reopening D14). This comment said for a
+        // month that Slint 1.17.1 had no rich-text item. It had one:
+        // `StyledText`, public since Slint 1.15, built at runtime by
+        // `slint::StyledText::from_markdown`. It renders emphasis, links,
+        // lists and inline code, and not headings, tables or images -- so a
+        // preview is a product decision about a partial rendering, not a
+        // toolkit gap. An HTML file handed to the system browser stays ruled
+        // out: this product launches no programs (ADR-0075).
         //
-        // What a reader actually wanted from it partly exists: Note ▸ Outline
-        // gives the structure. Two of the three answers this comment used to
-        // give were Notebook ▸ Cell Outline and Run, and ADR-0057 removed
-        // both -- so the case for a preview is *stronger* than it was, not
-        // weaker, and it is still blocked on the same toolkit gap.
-        //
-        // Revisit if Slint ships styled text. *Split* -- two panes over one
-        // document -- is a separate feature and was never the hard half.
+        // *Split* -- two panes over one document -- is a separate feature and
+        // was never the hard half.
     ]
 }
 

@@ -289,7 +289,7 @@ else whose drawn width differs from its character count has the same shape.
 **Parity is settled and not in the custom view's favour.** Word wrap is done —
 a document line can occupy several visual rows, Up and Down move by row, and
 scrolling anchors to a line *and* a row within it. Input-method composition
-cannot be done at all on Slint 1.17.1: `FocusScope` returns
+cannot be done at all on Slint 1.17.1, nor on 1.18.1 (ADR-0081): `FocusScope` returns
 `EventResult::Reject` for `UpdateComposition` and `CommitComposition` in both
 its handlers and exposes no callback for either, and `TextInput` is the only
 item in the toolkit that consumes them. Without it CJK entry does not work, so

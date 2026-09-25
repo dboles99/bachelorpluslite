@@ -48,13 +48,13 @@ What recognition is used for:
 
 ## What you cannot do here
 
-**No Markdown preview.** The toolkit has no rich-text item -- no styled runs,
-no spans -- so inline formatting could not be rendered at all, and a preview
-that dropped bold and links would be worse than none
-([ADR-0048](https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0048.md)). Writing it to HTML and opening a
-browser was the other option, and this product does not launch programs.
-
-It is re-checked on every toolkit upgrade.
+**No Markdown preview.** This page used to say the toolkit could not render
+one. It can, and could when that was written: its styled-text element renders
+emphasis, links, lists and inline code, though not headings or tables
+([ADR-0081](https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0081.md)). Whether this product should have a
+preview is now an open question rather than a technical one. Writing it to
+HTML and opening a browser is still ruled out -- this product does not launch
+programs.
 
 **No printing.** It is platform work with no cross-platform story yet, and
 half of it is not a thing worth shipping.

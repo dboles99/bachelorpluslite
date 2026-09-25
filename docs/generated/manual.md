@@ -459,11 +459,12 @@ answer, and it is the one that works with the window manager you already use.
 
 ### Drag and drop
 
-**Dropping a file on the window does not open it**, and that is a limitation
-rather than a choice. The toolkit's backend carries no file-drop plumbing --
-what it can hand over is plain text or an image, not a path. It is checked
-against each toolkit upgrade and will be built the moment it becomes
-possible.
+**Dropping a file on the window does not open it yet.** This page used to
+call that a toolkit limitation, and it was not one: the drop reaches the
+application through the windowing layer beneath the toolkit, on Windows and on
+an X11 Linux session ([ADR-0081](../decisions/ADR-0081.md)). It is queued. On a
+native Wayland session it will not work even once it is built, because that
+layer does not report a dropped file there.
 
 Use File > Open, Open Recent, or the command line.
 
@@ -694,13 +695,13 @@ What recognition is used for:
 
 ### What you cannot do here
 
-**No Markdown preview.** The toolkit has no rich-text item -- no styled runs,
-no spans -- so inline formatting could not be rendered at all, and a preview
-that dropped bold and links would be worse than none
-([ADR-0048](../decisions/ADR-0048.md)). Writing it to HTML and opening a
-browser was the other option, and this product does not launch programs.
-
-It is re-checked on every toolkit upgrade.
+**No Markdown preview.** This page used to say the toolkit could not render
+one. It can, and could when that was written: its styled-text element renders
+emphasis, links, lists and inline code, though not headings or tables
+([ADR-0081](../decisions/ADR-0081.md)). Whether this product should have a
+preview is now an open question rather than a technical one. Writing it to
+HTML and opening a browser is still ruled out -- this product does not launch
+programs.
 
 **No printing.** It is platform work with no cross-platform story yet, and
 half of it is not a thing worth shipping.
@@ -1221,8 +1222,10 @@ caret is -- and a feature that has to know cannot be built on it
 
 ### Dropping a file on the window does nothing
 
-Not implemented, and not by choice: the toolkit's backend carries no file-drop
-plumbing. Use File > Open, Open Recent, or name the file on the command line.
+Not implemented yet. It is buildable on Windows and on an X11 Linux session,
+and will not work on a native Wayland one, whose window system does not hand
+this toolkit a dropped file ([ADR-0081](../decisions/ADR-0081.md)). Until
+then, use File > Open, Open Recent, or name the file on the command line.
 
 ### A file opens as gibberish
 
@@ -1396,7 +1399,7 @@ because it has to know where the caret is (ADR-0018).
 | Line Numbers, Word Wrap | **live** |
 | Zoom In / Zoom Out / Reset Zoom | **live** — Ctrl+= / Ctrl+- / Ctrl+0, bounded by `bp_config::{MIN,MAX}_FONT_SIZE`; the rows grey at the bound and the reset row names the size in force |
 | Follow System | **live** — `ThemeId::for_system` resolves the desktop's preference to Light or Dark; a desktop that will not say leaves the theme alone and says so |
-| Split / Preview | **Not a row, and this answers D14** ([ADR-0048](../decisions/ADR-0048.md)). Slint 1.17.1 has no rich-text item — no styled runs, no spans — so bold inside a sentence is not representable, and a preview that silently dropped inline formatting would be worse than none. Handing HTML to the system browser means writing the document's text to a temporary file in plaintext, which is what `Policy::temporary_files` exists to forbid for a Confidential document. Most of what a reader wanted is elsewhere: Note ▸ Outline. Revisit if Slint ships styled text; *Split* was never the hard half |
+| Split / Preview | **Not a row, and D14 is open again** ([ADR-0081](../decisions/ADR-0081.md)). [ADR-0048](../decisions/ADR-0048.md) answered it on the premise that Slint 1.17.1 had no rich-text item; it had one, `StyledText`, public since Slint 1.15, which renders emphasis, links, lists and inline code but not headings, tables or images. Handing HTML to the system browser is still ruled out -- this product launches no programs (ADR-0075). Whether a product reduced to Notepad wants a preview at all is Daniel's question. *Split* -- two panes over one document -- is a separate feature and was never the hard half |
 
 ### Insert
 

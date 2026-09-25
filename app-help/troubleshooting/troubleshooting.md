@@ -78,8 +78,10 @@ caret is -- and a feature that has to know cannot be built on it
 
 ## Dropping a file on the window does nothing
 
-Not implemented, and not by choice: the toolkit's backend carries no file-drop
-plumbing. Use File > Open, Open Recent, or name the file on the command line.
+Not implemented yet. It is buildable on Windows and on an X11 Linux session,
+and will not work on a native Wayland one, whose window system does not hand
+this toolkit a dropped file ([ADR-0081](https://bpad.prompt-forge.dev/docs)). Until
+then, use File > Open, Open Recent, or name the file on the command line.
 
 ## A file opens as gibberish
 

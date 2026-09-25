@@ -47,7 +47,7 @@ because it has to know where the caret is (ADR-0018).
 | Line Numbers, Word Wrap | **live** |
 | Zoom In / Zoom Out / Reset Zoom | **live** — Ctrl+= / Ctrl+- / Ctrl+0, bounded by `bp_config::{MIN,MAX}_FONT_SIZE`; the rows grey at the bound and the reset row names the size in force |
 | Follow System | **live** — `ThemeId::for_system` resolves the desktop's preference to Light or Dark; a desktop that will not say leaves the theme alone and says so |
-| Split / Preview | **Not a row, and this answers D14** ([ADR-0048](https://bpad.prompt-forge.dev/docs)). Slint 1.17.1 has no rich-text item — no styled runs, no spans — so bold inside a sentence is not representable, and a preview that silently dropped inline formatting would be worse than none. Handing HTML to the system browser means writing the document's text to a temporary file in plaintext, which is what `Policy::temporary_files` exists to forbid for a Confidential document. Most of what a reader wanted is elsewhere: Note ▸ Outline. Revisit if Slint ships styled text; *Split* was never the hard half |
+| Split / Preview | **Not a row, and D14 is open again** ([ADR-0081](https://bpad.prompt-forge.dev/docs)). [ADR-0048](https://bpad.prompt-forge.dev/docs) answered it on the premise that Slint 1.17.1 had no rich-text item; it had one, `StyledText`, public since Slint 1.15, which renders emphasis, links, lists and inline code but not headings, tables or images. Handing HTML to the system browser is still ruled out -- this product launches no programs (ADR-0075). Whether a product reduced to Notepad wants a preview at all is Daniel's question. *Split* -- two panes over one document -- is a separate feature and was never the hard half |
 
 ## Insert
 
