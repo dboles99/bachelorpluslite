@@ -160,7 +160,7 @@ function Skip-Stage {
 
 Push-Location $Root
 try {
-    Write-Host "BachelorPad+ local CI" -ForegroundColor White
+    Write-Host "BachelorPad+ Lite local CI" -ForegroundColor White
     Write-Host ("  root:     {0}" -f $Root)
     Write-Host ("  rustc:    {0}" -f (rustc --version))
     Write-Host ("  cargo:    {0}" -f (cargo --version))
@@ -181,6 +181,99 @@ try {
     }
 
     Invoke-Stage 'clippy' { cargo clippy --workspace --all-targets -- -D warnings }
+
+    # --- the licence, which is a claim like any other --------------------
+    #
+    # ADR-0071 relicensed this project to GPL-3.0-only, and that rests on
+    # every crate the binary links being compatible with those terms. It was
+    # true when it was checked by hand, and a hand-check is a wish (trap 3):
+    # one `cargo add` of an AGPL or SSPL crate makes it false and nothing
+    # fails. `deny.toml` is the allow-list; this is what reads it.
+    #
+    # `licenses` only, not `cargo deny check`. Advisories need the RustSec
+    # database over the network, and a gate that fails on a train is a gate
+    # people learn to skip -- CI runs the advisory leg, where a network is a
+    # promise rather than a hope.
+    #
+    # Optional, exactly like nextest: a fresh clone without cargo-deny gets a
+    # skip with the reason, not a broken gate.
+    if ($null -ne (Get-Command cargo-deny -ErrorAction SilentlyContinue)) {
+        Invoke-Stage 'licences' { cargo deny check licenses }
+    }
+    else {
+        Skip-Stage 'licences' 'cargo-deny not installed (cargo install cargo-deny)'
+    }
+
+    # --- and the notices, which are that claim written out ----------------
+    #
+    # THIRD-PARTY-NOTICES.md ships in both archives because GPL-3.0-only
+    # obliges this project to pass on the terms of the ~600 crates it
+    # redistributes. It is generated, so the only way it can be wrong is by
+    # going stale, and staleness is exactly what nothing would notice.
+    #
+    # Skipped in quick mode for the reason `check (locked)` is: it re-resolves
+    # the dependency graph, and the graph cannot move without a manifest
+    # moving. pre-push runs it.
+    if ($Quick) {
+        Skip-Stage 'notices' 'quick mode -- pre-push runs it'
+    }
+    else {
+        Invoke-Stage 'notices' {
+            & (Join-Path $PSScriptRoot 'New-ThirdPartyNotices.ps1') -Check
+            if ($LASTEXITCODE -ne 0) { throw 'THIRD-PARTY-NOTICES.md is stale -- run ./scripts/New-ThirdPartyNotices.ps1' }
+        }
+    }
+
+    # --- the documentation, which is generated and can therefore go stale ---
+    #
+    # `docs/` is the one source and `docs/generated/`, `app-help/` and `wiki/`
+    # are built from it (ADR-0075). All three are committed -- `app-help/`
+    # because it ships inside the release archives and must exist without a
+    # build step, `wiki/` because a diff of it is the review of what strangers
+    # will read -- and a committed generated file has exactly one failure
+    # mode, which is drifting from its source with nothing to notice.
+    #
+    # This is what notices. Each check reports *which* file drifted rather
+    # than only that something did, because a staleness check whose whole
+    # output is "stale" sends somebody to `git diff` to find out what it
+    # meant.
+    if ($Quick) {
+        Skip-Stage 'docs' 'quick mode -- pre-push runs it'
+    }
+    else {
+        Invoke-Stage 'docs' {
+            foreach ($generator in 'Build-Docs.ps1', 'Build-AppHelp.ps1', 'Sync-GitHubWiki.ps1') {
+                & (Join-Path $PSScriptRoot $generator) -Check
+                if ($LASTEXITCODE -ne 0) { throw "$generator -Check failed -- its output is above" }
+            }
+        }
+    }
+
+    # --- the website, which is generated too ------------------------------
+    #
+    # Six locales times two pages is twelve HTML files, and three facts have
+    # to agree across all twelve: the `hreflang` alternates, the canonical
+    # URLs and the language switcher (ADR-0076). A locale added by hand
+    # reaches eleven of them, and the one it misses is invisible until a
+    # search engine reports it months later.
+    #
+    # Cheap, because it needs no toolchain: it is templates and JSON.
+    Invoke-Stage 'site' {
+        & (Join-Path $PSScriptRoot 'Build-Site.ps1') -Check
+        if ($LASTEXITCODE -ne 0) { throw 'Build-Site.ps1 -Check failed -- its output is above' }
+    }
+
+    # --- and the three things a generated site gets wrong ------------------
+    #
+    # Every local link resolves, no placeholder survived, and nothing is
+    # loaded from a third party (ADR-0076). The logic is in the script, not
+    # here: it was written twice at first, once in this file and once in
+    # `.github/workflows/site.yml`, and both copies had the same two false
+    # positives. Two gates that disagree are worse than one.
+    Invoke-Stage 'site checks' {
+        & (Join-Path $PSScriptRoot 'Test-Site.ps1')
+        if ($LASTEXITCODE -ne 0) { throw 'Test-Site.ps1 failed -- its output is above' }
+    }
 
     # `cargo nextest` where it exists, `cargo test` where it does not.
     #
@@ -306,9 +399,14 @@ try {
     # called phase 19 *Started* on the strength of them.
     #
     # Deliberately **not** behind -IncludeSpikes. A spike is a prototype the
-    # product does not depend on; these are tests of `bp-crypto`, `bp-data`,
-    # `bp-files` and `bp-formats` against input designed to break them, which
-    # is the one thing a gate is most for.
+    # product does not depend on; these are tests of `bp-files` and
+    # `bp-formats` against input designed to break them, which is the one
+    # thing a gate is most for.
+    #
+    # Two harnesses, down from five. `bp-notebook`'s went under ADR-0057,
+    # `bp-data`'s YAML one under ADR-0062, and `bp-crypto`'s envelope target
+    # -- the highest-value one in the suite -- under ADR-0064, each with the
+    # crate it protected.
     #
     # It costs about two and a half minutes, which is most of why it belongs
     # in the full run and not in -Quick. Where a single harness is too

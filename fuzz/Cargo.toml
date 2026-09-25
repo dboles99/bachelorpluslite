@@ -13,7 +13,7 @@
 name = "bp-fuzz"
 version = "0.1.0"
 edition = "2024"
-license = "MIT OR Apache-2.0"
+license = "GPL-3.0-only"
 publish = false
 
 [workspace]
@@ -23,8 +23,6 @@ publish = false
 # package reads them, it is not read by them, so nothing here can reach the
 # application.
 bp-core = { path = "../crates/bp-core" }
-bp-crypto = { path = "../crates/bp-crypto" }
-bp-data = { path = "../crates/bp-data" }
 bp-files = { path = "../crates/bp-files" }
 bp-formats = { path = "../crates/bp-formats" }
 

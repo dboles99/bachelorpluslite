@@ -233,11 +233,11 @@ impl Capability {
 
             // --- secrets: blocked on a human -------------------------------
             (Self::CredentialStore, _) => AwaitingDecision {
-                reason: "DPAPI and Secret Service are both in specs.md, and both would decide \
-                         where the signing key of `bp-integrity` lives -- whether the platform \
-                         vault is the custodian of the key or merely a wrapper over a key file. \
-                         That question is open, and implementing a keyring would answer it by \
-                         accident.",
+                reason: "DPAPI and Secret Service are both in specs.md. They were blocked on \
+                         where a signing key should live; ADR-0064 removed signing, so there \
+                         is now no secret for a platform vault to hold. This stays \
+                         AwaitingDecision rather than becoming Unsupported, because the open \
+                         question is what would *want* one.",
             },
             (Self::BiometricUnlock, Platform::Windows) => AwaitingDecision {
                 reason: "Windows Hello only protects something once there is somewhere for that \

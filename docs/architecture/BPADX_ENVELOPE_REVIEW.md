@@ -1,6 +1,21 @@
 # The `.bpadx` envelope, prepared for outside review
 
-**This document exists to make D4 cheap.** ADR-0011 forbids implementing
+> **D4 is moot, and this document is history rather than a request.**
+> [ADR-0064](../decisions/ADR-0064.md) removed encryption on 2026-08-30, and
+> with it `bp-crypto` -- the crate this brief asks a reviewer to read. There is
+> no envelope to review, no `.bpadx` this build can open, and **nothing to send
+> anybody.**
+>
+> It is kept, unedited below this line, for one reason: the three live
+> questions it raises are the design questions any future envelope would have
+> to answer, and they were expensive to find. If encryption ever returns, it
+> starts here rather than from nothing -- and it starts by answering them,
+> because they were never answered, only asked.
+>
+> Everything below describes code that existed at commit `3589205` and does
+> not exist now. Read it in the past tense.
+
+**This document existed to make D4 cheap.** ADR-0011 forbids implementing
 cryptography and permits composing it; ADR-0021 is the composition. Every
 primitive here is vetted RustCrypto, and the *arrangement* of them is this
 project's own design — which is exactly the part an author cannot check by

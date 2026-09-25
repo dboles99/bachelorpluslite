@@ -213,8 +213,15 @@ pub struct Package {
     /// `env!("CARGO_PKG_VERSION")` at the shell.
     pub version: &'static str,
     /// `env!("CARGO_PKG_LICENSE")` at the shell. The workspace manifest is
-    /// the one home for this string; `LICENSE-MIT` and `LICENSE-APACHE` at
-    /// the repository root are the texts behind it.
+    /// the one home for this string and `LICENSE` at the repository root is
+    /// the text behind it (ADR-0071).
+    ///
+    /// **"The one home" was false for as long as nothing asked.** The About
+    /// box in `bp-ui` carried the licence as a string literal, so the two
+    /// disagreed the moment either changed -- trap 4, and it survived a
+    /// relicence being planned rather than being found by one. About now
+    /// reads `CARGO_PKG_LICENSE` too, which is what makes this sentence a
+    /// property of the code rather than a wish about it.
     pub license: &'static str,
 }
 
@@ -361,7 +368,7 @@ mod tests {
 
     const PACKAGE: Package = Package {
         version: "9.9.9",
-        license: "MIT OR Apache-2.0",
+        license: "GPL-3.0-only",
     };
 
     #[test]
@@ -490,7 +497,7 @@ mod tests {
     fn version_reports_the_version_and_licence_it_was_handed() {
         let rendered = version(PACKAGE);
         assert!(rendered.contains("9.9.9"), "got {rendered}");
-        assert!(rendered.contains("MIT OR Apache-2.0"), "got {rendered}");
+        assert!(rendered.contains("GPL-3.0-only"), "got {rendered}");
     }
 
     #[test]

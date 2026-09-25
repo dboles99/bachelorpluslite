@@ -21,6 +21,17 @@
       was recorded and later withdrawn for exactly that. Every send here
       checks the foreground handle on both sides and refuses rather than
       typing into whatever else happened to be in front.
+    - **It takes the keyboard away from whoever is at the machine**, and that
+      guard does not help, because it is the *right* window in front -- the
+      keystrokes are simply not the ones this script sent. A run on 2026-08-30
+      captured nine characters a person was typing into another application
+      and wrote them into the document under test, which then reached the
+      recovery journal. **A defect was nearly reported from that evidence.**
+
+      So: do not run this while somebody is using the desktop. Say that it is
+      about to happen and let them say when. An agent driving this on a
+      machine with a human at it is not running a test, it is competing for
+      the keyboard -- and the contaminated run *looks like* a clean one.
 
 .PARAMETER File
     A document to open. Optional.

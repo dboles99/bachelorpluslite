@@ -1,7 +1,13 @@
 # Working in this repository
 
-BachelorPad+ — a Rust/Slint text editor. *Notepad when you want it. More when
-you need it.*
+BachelorPad+ Lite — a Rust/Slint text editor. *Notepad when you want it. More
+when you need it.*
+
+**Public since 2026-09-10, GPL-3.0-only, version 0.9.5.** The product name is
+`BachelorPad+ Lite` and lives in one place, `bp_platform::DISPLAY_NAME`
+([ADR-0074](docs/decisions/ADR-0074.md)) — do not spell it out anywhere, and
+read that ADR before you are tempted to, because the last two renames both
+reached some of the sites and not all of them.
 
 **This file is the entry point, and it is deliberately short.** Everything it
 says is a rule you need before you touch anything; everything else is one link
@@ -20,6 +26,25 @@ away. If this file grows past a screen or two it has stopped doing its job.
    session.
 4. `project/NEXT_SESSION.md` — what matters most, which is not the same list
    as what is ready.
+
+> **Items 2 and 4 live in a private repository**, and have since this one went
+> public on 2026-09-10:
+> [dboles99/bachelorpluslite-planning](https://github.com/dboles99/bachelorpluslite-planning).
+> `project/` and the marketing plan moved there because they hold commercial
+> strategy and open questions rather than reasoning. **Everything that
+> explains why the software is the way it is stayed here** — every ADR, every
+> lesson in `DECISIONS.md`, the whole manual.
+>
+> Roughly seventy-five references to those filenames remain in the ADRs and
+> were deliberately left alone. *"The checklist is in
+> `project/NEXT_SESSION.md` section 3"* is a true statement about how this
+> project was run, and rewriting seventy-five of them to say something vaguer
+> would damage the record to hide a filename. Only the fourteen actual links
+> were changed, because a link that 404s is a different thing from a
+> reference that names something.
+>
+> **If you are working on this from outside, you do not need them.** They
+> schedule work; they do not explain it.
 
 ---
 
@@ -113,10 +138,15 @@ will be updated in three. When you need to mention something owned elsewhere,
 | `docs/decisions/ADR-*.md` | One decision each, with its reasoning | Status of the work that implements it |
 | `docs/product/MENU_MAP.md` | Every menu row and its state | Implementation detail |
 | `docs/architecture/ARCHITECTURE.md` | Crates, modules, sizes, seams | Feature descriptions |
-| `project/DECISIONS_NEEDED.md` | Open questions for a human | Answers — those move to an ADR and the row is deleted |
-| `project/WORK_QUEUE.md` | What is ready to take, and collision rules | Why it matters |
-| `project/NEXT_SESSION.md` | What matters most, and the manual-pass checklist | Anything a permanent file owns |
+| `project/DECISIONS_NEEDED.md` *(private repo)* | Open questions for a human | Answers — those move to an ADR and the row is deleted |
+| `project/WORK_QUEUE.md` *(private repo)* | What is ready to take, and collision rules | Why it matters |
+| `project/NEXT_SESSION.md` *(private repo)* | What matters most, and the manual-pass checklist | Anything a permanent file owns |
+| `docs/product/MARKETING_PLAN.md` *(private repo)* | Positioning, channels, and what is not decided | Anything about how the software works |
 | `prompts/rosettas/R011...` | The traps in `bp-ui` | Anything about a specific feature |
+| `docs/user/`, `docs/tutorials/`, `docs/developer/` | The documentation, as source | Anything a generated page holds |
+| `docs/generated/`, `app-help/`, `wiki/` | **Nothing. Generated** ([ADR-0075](docs/decisions/ADR-0075.md)) | Edits — the gate reverts them |
+| `site/` | The website and the waitlist ([ADR-0076](docs/decisions/ADR-0076.md)) | Anything about the product a doc page owns |
+| `CONTRIBUTING.md`, `SECURITY.md` | How an outsider contributes, and how to report a vulnerability | Lessons, or why a thing was decided |
 
 **Lessons go in `DECISIONS.md` and nowhere else.** README may name one in a
 clause and link; it must not retell it.
@@ -132,8 +162,28 @@ clause and link; it must not retell it.
 ./scripts/Drive-Window.ps1 -Kill        # launch the app and photograph it
 ```
 
-This **is** CI — there is no hosted CI ([ADR-0016](docs/decisions/ADR-0016.md)).
-Every commit in this repository has passed it. Keep it that way.
+**This is the gate, and it is authoritative.** Every commit in this repository
+has passed it. Keep it that way.
+
+**There is hosted CI as well, since 2026-09-10**, and this file said otherwise
+for one line. [ADR-0016](docs/decisions/ADR-0016.md) opened *"GitHub Actions
+is not available to this project"*; one `gh api` call disproved it, and
+[ADR-0073](docs/decisions/ADR-0073.md) restored it. That is **trap 6 inside an
+accepted ADR**, which is where a false premise is safest — settled is how
+something stops being re-read.
+
+The two gates have two jobs and must not drift:
+
+| | Runs | Is the gate for |
+| --- | --- | --- |
+| `Invoke-LocalCI.ps1` | pre-commit, pre-push, by hand | Everything before a push. **Yours to run** |
+| `.github/workflows/ci.yml` | push, pull request | A pull request from somebody who is not Daniel |
+| `release.yml`, `docs.yml`, `site.yml` | a `v*` tag, `docs/**`, `site/**` | Releases, generated-doc staleness, the website |
+
+**When the two disagree, the local one is right.** Hosted CI does the three
+things a local gate structurally cannot: judge a stranger's PR, build on a
+machine that has never built this (trap 7), and run the RustSec advisory
+database, which needs a network the local gate is not allowed to assume.
 
 - **Background it, and do not edit files while it runs.** The Linux leg
   re-runs `cargo fmt --check` from scratch, so a mid-run edit fails the run
@@ -161,6 +211,18 @@ Every commit in this repository has passed it. Keep it that way.
 - **No new dependency without saying so and giving the reason.** Dependency
   choices are ADR material here.
 - Keep the UI thread non-blocking
+- **GPL-3.0-only, never `-or-later`** ([ADR-0071](docs/decisions/ADR-0071.md)).
+  Slint's grant is to version 3 and no other, so "or later" would offer terms
+  this project has not been granted. A new dependency must pass
+  `cargo deny check licenses`, and `THIRD-PARTY-NOTICES.md` is generated —
+  regenerate it when the graph moves
+- **Windows and Linux only.** macOS is declined with its cost written down
+  ([ADR-0072](docs/decisions/ADR-0072.md)), and it would *compile* today,
+  which is why the refusal needs a record rather than a silence
+- **`docs/` is the one documentation source**
+  ([ADR-0075](docs/decisions/ADR-0075.md)). `docs/generated/`, `app-help/` and
+  `wiki/` are generated from it and gate-checked; editing them is a change the
+  next run reverts
 
 ## House style
 
@@ -188,6 +250,15 @@ Named here, explained in `DECISIONS.md`:
    Trap 3 from the other side — when trap 3's answer is "nothing would fail",
    the test beside the comment is free to say the opposite, and probably does.
 
+   **And its sharpest form, which cost a rename twice**
+   ([ADR-0074](docs/decisions/ADR-0074.md)): *a test that proves two things
+   agree is evidence about two things.* `DISPLAY_NAME` had a green test
+   proving a **pair** agreed, a doc comment claiming three sites, and the name
+   written out at **eight** — one of them a `.slint` literal no Rust test can
+   see. **Before trusting a constant as the one home for a value, grep for the
+   value.** If the count exceeds the number of readers, the constant is a
+   convention rather than a mechanism.
+
 **And three more, all about verification itself** ([ADR-0049](docs/decisions/ADR-0049.md),
 [ADR-0050](docs/decisions/ADR-0050.md)):
 
@@ -198,6 +269,12 @@ Named here, explained in `DECISIONS.md`:
    five sessions on a premise one `git` command disproved. A question that has
    waited several sessions should have its premise checked before it is asked
    again.
+
+   **And an *accepted ADR* is where a false premise is safest**, because
+   settled is how something stops being re-read — ADR-0016 rested on "GitHub
+   Actions is not available to this project" and one `gh api` call disproved
+   it ([ADR-0073](docs/decisions/ADR-0073.md)). **An ADR whose reasoning rests
+   on an external fact should name the command that would test it.**
 7. **A round trip through one build says nothing about another build.** Seal
    and open agreeing with each other is weaker than it reads, and it is what
    almost every format test actually asserts. The test that means something is

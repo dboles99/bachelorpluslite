@@ -1,8 +1,26 @@
-# BachelorPad+ Full-Product Roadmap
+# BachelorPlusLite Full-Product Roadmap
+
+> **The product is public, GPL-3.0-only, and version 0.9.5** as of
+> 2026-09-10. Six decisions in one session:
+> [ADR-0071](docs/decisions/ADR-0071.md) relicensed it and found the previous
+> claim described a fraction of the binary;
+> [ADR-0072](docs/decisions/ADR-0072.md) declined macOS with what it would
+> cost; [ADR-0073](docs/decisions/ADR-0073.md) restored hosted CI after one
+> `gh api` call disproved ADR-0016's premise;
+> [ADR-0074](docs/decisions/ADR-0074.md) renamed the product and found its
+> name written out at eight sites;
+> [ADR-0075](docs/decisions/ADR-0075.md) made `docs/` the one source for four
+> destinations; [ADR-0076](docs/decisions/ADR-0076.md) settled what the
+> website may collect.
+>
+> **What is left before 1.0 is a person's work, not a session's**: the manual
+> pass in `project/NEXT_SESSION.md` section 3, the Azure resource and DNS for
+> `bpad.prompt-forge.dev`, and a native review of the four translated
+> locales.
 
 This is not an MVP roadmap. Each phase contributes to the full v1 target.
 
-Status as of **2026-08-29**. Four words, meaning four different things:
+Status as of **2026-08-30**. Four words, meaning four different things:
 
 - **Done** — the phase's work is finished.
 - **Started** — a real, tested slice exists *and is reachable from the
@@ -15,33 +33,40 @@ Status as of **2026-08-29**. Four words, meaning four different things:
   three, for four sessions — was this project's most useful single number
   while it was not zero.
 - **Removed** — the phase's capability was built, shipped, and then taken out
-  again, with an ADR saying why. One phase carries it: 12, under
-  [ADR-0057](docs/decisions/ADR-0057.md). It is a status rather than a deleted
+  again, with an ADR saying why. Seven phases carry it: 15 and 16 under
+  [ADR-0064](docs/decisions/ADR-0064.md), 4 under
+  [ADR-0063](docs/decisions/ADR-0063.md), 12 entire, under
+  [ADR-0057](docs/decisions/ADR-0057.md), 13 in part, under
+  [ADR-0060](docs/decisions/ADR-0060.md), 11 under
+  [ADR-0061](docs/decisions/ADR-0061.md) and 6 under
+  [ADR-0062](docs/decisions/ADR-0062.md) — research mode's citation half left
+  and its synthesis half stayed, which is why the row reads *in part* and
+  names the crates that remain. It is a status rather than a deleted
   row because a phase number is what `specs.md` and every ADR refer to, and a
   table that renumbers around a removal breaks all of them.
 
 | # | Phase | Status | Tasks | Crates |
 | --- | --- | --- | --- | --- |
-| 1 | Foundation and workspace | **Done** | [01-foundation](project/tasks/01-foundation/) | `bp-core`, `bp-config`, `bp-theme`, `bp-ui` |
-| 2 | Core editor | **Started** | [02-core-editor](project/tasks/02-core-editor/) | `bp-buffer`, `bp-editor` |
-| 3 | File safety and recovery | **Done** | [03-file-safety](project/tasks/03-file-safety/) | `bp-files`, `bp-history` |
-| 4 | Large-file engine | **Done** | [04-large-files](project/tasks/04-large-files/) | `bp-buffer` |
-| 5 | Format registry and parser framework | **Started** | [05-formats](project/tasks/05-formats/) | `bp-formats` |
-| 6 | Structured formats | **Started** | [05-formats](project/tasks/05-formats/) | `bp-data` |
-| 7 | Search engine | **Started** | [06-search](project/tasks/06-search/) | `bp-search` |
-| 8 | Semantic foundation and naming | **Started** | [07-semantic](project/tasks/07-semantic/) | `bp-semantic`, `bp-naming` |
-| 9 | Organization and related-note graph | **Started** | [07-semantic](project/tasks/07-semantic/) | `bp-storage` |
-| 10 | Semantic/hybrid search | Not started, **decided** | [07-semantic](project/tasks/07-semantic/) | — |
-| 11 | Clipboard system | **Started** | [08-clipboard](project/tasks/08-clipboard/) | `bp-clipboard` |
+| 1 | Foundation and workspace | **Done** | `project/tasks/01-foundation` | `bp-core`, `bp-config`, `bp-theme`, `bp-ui` |
+| 2 | Core editor | **Started** | `project/tasks/02-core-editor` | `bp-buffer`, `bp-editor` |
+| 3 | File safety and recovery | **Done** | `project/tasks/03-file-safety` | `bp-files`, `bp-history` |
+| 4 | Large-file engine | **Removed** | [ADR-0063](docs/decisions/ADR-0063.md) | — |
+| 5 | Format registry and parser framework | **Started** | `project/tasks/05-formats` | `bp-formats` |
+| 6 | Structured formats | **Removed** | [ADR-0062](docs/decisions/ADR-0062.md) | — |
+| 7 | Search engine | **Started** | `project/tasks/06-search` | `bp-search` |
+| 8 | Semantic foundation and naming | **Started** | `project/tasks/07-semantic` | `bp-semantic`, `bp-naming` |
+| 9 | Organization and related-note graph | **Started** | `project/tasks/07-semantic` | `bp-storage` |
+| 10 | Semantic/hybrid search | Not started, **decided** | `project/tasks/07-semantic` | — |
+| 11 | Clipboard system | **Removed** | [ADR-0061](docs/decisions/ADR-0061.md) | — |
 | 12 | Notebook/execution system | **Removed** | [ADR-0057](docs/decisions/ADR-0057.md) | — |
-| 13 | Research mode | **Started** | [10-research](project/tasks/10-research/) | `bp-research`, `bp-storage`, `bp-semantic` |
-| 14 | Security foundation | **Started** | [11-security](project/tasks/11-security/) | `bp-security` |
-| 15 | Encrypted `.bpadx` documents | **Started** | [11-security](project/tasks/11-security/) | `bp-crypto` |
-| 16 | Advanced security | **Started** | [11-security](project/tasks/11-security/) | `bp-secrets`, `bp-redaction`, `bp-audit`, `bp-integrity` |
-| 17 | Themes/personality/accessibility | **Started** | [12-themes-brand](project/tasks/12-themes-brand/) | `bp-theme` |
-| 18 | Windows/Linux platform integration | **Started** | [13-platform](project/tasks/13-platform/) | `bp-platform` |
-| 19 | Hardening, fuzzing and benchmarks | **Started** | [14-hardening](project/tasks/14-hardening/) | `fuzz/` (standalone, and now gated) |
-| 20 | Packaging, signing, release and upgrade testing | **Started** | [14-hardening](project/tasks/14-hardening/) | — |
+| 13 | Research mode | **Removed**, in part | [ADR-0060](docs/decisions/ADR-0060.md) | `bp-storage`, `bp-semantic` |
+| 14 | Privacy foundation | **Started** | `project/tasks/11-security` | `bp-security` |
+| 15 | Encrypted `.bpadx` documents | **Removed** | [ADR-0064](docs/decisions/ADR-0064.md) | — |
+| 16 | Advanced security | **Removed** | [ADR-0064](docs/decisions/ADR-0064.md) | — |
+| 17 | Themes/personality/accessibility | **Started** | `project/tasks/12-themes-brand` | `bp-theme` |
+| 18 | Windows/Linux platform integration | **Started** | `project/tasks/13-platform` | `bp-platform` |
+| 19 | Hardening, fuzzing and benchmarks | **Started** | `project/tasks/14-hardening` | `fuzz/` (standalone, and now gated) |
+| 20 | Packaging, signing, release and upgrade testing | **Done**, less signing | [ADR-0067](docs/decisions/ADR-0067.md), [ADR-0068](docs/decisions/ADR-0068.md) | — |
 
 **Phase 20 started on 2026-08-23, and what it found is worth knowing before
 anybody sizes the rest of it.** The inventory came first, as ADR-0048
@@ -63,9 +88,27 @@ literals for the four files this product leaves on a disk -- `config.toml`,
 `recent.toml`, the security history and the recovery journal -- each of which
 had only write-then-read-back coverage, which is trap 7 exactly.
 
-What is left of phase 20 is an icon and a `.desktop` file (a build-time
-resource, so a dependency ADR), and a decision about whether there is an
-installer at all.
+**Phase 20 is finished.** The last two items closed on 2026-08-30 and neither
+cost what its row said: there is no installer
+([ADR-0067](docs/decisions/ADR-0067.md)), and the icon ships beside the
+executable with no build-time resource and therefore no new dependency
+([ADR-0068](docs/decisions/ADR-0068.md)).
+
+**Phase 18 is the one the reduction quietly finished.** Its remaining items
+were DPAPI, Windows Hello and the Linux Secret Service -- every one of them a
+place to keep a key, and [ADR-0064](docs/decisions/ADR-0064.md) removed the
+keys. What is left of the phase shipped: path rules per platform, the
+capability register, config/data/cache directories, and File > Set as Default
+Editor. It still reads **Started** rather than Done because
+[ADR-0012](docs/decisions/ADR-0012.md)'s Windows half hands the user a `.reg`
+instead of applying it, and applying it needs a Win32 call or a dependency --
+a real remaining item rather than a technicality.
+
+Two defects in that phase were found on 2026-08-30 by installing the product
+rather than by testing it: registration had always named an icon that did not
+exist ([ADR-0068](docs/decisions/ADR-0068.md)), and every preset registered
+`.bpadx`, which this build opens as ciphertext
+([ADR-0069](docs/decisions/ADR-0069.md)).
 
 **Phase 10 was decided on 2026-08-23 without being started, which is a state
 this table needs a word for.** D16 asked what should compute an embedding;
@@ -109,6 +152,13 @@ headline of this section since the fourth session, when it was three crates,
 left under [ADR-0037](docs/decisions/ADR-0037.md), `bp-notebook` and
 `bp-execution` under [ADR-0043](docs/decisions/ADR-0043.md), and
 `bp-research` under [ADR-0044](docs/decisions/ADR-0044.md).
+
+**Three of those four crates have since been deleted** — `bp-notebook` and
+`bp-execution` under [ADR-0057](docs/decisions/ADR-0057.md), `bp-research`
+under [ADR-0060](docs/decisions/ADR-0060.md). The sentence still holds and
+means less than it did: reaching zero by wiring and reaching it by deletion
+are different achievements, and only `bp-storage` reached it the first way and
+stayed.
 
 **What actually unblocked the last three was not effort.** Each had been sized
 as a *mode* -- a large, unscoped thing -- and each turned out to be waiting on
@@ -211,13 +261,17 @@ closes the Windows/Linux asymmetry ADR-0026 measured and could not fix. Sign
 Document acts; Verify Signature already did.
 
 **Security profiles (phase 14) are wired.** ADR-0020 defines what each of
-Standard, Private, Confidential and Maximum permits across seven axes, and the
+Standard, Private, Confidential and Maximum permits across six axes, and the
 named profiles are checked to be monotonic — each at least as restrictive as
-the one before, on every axis. All three dependants now read the policy: the
-recovery journal refuses rather than writing plaintext (and deletes what a
-looser profile already wrote), clipboard history stops recording and is
-cleared, and `bp-storage`'s `record_document` drops the title under `PathOnly`
-and records nothing under `Disabled`. The Security menu sets the profile and
+the one before, on every axis. **Two of the six have a dependant that reads
+them**, and both do: the recovery journal refuses rather than writing
+plaintext (and deletes what a looser profile already wrote), and
+`bp-storage`'s `record_document` drops the title under `PathOnly` and records
+nothing under `Disabled`. There were seven axes and three dependants until
+[ADR-0061](docs/decisions/ADR-0061.md) removed the clipboard and its axis, and
+[ADR-0064](docs/decisions/ADR-0064.md) removed `bp-audit` and the encrypted
+journal; the other four axes are reported by the Tools inspector and consulted
+by nothing ([ADR-0059](docs/decisions/ADR-0059.md) §4). The Security menu sets the profile and
 states what it permits; the status bar shows anything other than the default.
 
 Two limits are deliberate and visible. Profiles requiring an encrypted journal

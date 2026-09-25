@@ -8,7 +8,7 @@
 //!
 //! | Row | Its subject |
 //! | --- | --- |
-//! | Security Inspector | The *policy* in force, on all seven axes, and where each axis got its answer |
+//! | Security Inspector | The *policy* in force, on all six axes, and where each axis got its answer |
 //! | File Analysis | The *file on disk*, which is not the same object as the document |
 //! | Configuration | The *settings*, and where each one came from |
 //!
@@ -21,7 +21,7 @@
 //! config file, four environment variables and a command line make worth
 //! asking. Configuration reads; it does not write, and it says so.
 
-use bp_security::{Clipboard, Embeddings, Metadata, Network, Recovery, TemporaryFiles, Zeroise};
+use bp_security::{Embeddings, Metadata, Network, Recovery, TemporaryFiles, Zeroise};
 
 use super::AppState;
 
@@ -29,20 +29,30 @@ impl AppState {
     /// Tools ▸ Security Inspector: the policy actually in force, axis by
     /// axis.
     ///
-    /// **The Security menu shows three of these seven and the rest are
-    /// invisible**, which is the gap this fills: `Policy` has seven axes,
-    /// the menu had room for recovery, clipboard and network, and a user had
-    /// no way to discover that embeddings, temporary files and zeroising are
-    /// governed at all.
+    /// **The Privacy menu shows two of these six and the rest are
+    /// invisible**, which is the gap this fills: the menu has room for
+    /// recovery and network, and a user has no way to discover that
+    /// embeddings, temporary files and zeroising are governed at all.
+    ///
+    /// **Three of the six govern nothing**, which ADR-0059 found by counting
+    /// enforcing readers and this readout is why it matters: a line here
+    /// reads as *the policy in force*, and for `embeddings`, `temporary_files`
+    /// and `zeroise` nothing consults the value before acting. They leave
+    /// under ADR-0059's R5 with the rest of the stack; until then this
+    /// comment is the honest label, because a readout that reports an
+    /// unenforced axis is a claim the code does not keep.
     ///
     /// Reports the policy *under Privacy Mode*, not the document's own, for
     /// the reason `menus::security` gives about its own readouts: showing the
-    /// unclamped policy would tell somebody their clipboard is kept while
+    /// unclamped policy would tell somebody their journal is kept while
     /// Privacy Mode is discarding it. Both are named, so a clamped axis shows
     /// its own answer as well as the one that overrode it.
     pub(crate) fn security_inspector_report(&self) -> String {
         let own = self.security();
-        let policy = own.policy_under(self.privacy);
+        // Through `AppState::policy`, not `policy_under` spelled out here:
+        // one place decides that Privacy Mode applies, and a second call site
+        // computing it itself is how one of them stops.
+        let policy = self.policy();
         let unclamped = own.policy();
 
         let mut lines = vec![
@@ -70,11 +80,6 @@ impl AppState {
             "Recovery journal",
             recovery(policy.recovery),
             recovery(unclamped.recovery),
-        );
-        axis(
-            "Clipboard history",
-            clipboard(policy.clipboard),
-            clipboard(unclamped.clipboard),
         );
         axis(
             "Metadata store",
@@ -134,19 +139,6 @@ impl AppState {
         match std::fs::metadata(path) {
             Ok(meta) => {
                 lines.push(format!("Size on disk: {}", super::human_bytes(meta.len())));
-                // The size class is a real behavioural fork rather than a
-                // statistic: it decides whether the rope holds the document
-                // or the viewer streams it (ADR-0027, ADR-0030).
-                let class = bp_buffer::SizeClass::of(meta.len());
-                lines.push(format!(
-                    "Size class: {} — {}",
-                    class.label(),
-                    if class.must_stream() {
-                        "read from disk as you scroll, read-only"
-                    } else {
-                        "held in memory and editable"
-                    }
-                ));
                 lines.push(format!(
                     "Read-only on disk: {}",
                     if meta.permissions().readonly() {
@@ -256,15 +248,6 @@ impl AppState {
             }
         }
 
-        let sealed = self.journal.sealed_count();
-        if sealed > 0 {
-            lines.push(String::new());
-            lines.push(format!(
-                "{sealed} sealed checkpoint{} also exist for encrypted                  documents. They are filed under a digest of the path and can                  only be read once that document is unlocked, so none of them                  can be listed here by name.",
-                if sealed == 1 { "" } else { "s" }
-            ));
-        }
-
         lines.push(String::new());
         lines.push(format!("Journal: {}", self.journal.location().display()));
         lines.join(
@@ -350,22 +333,12 @@ fn human_duration(seconds: u64) -> String {
 // Each axis in the user's words rather than the enum's. Free functions so
 // the wording is asserted by a test without a policy to build first, the
 // same shape `menus::describe_recovery` already has for the three axes the
-// Security menu shows.
+// Privacy menu shows.
 
 fn recovery(value: Recovery) -> String {
     match value {
         Recovery::Plaintext => "kept, unencrypted",
-        Recovery::Encrypted => "kept, encrypted with the document's passphrase",
         Recovery::Disabled => "never written",
-    }
-    .to_owned()
-}
-
-fn clipboard(value: Clipboard) -> String {
-    match value {
-        Clipboard::Persistent => "kept between sessions",
-        Clipboard::InMemory => "kept in memory only",
-        Clipboard::Disabled => "not kept",
     }
     .to_owned()
 }
@@ -417,11 +390,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_security_inspector_names_all_seven_axes() {
+    fn the_security_inspector_names_every_axis_the_policy_has() {
+        // Seven until ADR-0061 removed the clipboard axis with the crate it
+        // governed. The list is written out rather than derived from `Policy`
+        // on purpose: this test exists to catch an axis that exists and is
+        // never shown, and a list generated from the same type could not.
         let report = AppState::new().security_inspector_report();
         for axis in [
             "Recovery journal",
-            "Clipboard history",
             "Metadata store",
             "Embeddings",
             "Leaves this machine",
@@ -430,6 +406,10 @@ mod tests {
         ] {
             assert!(report.contains(axis), "{axis} is missing from {report}");
         }
+        assert!(
+            !report.contains("Clipboard"),
+            "the inspector still reports an axis the policy no longer has: {report}"
+        );
     }
 
     #[test]

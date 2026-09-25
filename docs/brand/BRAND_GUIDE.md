@@ -21,7 +21,6 @@ Allowed examples:
 - Semantic Filing Apparatus
 - Automatic Document Identification
 - Recall Engine
-- Clipboard Retention Chamber
 - Emergency Recovery System
 - Cryptographic Containment
 - Heavy-Duty Text Intake

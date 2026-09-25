@@ -7,15 +7,21 @@
 //! for `.bpadx` -- three golden envelopes had been checked in since the corpus
 //! was seeded and the harness fed them to `open` and discarded the result.
 //!
-//! `.bpadx` has its vectors now (`fuzz/tests/envelope.rs`). **These are the
-//! other four files this product leaves behind**, and they are the ones a
-//! user actually notices going missing:
+//! **These are the three files this product leaves behind**, and they are the
+//! ones a user actually notices going missing:
+//!
+//! There were four, with `.bpadx` golden vectors beside them. ADR-0064
+//! removed encryption and the security history, so `security.log` and
+//! `fuzz/tests/envelope.rs` went with the code that read them. **The fixture
+//! was deleted rather than kept or regenerated**: a committed byte string
+//! with no reader is evidence about nothing, which is the argument ADR-0058
+//! made when it deleted a hash manifest. Trap 7's coverage here is three
+//! files now, and saying so is the point of this paragraph.
 //!
 //! | File | Where | What losing it costs |
 //! | --- | --- | --- |
 //! | `config.toml` | `DirKind::Config` | Every setting silently back to default |
 //! | `recent.toml` | `DirKind::State` | The recent list, silently emptied |
-//! | `security.log` | `DirKind::State` | The security history, refused or misread |
 //! | `recovery/*.json` | `DirKind::State` | **Unsaved work**, which is the worst of the four |
 //!
 //! ## These bytes are fixtures, not expectations
@@ -34,7 +40,6 @@
 //! before -- so the habit that makes this file worth having is adding the new
 //! shape *beside* the old one rather than editing the old one.
 
-use bp_audit::{AuditLog, Event};
 use bp_config::{Env, Recent, RendererPref, resolve};
 use bp_history::{Checkpoint, CheckpointEncoding, CheckpointLineEnding};
 
@@ -61,17 +66,6 @@ paths = [
     \"/notes/alpha.txt\",
 ]
 ";
-
-/// One line of a plaintext `security.log`.
-///
-/// Newline-terminated because the file is line-oriented and a reader that
-/// only copes with a trailing newline it wrote itself is exactly the kind of
-/// agreement-with-itself this file exists to break.
-const SECURITY_LOG: &str = concat!(
-    r#"{"seq":1,"at_unix":1700000000,"at_offset":0,"document":1,"#,
-    r#""event":{"kind":"privacy_mode_entered"}}"#,
-    "\n"
-);
 
 /// One recovery checkpoint, in the shape this build writes.
 ///
@@ -127,25 +121,6 @@ fn a_recent_list_from_an_earlier_build_is_not_silently_emptied() {
          `parse` swallows the failure, so the user sees an empty list rather \
          than an error -- check the format before regenerating this fixture"
     );
-}
-
-#[test]
-fn a_security_history_from_an_earlier_build_still_reads() {
-    let dir = tempfile::tempdir().expect("a temporary directory");
-    let path = dir.path().join("security.log");
-    std::fs::write(&path, SECURITY_LOG).expect("the fixture is written");
-
-    let log = AuditLog::open(path, None).unwrap_or_else(|e| {
-        panic!(
-            "a security history written by an earlier build no longer opens: {e}. \
-             The line format changed, and every history already on disk is now \
-             unreadable or reported as tampering"
-        )
-    });
-
-    let records = log.records();
-    assert_eq!(records.len(), 1, "one line, one record");
-    assert_eq!(records[0].event(), Event::PrivacyModeEntered);
 }
 
 #[test]

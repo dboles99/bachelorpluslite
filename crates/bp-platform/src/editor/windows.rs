@@ -231,10 +231,18 @@ pub fn registry_values(app: &AppInfo, selection: &AssociationSelection) -> Vec<R
         values.push(RegistryValue {
             key: format!(r"{key}\DefaultIcon"),
             name: ValueName::Default,
-            // Icon index 0: the application's own first icon resource. A
-            // per-type icon would need an icon per type, and a missing one
-            // renders as a blank page in Explorer.
-            data: format!("\"{}\",0", app.executable),
+            // **The `.ico` beside the executable, not the executable itself**
+            // (ADR-0068). This was `"<exe>",0` -- icon index 0, the program's
+            // own first icon resource -- and the program has never had one,
+            // so every type registered through here rendered as a blank page
+            // in Explorer. Embedding one needs a build-time resource compiler
+            // and therefore a new dependency; ADR-0067 removed the installer
+            // that would otherwise have placed an icon, so the file ships in
+            // the archive and is referenced where it lands.
+            //
+            // A per-type icon would need an icon per type, and a missing one
+            // renders as that same blank page.
+            data: format!("\"{}\",0", app.icon),
         });
         values.push(RegistryValue {
             key: format!(r"{key}\shell\open\command"),

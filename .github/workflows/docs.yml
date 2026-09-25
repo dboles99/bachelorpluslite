@@ -1,0 +1,132 @@
+# The documentation is generated, so this is what notices when it goes stale
+# (ADR-0075).
+#
+# `docs/` is the one source. `docs/generated/`, `app-help/` and `wiki/` are
+# built from it, and all three are committed -- `app-help/` because it ships
+# inside the release archives and must exist without a build step, and `wiki/`
+# because a diff of it is the review of what strangers will read.
+#
+# **A committed generated file has exactly one failure mode**, which is
+# drifting from its source with nothing to notice. A pull request that edits a
+# page and forgets to regenerate should be caught here rather than by a
+# reader.
+#
+# This mirrors the local gate's `docs` stage. When they disagree, the local
+# one is right -- ADR-0016's rule, and ADR-0073 keeps it.
+
+name: Docs
+
+on:
+  # `main` only. `pull_request` below covers every other branch, and a
+  # branch with an open PR otherwise matched both and ran twice.
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "app-help/**"
+      - "wiki/**"
+      - "scripts/Build-Docs.ps1"
+      - "scripts/Build-AppHelp.ps1"
+      - "scripts/Sync-GitHubWiki.ps1"
+      - "scripts/DocsCommon.ps1"
+      - "crates/bp-config/src/cli.rs"
+      - "crates/bp-ui/src/dispatch.rs"
+      - "docs/product/MENU_MAP.md"
+      - ".github/workflows/docs.yml"
+  pull_request:
+    paths:
+      - "docs/**"
+      - "app-help/**"
+      - "wiki/**"
+      - "scripts/Build-*.ps1"
+      - "scripts/Sync-GitHubWiki.ps1"
+      - "scripts/DocsCommon.ps1"
+      - "crates/bp-config/src/cli.rs"
+      - "crates/bp-ui/src/dispatch.rs"
+      - "docs/product/MENU_MAP.md"
+  workflow_dispatch:
+
+# Three of the paths above are Rust, and that is the point rather than an
+# oversight. `cli.rs` holds the flag list, `dispatch.rs` holds the keyboard
+# shortcuts, and `MENU_MAP.md` holds every menu row -- so a change to any of
+# them makes a *documentation* page stale without touching `docs/` at all.
+# Those three pages are generated precisely because that is the failure a
+# hand-written page could not have.
+
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  generated-docs-must-match-their-source:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The flag reference is asked of the binary, so this needs a toolchain.
+      # `-SkipBinary` reads it from source instead and is the fallback for a
+      # machine without one; here there is one, and the binary is the better
+      # answer -- a manifest can be edited without a rebuild and a binary
+      # cannot (ADR-0054).
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: System libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libfontconfig1-dev \
+            libxkbcommon-dev \
+            libxcb-shape0-dev \
+            libxcb-xfixes0-dev \
+            libxcb1-dev \
+            libgl1-mesa-dev \
+            libwayland-dev
+
+      - name: docs/generated
+        shell: pwsh
+        run: ./scripts/Build-Docs.ps1 -Check
+
+      - name: app-help
+        shell: pwsh
+        run: ./scripts/Build-AppHelp.ps1 -Check
+
+      - name: wiki
+        shell: pwsh
+        run: ./scripts/Sync-GitHubWiki.ps1 -Check
+
+  # Pushing writes to something the public reads, so it is a separate job on a
+  # separate trigger: only `main`, never a pull request. Generation has a
+  # `-Check` behind it; publication is the kind of act this project keeps for
+  # an explicit gesture rather than a side effect.
+  publish-the-wiki:
+    needs: generated-docs-must-match-their-source
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: sync
+        shell: pwsh
+        env:
+          GIT_ASKPASS: /bin/true
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          ./scripts/Sync-GitHubWiki.ps1 -Push `
+            -Remote "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.wiki.git"
+        continue-on-error: true
+
+      # `continue-on-error` above, deliberately. A GitHub wiki does not exist
+      # until somebody creates its first page in the browser, and a clone of a
+      # wiki that has never been created fails. That is a setup step nobody
+      # has done yet rather than a broken build, and failing `main` over it
+      # would teach people to ignore a red main.
+      - name: say so if it did not sync
+        if: failure()
+        run: |
+          echo 'The wiki did not sync. If this is the first run, enable Wikis in'
+          echo 'Settings > Features and create the first page in the browser, then'
+          echo 're-run this job.'

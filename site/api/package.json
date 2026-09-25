@@ -1,0 +1,11 @@
+{
+  "name": "bpad-site-api",
+  "version": "1.0.0",
+  "description": "Signup capture for bpad.prompt-forge.dev",
+  "private": true,
+  "main": "subscribe/index.js",
+  "engines": { "node": ">=18" },
+  "dependencies": {
+    "@azure/data-tables": "^13.3.1"
+  }
+}

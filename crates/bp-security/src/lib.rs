@@ -1,7 +1,7 @@
 //! Security profiles and the policy they resolve to (ADR-0020).
 //!
 //! ADR-0011 says a document's security policy propagates to every artefact
-//! derived from it -- the recovery journal, clipboard history, semantic
+//! derived from it -- the recovery journal, semantic
 //! metadata, embeddings, temporary files and network eligibility. This crate
 //! is where that policy is decided. It is decided here and performed
 //! elsewhere: nothing in this crate writes a file, holds a secret or
@@ -31,7 +31,13 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Whether unsaved work may be written to the recovery journal, and how.
+/// Whether unsaved work may be written to the recovery journal.
+///
+/// **There was an `Encrypted` between the two until ADR-0064**, and it was
+/// deleted rather than quietly re-pointed at `Plaintext`. A profile that
+/// asked for an encrypted journal now asks for `Disabled`: *no journal*
+/// rather than *a journal somebody was told was encrypted*, which is the
+/// failure ADR-0020 exists to prevent.
 ///
 /// `bp-history` reads this. Today it writes plaintext into the user's config
 /// directory, which is [`Recovery::Plaintext`] -- named rather than hidden,
@@ -43,20 +49,6 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum Recovery {
     Plaintext,
-    Encrypted,
-    Disabled,
-}
-
-/// Whether copied text may outlive the moment it was copied.
-///
-/// `bp-clipboard` reads this. `InMemory` is today's behaviour: history is
-/// kept for the session and never written down. `Persistent` is what
-/// specs.md section 14 makes opt-in, and it is not reachable from any
-/// profile below Standard.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub enum Clipboard {
-    Persistent,
-    InMemory,
     Disabled,
 }
 
@@ -126,7 +118,6 @@ pub enum Zeroise {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Policy {
     pub recovery: Recovery,
-    pub clipboard: Clipboard,
     pub metadata: Metadata,
     pub embeddings: Embeddings,
     pub network: Network,
@@ -144,24 +135,11 @@ impl Policy {
     #[must_use]
     pub fn is_at_least_as_strict_as(&self, other: &Self) -> bool {
         self.recovery >= other.recovery
-            && self.clipboard >= other.clipboard
             && self.metadata >= other.metadata
             && self.embeddings >= other.embeddings
             && self.network >= other.network
             && self.temporary_files >= other.temporary_files
             && self.zeroise >= other.zeroise
-    }
-
-    /// Whether this policy needs cryptography that does not exist yet.
-    ///
-    /// `bp-crypto` arrives in phase 15. Until it does, a profile asking for
-    /// an encrypted journal cannot be honoured -- and ADR-0020 requires that
-    /// to fail loudly rather than degrade to plaintext. A security control
-    /// that quietly weakens itself is worse than an absent one, because the
-    /// user has been told it is on.
-    #[must_use]
-    pub const fn needs_encryption(&self) -> bool {
-        matches!(self.recovery, Recovery::Encrypted)
     }
 }
 
@@ -217,51 +195,57 @@ impl Profile {
     pub const fn policy(self) -> Policy {
         match self {
             // Today's product, described. Recovery writes plaintext,
-            // clipboard history is in memory, the metadata store is unwired
             // (ADR-0019) so nothing is recorded yet -- but Standard is what
             // permits it to be, which is what makes ADR-0019 revisitable
             // rather than reversible by hand.
             Self::Standard => Policy {
                 recovery: Recovery::Plaintext,
-                clipboard: Clipboard::InMemory,
                 metadata: Metadata::Summary,
                 embeddings: Embeddings::Local,
                 network: Network::Allowed,
                 temporary_files: TemporaryFiles::Allowed,
                 zeroise: Zeroise::Off,
             },
-            // The step that stops content leaving the machine. Recovery is
-            // still kept, because losing unsaved work is its own harm -- but
-            // it has to be encrypted, and until bp-crypto exists that means
-            // the journal is refused rather than silently written in clear.
+            // The step that stops content leaving the machine. **Recovery is
+            // plaintext, and the menu says so** (ADR-0065).
+            //
+            // It asked for an encrypted journal until ADR-0064 removed the
+            // sealed form, and that ADR set it to `Disabled` -- no journal --
+            // on ADR-0020's rule that a control which quietly weakens itself
+            // is worse than an absent one. The word doing the work there is
+            // **quietly**: this menu has always printed what the journal
+            // actually is, and it now prints "on, unencrypted".
+            //
+            // A journal on the local disk does not contradict what Private is
+            // for, which is stopping content leaving the machine. Losing a
+            // session's unsaved work to protect against an attacker who
+            // already has the disk is the wrong trade, and it is the one
+            // Confidential exists to make instead.
             Self::Private => Policy {
-                recovery: Recovery::Encrypted,
-                clipboard: Clipboard::InMemory,
+                recovery: Recovery::Plaintext,
                 metadata: Metadata::PathOnly,
                 embeddings: Embeddings::Local,
                 network: Network::Denied,
                 temporary_files: TemporaryFiles::Allowed,
                 zeroise: Zeroise::On,
             },
-            // Nothing is recorded about the document and nothing derived from
-            // it is computed. Clipboard history is off: a document at this
-            // level should not leave fragments in a list the user can page
-            // through from any other tab.
+            // Nothing is recorded about the document and nothing derived
+            // from it is computed -- and that includes the recovery journal,
+            // which is a copy of unsaved work sitting outside the file. This
+            // is where "no journal" belongs, because it is the profile whose
+            // whole subject is what touches the disk.
             Self::Confidential => Policy {
-                recovery: Recovery::Encrypted,
-                clipboard: Clipboard::Disabled,
+                recovery: Recovery::Disabled,
                 metadata: Metadata::Disabled,
                 embeddings: Embeddings::None,
                 network: Network::Denied,
                 temporary_files: TemporaryFiles::Denied,
                 zeroise: Zeroise::On,
             },
-            // The disk holds the file and nothing else. Recovery is disabled
-            // rather than encrypted, which is a real trade the user is
-            // making: a crash loses unsaved work, and that is the point.
+            // The disk holds the file and nothing else. A crash loses
+            // unsaved work, and that is the point rather than a gap.
             Self::Maximum => Policy {
                 recovery: Recovery::Disabled,
-                clipboard: Clipboard::Disabled,
                 metadata: Metadata::Disabled,
                 embeddings: Embeddings::None,
                 network: Network::Denied,
@@ -307,7 +291,6 @@ impl Privacy {
             Self::Off => policy,
             Self::On => Policy {
                 recovery: policy.recovery.max(Recovery::Disabled),
-                clipboard: policy.clipboard.max(Clipboard::Disabled),
                 metadata: policy.metadata.max(Metadata::Disabled),
                 embeddings: policy.embeddings.max(Embeddings::None),
                 network: policy.network.max(Network::Denied),
@@ -411,7 +394,6 @@ mod tests {
                     s.recovery >= l.recovery,
                     "recovery: {stricter:?} vs {looser:?}"
                 );
-                assert!(s.clipboard >= l.clipboard, "clipboard");
                 assert!(s.metadata >= l.metadata, "metadata");
                 assert!(s.embeddings >= l.embeddings, "embeddings");
                 assert!(s.network >= l.network, "network");
@@ -425,8 +407,8 @@ mod tests {
     fn standard_is_the_default_and_describes_todays_product() {
         // If this row and the product ever disagree, one of them is a bug.
         // The behaviours pinned here are the ones that exist right now:
-        // bp-history writes plaintext, bp-clipboard keeps history in memory
-        // only, and nothing is forbidden that currently happens.
+        // bp-history writes plaintext, and nothing is forbidden that
+        // currently happens.
         let policy = Security::default().policy();
 
         assert_eq!(Profile::default(), Profile::Standard);
@@ -436,12 +418,7 @@ mod tests {
             "bp-history writes plaintext today; the model must say so rather \
              than quietly promising otherwise"
         );
-        assert_eq!(policy.clipboard, Clipboard::InMemory);
         assert_eq!(policy.temporary_files, TemporaryFiles::Allowed);
-        assert!(
-            !policy.needs_encryption(),
-            "the default must not require cryptography that does not exist yet"
-        );
     }
 
     #[test]
@@ -459,18 +436,33 @@ mod tests {
     }
 
     #[test]
-    fn the_profiles_that_need_cryptography_are_the_ones_that_ask_for_it() {
-        // `needs_encryption` is what the journal checks before deciding
-        // whether it can honour a profile at all. Getting it wrong in one
-        // direction disables recovery for no reason; in the other it writes
-        // plaintext for a user who was told it was encrypted.
-        assert!(!Profile::Standard.policy().needs_encryption());
-        assert!(Profile::Private.policy().needs_encryption());
-        assert!(Profile::Confidential.policy().needs_encryption());
-        assert!(
-            !Profile::Maximum.policy().needs_encryption(),
-            "Maximum disables recovery outright, so there is nothing to encrypt"
-        );
+    fn the_journal_stops_at_confidential_and_not_before() {
+        // This asked which profiles *needed cryptography* until ADR-0064, and
+        // then whether any but Standard journalled at all. Both answers moved;
+        // the reason for pinning it has not. Getting it wrong in one direction
+        // disables recovery for no reason, and in the other writes unsaved
+        // work to disk for somebody who asked for it not to be.
+        //
+        // **The line is between Private and Confidential**, and that is the
+        // decision ADR-0065 took: a local journal does not contradict "stop
+        // content leaving the machine", and it does contradict "nothing is
+        // recorded about this document".
+        for profile in [Profile::Standard, Profile::Private] {
+            assert_eq!(
+                profile.policy().recovery,
+                Recovery::Plaintext,
+                "{} keeps a journal, and the menu says it is unencrypted",
+                profile.name()
+            );
+        }
+        for profile in [Profile::Confidential, Profile::Maximum] {
+            assert_eq!(
+                profile.policy().recovery,
+                Recovery::Disabled,
+                "{} journals work its user asked not to have written down",
+                profile.name()
+            );
+        }
     }
 
     #[test]
@@ -479,7 +471,6 @@ mod tests {
         // what it is handed is not one.
         let policy = Policy {
             recovery: Recovery::Disabled,
-            clipboard: Clipboard::Persistent,
             metadata: Metadata::Disabled,
             embeddings: Embeddings::Cloud,
             network: Network::Allowed,
@@ -499,8 +490,14 @@ mod tests {
         let mixed = Policy {
             // Stricter than Standard on recovery...
             recovery: Recovery::Disabled,
-            // ...and more permissive on the clipboard.
-            clipboard: Clipboard::Persistent,
+            // ...and more permissive on embeddings, which is what makes the
+            // two genuinely incomparable rather than merely different. It
+            // used to be the clipboard axis, until ADR-0061 removed it with
+            // the crate it governed -- and the axis had to be *replaced*
+            // rather than dropped, because with only one difference left this
+            // policy would be strictly stricter and the test would pass
+            // while asserting nothing.
+            embeddings: Embeddings::Cloud,
             ..Profile::Standard.policy()
         };
         let standard = Profile::Standard.policy();
@@ -519,7 +516,6 @@ mod tests {
         // monotonic chain and is where an unclamped axis would hide.
         policies.push(Policy {
             recovery: Recovery::Disabled,
-            clipboard: Clipboard::Persistent,
             metadata: Metadata::Disabled,
             embeddings: Embeddings::Cloud,
             network: Network::Allowed,
@@ -564,7 +560,6 @@ mod tests {
         let clamped = Privacy::On.clamp(Profile::Standard.policy());
 
         assert_eq!(clamped.recovery, Recovery::Disabled);
-        assert_eq!(clamped.clipboard, Clipboard::Disabled);
         assert_eq!(clamped.metadata, Metadata::Disabled);
         assert_eq!(clamped.embeddings, Embeddings::None);
         assert_eq!(clamped.network, Network::Denied);
@@ -607,10 +602,7 @@ mod tests {
         // The ordering is what `is_at_least_as_strict_as` means. A variant
         // added in the wrong position would invert the comparison for that
         // axis and silently break every check above.
-        assert!(Recovery::Plaintext < Recovery::Encrypted);
-        assert!(Recovery::Encrypted < Recovery::Disabled);
-        assert!(Clipboard::Persistent < Clipboard::InMemory);
-        assert!(Clipboard::InMemory < Clipboard::Disabled);
+        assert!(Recovery::Plaintext < Recovery::Disabled);
         assert!(Metadata::Summary < Metadata::PathOnly);
         assert!(Metadata::PathOnly < Metadata::Disabled);
         assert!(Embeddings::Cloud < Embeddings::Local);

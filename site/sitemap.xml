@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The index. Submit this one to Google Search Console and Bing Webmaster
+     Tools; it names the per-language sitemaps, which is what lets a single
+     language be diagnosed without the others in the way. -->
+<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <sitemap>
+    <loc>https://bpad.prompt-forge.dev/sitemap-en.xml</loc>
+    <lastmod>2026-09-10</lastmod>
+  </sitemap>
+  <sitemap>
+    <loc>https://bpad.prompt-forge.dev/sitemap-us.xml</loc>
+    <lastmod>2026-09-10</lastmod>
+  </sitemap>
+  <sitemap>
+    <loc>https://bpad.prompt-forge.dev/sitemap-fr.xml</loc>
+    <lastmod>2026-09-10</lastmod>
+  </sitemap>
+  <sitemap>
+    <loc>https://bpad.prompt-forge.dev/sitemap-de.xml</loc>
+    <lastmod>2026-09-10</lastmod>
+  </sitemap>
+  <sitemap>
+    <loc>https://bpad.prompt-forge.dev/sitemap-ja.xml</loc>
+    <lastmod>2026-09-10</lastmod>
+  </sitemap>
+  <sitemap>
+    <loc>https://bpad.prompt-forge.dev/sitemap-zh-tw.xml</loc>
+    <lastmod>2026-09-10</lastmod>
+  </sitemap>
+</sitemapindex>

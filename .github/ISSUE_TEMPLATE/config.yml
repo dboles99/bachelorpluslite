@@ -1,0 +1,23 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/dboles99/bachelorpluslite/security/advisories/new
+    about: >
+      Report privately, never as a public issue. It stays between you and the
+      maintainer until an advisory is published.
+  - name: Documentation
+    url: https://github.com/dboles99/bachelorpluslite/wiki
+    about: >
+      Installing, the note layer, keyboard shortcuts, Windows and Linux
+      differences, troubleshooting.
+  - name: Why was it built this way?
+    url: https://github.com/dboles99/bachelorpluslite/blob/main/DECISIONS.md
+    about: >
+      76 decision records, and the one home for every lesson learned. Most
+      "why does it not just..." questions are answered here, with the
+      reasoning rather than the conclusion.
+  - name: BachelorPad+, the full version
+    url: https://bpad.prompt-forge.dev/waitlist.html
+    about: >
+      Encryption, notebooks, structured-data operations, clipboard history and
+      the full privacy stack -- everything removed to make this edition Lite.

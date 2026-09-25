@@ -1,0 +1,66 @@
+# BachelorPad+ Lite
+
+> https://bpad.prompt-forge.dev/de/
+
+## What this is
+
+BachelorPad+ Lite ist ein kostenloser, quelloffener Notepad-Ersatz für Windows und Linux. Alles, was Notepad kann, und eine Sache, die es nicht kann: es weiss, welche Ihrer Notizen dasselbe Thema behandeln, also finden Sie Ihre Überlegungen vom letzten Monat wieder, ohne sich an den Dateinamen zu erinnern. Es startet sofort, arbeitet dauerhaft offline, und es wird nie etwas ausführen oder irgendwohin senden.
+
+Free and open source under GPL-3.0-only. Windows 10, Windows 11 and Linux,
+64-bit. There is no macOS build. Version 0.9.5.
+
+Source: https://github.com/dboles99/bachelorpluslite
+Downloads: https://github.com/dboles99/bachelorpluslite/releases/latest
+
+## What it does
+
+- Sie können es bereits bedienen. Tabs, Suchen und Ersetzen, Gehe zu Zeile, Rückgängig, Zoom, UTF-8, LF oder CRLF. Wer Notepad bedienen kann, kann auch dies bedienen, und große Dateien bleiben flott, weil eine Änderung das kostet, was Sie geändert haben, und nicht das, was die Datei wiegt.
+- Es benennt Ihre Dateien für Sie. Ein Menüpunkt macht aus "unbenannt_3.txt" ein Quartalsbericht_10SEP2026.md und nimmt den Titel aus dem, was Sie tatsächlich geschrieben haben. Ein Ordner davon sortiert sich selbst nach Datum und liest sich wie eine Liste von Themen. Jede Umbenennung bestätigen Sie vorher.
+- Ihre Arbeit übersteht einen Absturz. Ungespeicherte Änderungen bleiben über einen Absturz, ein erzwungenes Beenden oder einen Stromausfall erhalten und werden Ihnen beim nächsten Start wieder angeboten. Ob es das überhaupt tut, entscheiden Sie pro Dokument.
+- "Was habe ich sonst noch dazu geschrieben?" Ein Klick listet jede Notiz, die dasselbe Feld abdeckt wie die, die Sie gerade lesen, die nächstliegende zuerst. Das ist die Funktion, wegen der Leute es behalten: Ihre eigenen Gedanken von vor drei Monaten, gefunden ohne zu wissen, wo Sie sie abgelegt haben.
+- Es merkt, wenn Sie das schon einmal geschrieben haben. Speichern Sie etwas, das einer vorhandenen Notiz nahekommt, sagt es Ihnen das, sodass Sie am Ende eine gute Notiz haben statt vier halber.
+
+## What it refuses to do, stated exactly
+
+- **It executes nothing.** No scripts, macros, plugins or interpreters.
+  Opening a document cannot run anything.
+- **It makes no network connection.** No telemetry, no update check, no crash
+  reporting, no AI, no account. It behaves identically offline.
+- **It launches no other program**, not even a browser for its own help.
+- **It will not seize a file association** or delete anything from a user
+  profile without showing what it would do first.
+
+## What it records on the user's machine
+
+Zwei Dinge und sonst nichts: eine Wiederherstellungsdatei, damit ein Absturz Sie keine Arbeit kostet, und ein Indexeintrag, damit die Notizfunktionen arbeiten. Beides sind echte Abwägungen, deshalb stehen sie hier statt eines beruhigenden Absatzes.
+
+- Standard: recovery file ja, nicht verschlüsselt; records Pfad, Titel und Themen.
+- Privat: recovery file ja, nicht verschlüsselt; records Nur der Pfad.
+- Vertraulich: no recovery file; records nothing.
+- Maximal: no recovery file; records nothing.
+
+Nothing is encrypted in this edition, and the program says so rather than
+implying otherwise.
+
+## Downloads, and one thing to tell people
+
+The archives are **unsigned**. Windows SmartScreen warns on first run. A
+code-signing certificate has not been bought, and self-signing was refused
+because it would ask a user to install a root certificate they have no reason
+to trust. Every release ships a SHA-256 checksum file.
+
+There is no installer. Unpack the archive anywhere and run it.
+
+## The paid version
+
+BachelorPad+ is the full version: encrypted notes, runnable notebooks,
+structured-data tools, clipboard history and complete privacy controls. It
+arrives on 10 October 2026. The price is not set. Lite stays free either way.
+
+Waitlist: https://bpad.prompt-forge.dev/de/waitlist.html
+
+## Licence
+
+GPL-3.0-only, not -or-later. The user interface is built with Slint, whose
+grant is to version 3 and no other, so "or later" would offer terms this
+project has not been granted.

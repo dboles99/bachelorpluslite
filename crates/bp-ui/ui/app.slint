@@ -1,4 +1,4 @@
-// BachelorPlusLite application shell.
+// BachelorPad+ Lite application shell.
 //
 // This file owns the window: its properties, the callbacks Rust binds to, the
 // shortcut bindings, and the layout that puts the pieces in order. The pieces
@@ -50,11 +50,21 @@ enum PendingFocus {
 }
 
 export component AppWindow inherits Window {
-    title: "BachelorPlusLite";
+    // Set by Rust from `bp_platform::DISPLAY_NAME`, never written here.
+    // A literal in this file is a second home for the product name, and
+    // the last rename reached the window and missed the constant --
+    // exactly the failure DISPLAY_NAME's doc comment predicts (ADR-0074).
+    title: root.app-title;
+    // Loaded by Rust from the PNG shipped beside the executable (ADR-0068),
+    // rather than `@image-url` -- an embedded copy would be a second icon to
+    // keep in step with the one registration points at, and this way there is
+    // one file. Empty until Rust sets it, which is the toolkit default.
+    icon: root.window-icon;
     preferred-width: 1000px;
     preferred-height: 680px;
     background: Palette.shell;
 
+    in property <string> app-title;
     in-out property <string> doc-text;
     in property <[TabInfo]> tabs;
     in property <string> gutter;
@@ -68,7 +78,6 @@ export component AppWindow inherits Window {
     in property <string> theme-name;
     /// The active document's security profile, or empty under the default.
     in property <string> security-profile;
-    in property <string> size-label;
     in property <string> error-message;
     /// What the desktop's appearance setting says, reported to Rust so
     /// `bp_theme::ThemeId::for_system` can resolve it.
@@ -94,16 +103,17 @@ export component AppWindow inherits Window {
 
     // Menu contents, built in Rust so that enabled state can depend on
     // application state (Save All only when something is unsaved, and so on).
+    /// The window and taskbar icon. See `icon:` above.
+    in property <image> window-icon;
     in property <[MenuItem]> file-items;
     in property <[MenuItem]> edit-items;
     in property <[MenuItem]> view-items;
     in property <[MenuItem]> insert-items;
     in property <[MenuItem]> format-items;
-    in property <[MenuItem]> data-items;
     in property <[MenuItem]> note-items;
     in property <[MenuItem]> organize-items;
     in property <[MenuItem]> research-items;
-    in property <[MenuItem]> security-items;
+    in property <[MenuItem]> privacy-items;
     in property <[MenuItem]> tools-items;
     in property <[MenuItem]> help-items;
     /// The tab strip's context menu. Not a menu-bar menu, but built the same
@@ -167,23 +177,6 @@ export component AppWindow inherits Window {
     callback find-previous();
     callback replace-all();
 
-    /// True while a document served from disk is being scanned for the find
-    /// bar's query (ADR-0042).
-    ///
-    /// `in-out` because both ends set it: Rust turns it on when a scan
-    /// starts and off when the scan reports it has finished, and the timer
-    /// below reads it. It is the *whole* of the cancellation story -- there
-    /// is no thread to signal, so a scan stops when nothing asks it to
-    /// continue.
-    in-out property <bool> scanning;
-    /// How long between two ticks of a scan, in milliseconds.
-    ///
-    /// Set by Rust from `bp_search::STREAM_TICK` rather than written here as
-    /// a literal. It is half of a scan rate whose other half
-    /// (`WINDOWS_PER_TICK`) lives in that crate, and two numbers that only
-    /// mean something together must not be a file apart.
-    in property <int> scan-tick-ms: 16;
-    callback scan-tick();
 
     // Cross-file search results.
     in property <[SearchHit]> search-hits;
@@ -313,17 +306,6 @@ export component AppWindow inherits Window {
                 root.focus-editor();
             }
             root.pending-focus = PendingFocus.none;
-        }
-    }
-
-    scan-timer := Timer {
-        interval: root.scan-tick-ms * 1ms;
-        // `find-open` as well as `scanning`, and it is not belt and braces:
-        // closing the find bar is a user cancelling a search, and with no
-        // thread to signal that has to *be* the timer not firing again.
-        running: root.scanning && root.find-open;
-        triggered => {
-            root.scan-tick();
         }
     }
 
@@ -571,12 +553,6 @@ export component AppWindow inherits Window {
                             format-menu.show();
                         }
                     }
-                    data-label := MenuLabel {
-                        label: "Data";
-                        clicked => {
-                            data-menu.show();
-                        }
-                    }
                     note-label := MenuLabel {
                         label: "Note";
                         clicked => {
@@ -595,10 +571,10 @@ export component AppWindow inherits Window {
                             research-menu.show();
                         }
                     }
-                    security-label := MenuLabel {
-                        label: "Security";
+                    privacy-label := MenuLabel {
+                        label: "Privacy";
                         clicked => {
-                            security-menu.show();
+                            privacy-menu.show();
                         }
                     }
                     tools-label := MenuLabel {
@@ -867,7 +843,6 @@ export component AppWindow inherits Window {
                 line-ending-label: root.line-ending-label;
                 cursor-label: root.cursor-label;
                 security-label: root.security-profile;
-                size-label: root.size-label;
                 theme-name: root.theme-name;
                 location: root.location;
                 error-message: root.error-message;
@@ -935,15 +910,6 @@ export component AppWindow inherits Window {
             root.dispatch(a);
         }
     }
-    data-menu := MenuPopup {
-        x: data-label.x + 4px;
-        y: 28px;
-        menu-max-height: root.menu-max-height;
-        items: root.data-items;
-        chosen(a) => {
-            root.dispatch(a);
-        }
-    }
     note-menu := MenuPopup {
         x: note-label.x + 4px;
         y: 28px;
@@ -971,11 +937,11 @@ export component AppWindow inherits Window {
             root.dispatch(a);
         }
     }
-    security-menu := MenuPopup {
-        x: security-label.x + 4px;
+    privacy-menu := MenuPopup {
+        x: privacy-label.x + 4px;
         y: 28px;
         menu-max-height: root.menu-max-height;
-        items: root.security-items;
+        items: root.privacy-items;
         chosen(a) => {
             root.dispatch(a);
         }

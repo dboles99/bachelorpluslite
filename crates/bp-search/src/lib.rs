@@ -17,11 +17,7 @@ use regex::{Regex, RegexBuilder};
 use thiserror::Error;
 
 mod files;
-mod stream;
 pub use files::{FileHit, FileSearchReport, MAX_FILE_BYTES, MAX_HITS, search_dir};
-pub use stream::{
-    STREAM_TICK, StreamHit, StreamLimits, StreamSearch, StreamSearchError, WINDOWS_PER_TICK,
-};
 
 /// Crate identity used by workspace smoke tests and diagnostics.
 pub const CRATE_NAME: &str = "bp-search";

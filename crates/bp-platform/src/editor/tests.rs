@@ -41,22 +41,13 @@ fn desktop_keys(entry: &str) -> Vec<(&str, &str)> {
 
 /// Whether `bp-formats` must be able to identify this extension.
 ///
-/// Every type except the product's own. `.bpadx` is an encrypted envelope
-/// (ADR-0021): `bp-crypto` opens it and *then* the plaintext inside is
-/// detected, so `bp_formats::Format` has no variant for it and should not --
-/// the question "what format is this" has no answer until it is decrypted.
-/// The exemption is by group rather than by extension so that a second
-/// product-owned type inherits it without anyone editing this test.
-fn must_be_parseable(file_type: &FileType) -> bool {
-    file_type.group != TypeGroup::Own
-}
-
 #[test]
 fn every_registerable_extension_is_one_bp_formats_can_identify() {
     // The one agreement that must hold between the registration table and the
     // parser: claiming a file type the editor cannot open is the failure the
     // user experiences as a broken machine rather than a missing feature.
-    for file_type in FILE_TYPES.iter().filter(|t| must_be_parseable(t)) {
+    // No exemption: ADR-0069 removed the one type that had one.
+    for file_type in FILE_TYPES {
         assert!(
             bp_formats::Format::from_extension(file_type.extension).is_some(),
             ".{} is offered for registration and bp-formats does not know it",
@@ -146,10 +137,9 @@ fn everything_supported_is_the_whole_table_and_the_others_are_inside_it() {
     for &preset in AssociationPreset::ALL {
         let selection = AssociationSelection::preset(preset);
         assert!(!selection.is_empty(), "{} is empty", preset.label());
-        // Every preset opens plain text and the product's own format --
-        // whatever else the user chose, the product must open its own files.
+        // Every preset opens plain text -- whatever else a user picked, a
+        // text editor that could not be asked to open a .txt is not one.
         assert!(selection.contains("txt"), "{}", preset.label());
-        assert!(selection.contains("bpadx"), "{}", preset.label());
         for extension in selection.extensions() {
             assert!(everything.contains(extension), "{extension}");
         }
@@ -209,8 +199,9 @@ fn the_desktop_entry_has_the_keys_a_desktop_environment_looks_for() {
         assert!(keys.contains(&required), "no {required} key in\n{entry}");
     }
     assert!(entry.contains("Exec=/usr/local/bin/bachelorpad %F"));
-    assert!(entry.contains("MimeType=application/x-bachelorpad-encrypted;"));
-    assert!(entry.contains(";text/plain;"), "{entry}");
+    // The product owns no type of its own (ADR-0069), so the list is entirely
+    // types the distribution already defines, and text/plain leads it.
+    assert!(entry.contains("MimeType=text/plain;"), "{entry}");
     assert!(entry.contains("Categories=Utility;TextEditor;\n"));
 }
 
@@ -249,9 +240,9 @@ fn a_windows_style_path_survives_both_layers_of_escaping() {
 
 #[test]
 fn the_mime_package_defines_only_the_products_own_types() {
-    let package = desktop::mime_package(&everything()).expect("bpadx is in every preset");
-    assert!(package.contains("application/x-bachelorpad-encrypted"));
-    assert!(package.contains("<glob pattern=\"*.bpadx\"/>"));
+    // PowerShell is the only type left that `shared-mime-info` does not define
+    // (ADR-0069 took the other one), so the package is exactly that type.
+    let package = desktop::mime_package(&everything()).expect("PowerShell is in Developer");
     // Not a redefinition of the distribution's own types.
     assert!(!package.contains("application/json"));
     assert!(!package.contains("text/plain"));
@@ -869,7 +860,7 @@ proptest! {
     ) {
         let refs: Vec<&str> = proposed.iter().map(String::as_str).collect();
         let selection = AssociationSelection::custom(refs);
-        for file_type in selection.file_types().filter(|t| must_be_parseable(t)) {
+        for file_type in selection.file_types() {
             prop_assert!(
                 bp_formats::Format::from_extension(file_type.extension).is_some(),
                 "{}",
@@ -877,4 +868,147 @@ proptest! {
             );
         }
     }
+}
+
+#[test]
+fn the_icon_a_plan_names_is_the_file_the_release_stages() {
+    // **The seam ADR-0068 exists to hold.** The icon is not embedded in the
+    // executable and is not installed into a theme; it travels in the
+    // archive, and two independent things have to agree about its name: this
+    // crate, which writes it into a `.desktop` file or a registry plan, and
+    // the release scripts, which copy it. Those scripts are PowerShell and
+    // shell and cannot be type-checked against this, so the agreement is
+    // asserted by reading them.
+    //
+    // Before ADR-0068 there was no file at all: Windows registration wrote
+    // `DefaultIcon` as `"<exe>",0` and the executable has never carried an
+    // icon resource, so every type registered through it rendered blank.
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(std::path::Path::parent)
+        .expect("the workspace root is two levels above this crate");
+
+    for platform in [Platform::Windows, Platform::Linux] {
+        let name = icon_file_name(platform);
+        assert!(
+            root.join("assets").join(name).is_file(),
+            "{platform:?}: assets/{name} is named by this crate and does not exist"
+        );
+    }
+
+    for (script, name) in [
+        ("scripts/New-Release.ps1", icon_file_name(Platform::Windows)),
+        ("scripts/release-linux.sh", icon_file_name(Platform::Linux)),
+    ] {
+        let text = std::fs::read_to_string(root.join(script))
+            .unwrap_or_else(|e| panic!("{script} is unreadable: {e}"));
+        assert!(
+            text.contains(name),
+            "{script} never mentions {name}, so the archive would ship without \
+             the icon its own registration points at"
+        );
+    }
+}
+
+#[test]
+fn the_icon_path_follows_the_executable_and_the_platform() {
+    // A user unpacks the archive wherever they like, so the icon's location
+    // is only ever knowable relative to the binary.
+    assert_eq!(
+        icon_beside(Platform::Linux, "/opt/bp/bachelorpad").as_deref(),
+        Some("/opt/bp/io.github.dboles99.BachelorPadPlus.png")
+    );
+    assert_eq!(
+        icon_beside(Platform::Windows, r"C:\Apps\bp\bachelorpad.exe").as_deref(),
+        Some(r"C:\Apps\bp\bachelorpad.ico")
+    );
+    // A bare name has no parent, and guessing one would write a path into a
+    // `.desktop` file that resolves to nothing.
+    assert_eq!(icon_beside(Platform::Linux, "bachelorpad"), None);
+}
+
+#[test]
+fn each_icon_asset_is_the_format_its_name_claims() {
+    // `is_file()` is satisfied by an empty file, and an empty file is exactly
+    // what a mangled copy or a failed generator leaves behind. The window
+    // icon fails *silently* by design -- a missing icon must not stop the
+    // editor starting -- so nothing at runtime would report this, and the
+    // Explorer icon would simply be blank again.
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(std::path::Path::parent)
+        .expect("the workspace root is two levels above this crate");
+    let read = |name: &str| std::fs::read(root.join("assets").join(name)).expect("asset");
+
+    let png = read(icon_file_name(Platform::Linux));
+    assert_eq!(
+        &png[..8],
+        b"\x89PNG\r\n\x1a\n",
+        "the Linux icon is not a PNG"
+    );
+    // IHDR width and height, big-endian at bytes 16..24.
+    let width = u32::from_be_bytes(png[16..20].try_into().unwrap());
+    let height = u32::from_be_bytes(png[20..24].try_into().unwrap());
+    assert_eq!((width, height), (256, 256), "the Linux icon is not 256x256");
+
+    let ico = read(icon_file_name(Platform::Windows));
+    // ICONDIR: reserved 0, type 1 (icon), then the image count.
+    assert_eq!(&ico[..4], &[0, 0, 1, 0], "the Windows icon is not an ICO");
+    let count = u16::from_le_bytes(ico[4..6].try_into().unwrap());
+    assert!(
+        count >= 4,
+        "an ICO with {count} sizes will be scaled badly somewhere; \
+         Explorer alone asks for 16, 32, 48 and 256"
+    );
+    // Every directory entry must point inside the file, or the reader gets a
+    // truncated image and shows nothing.
+    for i in 0..usize::from(count) {
+        let e = 6 + i * 16;
+        let len = u32::from_le_bytes(ico[e + 8..e + 12].try_into().unwrap()) as usize;
+        let off = u32::from_le_bytes(ico[e + 12..e + 16].try_into().unwrap()) as usize;
+        assert!(
+            off + len <= ico.len(),
+            "ICO entry {i} runs past the end of the file"
+        );
+    }
+}
+
+#[test]
+fn the_window_icon_is_a_format_the_toolkit_can_actually_decode() {
+    // **Caught by extracting an archive and looking at it**, an hour after
+    // the window icon was added. Slint 1.17 builds the `image` crate with
+    // `png` and `jpeg` only; there is no ICO decoder. The window icon loads
+    // silently-or-not by design, so on Windows it produced the toolkit's
+    // default and nothing reported it.
+    //
+    // Asserted as a property of the *name* rather than of Slint, because
+    // this crate cannot depend on the toolkit: the window icon must be a PNG
+    // on every platform, whatever registration names.
+    for platform in [Platform::Windows, Platform::Linux] {
+        let named = window_icon_beside(
+            platform,
+            match platform {
+                Platform::Windows => r"C:\Apps\bp\bachelorpad.exe",
+                Platform::Linux => "/opt/bp/bachelorpad",
+            },
+        )
+        .expect("an absolute executable has a parent");
+        assert!(
+            named.ends_with(".png"),
+            "{platform:?}: the window icon is {named}, which Slint cannot decode"
+        );
+    }
+
+    // And the Windows archive must carry it, not only the .ico.
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(std::path::Path::parent)
+        .expect("workspace root");
+    let script = std::fs::read_to_string(root.join("scripts/New-Release.ps1")).expect("script");
+    assert!(
+        script.contains(window_icon_file_name()),
+        "the Windows archive ships no {}, so the window icon would fall back \
+         to the toolkit default on every machine",
+        window_icon_file_name()
+    );
 }

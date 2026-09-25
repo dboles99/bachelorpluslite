@@ -1,0 +1,107 @@
+# bpad.prompt-forge.dev, on Azure Static Web Apps (ADR-0076).
+#
+# The site is deployed from this repository so that a release and the page
+# describing it move together. A download link naming a version the release
+# workflow has not produced is the failure this arrangement prevents.
+#
+# **The manual is copied in at deploy time rather than committed under
+# `site/`.** `docs/generated/manual.html` is already a committed generated
+# artefact with a staleness check over it (ADR-0075); a second copy inside
+# `site/` would be a third home for the same bytes and the one nothing
+# checks.
+
+name: Site
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+      - "docs/**"
+      - "scripts/Build-Docs.ps1"
+      - "scripts/DocsCommon.ps1"
+      - ".github/workflows/site.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "site/**"
+      - "docs/**"
+      - ".github/workflows/site.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: site-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    name: build and deploy
+    steps:
+      - uses: actions/checkout@v4
+
+      # Every link resolves, no placeholder survived, and nothing loads from
+      # a third party (ADR-0076). The logic lives in the script rather than
+      # here, because the first version had it written twice -- once here and
+      # once in the gate -- and both copies carried the same two bugs: they
+      # scanned `_templates/`, which is source, and they counted a
+      # `rel="canonical"` as a third-party request.
+      - name: check the site
+        shell: pwsh
+        run: ./scripts/Test-Site.ps1
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: System libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libfontconfig1-dev libxkbcommon-dev libxcb-shape0-dev \
+            libxcb-xfixes0-dev libxcb1-dev libgl1-mesa-dev libwayland-dev
+
+      - name: the manual must be current before it is published
+        shell: pwsh
+        run: ./scripts/Build-Docs.ps1 -Check
+
+      - name: the pages must match their templates before they are published
+        shell: pwsh
+        run: ./scripts/Build-Site.ps1 -Check
+
+      - name: stage the manual at /docs
+        run: |
+          mkdir -p site/docs
+          cp docs/generated/manual.html site/docs/index.html
+          cp docs/generated/manual.md site/docs/manual.md
+
+      # Deploys only when the secret exists, so a fork and a first run before
+      # the Azure resource is created report cleanly instead of failing with
+      # an authentication error nobody can act on.
+      - name: deploy
+        if: env.SWA_TOKEN != ''
+        env:
+          SWA_TOKEN: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+          action: upload
+          app_location: "site"
+          # The signup function. Left empty, the API is never deployed and
+          # /api/subscribe returns 404, which looks exactly like a broken
+          # form. af-site learned that; this does not need to learn it again.
+          api_location: "site/api"
+          output_location: ""
+          # Nothing to build: the pages are generated into site/ by
+          # scripts/Build-Site.ps1 and committed. Without this, Oryx inspects
+          # the tree, decides it might be a Node project because of api/, and
+          # either wastes a minute or fails on a dependency that is not there.
+          skip_app_build: true
+
+      - name: say what is missing if it did not deploy
+        if: env.SWA_TOKEN == ''
+        env:
+          SWA_TOKEN: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+        run: |
+          echo 'Built and checked, but not deployed.'
+          echo 'AZURE_STATIC_WEB_APPS_API_TOKEN is not set on this repository.'
+          echo 'Create the Static Web App, then add its deployment token as that secret.'

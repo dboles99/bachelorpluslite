@@ -11,9 +11,9 @@ use bp_core::{Document, DocumentId, Encoding, LineEnding};
 use bp_platform::editor::{Consent, InstallRefusal, RegistrationPlan};
 use bp_theme::ThemeId;
 
+use crate::AppWindow;
 use crate::menus::{self, action};
-use crate::state::{AppState, NoteOutcome, PushText, SaveResult, secret_scan_report};
-use crate::{AppWindow, set_os_clipboard};
+use crate::state::{AppState, NoteOutcome, PushText, SaveResult};
 
 const SHORTCUTS: &str = "\
 Ctrl+N          New
@@ -29,6 +29,96 @@ Ctrl+= / Ctrl+- Zoom in / out
 Ctrl+0          Reset zoom
 Ctrl+D          Duplicate line
 Alt+Up / Down   Move line up / down";
+
+/// The About box, as text, so the claim in it has a test behind it.
+///
+/// **The licence is read from `CARGO_PKG_LICENSE`, never written out.** It
+/// was written out until ADR-0071, while `bp_config::cli::Package`'s
+/// `license` field claimed three crates away that the workspace manifest was
+/// "the one home for this string". Both sentences were in the repository at
+/// once and neither could fail -- trap 4 -- so what actually caught it was a
+/// relicence needing to know where the string lived.
+///
+/// A function rather than a `const` because the renderer is read from the
+/// environment at click time, and separate from the match arm because a body
+/// built inside `handle_menu_action` is one no test can reach.
+fn about_text() -> String {
+    format!(
+        "{} {}\n\nNotepad when you want it. More when you need it.\n\n\
+         Renderer: {}\nLicence: {}\n\n\
+         Free software, and you may redistribute and modify it under the\n\
+         GNU General Public License version 3. It comes with NO WARRANTY.\n\
+         The full text is in LICENSE, beside this program.",
+        bp_platform::DISPLAY_NAME,
+        env!("CARGO_PKG_VERSION"),
+        std::env::var("SLINT_BACKEND").unwrap_or_else(|_| "software".to_owned()),
+        env!("CARGO_PKG_LICENSE"),
+    )
+}
+
+/// Where an issue is filed, derived from the manifest rather than written
+/// out.
+///
+/// `CARGO_PKG_REPOSITORY` is the workspace manifest's `repository` field, so
+/// a fork that changes it gets its own issues URL for free and this cannot
+/// point at somebody else's tracker. The same reasoning as the licence and
+/// the product name (ADR-0071, ADR-0074): the value has one home and this
+/// reads it.
+fn issues_url() -> String {
+    format!("{}/issues/new/choose", env!("CARGO_PKG_REPOSITORY"))
+}
+
+/// A bug report, pre-filled, ready for the user to add what they did.
+///
+/// **The diagnostics are already in it, and that is the whole point**
+/// (ADR-0077). `.github/ISSUE_TEMPLATE/bug_report.yml` asks for the version,
+/// the renderer, every resolved directory and which editor surface was in
+/// use, because reports without them cannot be acted on -- and somebody
+/// filing in a browser has to come back here, find Help > Diagnostics and
+/// copy it. Most will not. So the constraint that this product cannot open
+/// a browser produces the *better* report rather than a worse one.
+///
+/// Pure, and takes the diagnostics as a parameter, so a test can read it
+/// without a window or a real profile directory.
+fn problem_report(diagnostics: &str) -> String {
+    format!(
+        "# Problem report\n\n\
+         Fill in the three sections below, then paste the whole thing at:\n\
+         {}\n\n\
+         Nothing has been sent. This is a document; it goes nowhere until you\n\
+         put it there yourself.\n\n\
+         ## What I did\n\n\n\
+         ## What I expected\n\n\n\
+         ## What happened instead\n\n\n\
+         ## Diagnostics\n\n\
+         ```\n{}\n```\n\n\
+         ## Before you send it\n\n\
+         - An issue is public. Check the paths above are ones you are happy to\n\
+         share, and edit them if not.\n\
+         - If this is a security problem, do not open a public issue. See\n\
+         SECURITY.md in the repository.\n",
+        issues_url(),
+        diagnostics.trim_end(),
+    )
+}
+
+/// Where the shipped help is, or `None` if this build cannot work out where
+/// it is running from.
+///
+/// The path rule is `bp_platform::help`'s and the *question* -- where is this
+/// executable -- is the shell's, which is the split R011 asks for: `bp-ui`
+/// connects, and does not decide.
+///
+/// `current_exe` can fail, and the caller says so plainly rather than opening
+/// nothing. It is also the case that matters most in practice: somebody who
+/// moved `bachelorpad.exe` out of the unpacked folder has left the help
+/// behind, exactly as they would have left the icon behind (ADR-0068).
+fn user_guide_path() -> Option<PathBuf> {
+    let executable = std::env::current_exe().ok()?;
+    let path = bp_platform::help::index_beside(bp_platform::Platform::HOST, executable.to_str()?)?;
+    let path = PathBuf::from(path);
+    path.is_file().then_some(path)
+}
 
 /// A document's filename, for a row whose detail column already shows the
 /// full path -- the same reasoning `state::organize`'s own `filename_of`
@@ -86,32 +176,6 @@ pub(crate) fn pick_save_path(
         .save_file()
 }
 
-/// Give a chosen path the `.bpadx` extension.
-///
-/// The file dialog suggests the document's current name, and a user who
-/// accepts it would otherwise get an encrypted file called `notes.txt` --
-/// which the shell would happily reopen, but which every other program on the
-/// machine would treat as text and show as binary noise.
-fn with_bpadx_extension(path: PathBuf) -> PathBuf {
-    if path.extension().is_some_and(|e| e == "bpadx") {
-        path
-    } else {
-        let mut name = path.file_name().unwrap_or_default().to_os_string();
-        name.push(".bpadx");
-        path.with_file_name(name)
-    }
-}
-
-/// Choose the public key a signature is claimed to have been made with.
-fn pick_verifying_key(state: &AppState) -> Option<PathBuf> {
-    rfd::FileDialog::new()
-        .set_title("Choose the public key to verify against")
-        .set_directory(state.dialog_directory())
-        .add_filter("Public key", &["pub", "key", "txt"])
-        .add_filter("Any file", &["*"])
-        .pick_file()
-}
-
 /// Choose where to put the registry script Windows registration needs.
 ///
 /// The file name comes from `bp-platform`'s own artefact, so what the user
@@ -148,21 +212,6 @@ fn confirm_registration(body: &str) -> Consent {
     } else {
         Consent::Withheld
     }
-}
-
-/// Show what a redaction is about to destroy, and ask before destroying it.
-///
-/// The listing is not bounded the way `confirm_replace`'s is. A scan that
-/// found four hundred credentials is a document nobody should redact without
-/// reading the list, and a truncated list is one nobody read.
-fn confirm_redaction(plan: &crate::state::RedactionPlan) -> bool {
-    rfd::MessageDialog::new()
-        .set_level(rfd::MessageLevel::Warning)
-        .set_title("Redact")
-        .set_description(plan.consent_body())
-        .set_buttons(rfd::MessageButtons::OkCancel)
-        .show()
-        == rfd::MessageDialogResult::Ok
 }
 
 /// Show what Replace All would do, and ask before doing it.
@@ -274,14 +323,7 @@ pub fn handle_menu_action(
         action::OPEN => {
             let chosen = pick_file(&state.borrow());
             if let Some(path) = chosen {
-                // An encrypted file does not become a tab until it is
-                // unlocked: a tab nobody can read looks like an empty
-                // document, and saving it would write emptiness over the
-                // real one.
-                if state.borrow_mut().open_maybe_encrypted(path) {
-                    ui.invoke_focus_passphrase();
-                    return None;
-                }
+                state.borrow_mut().open(path);
             }
         }
         action::SAVE => {
@@ -481,85 +523,6 @@ pub fn handle_menu_action(
             push = PushText::No;
         }
 
-        action::ENCRYPT_DOCUMENT => {
-            // Save As, not encrypt-in-place: the plaintext original is left
-            // where it was rather than silently destroyed by an operation
-            // that is irreversible without the passphrase. The tab then
-            // adopts the encrypted file, so later saves stay encrypted.
-            let target = state.borrow().workspace.active_id();
-            if let Some(id) = target {
-                let suggested = pick_save_path(&state.borrow(), id);
-                if let Some(path) = suggested {
-                    let path = with_bpadx_extension(path);
-                    state.borrow_mut().ask = Some(crate::passphrase::Ask::Set { id, target: path });
-                    ui.invoke_focus_passphrase();
-                }
-            }
-            return None;
-        }
-
-        action::SCAN_SECRETS => {
-            let findings = state.borrow_mut().scan_for_secrets();
-            // The listing is a dialog rather than more status bar: the bar
-            // elides, and the positions are the part worth reading. Nothing
-            // here is the matched text -- a `Finding` does not carry it, and
-            // reaching back into the document to quote it would undo the one
-            // decision the crate is built around.
-            if !findings.is_empty() {
-                show_info("Possible credentials", &secret_scan_report(&findings));
-            }
-            push = PushText::No;
-        }
-
-        action::HASH_DOCUMENT => {
-            // The borrow ends with the statement, before the dialog opens:
-            // `rfd` pumps events, and a re-entrant callback on a live borrow
-            // panics.
-            let report = state.borrow_mut().hash_active_document();
-            if let Some(report) = report {
-                show_info("Document hash", &report);
-            }
-            push = PushText::No;
-        }
-
-        action::SIGN_DOCUMENT => {
-            push = PushText::No;
-            // Asks the right question and stops. Whether the passphrase bar
-            // says "new signing key passphrase" or "signing key passphrase"
-            // depends on whether a key exists, and `begin_signing` is what
-            // decides -- the whole flow lives there and in
-            // `answer_passphrase`, so a passphrase is typed in exactly one
-            // place in this product.
-            if state.borrow_mut().begin_signing() {
-                ui.invoke_focus_passphrase();
-            }
-        }
-
-        action::VERIFY_SIGNATURE => {
-            push = PushText::No;
-            // The first pass asks the user nothing, because a key cannot
-            // change its answer: whether a sidecar is there at all, whether
-            // it reads as one, and whether it holds against the key it itself
-            // names are all settled before anybody is asked for a file. A
-            // missing one fails here, closed, and stops.
-            let holds = state
-                .borrow_mut()
-                .verify_signature(&bp_integrity::Expectation::AnySigner);
-
-            // Only now is a key worth asking for. It is the one thing that
-            // tells "signed by who you expected" from "signed by somebody
-            // else" -- the verdict a bare 64-byte `.sig` cannot produce, and
-            // the reason ADR-0026's sidecar records a key at all. Cancelling
-            // leaves the first pass's answer standing, caveat and all, which
-            // is why that caveat is written.
-            if holds && let Some(path) = pick_verifying_key(&state.borrow()) {
-                let expect = state.borrow_mut().expected_signer(&path);
-                if let Some(expect) = expect {
-                    state.borrow_mut().verify_signature(&expect);
-                }
-            }
-        }
-
         action::SET_DEFAULT_EDITOR => {
             push = PushText::No;
             // Nothing is borrowed while a dialog is up: `rfd` pumps events,
@@ -636,54 +599,6 @@ pub fn handle_menu_action(
             }
         }
 
-        action::REDACT_SECRETS => {
-            // Three statements, each ending its borrow before the next, and
-            // the dialog in between opened while nothing is borrowed at all:
-            // `rfd` pumps events, and a re-entrant callback on a live
-            // `borrow_mut()` panics.
-            //
-            // The consent is not ceremony. Redaction destroys text the user
-            // wrote, in places on the screen they cannot all see at once, and
-            // it is offered because a scanner *guessed* the text was a
-            // credential. Replace All is confirmed for the weaker version of
-            // the same reason.
-            let plan = state.borrow_mut().plan_redaction();
-            push = PushText::No;
-            if let Some(plan) = plan {
-                if confirm_redaction(&plan) {
-                    // The document changed, so its text has to be re-pushed
-                    // -- and only then, because re-pushing throws away
-                    // `TextInput`'s caret.
-                    if state.borrow_mut().apply_redaction(&plan) {
-                        push = PushText::Yes;
-                    }
-                } else {
-                    state.borrow_mut().decline_redaction(&plan);
-                }
-            }
-        }
-
-        action::SECURITY_HISTORY => {
-            // Same shape as Inspect Metadata: the borrow ends with the
-            // statement, before the dialog opens. `rfd` pumps events, and a
-            // re-entrant callback on a live `borrow_mut()` panics.
-            let report = state.borrow_mut().security_history();
-            if let Some(report) = report {
-                show_info("Security History", &report);
-            }
-            push = PushText::No;
-        }
-
-        action::INSPECT_METADATA => {
-            // Same shape as Hash Document: the borrow ends with the
-            // statement, before the dialog opens.
-            let report = state.borrow_mut().inspect_metadata();
-            if let Some(report) = report {
-                show_info("Metadata", &report);
-            }
-            push = PushText::No;
-        }
-
         action::GO_TO_LINE => {
             // The bar owns the interaction from here; opening it is all the
             // menu row does, which is why one action id covers the feature.
@@ -751,28 +666,71 @@ pub fn handle_menu_action(
         action::ENCODING_UTF8 => state.borrow_mut().set_encoding(Encoding::Utf8),
         action::ENCODING_UTF8_BOM => state.borrow_mut().set_encoding(Encoding::Utf8Bom),
 
-        action::SHORTCUTS => show_info("Keyboard shortcuts", SHORTCUTS),
-        action::ABOUT => show_info(
-            "About BachelorPlusLite",
-            &format!(
-                "BachelorPlusLite {}\n\nNotepad when you want it. More when you need it.\n\n\
-                 Renderer: {}\nLicence: MIT OR Apache-2.0",
-                env!("CARGO_PKG_VERSION"),
-                std::env::var("SLINT_BACKEND").unwrap_or_else(|_| "software".to_owned()),
+        // Help ▸ User Guide. Opened as a document, which is what makes it
+        // possible at all: this product launches nothing, so a browser was
+        // never an option, and the editor already knows how to show text
+        // (ADR-0075). `bp_platform::help` decides *where* the file is,
+        // because joining a path is a platform question -- this arm only
+        // asks where the executable is, which is a shell question.
+        action::USER_GUIDE => match user_guide_path() {
+            Some(path) => state.borrow_mut().open(path),
+            None => show_info(
+                "User Guide",
+                "The help that ships beside this program could not be found.
+
+\n                 It is `app-help/index.md`, in the folder the executable is in.
+\n                 Moving the executable out of the unpacked archive leaves it
+\n                 behind -- move the whole folder instead.
+
+\n                 The same pages are at https://bpad.prompt-forge.dev/docs",
             ),
+        },
+        action::SHORTCUTS => show_info("Keyboard shortcuts", SHORTCUTS),
+        // Help ▸ Report a Problem. Composes a document and copies a URL; it
+        // opens nothing and sends nothing (ADR-0077).
+        //
+        // The borrow ends before `show_info`, because `rfd` pumps events and
+        // a re-entrant callback on a live `borrow_mut()` panics -- R011's
+        // seventh trap, and the reason this is three statements rather than
+        // one expression.
+        action::REPORT_PROBLEM => {
+            // A free function in `state`, not a method: it reads the process
+            // environment and the resolved directories rather than the open
+            // document, so it needs no `AppState` and takes no borrow. Which
+            // means the report is composed *before* any borrow is taken.
+            let report = problem_report(&crate::state::diagnostics_report());
+            {
+                let mut s = state.borrow_mut();
+                s.new_document();
+                s.edit(report);
+            }
+            let copied = crate::set_os_clipboard(&issues_url());
+            let where_to = if copied {
+                "The address is on your clipboard."
+            } else {
+                "The address is in the document; the clipboard was unavailable."
+            };
+            show_info(
+                "Report a Problem",
+                &format!(
+                    "A report has been opened in a new tab, with your diagnostics\n\
+                     already filled in.\n\n\
+                     Add what you did and what happened, then paste the whole\n\
+                     document into a new issue. {}\n\n\
+                     Nothing has been sent anywhere.",
+                    where_to
+                ),
+            );
+        }
+        action::ABOUT => show_info(
+            &format!("About {}", bp_platform::DISPLAY_NAME),
+            &about_text(),
         ),
         // Organize ▸ where documents sharing this one's tags already live.
         action::ORGANIZE_SUGGESTED_FOLDER => {
             let report = state.borrow().suggested_folder_report();
             push = PushText::No;
             show_info("Suggested Folder", &report);
-        }
-
-        // Security ▸ forget this document's passphrase now.
-        action::LOCK_DOCUMENT => {
-            let said = state.borrow_mut().lock_document();
-            show_info("Lock Document", &said);
-            push = PushText::No;
         }
 
         // Note ▸ the store's view of this document, and the journal's
@@ -829,69 +787,6 @@ pub fn handle_menu_action(
             };
             apply_editor_command(&mut state.borrow_mut(), &command);
             push = PushText::No;
-        }
-
-        // Bounded above by `clip_end()` -- an unbounded `>=` here is exactly
-        // what let the recent-files arm swallow everything up to 100 before
-        // it had a real range, and the paste-transformation ids just below
-        // would have fallen into this arm the same way.
-        id if (action::CLIP_BASE..menus::clip_end()).contains(&id) => {
-            let index = usize::try_from(id - action::CLIP_BASE).unwrap_or(0);
-            let text = state.borrow().clips.get(index).map(|e| e.text.clone())?;
-            set_os_clipboard(&text);
-
-            let owns_caret = state.borrow().editor_view;
-            if owns_caret {
-                {
-                    let mut s = state.borrow_mut();
-                    if let Some(editor) = s.active_editor_mut() {
-                        editor.insert(&text);
-                    }
-                    s.mark_edited();
-                }
-                refresh(ui, &mut state.borrow_mut(), PushText::No);
-                ui.invoke_focus_editor();
-            } else {
-                // The OS clipboard now holds the entry, so the
-                // widget's own paste puts it at the caret -- the one
-                // way to insert there without caret access.
-                ui.invoke_paste_from_clipboard();
-            }
-            return None;
-        }
-
-        // A paste transformation. Same two-path shape as the plain
-        // clipboard rows just above -- the caret is reached differently
-        // under each editor view, and missing one path is how a feature
-        // works for whoever tested it and does nothing for whoever did not.
-        id if (action::CLIP_TRANSFORM_BASE..menus::clip_transform_end()).contains(&id) => {
-            let (entry_index, transform) = {
-                let s = state.borrow();
-                menus::decode_transform(id, s.clips.entries())?
-            };
-            let source = state
-                .borrow()
-                .clips
-                .get(entry_index)
-                .map(|e| e.text.clone())?;
-            let text = menus::apply_transform(transform, &source)?;
-            set_os_clipboard(&text);
-
-            let owns_caret = state.borrow().editor_view;
-            if owns_caret {
-                {
-                    let mut s = state.borrow_mut();
-                    if let Some(editor) = s.active_editor_mut() {
-                        editor.insert(&text);
-                    }
-                    s.mark_edited();
-                }
-                refresh(ui, &mut state.borrow_mut(), PushText::No);
-                ui.invoke_focus_editor();
-            } else {
-                ui.invoke_paste_from_clipboard();
-            }
-            return None;
         }
 
         id if (action::NOTE_TITLE..=action::NOTE_OUTLINE).contains(&id) => {
@@ -969,25 +864,6 @@ pub fn handle_menu_action(
             show_info("Research Report", &report);
         }
 
-        // Research ▸ what the active document cites (ADR-0044). Each borrow
-        // ends with its statement, before the dialog opens, for the reason
-        // `RESEARCH_REPORT` gives just above.
-        action::CITATION_METADATA => {
-            let report = state.borrow().citation_metadata_report();
-            push = PushText::No;
-            show_info("Citation Metadata", &report);
-        }
-        action::FIND_IDENTIFIERS => {
-            let report = state.borrow().identifiers_report();
-            push = PushText::No;
-            show_info("Identifiers", &report);
-        }
-        action::CHECK_BIBLIOGRAPHY => {
-            let report = state.borrow().bibliography_report();
-            push = PushText::No;
-            show_info("Bibliography", &report);
-        }
-
         // Research ▸ what the active document asks, and what the store holds
         // (ADR-0046). Same borrow discipline as every arm above.
         action::OPEN_QUESTIONS => {
@@ -999,16 +875,6 @@ pub fn handle_menu_action(
             let report = state.borrow().store_contents_report();
             push = PushText::No;
             show_info("What the Store Holds", &report);
-        }
-
-        // Two ranges rather than one, because the Data block at 70-79 had a
-        // single id left when YAML needed two. Both reach the same place; the
-        // arm that decides which library function a click meant is
-        // `run_data_action`, where the format is in scope.
-        id if (action::DATA_VALIDATE..=action::DATA_COLUMN_TYPES).contains(&id)
-            || (action::DATA_YAML_TO_JSON..=action::DATA_JSON_TO_YAML).contains(&id) =>
-        {
-            state.borrow_mut().run_data_action(id);
         }
 
         id if (action::LINES_SORT_ASC..=action::LINES_TRIM).contains(&id) => {
@@ -1044,4 +910,98 @@ pub fn handle_menu_action(
 
     refresh(ui, &mut state.borrow_mut(), push);
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{about_text, issues_url, problem_report};
+    use bp_platform::DISPLAY_NAME;
+
+    #[test]
+    fn the_about_box_must_report_the_licence_the_manifest_declares() {
+        assert!(
+            about_text().contains(env!("CARGO_PKG_LICENSE")),
+            "About said: {}",
+            about_text()
+        );
+    }
+
+    /// The specific way this went wrong, kept as its own test.
+    ///
+    /// The previous literal outlived the licence it named, and a test
+    /// asserting only that About mentions *some* licence would have passed
+    /// over it unchanged -- `CARGO_PKG_LICENSE` was never in the string at
+    /// all. So this asserts the shape of the mistake rather than its value.
+    #[test]
+    fn no_licence_name_may_be_written_into_the_about_box_by_hand() {
+        let declared = env!("CARGO_PKG_LICENSE");
+        for spelling in ["MIT", "Apache-2.0", "BSD", "MPL"] {
+            assert!(
+                declared.contains(spelling) || !about_text().contains(spelling),
+                "About names {spelling}, which the manifest does not: {}",
+                about_text()
+            );
+        }
+    }
+
+    /// One of eight sites that spelled the product name out by hand.
+    ///
+    /// `DISPLAY_NAME` has said since it was written that the name "must not
+    /// be spelled out at the three places that show it", and there were
+    /// eight. This is the About body; `menus` asserts the About row and
+    /// `state` the diagnostics report, because a claim about eight sites
+    /// needs a reader at each of them rather than one that reads the
+    /// constant and proves only that the constant exists (ADR-0074).
+    #[test]
+    fn the_about_box_must_read_the_product_name_rather_than_spell_it() {
+        assert!(
+            about_text().starts_with(DISPLAY_NAME),
+            "About said: {}",
+            about_text()
+        );
+    }
+
+    /// The version has the same one-home rule and had never been asserted.
+    #[test]
+    fn the_about_box_must_report_the_version_the_manifest_declares() {
+        assert!(about_text().contains(env!("CARGO_PKG_VERSION")));
+    }
+
+    /// The diagnostics are the reason this row exists, so their presence is
+    /// asserted rather than assumed (ADR-0077).
+    #[test]
+    fn a_problem_report_carries_the_diagnostics_it_was_given() {
+        let report = problem_report("BachelorPad+ Lite 0.9.5\n\nRenderer: software");
+        assert!(
+            report.contains("Renderer: software"),
+            "report was: {report}"
+        );
+        assert!(report.contains("0.9.5"), "report was: {report}");
+    }
+
+    /// A report that did not say where to send it would be a document the
+    /// user has to go and look something up for, which is the friction the
+    /// whole row exists to remove.
+    #[test]
+    fn a_problem_report_says_where_to_paste_it() {
+        let report = problem_report("diagnostics");
+        assert!(report.contains(&issues_url()), "report was: {report}");
+    }
+
+    /// The issues URL is derived from the manifest, so a fork gets its own
+    /// tracker rather than sending its users here.
+    #[test]
+    fn the_issues_url_is_built_from_the_repository_the_manifest_declares() {
+        assert!(issues_url().starts_with(env!("CARGO_PKG_REPOSITORY")));
+    }
+
+    /// The one thing this row must never imply.
+    #[test]
+    fn a_problem_report_must_say_that_nothing_has_been_sent() {
+        let report = problem_report("diagnostics");
+        assert!(
+            report.to_lowercase().contains("nothing has been sent"),
+            "report was: {report}"
+        );
+    }
 }

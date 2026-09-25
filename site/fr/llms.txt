@@ -1,0 +1,66 @@
+# BachelorPad+ Lite
+
+> https://bpad.prompt-forge.dev/fr/
+
+## What this is
+
+BachelorPad+ Lite est un remplacement gratuit et open source du Bloc-notes pour Windows et Linux. Tout ce que fait le Bloc-notes, plus une chose qu'il ne sait pas faire : il sait lesquelles de vos notes parlent du même sujet, donc vous retrouvez ce que vous pensiez le mois dernier sans vous rappeler du nom du fichier. Il s'ouvre instantanement, fonctionne hors ligne pour toujours, et il n'exécutera jamais rien ni n'enverra rien nulle part.
+
+Free and open source under GPL-3.0-only. Windows 10, Windows 11 and Linux,
+64-bit. There is no macOS build. Version 0.9.5.
+
+Source: https://github.com/dboles99/bachelorpluslite
+Downloads: https://github.com/dboles99/bachelorpluslite/releases/latest
+
+## What it does
+
+- Vous savez déjà vous en servir. Onglets, rechercher et remplacer, aller à la ligne, annuler, zoom, UTF-8, LF ou CRLF. Si vous savez utiliser le Bloc-notes, vous savez utiliser celui-ci, et les gros fichiers restent rapides parce qu'une modification coûte ce que vous avez changé et non ce que pèse le fichier.
+- Il nomme vos fichiers à votre placé. Une entrée de menu transformé « sans_titre_3.txt » en Revue_Trimestrielle_10SEP2026.md, en prenant le titre dans ce que vous avez réellement écrit. Un dossier de ces fichiers se trie tout seul par date et se lit comme une liste de sujets. Vous validez chaque renommage avant qu'il ait lieu.
+- Votre travail survit à un plantage. Les modifications non enregistrées sont conservees à travers un plantage, une fermeture forcée ou une coupure de courant, puis vous sont proposées au lancement suivant. Vous choisissez, document par document, s'il le fait.
+- « Qu'ai-je écrit d'autre là-dessus ? » Un clic liste toutes les notes qui couvrent le même terrain que celle que vous lisez, la plus proche en premier. C'est la fonction pour laquelle les gens le gardent : vos propres réflexions d'il y a trois mois, retrouvées sans vous souvenir où vous les aviez mises.
+- Il repere que vous avez déjà écrit ceci. Enregistrez quelque chose de proche d'une note existante et il vous le dit, si bien que vous finissez avec une bonne note au lieu de quatre à moitié faites.
+
+## What it refuses to do, stated exactly
+
+- **It executes nothing.** No scripts, macros, plugins or interpreters.
+  Opening a document cannot run anything.
+- **It makes no network connection.** No telemetry, no update check, no crash
+  reporting, no AI, no account. It behaves identically offline.
+- **It launches no other program**, not even a browser for its own help.
+- **It will not seize a file association** or delete anything from a user
+  profile without showing what it would do first.
+
+## What it records on the user's machine
+
+Deux choses, et rien d'autre : un fichier de récupération pour qu'un plantage ne vous coûte pas votre travail, et une entrée d'index pour que les fonctions de notes marchent. Ce sont de vrais compromis, alors les voici, plutôt qu'un paragraphe rassurant.
+
+- Standard: recovery file oui, non chiffré; records Chemin, titre et sujets.
+- Privé: recovery file oui, non chiffré; records Le chemin seulement.
+- Confidentiel: no recovery file; records nothing.
+- Maximum: no recovery file; records nothing.
+
+Nothing is encrypted in this edition, and the program says so rather than
+implying otherwise.
+
+## Downloads, and one thing to tell people
+
+The archives are **unsigned**. Windows SmartScreen warns on first run. A
+code-signing certificate has not been bought, and self-signing was refused
+because it would ask a user to install a root certificate they have no reason
+to trust. Every release ships a SHA-256 checksum file.
+
+There is no installer. Unpack the archive anywhere and run it.
+
+## The paid version
+
+BachelorPad+ is the full version: encrypted notes, runnable notebooks,
+structured-data tools, clipboard history and complete privacy controls. It
+arrives on 10 October 2026. The price is not set. Lite stays free either way.
+
+Waitlist: https://bpad.prompt-forge.dev/fr/waitlist.html
+
+## Licence
+
+GPL-3.0-only, not -or-later. The user interface is built with Slint, whose
+grant is to version 3 and no other, so "or later" would offer terms this
+project has not been granted.

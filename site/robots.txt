@@ -1,0 +1,51 @@
+# BachelorPad+ Lite -- https://bpad.prompt-forge.dev
+#
+# Everything here is public and free software (GPL-3.0-only). Crawl it. There
+# is no admin area, no accounts and nothing behind a paywall, so there is
+# nothing to disallow, and blocking crawlers "just in case" is how a site
+# becomes invisible.
+
+User-agent: *
+Allow: /
+
+# Named explicitly as well. "User-agent: *" already permits these, but several
+# look for their own token first, and being explicit says the permission is
+# deliberate rather than an oversight.
+User-agent: bingbot
+Allow: /
+
+User-agent: GPTBot
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
+User-agent: Applebot-Extended
+Allow: /
+
+# Per-language as well as the index, because Bing has historically been
+# happier with explicit sitemaps than with an index alone.
+Sitemap: https://bpad.prompt-forge.dev/sitemap.xml
+Sitemap: https://bpad.prompt-forge.dev/sitemap-en.xml
+Sitemap: https://bpad.prompt-forge.dev/sitemap-us.xml
+Sitemap: https://bpad.prompt-forge.dev/sitemap-fr.xml
+Sitemap: https://bpad.prompt-forge.dev/sitemap-de.xml
+Sitemap: https://bpad.prompt-forge.dev/sitemap-ja.xml
+Sitemap: https://bpad.prompt-forge.dev/sitemap-zh-tw.xml
+
+# Written for machines that read prose rather than markup. One per language,
+# because an assistant answering in Japanese quotes what it can extract, and
+# translating a fact at quote time is where it goes wrong.
+#
+#   https://bpad.prompt-forge.dev/llms.txt     English (UK)
+#   https://bpad.prompt-forge.dev/us/llms.txt  English (US)
+#   https://bpad.prompt-forge.dev/fr/llms.txt  Français
+#   https://bpad.prompt-forge.dev/de/llms.txt  Deutsch
+#   https://bpad.prompt-forge.dev/ja/llms.txt  日本語
+#   https://bpad.prompt-forge.dev/zh-tw/llms.txt 繁體中文
