@@ -690,7 +690,7 @@ export component AppWindow inherits Window {
 
                 editor-scroll := Flickable {
                     visible: !root.use-editor-view;
-                    viewport-height: max(self.height, editor-row.preferred-height);
+                    content-height: max(self.height, editor-row.preferred-height);
 
                     editor-row := HorizontalLayout {
                         padding: 10px;
@@ -785,13 +785,13 @@ export component AppWindow inherits Window {
                             // forth between the two branches when the visible
                             // height is less than one line.
                             cursor-position-changed(caret) => {
-                                if (caret.y + editor-scroll.viewport-y < 0px) {
-                                    editor-scroll.viewport-y = min(0px, min(
+                                if (caret.y + editor-scroll.content-y < 0px) {
+                                    editor-scroll.content-y = min(0px, min(
                                         editor-scroll.height - caret.y - root.font-size * 2,
                                         max(editor-scroll.height - editor-row.preferred-height, -caret.y)));
-                                } else if (caret.y + editor-scroll.viewport-y
+                                } else if (caret.y + editor-scroll.content-y
                                         > editor-scroll.height - root.font-size * 2) {
-                                    editor-scroll.viewport-y = min(0px, max(
+                                    editor-scroll.content-y = min(0px, max(
                                         editor-scroll.height - editor-row.preferred-height,
                                         editor-scroll.height - caret.y - root.font-size * 2));
                                 }

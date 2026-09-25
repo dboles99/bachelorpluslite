@@ -48,8 +48,9 @@
 macOS is not built, and <a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0072.md">ADR-0072</a> says why.</p>
 <p><strong>There is no installer, and that is a decision</strong>
 (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0067.md">ADR-0067</a>). You unpack an archive wherever you
-want the program to live and run it. Nothing is written outside that folder
-until you ask for it.</p>
+want the program to live and run it. Nothing is written into that folder;
+what the product keeps about itself goes in your user profile, and
+<a href="#where-it-puts-things">Where it puts things</a> lists every directory.</p>
 <h3 id="download">Download</h3>
 <p>From <a href="https://github.com/dboles99/bachelorpluslite/releases">the releases page</a>:</p>
 <table>
@@ -145,7 +146,9 @@ cd bachelorpad-lite-0.9.5-linux-x86_64
 symlink are both set inside the archive, so neither needs restoring.</p>
 <h3 id="first-launch">First launch</h3>
 <p>The window opens on an empty, unsaved document called <em>Untitled</em>. Nothing has
-been written anywhere yet, and nothing will be until you save.</p>
+been written anywhere yet. Once you type, the recovery journal starts keeping
+a copy of the unsaved work in your profile, so a crash does not cost it --
+see <a href="#undo-history-and-recovery">Undo and recovery</a>.</p>
 <p>Three things worth doing once:</p>
 <ol>
 <li><strong>Pick a theme.</strong> View &gt; Theme offers Light, Dark, Organic and Green, plus
@@ -645,10 +648,13 @@ what you had open last time. Open Recent is what remembers.</p>
 <h2 id="encoding-line-endings-and-file-formats">Encoding, line endings and file formats</h2>
 <h3 id="encoding">Encoding</h3>
 <p><strong>Format &gt; Encoding</strong> offers <strong>UTF-8</strong> and <strong>UTF-8 with BOM</strong>.</p>
-<p>That is the whole list, and it is a decision rather than an unfinished one.
-Legacy code pages are a way to lose text: a document saved as one and opened
-as another is silently wrong, and nothing in the file says which it was. UTF-8
-is what everything else on both supported platforms now writes.</p>
+<p>A document can also be opened in <strong>UTF-16</strong>, with a byte-order mark, and is
+saved back that way.</p>
+<p><strong>A file in a legacy code page is refused today</strong> -- Windows-1252, Shift-JIS,
+GBK, and UTF-16 with no byte-order mark all stop at <em>not valid UTF-8</em>. Notepad
+opens them. Reading them, and saving them back in the encoding they came in,
+is decided and not yet built (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0085.md">ADR-0085</a>). Until it
+is, open such a file in Notepad and save it as UTF-8 there.</p>
 <p>The BOM variant exists because some Windows tools still want it.</p>
 <p>Choosing the encoding a document already has does nothing, and records no undo
 entry.</p>

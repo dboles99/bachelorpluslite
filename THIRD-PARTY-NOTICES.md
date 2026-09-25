@@ -5,7 +5,7 @@ The gate regenerates it and fails if this file has drifted, so an edit here
 is a change that will be reverted by the next run rather than kept.
 
 BachelorPad+ Lite is distributed under GPL-3.0-only (ADR-0071). It statically
-links the 624 crates below, and this file passes on their terms as that
+links the 582 crates below, and this file passes on their terms as that
 licence requires. Listed here is what is actually shipped: the dependency
 graph walked from the `bachelorpad` binary along normal and build edges only,
 never dev edges -- a test-only crate is in no artefact anybody downloads.
@@ -34,22 +34,20 @@ offering "or later" would be offering terms it has not been granted.
 | `accesskit_unix` | 0.22.1 | https://github.com/AccessKit/accesskit |
 | `accesskit_windows` | 0.34.0 | https://github.com/AccessKit/accesskit |
 | `ahash` | 0.8.12 | https://github.com/tkaitchuck/ahash |
-| `aligned` | 0.4.3 | https://github.com/rust-embedded-community/aligned |
 | `allocator-api2` | 0.2.21 | https://github.com/zakarumych/allocator-api2 |
 | `android_system_properties` | 0.1.6 | https://github.com/nical/android_system_properties |
 | `android-activity` | 0.6.1 | https://github.com/rust-mobile/android-activity |
 | `annotate-snippets` | 0.12.16 | https://github.com/rust-lang/annotate-snippets-rs |
 | `anstyle` | 1.0.14 | https://github.com/rust-cli/anstyle.git |
 | `anyhow` | 1.0.104 | https://github.com/dtolnay/anyhow |
-| `arbitrary` | 1.4.2 | https://github.com/rust-fuzz/arbitrary/ |
 | `arboard` | 3.6.1 | https://github.com/1Password/arboard |
 | `arrayvec` | 0.7.8 | https://github.com/bluss/arrayvec |
 | `as-raw-xcb-connection` | 1.0.1 | https://github.com/psychon/as-raw-xcb-connection |
-| `as-slice` | 0.2.1 | https://github.com/japaric/as-slice |
+| `ash` | 0.38.0+1.3.281 | https://github.com/ash-rs/ash |
 | `async-broadcast` | 0.7.2 | https://github.com/smol-rs/async-broadcast |
 | `async-recursion` | 1.1.1 | https://github.com/dcchut/async-recursion |
 | `async-trait` | 0.1.92 | https://github.com/dtolnay/async-trait |
-| `base64` | 0.22.1 | https://github.com/marshallpierce/rust-base64 |
+| `base64` | 0.23.1 | https://github.com/marshallpierce/rust-base64 |
 | `bitflags` | 2.13.1 | https://github.com/bitflags/bitflags |
 | `borsh` | 1.8.0 | https://github.com/near/borsh-rs |
 | `bumpalo` | 3.20.3 | https://github.com/fitzgen/bumpalo |
@@ -57,8 +55,8 @@ offering "or later" would be offering terms it has not been granted.
 | `cc` | 1.4.3 | https://github.com/rust-lang/cc-rs |
 | `cfg-if` | 1.0.4 | https://github.com/rust-lang/cfg-if |
 | `chrono` | 0.4.45 | https://github.com/chronotope/chrono |
-| `const-field-offset` | 0.2.0 | https://github.com/slint-ui/slint |
-| `const-field-offset-macro` | 0.2.0 | https://github.com/slint-ui/slint |
+| `const-field-offset` | 0.2.1 | https://github.com/slint-ui/slint |
+| `const-field-offset-macro` | 0.2.1 | https://github.com/slint-ui/slint |
 | `core-foundation` | 0.9.4 | https://github.com/servo/core-foundation-rs |
 | `core-foundation-sys` | 0.8.7 | https://github.com/servo/core-foundation-rs |
 | `core-graphics` | 0.23.2 | https://github.com/servo/core-foundation-rs |
@@ -73,17 +71,18 @@ offering "or later" would be offering terms it has not been granted.
 | `data-url` | 0.3.2 | https://github.com/servo/rust-url |
 | `deranged` | 0.5.8 | https://github.com/jhpratt/deranged |
 | `displaydoc` | 0.2.7 | https://github.com/yaahc/displaydoc |
+| `document-features` | 0.2.12 | https://github.com/slint-ui/document-features |
 | `either` | 1.17.0 | https://github.com/rayon-rs/either |
 | `enumflags2` | 0.7.12 | https://github.com/meithecatte/enumflags2 |
 | `enumflags2_derive` | 0.7.12 | https://github.com/meithecatte/enumflags2 |
 | `errno` | 0.3.14 | https://github.com/lambda-fairy/rust-errno |
 | `euclid` | 0.22.14 | https://github.com/servo/euclid |
 | `fdeflate` | 0.3.7 | https://github.com/image-rs/fdeflate |
-| `femtovg` | 0.25.1 | https://github.com/femtovg/femtovg |
+| `femtovg` | 0.27.0 | https://github.com/femtovg/femtovg |
 | `field-offset` | 0.3.6 | https://github.com/Diggsey/rust-field-offset |
 | `find-msvc-tools` | 0.1.11 | https://github.com/rust-lang/cc-rs |
+| `fixedbitset` | 0.5.7 | https://github.com/petgraph/fixedbitset |
 | `flate2` | 1.1.9 | https://github.com/rust-lang/flate2-rs |
-| `font-types` | 0.11.3 | https://github.com/googlefonts/fontations |
 | `font-types` | 0.12.3 | https://github.com/googlefonts/fontations |
 | `form_urlencoded` | 1.2.2 | https://github.com/servo/rust-url |
 | `futures` | 0.3.34 | https://github.com/rust-lang/futures-rs |
@@ -95,11 +94,11 @@ offering "or later" would be offering terms it has not been granted.
 | `futures-sink` | 0.3.34 | https://github.com/rust-lang/futures-rs |
 | `futures-task` | 0.3.34 | https://github.com/rust-lang/futures-rs |
 | `futures-util` | 0.3.34 | https://github.com/rust-lang/futures-rs |
-| `getopts` | 0.2.24 | https://github.com/rust-lang/getopts |
 | `getrandom` | 0.3.4 | https://github.com/rust-random/getrandom |
 | `getrandom` | 0.4.3 | https://github.com/rust-random/getrandom |
 | `gif` | 0.14.2 | https://github.com/image-rs/image-gif |
 | `glob` | 0.3.4 | https://github.com/rust-lang/glob |
+| `gpu-allocator` | 0.28.0 | https://github.com/Traverse-Research/gpu-allocator |
 | `half` | 2.7.1 | https://github.com/VoidStarKat/half-rs |
 | `hashbrown` | 0.14.5 | https://github.com/rust-lang/hashbrown |
 | `hashbrown` | 0.15.5 | https://github.com/rust-lang/hashbrown |
@@ -117,7 +116,7 @@ offering "or later" would be offering terms it has not been granted.
 | `image` | 0.25.10 | https://github.com/image-rs/image |
 | `image-webp` | 0.2.4 | https://github.com/image-rs/image-webp |
 | `itertools` | 0.13.0 | https://github.com/rust-itertools/itertools |
-| `itertools` | 0.14.0 | https://github.com/rust-itertools/itertools |
+| `itertools` | 0.15.0 | https://github.com/rust-itertools/itertools |
 | `itoa` | 1.0.18 | https://github.com/dtolnay/itoa |
 | `jni` | 0.22.4 | https://github.com/jni-rs/jni-rs |
 | `jni-macros` | 0.22.4 | https://github.com/jni-rs/jni-rs |
@@ -129,6 +128,7 @@ offering "or later" would be offering terms it has not been granted.
 | `keyboard-types` | 0.7.0 | https://github.com/pyfisch/keyboard-types |
 | `lazy_static` | 1.5.0 | https://github.com/rust-lang-nursery/lazy-static.rs |
 | `libc` | 0.2.189 | https://github.com/rust-lang/libc |
+| `litrs` | 1.0.0 | https://github.com/LukasKalbertodt/litrs |
 | `lock_api` | 0.4.14 | https://github.com/Amanieu/parking_lot |
 | `log` | 0.4.33 | https://github.com/rust-lang/log |
 | `lyon_algorithms` | 1.0.20 | https://github.com/nical/lyon |
@@ -136,50 +136,43 @@ offering "or later" would be offering terms it has not been granted.
 | `lyon_geom` | 1.0.19 | https://github.com/nical/lyon |
 | `lyon_path` | 1.0.19 | https://github.com/nical/lyon |
 | `memmap2` | 0.9.11 | https://github.com/RazrFalcon/memmap2-rs |
+| `naga` | 30.0.1 | https://github.com/gfx-rs/wgpu |
+| `naga-types` | 30.0.1 | https://github.com/gfx-rs/wgpu |
 | `ndk` | 0.9.0 | https://github.com/rust-mobile/ndk |
 | `ndk-context` | 0.1.1 | https://github.com/rust-windowing/android-ndk-rs |
 | `ndk-sys` | 0.6.0+11769913 | https://github.com/rust-mobile/ndk |
 | `num_threads` | 0.1.7 | https://github.com/jhpratt/num_threads |
-| `num-bigint` | 0.4.8 | https://github.com/rust-num/num-bigint |
-| `num-complex` | 0.4.6 | https://github.com/rust-num/num-complex |
 | `num-conv` | 0.2.2 | https://github.com/jhpratt/num-conv |
-| `num-derive` | 0.4.2 | https://github.com/rust-num/num-derive |
-| `num-integer` | 0.1.47 | https://github.com/rust-num/num-integer |
-| `num-rational` | 0.4.2 | https://github.com/rust-num/num-rational |
 | `num-traits` | 0.2.19 | https://github.com/rust-num/num-traits |
 | `once_cell` | 1.21.4 | https://github.com/matklad/once_cell |
 | `ordered-stream` | 0.2.0 | https://github.com/danieldg/ordered-stream |
 | `parking_lot` | 0.12.5 | https://github.com/Amanieu/parking_lot |
 | `parking_lot_core` | 0.9.12 | https://github.com/Amanieu/parking_lot |
-| `paste` | 1.0.15 | https://github.com/dtolnay/paste |
-| `pastey` | 0.1.1 | https://github.com/as1100k/pastey |
 | `pastey` | 0.2.3 | https://github.com/as1100k/pastey |
 | `percent-encoding` | 2.3.2 | https://github.com/servo/rust-url/ |
+| `petgraph` | 0.8.3 | https://github.com/petgraph/petgraph |
 | `pin-utils` | 0.1.0 | https://github.com/rust-lang-nursery/pin-utils |
 | `piper` | 0.2.5 | https://github.com/smol-rs/piper |
 | `pkg-config` | 0.3.34 | https://github.com/rust-lang/pkg-config-rs |
 | `png` | 0.18.1 | https://github.com/image-rs/image-png |
 | `polycool` | 0.4.0 | https://github.com/linebender/kurbo |
 | `powerfmt` | 0.2.0 | https://github.com/jhpratt/powerfmt |
-| `ppv-lite86` | 0.2.21 | https://github.com/cryptocorrosion/cryptocorrosion |
+| `presser` | 0.3.1 | https://github.com/EmbarkStudios/presser |
 | `prettyplease` | 0.2.37 | https://github.com/dtolnay/prettyplease |
 | `proc-macro-crate` | 3.5.0 | https://github.com/bkchr/proc-macro-crate |
 | `proc-macro2` | 1.0.107 | https://github.com/dtolnay/proc-macro2 |
 | `profiling` | 1.0.18 | https://github.com/aclysma/profiling |
-| `profiling-procmacros` | 1.0.18 | https://github.com/aclysma/profiling |
 | `quote` | 1.0.47 | https://github.com/dtolnay/quote |
-| `rand` | 0.9.5 | https://github.com/rust-random/rand |
-| `rand_chacha` | 0.9.0 | https://github.com/rust-random/rand |
-| `rand_core` | 0.9.5 | https://github.com/rust-random/rand |
+| `range-alloc` | 0.1.5 | https://github.com/gfx-rs/range-alloc |
 | `raw-window-metal` | 1.1.0 | https://github.com/rust-windowing/raw-window-metal |
 | `rayon` | 1.12.0 | https://github.com/rayon-rs/rayon |
 | `rayon-core` | 1.13.0 | https://github.com/rayon-rs/rayon |
-| `read-fonts` | 0.39.2 | https://github.com/googlefonts/fontations |
 | `read-fonts` | 0.41.0 | https://github.com/googlefonts/fontations |
 | `regex` | 1.13.1 | https://github.com/rust-lang/regex |
 | `regex-automata` | 0.4.18 | https://github.com/rust-lang/regex |
 | `regex-syntax` | 0.8.11 | https://github.com/rust-lang/regex |
-| `rowan` | 0.16.1 | https://github.com/rust-analyzer/rowan |
+| `renderdoc-sys` | 1.1.0 | https://github.com/ebkalderon/renderdoc-rs |
+| `rowan` | 0.17.0 | https://github.com/rust-analyzer/rowan |
 | `roxmltree` | 0.21.1 | https://github.com/RazrFalcon/roxmltree |
 | `rustc_version` | 0.4.1 | https://github.com/djc/rustc-version-rs |
 | `rustversion` | 1.0.23 | https://github.com/dtolnay/rustversion |
@@ -195,7 +188,6 @@ offering "or later" would be offering terms it has not been granted.
 | `shlex` | 2.0.1 | https://github.com/comex/rust-shlex |
 | `signal-hook-registry` | 1.4.8 | https://github.com/vorner/signal-hook |
 | `simdutf8` | 0.1.5 | https://github.com/rusticstuff/simdutf8 |
-| `skrifa` | 0.42.1 | https://github.com/googlefonts/fontations |
 | `skrifa` | 0.44.0 | https://github.com/googlefonts/fontations |
 | `smallvec` | 1.15.2 | https://github.com/servo/rust-smallvec |
 | `smol_str` | 0.2.2 | https://github.com/rust-analyzer/smol_str |
@@ -236,8 +228,8 @@ offering "or later" would be offering terms it has not been granted.
 | `unicode-xid` | 0.2.6 | https://github.com/unicode-rs/unicode-xid |
 | `unty` | 0.0.4 | https://github.com/bincode-org/unty |
 | `url` | 2.5.8 | https://github.com/servo/rust-url |
-| `vtable` | 0.4.0 | https://github.com/slint-ui/slint |
-| `vtable-macro` | 0.4.0 | https://github.com/slint-ui/slint |
+| `vtable` | 0.5.0 | https://github.com/slint-ui/slint |
+| `vtable-macro` | 0.5.0 | https://github.com/slint-ui/slint |
 | `wasm-bindgen` | 0.2.127 | https://github.com/wasm-bindgen/wasm-bindgen |
 | `wasm-bindgen-futures` | 0.4.77 | https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/futures |
 | `wasm-bindgen-macro` | 0.2.127 | https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/macro |
@@ -247,6 +239,13 @@ offering "or later" would be offering terms it has not been granted.
 | `web-time` | 1.1.0 | https://github.com/daxpedda/web-time |
 | `webbrowser` | 1.2.4 | https://github.com/amodm/webbrowser-rs |
 | `weezl` | 0.1.12 | https://github.com/image-rs/weezl |
+| `wgpu` | 30.0.1 | https://github.com/gfx-rs/wgpu |
+| `wgpu-core` | 30.0.1 | https://github.com/gfx-rs/wgpu |
+| `wgpu-core-deps-apple` | 30.0.1 | https://github.com/gfx-rs/wgpu |
+| `wgpu-core-deps-windows-linux-android` | 30.0.1 | https://github.com/gfx-rs/wgpu |
+| `wgpu-hal` | 30.0.1 | https://github.com/gfx-rs/wgpu |
+| `wgpu-naga-bridge` | 30.0.1 | https://github.com/gfx-rs/wgpu |
+| `wgpu-types` | 30.0.1 | https://github.com/gfx-rs/wgpu |
 | `windows` | 0.62.2 | https://github.com/microsoft/windows-rs |
 | `windows_aarch64_gnullvm` | 0.48.5 | https://github.com/microsoft/windows-rs |
 | `windows_aarch64_gnullvm` | 0.52.6 | https://github.com/microsoft/windows-rs |
@@ -279,7 +278,7 @@ offering "or later" would be offering terms it has not been granted.
 | `windows-targets` | 0.48.5 | https://github.com/microsoft/windows-rs |
 | `windows-targets` | 0.52.6 | https://github.com/microsoft/windows-rs |
 | `windows-threading` | 0.2.1 | https://github.com/microsoft/windows-rs |
-| `write-fonts` | 0.48.1 | https://github.com/googlefonts/fontations |
+| `write-fonts` | 0.50.0 | https://github.com/googlefonts/fontations |
 | `x11rb` | 0.13.2 | https://github.com/psychon/x11rb |
 | `x11rb-protocol` | 0.13.2 | https://github.com/psychon/x11rb |
 | `xattr` | 1.6.1 | https://github.com/Stebalien/xattr |
@@ -288,25 +287,19 @@ offering "or later" would be offering terms it has not been granted.
 
 | Crate | Version | Source |
 | --- | --- | --- |
-| `aligned-vec` | 0.6.4 | https://github.com/sarah-ek/aligned-vec/ |
 | `android-properties` | 0.2.2 | https://github.com/miklelappo/android-properties |
-| `arg_enum_proc_macro` | 0.3.4 | https://github.com/lu-zero/arg_enum_proc_macro |
-| `av-scenechange` | 0.14.1 | https://github.com/rust-av/av-scenechange |
 | `bincode` | 2.0.1 | https://github.com/bincode-org/bincode |
 | `block2` | 0.5.1 | https://github.com/madsmtm/objc2 |
 | `block2` | 0.6.2 | https://github.com/madsmtm/objc2 |
-| `built` | 0.8.1 | https://github.com/lukaslueg/built |
 | `bytes` | 1.12.1 | https://github.com/tokio-rs/bytes |
 | `calloop` | 0.13.0 | https://github.com/Smithay/calloop |
 | `calloop` | 0.14.4 | https://github.com/Smithay/calloop |
 | `calloop-wayland-source` | 0.3.0 | https://github.com/smithay/calloop-wayland-source |
-| `calloop-wayland-source` | 0.4.1 | https://github.com/smithay/calloop-wayland-source |
 | `cfg_aliases` | 0.2.2 | https://github.com/katharostech/cfg_aliases |
 | `clru` | 0.6.3 | https://github.com/marmeladema/clru-rs |
 | `color_quant` | 1.1.0 | https://github.com/image-rs/color_quant.git |
 | `combine` | 4.6.7 | https://github.com/Marwes/combine |
 | `convert_case` | 0.10.0 | https://github.com/rutrum/convert-case |
-| `core_maths` | 0.1.1 | https://github.com/robertbastian/core_maths |
 | `crunchy` | 0.2.4 | https://github.com/eira-fransham/crunchy |
 | `derive_more` | 2.1.1 | https://github.com/JelteF/derive_more |
 | `derive_more-impl` | 2.1.1 | https://github.com/JelteF/derive_more |
@@ -317,34 +310,29 @@ offering "or later" would be offering terms it has not been granted.
 | `drm-fourcc` | 2.2.0 | https://github.com/danielzfranklin/drm-fourcc-rs |
 | `drm-sys` | 0.8.1 | https://github.com/Smithay/drm-rs |
 | `endi` | 1.1.1 | https://github.com/zeenix/endi |
-| `equator` | 0.4.2 | https://github.com/sarah-ek/equator/ |
-| `equator-macro` | 0.4.2 | https://github.com/sarah-ek/equator/ |
 | `fax` | 0.2.7 | https://github.com/pdf-rs/fax |
 | `float-cmp` | 0.9.0 | https://github.com/mikedilger/float-cmp |
-| `fontdb` | 0.23.0 | https://github.com/RazrFalcon/fontdb |
+| `fontdb` | 0.24.0 | https://github.com/RazrFalcon/fontdb |
 | `gbm` | 0.18.0 | https://github.com/Smithay/gbm.rs |
 | `gbm-sys` | 0.4.0 | https://github.com/Drakulix/gbm.rs/tree/master/gbm-sys |
 | `glutin-winit` | 0.5.0 | https://github.com/rust-windowing/glutin |
 | `grid` | 1.0.1 | https://github.com/becheran/grid |
-| `harfrust` | 0.8.4 | https://github.com/harfbuzz/harfrust |
-| `imagesize` | 0.14.0 | https://github.com/Roughsketch/imagesize |
+| `harfrust` | 0.12.0 | https://github.com/harfbuzz/harfrust |
+| `imagesize` | 0.15.0 | https://github.com/Roughsketch/imagesize |
 | `input` | 0.10.0 | https://github.com/Drakulix/input.rs |
 | `input-sys` | 1.19.0 | https://github.com/Drakulix/input.rs/tree/master/input-sys |
-| `interpolate_name` | 0.2.4 | https://github.com/lu-zero/interpolate_name |
 | `libm` | 0.2.16 | https://github.com/rust-lang/compiler-builtins |
 | `libredox` | 0.1.20 | https://gitlab.redox-os.org/redox-os/libredox.git |
+| `libseat` | 0.2.4 | https://github.com/PolyMeilex/libseat-rs |
+| `libseat-sys` | 0.2.0 | https://github.com/PolyMeilex/libseat-rs |
 | `libsqlite3-sys` | 0.35.0 | https://github.com/rusqlite/rusqlite |
 | `libudev-sys` | 0.1.4 | https://github.com/dcuddeback/libudev-sys |
-| `loop9` | 0.1.5 | https://gitlab.com/kornelski/loop9.git |
 | `matchers` | 0.2.0 | https://github.com/hawkw/matchers |
-| `maybe-rayon` | 0.1.1 | https://github.com/shssoichiro/maybe-rayon |
 | `memoffset` | 0.9.1 | https://github.com/Gilnaa/memoffset |
 | `natord` | 1.0.9 | https://github.com/lifthrasiir/rust-natord |
-| `new_debug_unreachable` | 1.0.6 | https://github.com/mbrubeck/rust-debug-unreachable |
 | `nix` | 0.31.3 | https://github.com/nix-rust/nix |
 | `nom` | 7.1.3 | https://github.com/Geal/nom |
 | `nom` | 8.0.0 | https://github.com/rust-bakery/nom |
-| `noop_proc_macro` | 0.3.0 | https://github.com/lu-zero/noop_proc_macro |
 | `nu-ansi-term` | 0.50.3 | https://github.com/nushell/nu-ansi-term |
 | `objc-sys` | 0.3.5 | https://github.com/madsmtm/objc2 |
 | `objc2` | 0.5.2 | https://github.com/madsmtm/objc2 |
@@ -366,6 +354,8 @@ offering "or later" would be offering terms it has not been granted.
 | `objc2-uniform-type-identifiers` | 0.2.2 | https://github.com/madsmtm/objc2 |
 | `objc2-user-notifications` | 0.2.2 | https://github.com/madsmtm/objc2 |
 | `orbclient` | 0.3.55 | https://gitlab.redox-os.org/redox-os/orbclient |
+| `ordered-float` | 5.5.0 | https://github.com/reem/rust-ordered-float |
+| `os_pipe` | 1.2.3 | https://github.com/oconnor663/os_pipe.rs |
 | `phf` | 0.13.1 | https://github.com/rust-phf/rust-phf |
 | `phf_generator` | 0.13.1 | https://github.com/rust-phf/rust-phf |
 | `phf_macros` | 0.13.1 | https://github.com/rust-phf/rust-phf |
@@ -373,12 +363,7 @@ offering "or later" would be offering terms it has not been granted.
 | `pico-args` | 0.5.0 | https://github.com/RazrFalcon/pico-args |
 | `pin-weak` | 1.1.0 | https://github.com/sixtyfpsui/pin-weak |
 | `pulldown-cmark` | 0.13.4 | https://github.com/raphlinus/pulldown-cmark |
-| `pulldown-cmark-escape` | 0.11.0 | https://github.com/raphlinus/pulldown-cmark |
-| `pulp` | 0.22.3 | https://github.com/sarah-quinones/pulp/ |
-| `pulp-wasm-simd-flag` | 0.1.1 | https://github.com/sarah-quinones/pulp/ |
 | `quick-xml` | 0.41.0 | https://github.com/tafia/quick-xml |
-| `raw-cpuid` | 11.6.0 | https://github.com/gz/rust-cpuid |
-| `reborrow` | 0.5.5 | https://github.com/sarah-ek/reborrow/ |
 | `redox_syscall` | 0.4.1 | https://gitlab.redox-os.org/redox-os/syscall |
 | `redox_syscall` | 0.5.18 | https://gitlab.redox-os.org/redox-os/syscall |
 | `redox_syscall` | 0.9.2 | https://gitlab.redox-os.org/redox-os/syscall |
@@ -387,17 +372,13 @@ offering "or later" would be offering terms it has not been granted.
 | `ropey` | 1.6.1 | https://github.com/cessen/ropey |
 | `rspolib` | 0.1.2 | https://github.com/mondeja/rspolib |
 | `rusqlite` | 0.37.0 | https://github.com/rusqlite/rusqlite |
-| `rustybuzz` | 0.20.1 | https://github.com/harfbuzz/rustybuzz |
 | `sctk-adwaita` | 0.10.1 | https://github.com/PolyMeilex/sctk-adwaita |
 | `sharded-slab` | 0.1.7 | https://github.com/hawkw/sharded-slab |
-| `simd_helpers` | 0.1.0 | https://github.com/lu-zero/simd_helpers |
 | `simd-adler32` | 0.3.10 | https://github.com/mcountryman/simd-adler32 |
-| `skia-bindings` | 0.99.0 | https://github.com/rust-skia/rust-skia |
-| `skia-safe` | 0.99.0 | https://github.com/rust-skia/rust-skia |
+| `skia-bindings` | 0.153.3 | https://github.com/rust-skia/rust-skia |
+| `skia-safe` | 0.153.3 | https://github.com/rust-skia/rust-skia |
 | `slab` | 0.4.12 | https://github.com/tokio-rs/slab |
 | `smithay-client-toolkit` | 0.19.2 | https://github.com/smithay/client-toolkit |
-| `smithay-client-toolkit` | 0.20.0 | https://github.com/smithay/client-toolkit |
-| `smithay-clipboard` | 0.7.3 | https://github.com/smithay/smithay-clipboard |
 | `strict-num` | 0.1.1 | https://github.com/RazrFalcon/strict-num |
 | `strum` | 0.28.0 | https://github.com/Peternator7/strum |
 | `strum_macros` | 0.28.0 | https://github.com/Peternator7/strum |
@@ -409,6 +390,7 @@ offering "or later" would be offering terms it has not been granted.
 | `tracing-core` | 0.1.36 | https://github.com/tokio-rs/tracing |
 | `tracing-log` | 0.2.0 | https://github.com/tokio-rs/tracing |
 | `tracing-subscriber` | 0.3.23 | https://github.com/tokio-rs/tracing |
+| `tree_magic_mini` | 3.2.2 | https://github.com/mbrubeck/tree_magic/ |
 | `udev` | 0.9.3 | https://github.com/Smithay/udev-rs |
 | `uds_windows` | 1.2.1 | https://github.com/haraldh/rust_uds_windows |
 | `valuable` | 0.1.1 | https://github.com/tokio-rs/valuable |
@@ -417,21 +399,17 @@ offering "or later" would be offering terms it has not been granted.
 | `wayland-csd-frame` | 0.3.0 | https://github.com/rust-windowing/wayland-csd-frame |
 | `wayland-cursor` | 0.31.14 | https://github.com/smithay/wayland-rs |
 | `wayland-protocols` | 0.32.13 | https://github.com/smithay/wayland-rs |
-| `wayland-protocols-experimental` | 20250721.0.1 | https://github.com/smithay/wayland-rs |
-| `wayland-protocols-misc` | 0.3.12 | https://github.com/smithay/wayland-rs |
 | `wayland-protocols-plasma` | 0.3.12 | https://github.com/smithay/wayland-rs |
 | `wayland-protocols-wlr` | 0.3.12 | https://github.com/smithay/wayland-rs |
 | `wayland-scanner` | 0.31.11 | https://github.com/smithay/wayland-rs |
 | `wayland-sys` | 0.31.11 | https://github.com/smithay/wayland-rs |
 | `winnow` | 1.0.4 | https://github.com/winnow-rs/winnow |
-| `x11-clipboard` | 0.9.3 | https://github.com/quininer/x11-clipboard |
 | `x11-dl` | 2.21.0 | https://github.com/AltF02/x11-rs.git |
 | `xcursor` | 0.3.11 | https://github.com/esposm03/xcursor-rs |
 | `xkbcommon` | 0.9.0 | https://github.com/rust-x-bindings/xkbcommon-rs |
 | `xkbcommon-dl` | 0.4.2 | https://github.com/rust-windowing/xkbcommon-dl |
 | `xml-rs` | 0.8.29 | https://github.com/kornelski/xml-rs |
 | `xmlwriter` | 0.1.0 | https://github.com/RazrFalcon/xmlwriter |
-| `y4m` | 0.8.0 | https://github.com/image-rs/y4m.git |
 | `yeslogic-fontconfig-sys` | 6.0.1 | https://github.com/yeslogic/fontconfig-rs |
 | `zbus` | 5.19.0 | https://github.com/z-galaxy/zbus/ |
 | `zbus_macros` | 5.19.0 | https://github.com/z-galaxy/zbus/ |
@@ -460,42 +438,42 @@ offering "or later" would be offering terms it has not been granted.
 | `atspi` | 0.29.0 | https://github.com/odilia-app/atspi |
 | `atspi-common` | 0.13.0 | https://github.com/odilia-app/atspi |
 | `atspi-proxies` | 0.13.0 | https://github.com/odilia-app/atspi |
-| `auto_enums` | 0.8.10 | https://github.com/taiki-e/auto_enums |
 | `autocfg` | 1.5.1 | https://github.com/cuviper/autocfg |
+| `bit-set` | 0.10.0 | https://github.com/contain-rs/bit-set |
+| `bit-vec` | 0.9.1 | https://github.com/contain-rs/bit-vec |
 | `blocking` | 1.6.2 | https://github.com/smol-rs/blocking |
 | `concurrent-queue` | 2.5.0 | https://github.com/smol-rs/concurrent-queue |
 | `ctor` | 0.10.1 | https://github.com/mmastrac/rust-ctor |
-| `derive_utils` | 0.16.0 | https://github.com/taiki-e/derive_utils |
 | `dtor` | 0.8.1 | https://github.com/mmastrac/rust-ctor |
 | `equivalent` | 1.0.2 | https://github.com/indexmap-rs/equivalent |
 | `event-listener` | 5.4.2 | https://github.com/smol-rs/event-listener |
 | `event-listener-strategy` | 0.5.4 | https://github.com/smol-rs/event-listener-strategy |
 | `fastrand` | 2.5.0 | https://github.com/smol-rs/fastrand |
-| `fontique` | 0.10.0 | https://github.com/linebender/parley |
+| `fontique` | 0.11.1 | https://github.com/linebender/parley |
 | `futures-lite` | 2.6.1 | https://github.com/smol-rs/futures-lite |
 | `idna_adapter` | 1.2.2 | https://github.com/hsivonen/idna_adapter |
 | `indexmap` | 2.14.0 | https://github.com/indexmap-rs/indexmap |
 | `kurbo` | 0.13.1 | https://github.com/linebender/kurbo |
 | `linebender_resource_handle` | 0.1.1 | https://github.com/linebender/raw_resource_handle |
 | `muda` | 0.19.3 | https://github.com/tauri-apps/muda |
-| `no_std_io2` | 0.9.4 | https://github.com/wcampbell0x2a/no-std-io2 |
 | `parking` | 2.2.1 | https://github.com/smol-rs/parking |
 | `parlance` | 0.1.0 | https://github.com/linebender/parley |
-| `parley` | 0.10.0 | https://github.com/linebender/parley |
-| `parley_data` | 0.10.0 | https://github.com/linebender/parley |
+| `parley` | 0.11.1 | https://github.com/linebender/parley |
+| `parley_data` | 0.11.1 | https://github.com/linebender/parley |
 | `pin-project` | 1.1.13 | https://github.com/taiki-e/pin-project |
 | `pin-project-internal` | 1.1.13 | https://github.com/taiki-e/pin-project |
 | `pin-project-lite` | 0.2.17 | https://github.com/taiki-e/pin-project-lite |
 | `polling` | 3.11.0 | https://github.com/smol-rs/polling |
 | `portable-atomic` | 1.15.0 | https://github.com/taiki-e/portable-atomic |
-| `resvg` | 0.47.0 | https://github.com/linebender/resvg |
+| `portable-atomic-util` | 0.2.8 | https://github.com/taiki-e/portable-atomic-util |
+| `resvg` | 0.48.1 | https://github.com/linebender/resvg |
 | `rustc-hash` | 2.1.3 | https://github.com/rust-lang/rustc-hash |
 | `simd_cesu8` | 1.2.0 | https://github.com/seancroach/simd_cesu8 |
 | `simplecss` | 0.2.2 | https://github.com/linebender/simplecss |
 | `spin_on` | 0.1.1 | https://crates.io/crates/spin_on |
 | `svgtypes` | 0.16.1 | https://github.com/linebender/svgtypes |
 | `swash` | 0.2.10 | https://github.com/dfrg/swash |
-| `usvg` | 0.47.0 | https://github.com/linebender/resvg |
+| `usvg` | 0.48.1 | https://github.com/linebender/resvg |
 | `utf8_iter` | 1.0.4 | https://github.com/hsivonen/utf8_iter |
 | `uuid` | 1.24.1 | https://github.com/uuid-rs/uuid |
 | `yazi` | 0.2.1 | https://github.com/dfrg/yazi |
@@ -538,7 +516,6 @@ offering "or later" would be offering terms it has not been granted.
 | Crate | Version | Source |
 | --- | --- | --- |
 | `bitflags` | 1.3.2 | https://github.com/bitflags/bitflags |
-| `bitstream-io` | 4.10.0 | https://github.com/tuffy/bitstream-io |
 | `downcast-rs` | 1.2.1 | https://github.com/marcianx/downcast-rs |
 | `fallible-iterator` | 0.3.0 | https://github.com/sfackler/rust-fallible-iterator |
 | `fallible-streaming-iterator` | 0.1.9 | https://github.com/sfackler/fallible-streaming-iterator |
@@ -546,41 +523,16 @@ offering "or later" would be offering terms it has not been granted.
 | `foreign-types` | 0.5.0 | https://github.com/sfackler/foreign-types |
 | `foreign-types-macros` | 0.2.4 | https://github.com/sfackler/foreign-types |
 | `foreign-types-shared` | 0.3.1 | https://github.com/sfackler/foreign-types |
-| `linked-hash-map` | 0.5.6 | https://github.com/contain-rs/linked-hash-map |
 | `minimal-lexical` | 0.2.1 | https://github.com/Alexhuszagh/minimal-lexical |
 | `plain` | 0.2.3 | https://github.com/randomites/plain |
-| `qoi` | 0.4.1 | https://github.com/aldanor/qoi-rust |
 | `quick-error` | 2.0.1 | http://github.com/tailhook/quick-error |
 | `scoped-tls` | 1.0.1 | https://github.com/alexcrichton/scoped-tls |
 | `scoped-tls-hkt` | 0.1.5 | https://github.com/Diggsey/scoped-tls-hkt |
 | `siphasher` | 1.0.3 | https://github.com/jedisct1/rust-siphash |
-| `unicode-bidi-mirroring` | 0.4.0 | https://github.com/RazrFalcon/unicode-bidi-mirroring |
-| `unicode-ccc` | 0.4.0 | https://github.com/RazrFalcon/unicode-ccc |
-| `unicode-properties` | 0.1.4 | https://github.com/unicode-rs/unicode-properties |
 | `unicode-vo` | 0.1.0 | https://github.com/RazrFalcon/unicode-vo |
 | `vcpkg` | 0.2.15 | https://github.com/mcgoo/vcpkg-rs |
 | `version_check` | 0.9.5 | https://github.com/SergioBenitez/version_check |
-
-### Zlib OR Apache-2.0 OR MIT
-
-| Crate | Version | Source |
-| --- | --- | --- |
-| `bytemuck` | 1.25.2 | https://github.com/Lokathor/bytemuck |
-| `bytemuck_derive` | 1.12.0 | https://github.com/Lokathor/bytemuck |
-| `dispatch2` | 0.3.1 | https://github.com/madsmtm/objc2 |
-| `objc2-app-kit` | 0.3.2 | https://github.com/madsmtm/objc2 |
-| `objc2-cloud-kit` | 0.3.2 | https://github.com/madsmtm/objc2 |
-| `objc2-core-data` | 0.3.2 | https://github.com/madsmtm/objc2 |
-| `objc2-core-foundation` | 0.3.2 | https://github.com/madsmtm/objc2 |
-| `objc2-core-graphics` | 0.3.2 | https://github.com/madsmtm/objc2 |
-| `objc2-core-image` | 0.3.2 | https://github.com/madsmtm/objc2 |
-| `objc2-core-text` | 0.3.2 | https://github.com/madsmtm/objc2 |
-| `objc2-core-video` | 0.3.2 | https://github.com/madsmtm/objc2 |
-| `objc2-io-surface` | 0.3.2 | https://github.com/madsmtm/objc2 |
-| `objc2-metal` | 0.3.2 | https://github.com/madsmtm/objc2 |
-| `objc2-quartz-core` | 0.3.2 | https://github.com/madsmtm/objc2 |
-| `objc2-ui-kit` | 0.3.2 | https://github.com/madsmtm/objc2 |
-| `tinyvec` | 1.12.0 | https://github.com/Lokathor/tinyvec |
+| `wl-clipboard-rs` | 0.9.3 | https://github.com/YaLTeR/wl-clipboard-rs |
 
 ### Apache-2.0
 
@@ -590,6 +542,7 @@ offering "or later" would be offering terms it has not been granted.
 | `ab_glyph_rasterizer` | 0.1.10 | https://github.com/alexheretic/ab-glyph |
 | `accesskit_winit` | 0.33.2 | https://github.com/AccessKit/accesskit |
 | `clang-sys` | 1.9.1 | https://github.com/KyleMayes/clang-sys |
+| `codespan-reporting` | 0.13.1 | https://github.com/brendanzab/codespan |
 | `gethostname` | 1.1.0 | https://codeberg.org/swsnr/gethostname.rs.git |
 | `gl_generator` | 0.14.0 | https://github.com/brendanzab/gl-rs/ |
 | `glutin` | 0.32.3 | https://github.com/rust-windowing/glutin |
@@ -597,8 +550,8 @@ offering "or later" would be offering terms it has not been granted.
 | `glutin_glx_sys` | 0.6.1 | https://github.com/rust-windowing/glutin |
 | `glutin_wgl_sys` | 0.6.1 | https://github.com/rust-windowing/glutin |
 | `khronos_api` | 3.1.0 | https://github.com/brendanzab/gl-rs/ |
-| `linked_hash_set` | 0.1.6 | https://github.com/alexheretic/linked-hash-set |
 | `owned_ttf_parser` | 0.25.1 | https://github.com/alexheretic/owned-ttf-parser |
+| `spirv` | 0.4.0+sdk-1.4.341.0 | https://github.com/gfx-rs/rspirv |
 | `unicode-linebreak` | 0.1.5 | https://github.com/axelf4/unicode-linebreak |
 | `winit` | 0.30.13 | https://github.com/rust-windowing/winit |
 
@@ -606,48 +559,37 @@ offering "or later" would be offering terms it has not been granted.
 
 | Crate | Version | Source |
 | --- | --- | --- |
-| `i-slint-backend-linuxkms` | 1.17.1 | https://github.com/slint-ui/slint |
-| `i-slint-backend-selector` | 1.17.1 | https://github.com/slint-ui/slint |
-| `i-slint-backend-testing` | 1.17.1 | https://github.com/slint-ui/slint |
-| `i-slint-backend-winit` | 1.17.1 | https://github.com/slint-ui/slint |
-| `i-slint-common` | 1.17.1 | https://github.com/slint-ui/slint |
-| `i-slint-compiler` | 1.17.1 | https://github.com/slint-ui/slint |
-| `i-slint-core` | 1.17.1 | https://github.com/slint-ui/slint |
-| `i-slint-core-macros` | 1.17.1 | https://github.com/slint-ui/slint |
-| `i-slint-renderer-femtovg` | 1.17.1 | https://github.com/slint-ui/slint |
-| `i-slint-renderer-skia` | 1.17.1 | https://github.com/slint-ui/slint |
-| `i-slint-renderer-software` | 1.17.1 | https://github.com/slint-ui/slint |
-| `slint` | 1.17.1 | https://github.com/slint-ui/slint |
-| `slint-build` | 1.17.1 | https://github.com/slint-ui/slint |
-| `slint-macros` | 1.17.1 | https://github.com/slint-ui/slint |
+| `i-slint-backend-linuxkms` | 1.18.1 | https://github.com/slint-ui/slint |
+| `i-slint-backend-selector` | 1.18.1 | https://github.com/slint-ui/slint |
+| `i-slint-backend-testing` | 1.18.1 | https://github.com/slint-ui/slint |
+| `i-slint-backend-winit` | 1.18.1 | https://github.com/slint-ui/slint |
+| `i-slint-common` | 1.18.1 | https://github.com/slint-ui/slint |
+| `i-slint-compiler` | 1.18.1 | https://github.com/slint-ui/slint |
+| `i-slint-core` | 1.18.1 | https://github.com/slint-ui/slint |
+| `i-slint-core-macros` | 1.18.1 | https://github.com/slint-ui/slint |
+| `i-slint-renderer-femtovg` | 1.18.1 | https://github.com/slint-ui/slint |
+| `i-slint-renderer-skia` | 1.18.1 | https://github.com/slint-ui/slint |
+| `i-slint-renderer-software` | 1.18.1 | https://github.com/slint-ui/slint |
+| `slint` | 1.18.1 | https://github.com/slint-ui/slint |
+| `slint-build` | 1.18.1 | https://github.com/slint-ui/slint |
+| `slint-macros` | 1.18.1 | https://github.com/slint-ui/slint |
 
-### BSD-3-Clause
-
-| Crate | Version | Source |
-| --- | --- | --- |
-| `avif-serialize` | 0.8.9 | https://github.com/kornelski/avif-serialize |
-| `bindgen` | 0.72.1 | https://github.com/rust-lang/rust-bindgen |
-| `exr` | 1.74.2 | https://github.com/johannesvollmer/exrs |
-| `lebe` | 0.5.3 | https://github.com/johannesvollmer/lebe |
-| `ravif` | 0.13.0 | https://github.com/kornelski/cavif-rs |
-| `tiny-skia` | 0.11.4 | https://github.com/RazrFalcon/tiny-skia |
-| `tiny-skia` | 0.12.0 | https://github.com/linebender/tiny-skia |
-| `tiny-skia-path` | 0.11.4 | https://github.com/RazrFalcon/tiny-skia/tree/master/path |
-| `tiny-skia-path` | 0.12.0 | https://github.com/linebender/tiny-skia/tree/master/path |
-
-### MIT OR Apache-2.0 OR Zlib
+### Zlib OR Apache-2.0 OR MIT
 
 | Crate | Version | Source |
 | --- | --- | --- |
-| `cursor-icon` | 1.2.0 | https://github.com/rust-windowing/cursor-icon |
-| `glow` | 0.17.0 | https://github.com/grovesNL/glow |
-| `raw-window-handle` | 0.6.2 | https://github.com/rust-windowing/raw-window-handle |
-| `tiny-xlib` | 0.2.5 | https://github.com/rust-windowing/tiny-xlib |
-| `tinyvec_macros` | 0.1.1 | https://github.com/Soveu/tinyvec_macros |
-| `xkeysym` | 0.2.1 | https://github.com/notgull/xkeysym |
-| `zune-core` | 0.5.3 | https://github.com/etemesi254/zune-image |
-| `zune-inflate` | 0.2.54 | https://crates.io/crates/zune-inflate |
-| `zune-jpeg` | 0.5.15 | https://github.com/etemesi254/zune-image/tree/dev/crates/zune-jpeg |
+| `bytemuck` | 1.25.2 | https://github.com/Lokathor/bytemuck |
+| `bytemuck_derive` | 1.12.0 | https://github.com/Lokathor/bytemuck |
+| `dispatch2` | 0.3.1 | https://github.com/madsmtm/objc2 |
+| `objc2-app-kit` | 0.3.2 | https://github.com/madsmtm/objc2 |
+| `objc2-core-foundation` | 0.3.2 | https://github.com/madsmtm/objc2 |
+| `objc2-core-graphics` | 0.3.2 | https://github.com/madsmtm/objc2 |
+| `objc2-core-text` | 0.3.2 | https://github.com/madsmtm/objc2 |
+| `objc2-io-surface` | 0.3.2 | https://github.com/madsmtm/objc2 |
+| `objc2-metal` | 0.3.2 | https://github.com/madsmtm/objc2 |
+| `objc2-quartz-core` | 0.3.2 | https://github.com/madsmtm/objc2 |
+| `objc2-ui-kit` | 0.3.2 | https://github.com/madsmtm/objc2 |
+| `tinyvec` | 1.12.0 | https://github.com/Lokathor/tinyvec |
 
 ### Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT
 
@@ -662,24 +604,28 @@ offering "or later" would be offering terms it has not been granted.
 | `wasip2` | 1.0.4+wasi-0.2.12 | https://github.com/bytecodealliance/wasi-rs |
 | `wit-bindgen` | 0.57.1 | https://github.com/bytecodealliance/wit-bindgen |
 
-### Apache-2.0/MIT
+### MIT OR Apache-2.0 OR Zlib
 
 | Crate | Version | Source |
 | --- | --- | --- |
-| `bit_field` | 0.10.3 | https://github.com/phil-opp/rust-bit-field |
-| `cexpr` | 0.6.0 | https://github.com/jethrogb/rust-cexpr |
-| `integer-sqrt` | 0.1.5 | https://github.com/derekdreery/integer-sqrt-rs |
-| `pollster` | 0.4.0 | https://github.com/zesterer/pollster |
-| `rustc-hash` | 1.1.0 | https://github.com/rust-lang-nursery/rustc-hash |
+| `cursor-icon` | 1.2.0 | https://github.com/rust-windowing/cursor-icon |
+| `glow` | 0.18.0 | https://github.com/grovesNL/glow |
+| `raw-window-handle` | 0.6.2 | https://github.com/rust-windowing/raw-window-handle |
+| `tiny-xlib` | 0.2.5 | https://github.com/rust-windowing/tiny-xlib |
+| `tinyvec_macros` | 0.1.1 | https://github.com/Soveu/tinyvec_macros |
+| `xkeysym` | 0.2.1 | https://github.com/notgull/xkeysym |
+| `zune-core` | 0.5.3 | https://github.com/etemesi254/zune-image |
+| `zune-jpeg` | 0.5.15 | https://github.com/etemesi254/zune-image/tree/dev/crates/zune-jpeg |
 
-### BSD-2-Clause
+### BSD-3-Clause
 
 | Crate | Version | Source |
 | --- | --- | --- |
-| `arrayref` | 0.3.9 | https://github.com/droundy/arrayref |
-| `av1-grain` | 0.2.5 | https://github.com/rust-av/av1-grain |
-| `rav1e` | 0.8.1 | https://github.com/xiph/rav1e/ |
-| `v_frame` | 0.3.9 | https://github.com/rust-av/v_frame |
+| `bindgen` | 0.72.1 | https://github.com/rust-lang/rust-bindgen |
+| `tiny-skia` | 0.11.4 | https://github.com/RazrFalcon/tiny-skia |
+| `tiny-skia` | 0.12.0 | https://github.com/linebender/tiny-skia |
+| `tiny-skia-path` | 0.11.4 | https://github.com/RazrFalcon/tiny-skia/tree/master/path |
+| `tiny-skia-path` | 0.12.0 | https://github.com/linebender/tiny-skia/tree/master/path |
 
 ### Unlicense OR MIT
 
@@ -689,6 +635,14 @@ offering "or later" would be offering terms it has not been granted.
 | `byteorder-lite` | 0.1.0 | https://github.com/image-rs/byteorder-lite |
 | `memchr` | 2.8.3 | https://github.com/BurntSushi/memchr |
 | `winapi-util` | 0.1.11 | https://github.com/BurntSushi/winapi-util |
+
+### Apache-2.0/MIT
+
+| Crate | Version | Source |
+| --- | --- | --- |
+| `cexpr` | 0.6.0 | https://github.com/jethrogb/rust-cexpr |
+| `pollster` | 0.4.0 | https://github.com/zesterer/pollster |
+| `rustc-hash` | 1.1.0 | https://github.com/rust-lang-nursery/rustc-hash |
 
 ### Zlib
 
@@ -726,13 +680,6 @@ offering "or later" would be offering terms it has not been granted.
 | `clipboard-win` | 5.4.1 | https://github.com/DoumanAsh/clipboard-win |
 | `error-code` | 3.4.0 | https://github.com/DoumanAsh/error-code |
 
-### MIT / Apache-2.0
-
-| Crate | Version | Source |
-| --- | --- | --- |
-| `cgl` | 0.3.2 | https://github.com/servo/cgl-rs |
-| `copypasta` | 0.10.2 | https://github.com/alacritty/copypasta |
-
 ### MIT OR Apache-2.0 OR LGPL-2.1-or-later
 
 | Crate | Version | Source |
@@ -746,12 +693,6 @@ offering "or later" would be offering terms it has not been granted.
 | --- | --- | --- |
 | `same-file` | 1.0.6 | https://github.com/BurntSushi/same-file |
 | `walkdir` | 2.5.0 | https://github.com/BurntSushi/walkdir |
-
-### (MIT OR Apache-2.0) AND NCSA
-
-| Crate | Version | Source |
-| --- | --- | --- |
-| `libfuzzer-sys` | 0.4.13 | https://github.com/rust-fuzz/libfuzzer |
 
 ### (MIT OR Apache-2.0) AND Unicode-3.0
 
@@ -777,6 +718,12 @@ offering "or later" would be offering terms it has not been granted.
 | --- | --- | --- |
 | `dpi` | 0.1.2 | https://github.com/rust-windowing/winit |
 
+### BSD-2-Clause
+
+| Crate | Version | Source |
+| --- | --- | --- |
+| `arrayref` | 0.3.9 | https://github.com/droundy/arrayref |
+
 ### CC0-1.0 OR Apache-2.0
 
 | Crate | Version | Source |
@@ -788,6 +735,12 @@ offering "or later" would be offering terms it has not been granted.
 | Crate | Version | Source |
 | --- | --- | --- |
 | `libloading` | 0.8.9 | https://github.com/nagisa/rust_libloading/ |
+
+### MIT / Apache-2.0
+
+| Crate | Version | Source |
+| --- | --- | --- |
+| `cgl` | 0.3.2 | https://github.com/servo/cgl-rs |
 
 ### MIT OR Zlib OR Apache-2.0
 

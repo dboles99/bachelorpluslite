@@ -269,13 +269,16 @@ code-signing certificate has not been bought, and self-signing was refused
 because it would ask a user to install a root certificate they have no reason
 to trust. Every release ships a SHA-256 checksum file.
 
-There is no installer. Unpack the archive anywhere and run it.
+There is no installer. Unpack the archive anywhere and run it. Settings, recent
+files and recovery journals are written to the per-user profile directories,
+not beside the program; the Installation page of the manual lists them.
 
 ## The paid version
 
 BachelorPad+ is the full version: encrypted notes, runnable notebooks,
-structured-data tools, clipboard history and complete privacy controls. It
-arrives on 10 October 2026. The price is not set. Lite stays free either way.
+structured-data tools, clipboard history and complete privacy controls. It is
+in development and has no date. The price is not set. Lite stays free either
+way.
 
 Waitlist: $waitUrl
 

@@ -37,7 +37,7 @@ bp-files = { path = "../bp-files" }
 bp-naming = { path = "../bp-naming" }
 bp-theme = { path = "../bp-theme" }
 arboard = "3"
-slint = "1.17"
+slint = "1.18.1"
 # Native file dialogs. xdg-portal rather than gtk3 on Linux, so the app does
 # not need a specific desktop environment installed just to open a file
 # (BP-ADR-0001). `pollster` supplies the executor the blocking API needs,
@@ -58,7 +58,7 @@ time.workspace = true
 tracing.workspace = true
 
 [build-dependencies]
-slint-build = "1.17"
+slint-build = "1.18.1"
 
 [dev-dependencies]
 time = { workspace = true, features = ["macros"] }

@@ -122,6 +122,29 @@ Notepad, and the need it served is met by Find > In Folder and Related Notes.
 The `Embeddings` policy axis left with it, and so did the three other axes
 nothing enforced, which ADR-0059 had already decided to remove.
 
+## The release candidate, and what it is blocked on
+
+The eight decisions a release candidate needed were taken on 2026-09-25, as
+ADR-0083 to ADR-0089. Two are done; the rest are decided and waiting on work.
+
+| Blocks the RC | Decided by | State |
+| --- | --- | --- |
+| A document past about 2,000 lines overflowed the renderer | [ADR-0083](docs/decisions/ADR-0083.md) | **Done** -- Slint 1.18.1 |
+| The site claimed what does not ship, and a date nobody planned | [ADR-0089](docs/decisions/ADR-0089.md) | **Done** |
+| No `zenity` on Linux deletes the recovery journal | [ADR-0084](docs/decisions/ADR-0084.md) | Decided; W1-02 |
+| Windows-1252, Shift-JIS and GBK files are refused | [ADR-0085](docs/decisions/ADR-0085.md) | Decided; W2-04 |
+| The Linux binary needs glibc 2.39 | [ADR-0087](docs/decisions/ADR-0087.md) | Decided; W3-01 |
+| No keyboard route into the menus, no accessible names | [ADR-0088](docs/decisions/ADR-0088.md) | Decided; W4-02 |
+| Signing | [ADR-0086](docs/decisions/ADR-0086.md) | **Not a blocker**: the RC ships unsigned; 1.0 is SignPath or the Store |
+
+The work items and their order are in the release-candidate plan, in the
+private planning repository. The other blockers that plan names -- offsets
+passed to the widget in characters where it counts bytes, Enter writing `\n`
+into a CRLF file, the widget's own undo stack growing without bound, two
+instances sharing one journal, the dynamic C runtime on Windows, and no
+release existing yet -- are defects rather than decisions, and did not need
+one.
+
 ## Two numbering schemes, reconciled
 
 The phase numbers above are canonical — they are what `specs.md` and the ADRs

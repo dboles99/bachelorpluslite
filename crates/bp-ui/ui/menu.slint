@@ -113,8 +113,8 @@ export component MenuPopup inherits PopupWindow {
             // past the right edge, where a Flickable clips it. Before this was
             // a Flickable that text simply overflowed the popup and drew
             // outside it, so nothing was lost; now it would be.
-            viewport-width: self.width;
-            viewport-height: content.preferred-height;
+            content-width: self.width;
+            content-height: content.preferred-height;
 
             content := VerticalLayout {
                 alignment: start;

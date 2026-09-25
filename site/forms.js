@@ -1,4 +1,4 @@
-/* bpad.prompt-forge.dev: the countdown, and the two sign-up forms.
+/* bpad.prompt-forge.dev: the two sign-up forms.
  *
  * There are two lists and they are deliberately separate. The waitlist is for
  * BachelorPad+ early access. The release-notes list is for the free version.
@@ -11,10 +11,10 @@
  * is what lets the Content-Security-Policy stay at `self` with no exception,
  * so this page genuinely makes no third-party request at all (ADR-0076).
  *
- * NOTHING IS STORED IN YOUR BROWSER. The countdown reads a fixed date and the
- * clock. It does not remember you, and clearing your storage changes nothing
- * about it, which is deliberate: a per-visitor "30 days" that resets when
- * somebody clears their browser is a claim the visitor can catch being false.
+ * NOTHING IS STORED IN YOUR BROWSER: no cookie, no storage, no draft of the
+ * address. The page names no launch date either, and there is no countdown
+ * to one -- a date with no plan behind it is a claim the reader can catch
+ * being false (ADR-0089).
  *
  * Every message shown to the reader comes from a data- attribute in the
  * markup rather than from a string in here, so the six locales share one
@@ -24,46 +24,6 @@
   "use strict";
 
   var ENDPOINT = "/api/subscribe";
-
-  /* ---- the countdown -------------------------------------------------
-   *
-   * A fixed instant in UTC, so it reads the same in every timezone and
-   * cannot drift.
-   */
-  var ARRIVES_AT = Date.UTC(2026, 9, 10, 23, 59, 59); /* 10 October 2026 */
-
-  var countdown = document.getElementById("countdown");
-  if (countdown) {
-    var dials = {
-      days: document.getElementById("cd-days"),
-      hours: document.getElementById("cd-hours"),
-      mins: document.getElementById("cd-mins"),
-      secs: document.getElementById("cd-secs")
-    };
-    var caption = document.getElementById("countdown-caption");
-
-    var pad = function (n) { return n < 10 ? "0" + n : String(n); };
-
-    var tick = function () {
-      var left = ARRIVES_AT - Date.now();
-      if (left <= 0) {
-        dials.days.textContent = dials.hours.textContent =
-          dials.mins.textContent = dials.secs.textContent = "00";
-        if (caption && caption.getAttribute("data-closed")) {
-          caption.textContent = caption.getAttribute("data-closed");
-        }
-        return false;
-      }
-      var s = Math.floor(left / 1000);
-      dials.days.textContent = pad(Math.floor(s / 86400));
-      dials.hours.textContent = pad(Math.floor(s / 3600) % 24);
-      dials.mins.textContent = pad(Math.floor(s / 60) % 60);
-      dials.secs.textContent = pad(s % 60);
-      return true;
-    };
-
-    if (tick()) { setInterval(tick, 1000); }
-  }
 
   /* ---- the forms ------------------------------------------------------ */
 

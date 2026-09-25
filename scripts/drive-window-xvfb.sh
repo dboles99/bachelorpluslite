@@ -10,6 +10,12 @@
 #
 #   scripts/drive-window-xvfb.sh "ctrl+Home A Page_Down F"
 #   scripts/drive-window-xvfb.sh "ctrl+Home Insert X Y" --editor-view
+#   FIXTURE_LINES=5000 SLINT_SCALE_FACTOR=2 scripts/drive-window-xvfb.sh "ctrl+End Z"
+#
+# The last is the long-document crash (ADR-0083): Slint 1.17.1's software
+# renderer panicked past about 2,000 lines, or 1,100 at a scale factor of 2.
+# A panic in the log fails the run whatever the diff says, because a Slint
+# panic inside the event loop can leave the window up and the save working.
 #
 # Needs Xvfb, xdotool, imagemagick (for the screenshot) and libxkbcommon-x11
 # -- `apt-get install xvfb xdotool imagemagick libxkbcommon-x11-0`. Builds
@@ -39,7 +45,7 @@ export HOME=$run/home XDG_CONFIG_HOME=$run/config XDG_DATA_HOME=$run/data \
     XDG_STATE_HOME=$run/state XDG_CACHE_HOME=$run/cache
 mkdir -p "$HOME" "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME"
 
-fixture() { for i in $(seq -w 1 200); do echo "line $i abcdefghij"; done; }
+fixture() { for i in $(seq -w 1 "${FIXTURE_LINES:-200}"); do echo "line $i abcdefghij"; done; }
 fixture > "$run/doc.txt"
 
 export DISPLAY=${XVFB_DISPLAY:-:99}
@@ -82,4 +88,9 @@ kill "$app" 2>/dev/null
 wait "$app" 2>/dev/null
 
 diff <(fixture) "$run/doc.txt" | cat -A | sed 's/\$$//'
+if grep -q 'panicked at' "$run/app.log"; then
+    echo "the application panicked:" >&2
+    grep -A2 'panicked at' "$run/app.log" >&2
+    exit 1
+fi
 exit 0

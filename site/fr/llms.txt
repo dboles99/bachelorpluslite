@@ -4,7 +4,7 @@
 
 ## What this is
 
-BachelorPad+ Lite est un remplacement gratuit et open source du Bloc-notes pour Windows et Linux. Tout ce que fait le Bloc-notes, plus une chose qu'il ne sait pas faire : il sait lesquelles de vos notes parlent du même sujet, donc vous retrouvez ce que vous pensiez le mois dernier sans vous rappeler du nom du fichier. Il s'ouvre instantanement, fonctionne hors ligne pour toujours, et il n'exécutera jamais rien ni n'enverra rien nulle part.
+BachelorPad+ Lite est un remplacement gratuit et open source du Bloc-notes pour Windows et Linux. Il édite le texte brut comme le Bloc-notes, et fait en plus une chose que le Bloc-notes ne sait pas faire : il sait lesquelles de vos notes parlent du même sujet, donc vous retrouvez ce que vous pensiez le mois dernier sans vous rappeler du nom du fichier. Il s'ouvre instantanément, fonctionne hors ligne pour toujours, et il n'exécutera jamais rien ni n'enverra rien nulle part.
 
 Free and open source under GPL-3.0-only. Windows 10, Windows 11 and Linux,
 64-bit. There is no macOS build. Version 0.9.5.
@@ -49,13 +49,16 @@ code-signing certificate has not been bought, and self-signing was refused
 because it would ask a user to install a root certificate they have no reason
 to trust. Every release ships a SHA-256 checksum file.
 
-There is no installer. Unpack the archive anywhere and run it.
+There is no installer. Unpack the archive anywhere and run it. Settings, recent
+files and recovery journals are written to the per-user profile directories,
+not beside the program; the Installation page of the manual lists them.
 
 ## The paid version
 
 BachelorPad+ is the full version: encrypted notes, runnable notebooks,
-structured-data tools, clipboard history and complete privacy controls. It
-arrives on 10 October 2026. The price is not set. Lite stays free either way.
+structured-data tools, clipboard history and complete privacy controls. It is
+in development and has no date. The price is not set. Lite stays free either
+way.
 
 Waitlist: https://bpad.prompt-forge.dev/fr/waitlist.html
 
