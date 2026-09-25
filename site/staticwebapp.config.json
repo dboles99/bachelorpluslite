@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json.schemastore.org/staticwebapp.config.json",
+
+  "//": [
+    "Azure Static Web Apps configuration for bpad.prompt-forge.dev (ADR-0076).",
+    "",
+    "The Content-Security-Policy below is the enforcing reader behind this",
+    "site's central claim. ADR-0076 says the site loads no analytics, no",
+    "trackers and no third-party scripts -- and trap 3 applies to a promise on",
+    "a web page exactly as it applies to a comment in Rust: nothing would fail",
+    "if somebody pasted a tag in. A CSP of 'self' means the browser refuses,",
+    "which turns the promise into a property.",
+    "",
+    "Both sign-up forms post to /api/subscribe, which is same-origin: an Azure",
+    "Function in this Static Web App, matching af-site. That is what lets",
+    "connect-src stay at self with no exception, so the page makes no",
+    "third-party request at all."
+  ],
+
+  "globalHeaders": {
+    "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'; object-src 'none'",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+    "Permissions-Policy": "geolocation=(), microphone=(), camera=(), interest-cohort=()",
+    "Strict-Transport-Security": "max-age=63072000; includeSubDomains"
+  },
+
+  "routes": [
+    {
+      "route": "/docs",
+      "rewrite": "/docs/index.html"
+    },
+    {
+      "route": "/waitlist",
+      "redirect": "/waitlist.html",
+      "statusCode": 301
+    }
+  ],
+
+  "responseOverrides": {
+    "404": {
+      "rewrite": "/404.html",
+      "statusCode": 404
+    }
+  },
+
+  "mimeTypes": {
+    ".md": "text/markdown; charset=utf-8",
+    ".json": "application/json"
+  }
+}

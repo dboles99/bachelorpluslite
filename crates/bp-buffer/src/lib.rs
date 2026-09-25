@@ -23,21 +23,6 @@ use std::ops::Range;
 
 use ropey::Rope;
 
-pub mod large;
-pub mod line_index;
-pub mod stream;
-
-pub use large::{
-    Access, CHUNK_BYTES, DisplayLine, HUGE_FILE_BYTES, INDEX_BUDGET_BYTES, IndexProgress,
-    LARGE_FILE_BYTES, LargeFile, LargeFileError, MAX_DISPLAY_BYTES, MAX_DISPLAY_LINE_BYTES,
-    MAX_DISPLAY_LINES, SizeClass,
-};
-pub use line_index::{LineIndex, LineLocation, MAX_ANCHORS, MAX_INDEX_HEAP_BYTES};
-pub use stream::{
-    DEFAULT_OVERLAP_BYTES, DEFAULT_WINDOW_BYTES, MAX_OVERLAP_BYTES, MIN_WINDOW_BYTES, StreamWindow,
-    WindowReader,
-};
-
 /// Crate identity used by workspace smoke tests and diagnostics.
 pub const CRATE_NAME: &str = "bp-buffer";
 
@@ -72,7 +57,6 @@ impl Position {
 #[derive(Debug, Clone, Default)]
 pub struct Buffer {
     rope: Rope,
-    access: Access,
 }
 
 impl Buffer {
@@ -83,40 +67,7 @@ impl Buffer {
     pub fn from_text(text: &str) -> Self {
         Self {
             rope: Rope::from_str(text),
-            access: Access::Editable,
         }
-    }
-
-    /// Whether this buffer accepts edits, and why not if it does not.
-    ///
-    /// Carried on the buffer rather than checked by every caller because
-    /// "read-only" enforced at the call sites is read-only until somebody
-    /// adds a call site. The rope is the one place every edit passes through.
-    pub fn access(&self) -> Access {
-        self.access
-    }
-
-    /// Shorthand for the common question.
-    pub fn is_read_only(&self) -> bool {
-        self.access.is_read_only()
-    }
-
-    /// Mark the buffer read-only, or editable again.
-    ///
-    /// Takes the reason, not a boolean: a buffer that is read-only because
-    /// the file is locked and one that is read-only because the document is
-    /// 2 GB need different words in the status bar, and a `bool` throws that
-    /// away at the only point where it is still known. See [`Access`].
-    pub fn set_access(&mut self, access: Access) {
-        self.access = access;
-    }
-
-    /// The same buffer, marked. For construction sites that would otherwise
-    /// need a `let mut` and a second statement.
-    #[must_use]
-    pub fn with_access(mut self, access: Access) -> Self {
-        self.access = access;
-        self
     }
 
     pub fn len_chars(&self) -> usize {
@@ -129,6 +80,22 @@ impl Buffer {
 
     pub fn is_empty(&self) -> bool {
         self.rope.len_chars() == 0
+    }
+
+    /// The character index of a UTF-8 byte offset, clamped to the end.
+    ///
+    /// For the one caller that is handed bytes: Slint's `TextInput` reports
+    /// its caret as a byte offset, and everything in this workspace counts in
+    /// characters. A byte offset inside a character resolves to that
+    /// character, which is ropey's rule and the safe one -- it can only ever
+    /// name a real boundary.
+    pub fn byte_to_char(&self, byte_idx: usize) -> usize {
+        self.rope.byte_to_char(byte_idx.min(self.len_bytes()))
+    }
+
+    /// The UTF-8 byte offset of a character index, clamped to the end.
+    pub fn char_to_byte(&self, char_idx: usize) -> usize {
+        self.rope.char_to_byte(char_idx.min(self.len_chars()))
     }
 
     /// Number of lines, counting the empty line after a trailing newline.
@@ -147,18 +114,11 @@ impl Buffer {
     /// the caller is a keystroke, the answer is already on screen in the
     /// status bar, and a dialog per character is not a better editor.
     pub fn insert(&mut self, char_idx: usize, text: &str) {
-        if self.is_read_only() {
-            return;
-        }
         self.rope.insert(char_idx.min(self.len_chars()), text);
     }
 
-    /// Remove a character range, clamped to the buffer. Does nothing when the
-    /// buffer is read-only.
+    /// Remove a character range, clamped to the buffer.
     pub fn remove(&mut self, range: Range<usize>) {
-        if self.is_read_only() {
-            return;
-        }
         let end = range.end.min(self.len_chars());
         let start = range.start.min(end);
         if start < end {
@@ -405,53 +365,6 @@ mod tests {
     }
 
     #[test]
-    fn a_buffer_is_editable_until_it_is_told_otherwise() {
-        // The default matters more than it looks: every existing caller
-        // builds a buffer without mentioning access, and all of them must
-        // keep working.
-        let mut b = Buffer::from_text("hi");
-        assert_eq!(b.access(), Access::Editable);
-        assert!(!b.is_read_only());
-        b.insert(2, "!");
-        assert_eq!(b.to_string(), "hi!");
-        assert_eq!(Buffer::new().access(), Access::Editable);
-        assert_eq!(Buffer::default().access(), Access::Editable);
-        assert_eq!(Buffer::from("x").access(), Access::Editable);
-    }
-
-    #[test]
-    fn a_read_only_buffer_refuses_every_edit_whatever_the_reason() {
-        // Both reasons must stop the edit. Only the message differs -- if
-        // one of them let a keystroke through, the difference between them
-        // would have become a correctness bug rather than a wording one.
-        for access in [
-            Access::ReadOnlyFile,
-            Access::ReadOnlyBySize {
-                bytes: HUGE_FILE_BYTES + 1,
-            },
-        ] {
-            let mut b = Buffer::from_text("hello").with_access(access);
-            assert!(b.is_read_only(), "{access:?}");
-            b.insert(0, "X");
-            b.remove(0..3);
-            assert_eq!(b.to_string(), "hello", "{access:?} let an edit through");
-            assert!(!b.access().message().is_empty(), "and must say why");
-        }
-    }
-
-    #[test]
-    fn a_buffer_can_be_made_editable_again() {
-        // Permissions change while a file is open, and reopening the
-        // document to pick that up would be a worse editor.
-        let mut b = Buffer::from_text("ab").with_access(Access::ReadOnlyFile);
-        b.insert(2, "c");
-        assert_eq!(b.to_string(), "ab");
-        b.set_access(Access::Editable);
-        b.insert(2, "c");
-        assert_eq!(b.to_string(), "abc");
-    }
-
-    #[test]
     fn slice_and_line_read_back() {
         let b = Buffer::from_text("one\ntwo\nthree");
         assert_eq!(b.slice(0..3), "one");
@@ -459,5 +372,14 @@ mod tests {
         assert_eq!(b.line(2), "three");
         assert_eq!(b.line(99), "");
         assert_eq!(b.slice(0..999), "one\ntwo\nthree");
+    }
+
+    #[test]
+    fn byte_and_character_offsets_round_trip_across_multibyte_text() {
+        let buffer = Buffer::from_text("a日b");
+        assert_eq!(buffer.char_to_byte(2), 4, "日 is three bytes");
+        assert_eq!(buffer.byte_to_char(4), 2);
+        assert_eq!(buffer.byte_to_char(99), 3, "past the end clamps");
+        assert_eq!(buffer.char_to_byte(99), 5, "past the end clamps");
     }
 }

@@ -1,4 +1,4 @@
-//! The BachelorPlusLite application shell.
+//! The BachelorPad+ Lite application shell.
 //!
 //! This crate owns the window and nothing else. Document state lives in
 //! `bp-core`, saving in `bp-files`, naming in `bp-naming`, colours in
@@ -62,17 +62,18 @@ pub use generated::*;
 
 mod menus;
 
-mod audit;
 mod default_editor;
 mod dispatch;
 mod editor_view;
-mod passphrase;
 mod state;
 #[cfg(test)]
 mod testpaths;
-mod viewer;
 
 /// Crate identity used by workspace smoke tests and diagnostics.
+/// The product name, re-exported so the shell's callers need not depend on
+/// `bp-platform` to say it. One home, reached from more places (ADR-0074).
+pub use bp_platform::DISPLAY_NAME;
+
 pub const CRATE_NAME: &str = "bp-ui";
 
 #[derive(Debug, thiserror::Error)]
@@ -150,6 +151,7 @@ fn refresh(ui: &AppWindow, state: &mut state::AppState, push_text: state::PushTe
         ui.set_format_label(format.label().into());
         ui.set_cursor_label(cursor.as_str().into());
     }
+    ui.set_overwrite(state.overwrite);
 
     // Something that just failed outranks a standing warning about the file.
     let notice = state
@@ -178,7 +180,6 @@ fn refresh(ui: &AppWindow, state: &mut state::AppState, push_text: state::PushTe
     // Privacy Mode outranks the profile name here: it is the session-wide
     // fact, and it is the thing somebody switches on precisely because they
     // want to be able to see that it is on.
-    ui.set_size_label(state.size_label().into());
 
     ui.set_security_profile(
         if state.privacy.is_on() {
@@ -190,13 +191,6 @@ fn refresh(ui: &AppWindow, state: &mut state::AppState, push_text: state::PushTe
         }
         .into(),
     );
-
-    // What the passphrase bar is asking, if anything.
-    if let Some(ask) = &state.ask {
-        ui.set_passphrase_prompt(ask.prompt().into());
-        ui.set_passphrase_action(ask.action().into());
-    }
-    ui.set_passphrase_status(state.passphrase_status.as_str().into());
 
     ui.set_show_gutter(state.show_gutter);
     ui.set_wrap_text(state.wrap_text);
@@ -213,7 +207,6 @@ fn refresh(ui: &AppWindow, state: &mut state::AppState, push_text: state::PushTe
     ui.set_file_items(model(menus::file(
         any_dirty,
         has_path,
-        state.active_is_viewer(),
         state.recent.paths(),
     )));
     ui.set_view_items(model(menus::view(
@@ -234,7 +227,6 @@ fn refresh(ui: &AppWindow, state: &mut state::AppState, push_text: state::PushTe
     // the clock: a menu built at startup would still be offering this
     // morning's time this afternoon.
     ui.set_insert_items(model(menus::insert(state::now(), state.editor_view)));
-    ui.set_data_items(model(menus::data(format)));
     ui.set_note_items(model(menus::note(state.active_has_content())));
     // Rebuilt rather than set once, for the same reason `note_items` is not
     // static: the Document Inspector row greys on `has_content`, which
@@ -249,34 +241,10 @@ fn refresh(ui: &AppWindow, state: &mut state::AppState, push_text: state::PushTe
     // for the same reason: the rows grey when there is nothing to read, and
     // that changes with every keystroke.
     ui.set_research_items(model(menus::research(state.active_has_content())));
-    ui.set_edit_items(model(menus::edit(state.clips.entries(), state.editor_view)));
+    ui.set_edit_items(model(menus::edit(state.editor_view)));
     // Rebuilt rather than set once: it shows the *active* document's profile
     // and what that profile permits, both of which change with the tab.
-    let encrypted = state
-        .workspace
-        .active_id()
-        .is_some_and(|id| state.is_encrypted(id));
-    ui.set_security_items(model(menus::security(
-        state.security(),
-        encrypted,
-        state.privacy,
-        // Redaction needs something to redact. A prefix check rather than a
-        // scan: this runs on every refresh, and scanning the whole document
-        // there is the trap R011 spends a paragraph on.
-        state.active_has_content(),
-        // Verification reads the *file*, and looks for the sidecar beside it
-        // by name. Already computed above for Reload, which needs the same
-        // fact for the same underlying reason.
-        has_path,
-        // Signing is over the bytes on disk (ADR-0026), so a document with
-        // unsaved changes would be signed as it *was*. The row says so rather
-        // than the click doing it -- and it asks the **same** predicate
-        // `begin_signing` refuses on, because a row that greys on one rule and
-        // an action that refuses on another is how a user learns to distrust
-        // the greying.
-        !state.active_differs_from_disk(),
-        state.has_signing_key(),
-    )));
+    ui.set_privacy_items(model(menus::privacy_menu(state.security(), state.privacy)));
 }
 
 /// Menus whose contents never change. Set once, not on every refresh.
@@ -385,7 +353,7 @@ pub struct RunOptions {
     pub font_size: Option<u8>,
 }
 
-/// Run the BachelorPlusLite shell.
+/// Run the BachelorPad+ Lite shell.
 pub fn run() -> Result<(), UiError> {
     run_with(RunOptions::default())
 }
@@ -409,6 +377,31 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
     }
 
     let ui = AppWindow::new()?;
+
+    // The window title, from the constant rather than from `app.slint`. The
+    // last rename changed the literal in that file and left DISPLAY_NAME
+    // alone, so the product introduced itself by two different names for a
+    // week; there is now only one place to change (ADR-0074).
+    ui.set_app_title(DISPLAY_NAME.into());
+    // The window and taskbar icon, loaded from the PNG that ships beside the
+    // executable (ADR-0068). **The PNG on both platforms**, even though
+    // Windows registration names a `.ico`: Slint decodes png and jpeg only,
+    // so an ICO here silently produced the toolkit's default and said
+    // nothing. Explorer needs the ICO and this needs the PNG, so the archive
+    // carries both.
+    //
+    // Silent on failure, and deliberately: a missing or unreadable icon is a
+    // window with the toolkit's default, which is a cosmetic loss. Refusing
+    // to start over it would turn a cosmetic loss into an outage.
+    if let Some(path) = std::env::current_exe().ok().and_then(|exe| {
+        exe.to_str().and_then(|exe| {
+            bp_platform::editor::window_icon_beside(bp_platform::Platform::HOST, exe)
+        })
+    }) && let Ok(image) = slint::Image::load_from_path(std::path::Path::new(&path))
+    {
+        ui.set_window_icon(image);
+    }
+
     let mut initial = state::AppState::new();
     if let Some(theme) = options.theme {
         initial.theme = theme;
@@ -451,7 +444,8 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
             .set_level(rfd::MessageLevel::Warning)
             .set_title("Unsaved work recovered")
             .set_description(format!(
-                "BachelorPlusLite closed with {} unsaved document(s):\n\n{}\n\nRestore them?",
+                "{} closed with {} unsaved document(s):\n\n{}\n\nRestore them?",
+                bp_platform::DISPLAY_NAME,
                 pending.len(),
                 names.join("\n")
             ))
@@ -474,10 +468,6 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
     // what is in the active tab rather than on the flag alone. It runs before
     // the window is shown, so the first frame is already right.
     ui.set_use_editor_view(options.editor_view);
-    // The scan rate ADR-0042 chose, handed to Slint rather than written there
-    // as a literal: `WINDOWS_PER_TICK` and this interval only mean something
-    // together, and they must not be a file apart.
-    ui.set_scan_tick_ms(i32::try_from(bp_search::STREAM_TICK.as_millis()).unwrap_or(16));
 
     let mut reported = false;
     let measure_exit = options.measure_exit;
@@ -672,6 +662,40 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
         });
     }
 
+    // --- the Insert key, under `TextInput` -----------------------------
+    // The custom surface reaches the same two decisions through
+    // `editor_key`; these are how the widget asks for them.
+    {
+        let cell = Rc::clone(&state);
+        let weak = ui.as_weak();
+        ui.on_insert_key(move |control, shift, alt| {
+            let modifiers = bp_editor::Modifiers {
+                control,
+                shift,
+                alt,
+            };
+            let what = editor_view::insert_key(&mut cell.borrow_mut(), modifiers);
+            if what == editor_view::InsertKey::Toggled
+                && let Some(ui) = weak.upgrade()
+            {
+                refresh(&ui, &mut cell.borrow_mut(), state::PushText::No);
+            }
+            what.name().into()
+        });
+    }
+    {
+        let cell = Rc::clone(&state);
+        ui.on_overtype_end(move |cursor, anchor, text, control, shift, alt| {
+            let modifiers = bp_editor::Modifiers {
+                control,
+                shift,
+                alt,
+            };
+            editor_view::overtype_end(&cell.borrow(), cursor, anchor, &text, modifiers)
+                .unwrap_or(-1)
+        });
+    }
+
     // --- the custom editor surface -------------------------------------
     {
         let cell = Rc::clone(&state);
@@ -796,16 +820,6 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
         ui.on_find_changed(move || {
             let Some(ui) = weak.upgrade() else { return };
             let query = ui_query(&ui);
-            // A document served from disk is searched by scanning it, not by
-            // asking a rope that does not exist (ADR-0042). The scan reports
-            // itself through the same `find_status` the bar already reads.
-            if cell.borrow().active_is_viewer() {
-                let running = cell.borrow_mut().begin_scan(&query);
-                ui.set_scanning(running);
-                ui.set_find_status(cell.borrow().find_status.as_str().into());
-                editor_view::draw_editor_view(&ui, &mut cell.borrow_mut());
-                return;
-            }
             let selection = cell.borrow_mut().find(&query);
             ui.set_find_status(cell.borrow().find_status.as_str().into());
             if let Some(range) = selection {
@@ -821,15 +835,6 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
         let weak = ui.as_weak();
         let step = move || {
             let Some(ui) = weak.upgrade() else { return };
-            if cell.borrow().active_is_viewer() {
-                // Stepping a scan moves the *view*, not a caret, and it wraps
-                // over what has been found so far rather than waiting for the
-                // scan to finish.
-                cell.borrow_mut().step_scan_hit(forward);
-                ui.set_find_status(cell.borrow().find_status.as_str().into());
-                editor_view::draw_editor_view(&ui, &mut cell.borrow_mut());
-                return;
-            }
             let selection = cell.borrow_mut().step_match(forward);
             ui.set_find_status(cell.borrow().find_status.as_str().into());
             if let Some(range) = selection {
@@ -892,23 +897,6 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
     {
         let cell = Rc::clone(&state);
         let weak = ui.as_weak();
-        // One tick of a scan of a document served from disk (ADR-0042). The
-        // budget is what keeps the window responsive: this returns after a
-        // few megabytes rather than after the file, and Slint redraws in
-        // between. Stopping is the timer not firing again -- there is no
-        // thread to signal and nothing to join.
-        ui.on_scan_tick(move || {
-            let Some(ui) = weak.upgrade() else { return };
-            let running = cell.borrow_mut().advance_scan(bp_search::WINDOWS_PER_TICK);
-            ui.set_scanning(running);
-            ui.set_find_status(cell.borrow().find_status.as_str().into());
-            editor_view::draw_editor_view(&ui, &mut cell.borrow_mut());
-        });
-    }
-
-    {
-        let cell = Rc::clone(&state);
-        let weak = ui.as_weak();
         ui.on_goto_submitted(move || {
             let Some(ui) = weak.upgrade() else { return };
             let moved = cell.borrow_mut().go_to_line(&ui.get_goto_line());
@@ -921,46 +909,6 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
                 // that no longer holds focus goes into the document.
                 dispatch::reveal(&ui, &mut cell.borrow_mut(), &range);
             }
-        });
-    }
-
-    {
-        let cell = Rc::clone(&state);
-        let weak = ui.as_weak();
-        ui.on_passphrase_submitted(move |entered| {
-            let Some(ui) = weak.upgrade() else { return };
-            let again = cell.borrow_mut().answer_passphrase(&entered);
-            // Wiped whatever happened. A passphrase left in the widget
-            // outlives the question it answered, and the next prompt would
-            // start pre-filled with the last one.
-            ui.invoke_clear_passphrase();
-            ui.set_passphrase_open(again);
-            if again {
-                ui.invoke_focus_passphrase();
-            } else {
-                ui.invoke_focus_editor();
-            }
-            refresh(&ui, &mut cell.borrow_mut(), state::PushText::Yes);
-        });
-    }
-
-    {
-        let cell = Rc::clone(&state);
-        let weak = ui.as_weak();
-        ui.on_passphrase_cancelled(move || {
-            let Some(ui) = weak.upgrade() else { return };
-            {
-                let mut s = cell.borrow_mut();
-                // Dropping the ask drops any half-entered passphrase with it
-                // -- the first of two entries travels inside `Ask::Confirm`
-                // precisely so it cannot outlive the question.
-                s.ask = None;
-                s.passphrase_status.clear();
-            }
-            ui.invoke_clear_passphrase();
-            ui.set_passphrase_open(false);
-            ui.invoke_focus_editor();
-            refresh(&ui, &mut cell.borrow_mut(), state::PushText::No);
         });
     }
 
@@ -1070,44 +1018,6 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
                 // repaint -- but a checkpoint is not a save and the save
                 // state must not move.
                 if let Some(ui) = weak.upgrade() {
-                    refresh(&ui, &mut cell.borrow_mut(), state::PushText::No);
-                }
-            },
-        );
-    }
-
-    // Capture clipboard changes. Polling, because neither platform offers a
-    // portable change notification and a missed clip is a minor loss.
-    //
-    // History is in memory only: the clipboard carries passwords and tokens
-    // constantly, and specs.md section 14 makes persistence opt-in.
-    let clipboard_timer = slint::Timer::default();
-    {
-        let cell = Rc::clone(&state);
-        let weak = ui.as_weak();
-        clipboard_timer.start(
-            slint::TimerMode::Repeated,
-            std::time::Duration::from_millis(1200),
-            move || {
-                let Some(text) = read_os_clipboard() else {
-                    return;
-                };
-                // The active document's policy, because you copy out of the
-                // document you are looking at and an OS clipboard read says
-                // nothing about where the text came from.
-                let changed = {
-                    let mut s = cell.borrow_mut();
-                    let policy = s.policy().clipboard;
-                    // Enforce first: a document whose profile forbids a
-                    // history must not keep one gathered a moment ago under a
-                    // looser profile, and the poll is the soonest reliable
-                    // point at which that is noticed.
-                    let cleared = s.clips.enforce(policy);
-                    let added = s.clips.push(&text, policy);
-                    cleared || added
-                };
-                // Only rebuild the menus when the history actually changed.
-                if changed && let Some(ui) = weak.upgrade() {
                     refresh(&ui, &mut cell.borrow_mut(), state::PushText::No);
                 }
             },

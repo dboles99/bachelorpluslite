@@ -1,8 +1,11 @@
-//! Seam: `bp-security`'s `Policy` against the three things ADR-0020 says it
-//! governs -- `bp-history`'s recovery journal, `bp-clipboard`'s history and
-//! `bp-storage`'s `record_document`.
+//! Seam: `bp-security`'s `Policy` against the two things it still governs --
+//! `bp-history`'s recovery journal and `bp-storage`'s `record_document`.
 //!
-//! `bp-security` decides and performs nothing; the other three perform and
+//! **It was three until ADR-0061**, which removed `bp-clipboard` and the
+//! `Clipboard` axis with it. An axis whose subject has left governs nothing,
+//! and a test asserting that it does would pass while meaning nothing.
+//!
+//! `bp-security` decides and performs nothing; the other two perform and
 //! decide nothing. Every one of them is tested alone, which means the join --
 //! *does the decision actually reach the thing that acts on it* -- is tested
 //! nowhere. ADR-0020's own consequence section is explicit that the failure
@@ -18,15 +21,12 @@
 
 mod common;
 
-use common::{Pass, no_files};
+use common::no_files;
 
 use std::path::{Path, PathBuf};
 
-use bp_clipboard::History;
 use bp_history::{Checkpoint, Journal, Refusal, Written};
-use bp_security::{
-    Clipboard, Metadata, Policy, Privacy, Profile, Recovery, Security, TemporaryFiles, Zeroise,
-};
+use bp_security::{Metadata, Policy, Privacy, Profile, Recovery, Security};
 use bp_storage::Store;
 use proptest::prelude::*;
 use tempfile::TempDir;
@@ -109,8 +109,6 @@ fn checkpoint_for(path: Option<&Path>) -> Checkpoint {
 
 #[test]
 fn the_journal_writes_plaintext_only_where_the_policy_says_plaintext() {
-    let passphrase = Pass("correct horse battery".to_owned());
-
     for (profile, privacy) in every_case() {
         let policy = policy_of(profile, privacy);
         let fixture = journal_fixture();
@@ -118,7 +116,7 @@ fn the_journal_writes_plaintext_only_where_the_policy_says_plaintext() {
 
         let written = fixture
             .journal
-            .checkpoint(1, &checkpoint, policy.recovery, Some(passphrase.as_str()))
+            .checkpoint(1, &checkpoint, policy.recovery)
             .expect("checkpoint");
 
         let on_disk = all_bytes_under(fixture.journal.location());
@@ -133,22 +131,6 @@ fn the_journal_writes_plaintext_only_where_the_policy_says_plaintext() {
                 );
                 assert_eq!(fixture.journal.pending().len(), 1, "{case}");
             }
-            Recovery::Encrypted => {
-                assert_eq!(written, Written::Yes, "{case}: no journal was written");
-                assert!(
-                    !contains(&on_disk, SENTINEL),
-                    "{case}: the document's text is on disk in clear"
-                );
-                assert!(
-                    !contains(&on_disk, &fixture.document.to_string_lossy()),
-                    "{case}: the document's path is on disk in clear (ADR-0022)"
-                );
-                assert!(
-                    fixture.journal.pending().is_empty(),
-                    "{case}: a plaintext checkpoint is readable without the passphrase"
-                );
-                assert_eq!(fixture.journal.sealed_count(), 1, "{case}");
-            }
             Recovery::Disabled => {
                 assert_eq!(
                     written,
@@ -160,7 +142,6 @@ fn the_journal_writes_plaintext_only_where_the_policy_says_plaintext() {
                     "{case}: a disabled journal wrote the document to disk"
                 );
                 assert!(fixture.journal.pending().is_empty(), "{case}");
-                assert_eq!(fixture.journal.sealed_count(), 0, "{case}");
             }
         }
     }
@@ -170,7 +151,6 @@ fn the_journal_writes_plaintext_only_where_the_policy_says_plaintext() {
 fn under_privacy_mode_no_profile_journals_anything() {
     // The one assertion Privacy Mode exists to earn. Every profile, including
     // the one whose own policy is plaintext.
-    let passphrase = Pass("correct horse battery".to_owned());
 
     for profile in Profile::all().iter().copied() {
         let policy = policy_of(profile, Privacy::On);
@@ -179,7 +159,7 @@ fn under_privacy_mode_no_profile_journals_anything() {
 
         let written = fixture
             .journal
-            .checkpoint(1, &checkpoint, policy.recovery, Some(passphrase.as_str()))
+            .checkpoint(1, &checkpoint, policy.recovery)
             .expect("checkpoint");
 
         assert_eq!(
@@ -200,7 +180,6 @@ fn under_privacy_mode_no_profile_journals_anything() {
 fn tightening_a_profile_removes_what_the_looser_one_wrote() {
     // The failure this prevents is the worst kind: the journal reports itself
     // as protected while this morning's plaintext sits beside it.
-    let passphrase = Pass("correct horse battery".to_owned());
 
     for (profile, privacy) in every_case() {
         let policy = policy_of(profile, privacy);
@@ -213,7 +192,7 @@ fn tightening_a_profile_removes_what_the_looser_one_wrote() {
         // Under Standard first, which writes it in clear.
         fixture
             .journal
-            .checkpoint(1, &checkpoint, Recovery::Plaintext, None)
+            .checkpoint(1, &checkpoint, Recovery::Plaintext)
             .expect("checkpoint");
         assert!(contains(
             &all_bytes_under(fixture.journal.location()),
@@ -223,7 +202,7 @@ fn tightening_a_profile_removes_what_the_looser_one_wrote() {
         // Then the stricter profile.
         fixture
             .journal
-            .checkpoint(1, &checkpoint, policy.recovery, Some(passphrase.as_str()))
+            .checkpoint(1, &checkpoint, policy.recovery)
             .expect("checkpoint");
 
         assert!(
@@ -232,141 +211,6 @@ fn tightening_a_profile_removes_what_the_looser_one_wrote() {
             profile.name(),
             privacy
         );
-    }
-}
-
-#[test]
-fn loosening_a_profile_removes_the_sealed_journal_it_had() {
-    // The other direction, and the easier one to forget: a sealed copy left
-    // behind would be offered at the next unlock holding older work.
-    let passphrase = Pass("correct horse battery".to_owned());
-    let fixture = journal_fixture();
-    let checkpoint = checkpoint_for(Some(&fixture.document));
-
-    fixture
-        .journal
-        .checkpoint(
-            1,
-            &checkpoint,
-            Recovery::Encrypted,
-            Some(passphrase.as_str()),
-        )
-        .expect("checkpoint");
-    assert_eq!(fixture.journal.sealed_count(), 1);
-
-    fixture
-        .journal
-        .checkpoint(1, &checkpoint, Recovery::Plaintext, None)
-        .expect("checkpoint");
-
-    assert_eq!(
-        fixture.journal.sealed_count(),
-        0,
-        "the sealed journal survived a move to a looser profile"
-    );
-}
-
-#[test]
-fn an_encrypted_profile_with_no_passphrase_refuses_rather_than_downgrading() {
-    // ADR-0020's loudest requirement: a control that cannot be honoured fails
-    // loudly instead of writing plaintext for a user who has been told it is
-    // encrypted.
-    let fixture = journal_fixture();
-    let checkpoint = checkpoint_for(Some(&fixture.document));
-
-    let written = fixture
-        .journal
-        .checkpoint(1, &checkpoint, Recovery::Encrypted, None)
-        .expect("checkpoint");
-
-    assert_eq!(written, Written::Refused(Refusal::NoPassphrase));
-    assert!(
-        !contains(&all_bytes_under(fixture.journal.location()), SENTINEL),
-        "the journal fell back to plaintext"
-    );
-    assert!(
-        Refusal::NoPassphrase.notice().is_some(),
-        "an actionable refusal must be told to the user"
-    );
-}
-
-#[test]
-fn an_encrypted_profile_refuses_a_document_that_has_never_been_saved() {
-    let fixture = journal_fixture();
-    let checkpoint = checkpoint_for(None);
-
-    let written = fixture
-        .journal
-        .checkpoint(
-            1,
-            &checkpoint,
-            Recovery::Encrypted,
-            Some("correct horse battery"),
-        )
-        .expect("checkpoint");
-
-    assert_eq!(written, Written::Refused(Refusal::NeverSaved));
-    assert!(!contains(
-        &all_bytes_under(fixture.journal.location()),
-        SENTINEL
-    ));
-}
-
-// --- the clipboard -------------------------------------------------------
-
-#[test]
-fn the_clipboard_records_only_where_the_policy_permits_a_history() {
-    for (profile, privacy) in every_case() {
-        let policy = policy_of(profile, privacy);
-        let case = format!("{} under privacy {:?}", profile.name(), privacy);
-        let mut history = History::new();
-
-        let accepted = history.push(SENTINEL, policy.clipboard);
-
-        match policy.clipboard {
-            Clipboard::Disabled => {
-                assert!(!accepted, "{case}: copied text was recorded");
-                assert!(history.is_empty(), "{case}");
-            }
-            Clipboard::InMemory | Clipboard::Persistent => {
-                assert!(accepted, "{case}: copied text was not recorded");
-                assert_eq!(history.entries().len(), 1, "{case}");
-            }
-        }
-
-        assert_eq!(
-            history.entries().iter().any(|e| e.text.contains(SENTINEL)),
-            policy.clipboard != Clipboard::Disabled,
-            "{case}: the history's contents disagree with the policy"
-        );
-    }
-}
-
-#[test]
-fn switching_to_a_stricter_document_clears_a_history_gathered_under_a_looser_one() {
-    // Retention is a separate decision from recording, and this is the one
-    // that leaks: the text was copied legitimately, and then the user opened
-    // a Confidential document in another tab.
-    for (profile, privacy) in every_case() {
-        let policy = policy_of(profile, privacy);
-        let mut history = History::new();
-        history.push(SENTINEL, Clipboard::InMemory);
-        // Pinned, because a pin is a request and not an exemption from
-        // policy -- and a pinned entry is the one most likely to matter.
-        history.toggle_pin(0);
-        assert_eq!(history.entries().len(), 1);
-
-        history.enforce(policy.clipboard);
-
-        let case = format!("{} under privacy {:?}", profile.name(), privacy);
-        if policy.clipboard == Clipboard::Disabled {
-            assert!(
-                !history.entries().iter().any(|e| e.text.contains(SENTINEL)),
-                "{case}: copied text survived a profile that forbids a history"
-            );
-        } else {
-            assert_eq!(history.entries().len(), 1, "{case}: cleared needlessly");
-        }
     }
 }
 
@@ -442,31 +286,14 @@ fn the_store_records_exactly_what_the_policy_permits_and_nothing_more() {
 
 fn any_policy() -> impl Strategy<Value = Policy> {
     (
-        prop_oneof![
-            Just(Recovery::Plaintext),
-            Just(Recovery::Encrypted),
-            Just(Recovery::Disabled)
-        ],
-        prop_oneof![
-            Just(Clipboard::Persistent),
-            Just(Clipboard::InMemory),
-            Just(Clipboard::Disabled)
-        ],
+        prop_oneof![Just(Recovery::Plaintext), Just(Recovery::Disabled)],
         prop_oneof![
             Just(Metadata::Summary),
             Just(Metadata::PathOnly),
             Just(Metadata::Disabled)
         ],
     )
-        .prop_map(|(recovery, clipboard, metadata)| Policy {
-            recovery,
-            clipboard,
-            metadata,
-            embeddings: bp_security::Embeddings::Local,
-            network: bp_security::Network::Allowed,
-            temporary_files: TemporaryFiles::Allowed,
-            zeroise: Zeroise::Off,
-        })
+        .prop_map(|(recovery, metadata)| Policy { recovery, metadata })
 }
 
 proptest! {
@@ -487,14 +314,10 @@ proptest! {
         let checkpoint = checkpoint_for(Some(&fixture.document));
         let written = fixture
             .journal
-            .checkpoint(1, &checkpoint, in_force.recovery, Some("correct horse battery"))
+            .checkpoint(1, &checkpoint, in_force.recovery)
             .expect("checkpoint");
         prop_assert_eq!(written, Written::Refused(Refusal::ProfileForbidsIt));
         prop_assert!(!contains(&all_bytes_under(fixture.journal.location()), SENTINEL));
-
-        let mut history = History::new();
-        prop_assert!(!history.push(SENTINEL, in_force.clipboard));
-        prop_assert!(history.is_empty());
 
         let store = Store::in_memory().expect("store");
         let document = PathBuf::from(format!("/tmp/{SENTINEL}.txt"));
@@ -518,52 +341,4 @@ proptest! {
                 .is_at_least_as_strict_as(&security.policy_under(Privacy::Off))
         );
     }
-}
-
-/// The sealed journal is readable again with the document's own passphrase,
-/// and only with it.
-///
-/// Recovery under a strict profile has to actually recover: a journal nobody
-/// can open is a leak avoided by losing the work, which is not the trade
-/// ADR-0022 made.
-#[test]
-fn a_sealed_journal_is_recoverable_with_the_documents_passphrase_and_no_other() {
-    let fixture = journal_fixture();
-    let checkpoint = checkpoint_for(Some(&fixture.document));
-    let passphrase = Pass("correct horse battery".to_owned());
-
-    fixture
-        .journal
-        .checkpoint(
-            1,
-            &checkpoint,
-            Recovery::Encrypted,
-            Some(passphrase.as_str()),
-        )
-        .expect("checkpoint");
-
-    let recovered = fixture
-        .journal
-        .sealed_pending(&fixture.document, passphrase.as_str())
-        .expect("the sealed journal must be recoverable");
-    assert!(recovered == checkpoint, "the recovered checkpoint differs");
-
-    assert!(
-        fixture
-            .journal
-            .sealed_pending(&fixture.document, "correct horse batteries")
-            .is_none(),
-        "a wrong passphrase opened the journal"
-    );
-    // And a different document's passphrase is no use, because the journal is
-    // filed under a digest of the path it belongs to.
-    assert!(
-        fixture
-            .journal
-            .sealed_pending(
-                &fixture.document.with_file_name("other.txt"),
-                passphrase.as_str()
-            )
-            .is_none()
-    );
 }

@@ -34,7 +34,7 @@ when the task matches; otherwise use the chain.
 | R004 | Adding a format handler (`bp-formats`, `bp-data`) |
 | R005 | **Deleted.** Notebook runners, phase 12 — both removed by [ADR-0057](../../docs/decisions/ADR-0057.md). The number is not reused: R006 to R011 keep theirs, because every ADR and task file that points at one points by number |
 | R006 | Anything whose behaviour differs by platform |
-| R007 | Research mode (phase 13) |
+| R007 | Researching a product decision from primary sources. **Not the Research menu**, and not the deleted `bp-research` — this file has said "Research mode (phase 13)" since the scaffold and the rosetta was never about that |
 | R008 | Performance work with a measured baseline |
 | R009 | Default-editor integration (phase 18, ADR-0012) |
 | R010 | Brand and UI surface (ADR-0013) |

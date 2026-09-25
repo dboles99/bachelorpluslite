@@ -7,23 +7,15 @@ resolver = "2"
 # when there is something to put in it.
 members = [
     "apps/bachelorpad",
-    "crates/bp-audit",
     "crates/bp-buffer",
-    "crates/bp-clipboard",
     "crates/bp-config",
     "crates/bp-core",
-    "crates/bp-crypto",
-    "crates/bp-data",
     "crates/bp-editor",
     "crates/bp-formats",
     "crates/bp-history",
     "crates/bp-naming",
-    "crates/bp-integrity",
     "crates/bp-platform",
-    "crates/bp-redaction",
-    "crates/bp-research",
     "crates/bp-search",
-    "crates/bp-secrets",
     "crates/bp-security",
     "crates/bp-semantic",
     "crates/bp-storage",
@@ -59,9 +51,26 @@ todo = "warn"
 unimplemented = "warn"
 
 [workspace.package]
-version = "0.1.0"
+# 0.9.5, not 0.1.0: the first public release (ADR-0071). The number says
+# what the product is -- feature-complete against what it set out to be,
+# and short of 1.0 by the manual passes `project/NEXT_SESSION.md` section
+# 3 still lists as undone.
+#
+# Nothing else needs editing for a version bump: both release scripts ask
+# the binary rather than reading a manifest, so the archive name, BUILD.txt
+# and the About box all follow from this line.
+version = "0.9.5"
 edition = "2024"
-license = "MIT OR Apache-2.0"
+# GPL-3.0-only, and the `-only` is the decision (ADR-0071). Slint is
+# tri-licensed and the branch this product takes is **GPL-3.0-only**; a
+# project saying "or later" would let a recipient elect a GPLv4 that Slint's
+# grant does not cover, which is the same defect this field had before, one
+# version on.
+#
+# `--version` and the About box both print this string -- `env!("CARGO_PKG_LICENSE")`
+# -- so the claim has a reader in the shipped binary rather than living only
+# in a manifest nothing consults.
+license = "GPL-3.0-only"
 # Both lines, because this is a derived work: BachelorPlusLite is a clone of
 # BachelorPad+ and inherits its authorship rather than replacing it.
 authors = ["BachelorPlusLite contributors", "BachelorPad+ contributors"]
@@ -98,14 +107,4 @@ sha2 = "0.10"
 # the conventional choice; composed, never reimplemented (ADR-0011).
 ed25519-dalek = { version = "2", features = ["rand_core"] }
 rand_core = { version = "0.6", features = ["getrandom"] }
-zeroize = { version = "1", features = ["zeroize_derive"] }
 
-# YAML (phase 6). `serde_yaml` is deprecated and `yaml-rust2` is superseded;
-# `saphyr` is the maintained successor and the only one of the three that is
-# YAML 1.2 compliant. `saphyr-parser` is its own event-level half, taken
-# directly because `bp-data` must measure a document's nesting depth *before*
-# a tree is built for it -- see `yaml_nesting_depth`. `default-features =
-# false` drops `encoding_rs`: every caller here hands us a `&str`, so the
-# encoding-sniffing half of `saphyr` is weight with no reader.
-saphyr = { version = "0.0.12", default-features = false }
-saphyr-parser = "0.0.12"

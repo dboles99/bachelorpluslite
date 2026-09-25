@@ -20,6 +20,9 @@ export component EditorSurface inherits Rectangle {
     in property <int> caret-column;
     in property <bool> show-gutter: true;
     in property <length> font-size: 14px;
+    /// Overtype mode, drawn as an underline one character wide: it shows
+    /// what the next keystroke replaces without covering it.
+    in property <bool> overwrite;
     /// Derived, not a constant, because zoom moves `font-size` underneath it.
     ///
     /// A fixed 18px looks right at 14pt and nowhere else: zoom in and the
@@ -177,9 +180,9 @@ export component EditorSurface inherits Rectangle {
     Rectangle {
         visible: root.caret-row >= 0 && keys.has-focus;
         x: root.text-left + root.caret-column * root.advance;
-        y: root.pad + root.caret-row * root.line-height;
-        width: 2px;
-        height: root.line-height;
+        y: root.pad + root.caret-row * root.line-height + (root.overwrite ? root.line-height - 2px : 0px);
+        width: root.overwrite ? root.advance : 2px;
+        height: root.overwrite ? 2px : root.line-height;
         background: Palette.ink;
     }
 

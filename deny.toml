@@ -1,0 +1,119 @@
+# cargo-deny: the reader behind the licence claim.
+#
+# ADR-0071 relicensed this project to GPL-3.0-only, and the claim it rests on
+# is that every crate the binary links is compatible with those terms. That
+# claim was true when it was checked by hand, and trap 3 says a claim nothing
+# reads is a wish -- a single `cargo add` of an AGPL or SSPL crate would make
+# it false with nothing failing. `cargo deny check licenses` is what asks.
+#
+# Run by the gate (scripts/Invoke-LocalCI.ps1) and by CI.
+
+[graph]
+# Only what is actually shipped. ADR-0001 names Windows and Linux, and
+# ADR-0072 declined macOS -- a crate that is only ever compiled for a target
+# this project does not build is not part of anything anybody downloads.
+targets = [
+    "x86_64-pc-windows-msvc",
+    "x86_64-unknown-linux-gnu",
+]
+all-features = false
+
+[licenses]
+# Every licence in the tree, as measured rather than as guessed. All are
+# one-way compatible with GPL-3.0: permissive terms may be combined into a
+# GPL-3.0 work, and the combined work is distributed under GPL-3.0.
+#
+# **A licence is added here only with the reason written down.** The list is
+# the audit; a wildcard would make it a formality.
+allow = [
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "CC0-1.0",
+    "ISC",
+    "MIT",
+    "MIT-0",
+    "NCSA",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+    "0BSD",
+    # This project's own crates, and Slint's elected branch. Slint is offered
+    # as `GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR
+    # LicenseRef-Slint-Software-3.0`; the election of GPL-3.0-only is the
+    # whole reason this file's `allow` list can be this short, and it is
+    # recorded in THIRD-PARTY-NOTICES.md where a reader will find it.
+    "GPL-3.0-only",
+]
+
+# `Apache-2.0 WITH LLVM-exception` appears in the tree (the `wasi`/`compiler
+# builtins` family). The exception only *widens* Apache-2.0's grant, so it
+# cannot make a compatible licence incompatible.
+exceptions = []
+
+# An unlicensed crate is not a licence question, it is a "do not ship this"
+# question, and it should stop a build rather than be waved through.
+unused-allowed-license = "allow"
+confidence-threshold = 0.9
+
+[[licenses.clarify]]
+# `r-efi` is `MIT OR Apache-2.0 OR LGPL-2.1-or-later` and reaches the tree
+# only through `wasi` on a target this project does not build. Named rather
+# than silently matched, so that the LGPL branch never becomes the one taken
+# by accident.
+crate = "r-efi"
+expression = "MIT OR Apache-2.0"
+license-files = []
+
+[bans]
+# Not the point of this file, so warn rather than deny -- a duplicate version
+# is a size and build-time question, and ADR-0021's rule about one AEAD
+# implementation is enforced by the workspace dependency table instead.
+multiple-versions = "warn"
+wildcards = "warn"
+
+[advisories]
+# The advisory database needs network access, which the local gate is not
+# allowed to assume -- a gate that fails on a train is a gate people learn to
+# skip -- so the gate runs `check licenses` and CI runs `check` whole
+# (ADR-0073).
+#
+# **That arrangement paid for itself on its first hosted run**, which failed
+# on three advisories the local gate had never been in a position to see.
+yanked = "warn"
+
+# Three unmaintained crates, accepted individually and never as a category
+# (ADR-0078).
+#
+# **`unmaintained` is not `vulnerability`.** None of these three has a known
+# defect; each is a crate whose author has said they will not maintain it. All
+# three arrive through Slint's text and image handling, so this project cannot
+# upgrade away from them without leaving the toolkit -- and Slint 1.17.1 is
+# what draws every glyph in the product.
+#
+# **Listed by id rather than by setting `unmaintained = "warn"`**, which is
+# the whole point. Silencing the category would silence the *next* one too,
+# and the next one is the one nobody has looked at. A new unmaintained
+# dependency still fails this build.
+#
+# Re-ask condition: any of these becoming a `vulnerability` rather than an
+# `unmaintained` advisory, or Slint moving off them in a later release. The
+# command that checks is `cargo deny check advisories`.
+ignore = [
+    # `paste`, through image -> exr -> pulp, in Slint's compiler. A
+    # proc-macro for pasting identifiers together; no runtime surface.
+    { id = "RUSTSEC-2024-0436", reason = "unmaintained, not vulnerable; reaches us only through i-slint-compiler's image support, and has no runtime code" },
+    # `rustybuzz`, through usvg -> resvg, in Slint's SVG rendering. Text
+    # shaping.
+    { id = "RUSTSEC-2026-0206", reason = "unmaintained, not vulnerable; Slint's SVG text shaping, replaceable only by Slint" },
+    # `ttf-parser`, the same path plus font loading. It parses fonts, which
+    # *is* hostile input -- so this is the one of the three worth re-reading
+    # if it ever gains a vulnerability advisory.
+    { id = "RUSTSEC-2026-0192", reason = "unmaintained, not vulnerable; font parsing inside Slint. The one to watch, since fonts are untrusted input" },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

@@ -55,11 +55,12 @@ impl AppState {
 /// What Open Questions says.
 ///
 /// A free function so its test asserts the product's sentences rather than a
-/// copy of them -- the same reason `paper_report` and `identifier_report` are
-/// ones.
+/// copy of them, which is the rule every report in this crate follows.
 ///
-/// **The line number leads each row**, as it does in Find Identifiers, and
-/// for the same reason: what the reader does next is Ctrl+G to it.
+/// **The line number leads each row**, because what the reader does next is
+/// Ctrl+G to it. Find Identifiers used to lead the same way and is the reason
+/// this one does; it left with `bp-research` (ADR-0060) and the reason did
+/// not, because it was about the reader rather than about that row.
 pub(crate) fn question_report(found: &[Question]) -> String {
     if found.is_empty() {
         return "This document asks nothing.\n\n\

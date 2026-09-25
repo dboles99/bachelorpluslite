@@ -19,11 +19,11 @@
 //!
 //! Where `shared-mime-info` has a type, that is the one used, because
 //! `mimeapps.list` keys on exactly those strings and a near-miss silently
-//! associates nothing. Where it has none -- PowerShell, and the product's own
-//! `.bpadx` -- an `x-` type is defined here and shipped in a MIME package (see
-//! [`super::desktop::mime_package`]), which is the standards-based way to add
-//! one. Getting a MIME name wrong costs nothing on Windows, which associates
-//! by extension and never looks at these.
+//! associates nothing. Where it has none -- PowerShell is now the only case,
+//! since ADR-0069 removed `.bpadx` -- an `x-` type is defined here and shipped
+//! in a MIME package (see [`super::desktop::mime_package`]), which is the
+//! standards-based way to add one. Getting a MIME name wrong costs nothing on
+//! Windows, which associates by extension and never looks at these.
 
 use std::collections::BTreeSet;
 
@@ -36,9 +36,6 @@ use std::collections::BTreeSet;
 /// preset nobody uses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum TypeGroup {
-    /// The product's own formats. In every preset, because nothing else opens
-    /// them and leaving them out means a `.bpadx` the user cannot double-click.
-    Own,
     /// What Windows Notepad is the default for: `.txt`, `.log`, `.ini`.
     PlainText,
     /// Markdown.
@@ -88,15 +85,15 @@ impl FileType {
         format!("*.{}", self.extension)
     }
 
-    /// Whether this type is the product's own invention rather than one the
-    /// shared MIME database already knows.
+    /// Whether this type is one the shared MIME database does not already
+    /// know, and so must be defined rather than referred to.
     ///
     /// The dividing line for [`super::desktop::mime_package`]: adding a glob
     /// for a type the distribution already defines is at best redundant and at
     /// worst a fight with the packager over what `.json` means.
     #[must_use]
     pub fn is_own_mime_type(&self) -> bool {
-        self.mime.starts_with("application/x-bachelorpad") || self.mime == "text/x-powershell"
+        self.mime == "text/x-powershell"
     }
 }
 
@@ -106,13 +103,6 @@ impl FileType {
 /// byte-stable across runs -- a `.desktop` file whose `MimeType=` line
 /// reorders itself is a file that shows up in every diff and every backup.
 pub const FILE_TYPES: &[FileType] = &[
-    // --- the product's own ------------------------------------------------
-    FileType {
-        extension: "bpadx",
-        mime: "application/x-bachelorpad-encrypted",
-        description: "BachelorPad+ encrypted document",
-        group: TypeGroup::Own,
-    },
     // --- plain text: what Notepad is the default for ----------------------
     FileType {
         extension: "cfg",
@@ -399,21 +389,15 @@ impl AssociationPreset {
     /// The groups this preset covers.
     #[must_use]
     pub fn groups(self) -> &'static [TypeGroup] {
-        use TypeGroup::{Code, Notebook, Notes, Own, PlainText, StructuredData, Tabular};
+        use TypeGroup::{Code, Notebook, Notes, PlainText, StructuredData, Tabular};
         match self {
-            Self::NotepadReplacement => &[Own, PlainText],
-            Self::TextAndNotes => &[Own, PlainText, Notes],
-            Self::TextAndStructuredData => &[Own, PlainText, Notes, StructuredData, Tabular],
-            Self::Developer => &[Own, PlainText, Notes, StructuredData, Code, Notebook],
-            Self::EverythingSupported => &[
-                Own,
-                PlainText,
-                Notes,
-                StructuredData,
-                Tabular,
-                Code,
-                Notebook,
-            ],
+            Self::NotepadReplacement => &[PlainText],
+            Self::TextAndNotes => &[PlainText, Notes],
+            Self::TextAndStructuredData => &[PlainText, Notes, StructuredData, Tabular],
+            Self::Developer => &[PlainText, Notes, StructuredData, Code, Notebook],
+            Self::EverythingSupported => {
+                &[PlainText, Notes, StructuredData, Tabular, Code, Notebook]
+            }
         }
     }
 }

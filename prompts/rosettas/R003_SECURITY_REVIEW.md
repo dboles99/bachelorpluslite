@@ -3,7 +3,6 @@
 Review a BachelorPad+ feature against:
 - security profiles
 - recovery/history propagation
-- clipboard persistence
 - semantic metadata/embeddings
 - logs
 - temp files

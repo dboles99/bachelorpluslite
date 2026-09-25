@@ -49,11 +49,10 @@
 //!
 //! **Credential storage.** specs.md asks for DPAPI on Windows and Secret
 //! Service on Linux, and `docs/architecture/PLATFORM_MATRIX.md` lists both.
-//! They are not implemented, because what would go in them is entangled with
-//! an open question a human has to answer: where the signing key of
-//! `bp-integrity` lives, and whether a platform credential store is the
-//! custodian or merely a wrapper around a key file. Implementing a keyring
-//! first would decide that by accident. They appear here as
+//! They are not implemented. What would have gone in them was a signing key,
+//! and ADR-0064 removed signing -- so there is no secret for a vault to hold
+//! and the question is now what would *want* one, which is a smaller and
+//! differently-shaped decision than the one this paragraph used to describe. They appear here as
 //! [`Capability::CredentialStore`](capabilities::Capability::CredentialStore)
 //! and [`Capability::BiometricUnlock`](capabilities::Capability::BiometricUnlock),
 //! reported as
@@ -73,6 +72,7 @@
 pub mod capabilities;
 pub mod dirs;
 pub mod editor;
+pub mod help;
 pub mod paths;
 
 pub use capabilities::{Availability, Capability};
@@ -124,13 +124,33 @@ pub const APP_ID: &str = "io.github.dboles99.BachelorPadPlus";
 /// it must not be spelled out at the three places that show it: the desktop
 /// registration, `--version`, and Help ▸ Diagnostics. A rename that reaches
 /// two of the three is worse than no rename.
-pub const DISPLAY_NAME: &str = "BachelorPad+";
+///
+/// **Which is exactly what happened.** The identity change renamed the window
+/// title and the About box by hand and left this constant alone, so for a
+/// week the product introduced itself as BachelorPlusLite in the window and
+/// BachelorPad+ at the command line and in every `mimeapps.list` on the
+/// machine. The paragraph above named the failure mode and did not prevent
+/// it, because a doc comment is a wish unless something asks (trap 3) --
+/// `version_names_the_product_the_desktop_registration_names` is what asks,
+/// and it passed throughout, because both halves of *that* pair read this.
+///
+/// **It happened a second time, and this rename is the fix for the cause.**
+/// Going public renamed the product to `BachelorPad+ Lite` (ADR-0074), and
+/// the paragraph above was found to be false in a way its own author would
+/// have recognised: the name was spelled out at *eight* sites, not three --
+/// the window title, the About row, the About body, the recovery prompt, the
+/// diagnostics report, a log line and two module headers. The pair test
+/// covered the two it was written for and nothing asked about the rest.
+/// Every one of them now reads this constant, and
+/// `every_place_the_product_names_itself_must_read_display_name` is what
+/// asks. A rename that reaches eight of eight is the only kind worth having.
+pub const DISPLAY_NAME: &str = "BachelorPad+ Lite";
 
 /// One line, wherever the product introduces itself.
 ///
 /// Short enough for a `.desktop` `Comment=`, which is the tightest of the
 /// places it appears.
-pub const DESCRIPTION: &str = "Text editor for notes, data and logs";
+pub const DESCRIPTION: &str = "Text editor for notes and logs";
 
 /// One of the two operating systems ADR-0001 names, as a *value*.
 ///

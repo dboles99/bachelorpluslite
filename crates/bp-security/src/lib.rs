@@ -1,8 +1,9 @@
 //! Security profiles and the policy they resolve to (ADR-0020).
 //!
 //! ADR-0011 says a document's security policy propagates to every artefact
-//! derived from it -- the recovery journal, clipboard history, semantic
-//! metadata, embeddings, temporary files and network eligibility. This crate
+//! derived from it. What is left of that here is two artefacts -- the
+//! recovery journal and the metadata store -- because those are the two
+//! things this product derives from a document and writes down. This crate
 //! is where that policy is decided. It is decided here and performed
 //! elsewhere: nothing in this crate writes a file, holds a secret or
 //! encrypts anything.
@@ -21,7 +22,7 @@
 //! * **The named profiles are monotonic.** Standard, Private, Confidential,
 //!   Maximum -- each at least as restrictive as the one before, on every
 //!   axis. It is checked rather than asserted, because it is the property
-//!   that decays: an eighth axis gets added, the interesting rows get filled
+//!   that decays: another axis gets added, the interesting rows get filled
 //!   in, and one profile is quietly left more permissive than the stricter
 //!   one below it.
 //!
@@ -31,10 +32,17 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Whether unsaved work may be written to the recovery journal, and how.
+/// Whether unsaved work may be written to the recovery journal.
 ///
-/// `bp-history` reads this. Today it writes plaintext into the user's config
-/// directory, which is [`Recovery::Plaintext`] -- named rather than hidden,
+/// **There was an `Encrypted` between the two until ADR-0064**, and it was
+/// deleted rather than quietly re-pointed at `Plaintext`. A profile that
+/// asked for an encrypted journal now asks for `Disabled`: *no journal*
+/// rather than *a journal somebody was told was encrypted*, which is the
+/// failure ADR-0020 exists to prevent.
+///
+/// The recovery journal reads this, in `bp-ui`'s `state/privacy.rs`. It
+/// writes plaintext into the user's state directory, which is
+/// [`Recovery::Plaintext`] -- named rather than hidden,
 /// because a recovery journal is a copy of unsaved work sitting outside the
 /// file being edited.
 ///
@@ -43,28 +51,15 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum Recovery {
     Plaintext,
-    Encrypted,
-    Disabled,
-}
-
-/// Whether copied text may outlive the moment it was copied.
-///
-/// `bp-clipboard` reads this. `InMemory` is today's behaviour: history is
-/// kept for the session and never written down. `Persistent` is what
-/// specs.md section 14 makes opt-in, and it is not reachable from any
-/// profile below Standard.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub enum Clipboard {
-    Persistent,
-    InMemory,
     Disabled,
 }
 
 /// What the local metadata store may record about a document.
 ///
-/// `bp-storage` reads this, and ADR-0019 is the reason it currently records
-/// nothing: a document's extracted title is a summary of what the user wrote,
-/// so a store full of them is a plaintext index of what they write about.
+/// `bp-storage` reads this, through `bp-ui`'s `state/organize.rs`, whenever a
+/// document is recorded (ADR-0037). ADR-0019 is why it exists at all: a
+/// document's extracted title is a summary of what the user wrote, so a store
+/// full of them is a plaintext index of what they write about.
 /// `PathOnly` is the middle ground -- enough to notice a file has been seen
 /// before, not enough to say what is in it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -74,64 +69,22 @@ pub enum Metadata {
     Disabled,
 }
 
-/// Whether embeddings may be computed, and where.
-///
-/// Phase 10 reads this. `Cloud` means document content may be sent to a
-/// service to be embedded, which is the strongest claim any axis here makes
-/// and the reason it is the most permissive value of the most sensitive axis.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub enum Embeddings {
-    Cloud,
-    Local,
-    None,
-}
-
-/// Whether anything derived from the document may leave the machine.
-///
-/// `Allowed` means *this profile does not forbid it*. It does not mean any
-/// particular destination is approved -- that is a separate decision and
-/// deliberately not encoded here (ADR-0020).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub enum Network {
-    Allowed,
-    Denied,
-}
-
-/// Whether document content may pass through a temporary file.
-///
-/// Atomic save writes one by design, so `Denied` is a real constraint on the
-/// product rather than a formality: a profile that denies temporary files
-/// needs a save path that does not use one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub enum TemporaryFiles {
-    Allowed,
-    Denied,
-}
-
-/// Whether buffers holding document content should be wiped after use.
-///
-/// specs.md section 15, "sensitive-memory wrappers/zeroization where
-/// practical". `Off` first, because off is the permissive answer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub enum Zeroise {
-    Off,
-    On,
-}
-
 /// What a profile permits, one field per axis.
 ///
-/// This is what code reads. Seven axes, and every one has a named reader --
-/// an axis nothing consults reads as a guarantee while being decoration,
-/// which is worse than its absence.
+/// This is what code reads. **Two axes, and each has a reader that acts on
+/// it**: `recovery` governs the journal and `metadata` governs the store.
+///
+/// There were seven. An axis nothing consults reads as a guarantee while
+/// being decoration, which is worse than its absence -- and four of these
+/// were worse than decoration, because the Security Inspector showed them to
+/// users as the policy in force. `clipboard` left with its crate (ADR-0061);
+/// `embeddings`, `network`, `temporary_files` and `zeroise` left together
+/// under ADR-0082, which carried out what ADR-0059 had decided and ADR-0064
+/// deferred. A new axis arrives with the code that reads it, or not at all.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Policy {
     pub recovery: Recovery,
-    pub clipboard: Clipboard,
     pub metadata: Metadata,
-    pub embeddings: Embeddings,
-    pub network: Network,
-    pub temporary_files: TemporaryFiles,
-    pub zeroise: Zeroise,
 }
 
 impl Policy {
@@ -143,25 +96,7 @@ impl Policy {
     /// to order them would be lying about a genuine partial order.
     #[must_use]
     pub fn is_at_least_as_strict_as(&self, other: &Self) -> bool {
-        self.recovery >= other.recovery
-            && self.clipboard >= other.clipboard
-            && self.metadata >= other.metadata
-            && self.embeddings >= other.embeddings
-            && self.network >= other.network
-            && self.temporary_files >= other.temporary_files
-            && self.zeroise >= other.zeroise
-    }
-
-    /// Whether this policy needs cryptography that does not exist yet.
-    ///
-    /// `bp-crypto` arrives in phase 15. Until it does, a profile asking for
-    /// an encrypted journal cannot be honoured -- and ADR-0020 requires that
-    /// to fail loudly rather than degrade to plaintext. A security control
-    /// that quietly weakens itself is worse than an absent one, because the
-    /// user has been told it is on.
-    #[must_use]
-    pub const fn needs_encryption(&self) -> bool {
-        matches!(self.recovery, Recovery::Encrypted)
+        self.recovery >= other.recovery && self.metadata >= other.metadata
     }
 }
 
@@ -216,57 +151,57 @@ impl Profile {
     #[must_use]
     pub const fn policy(self) -> Policy {
         match self {
-            // Today's product, described. Recovery writes plaintext,
-            // clipboard history is in memory, the metadata store is unwired
-            // (ADR-0019) so nothing is recorded yet -- but Standard is what
-            // permits it to be, which is what makes ADR-0019 revisitable
-            // rather than reversible by hand.
+            // Today's product, described: the journal writes plaintext, and
+            // the store records a document's title as well as its path
+            // (ADR-0037).
             Self::Standard => Policy {
                 recovery: Recovery::Plaintext,
-                clipboard: Clipboard::InMemory,
                 metadata: Metadata::Summary,
-                embeddings: Embeddings::Local,
-                network: Network::Allowed,
-                temporary_files: TemporaryFiles::Allowed,
-                zeroise: Zeroise::Off,
             },
-            // The step that stops content leaving the machine. Recovery is
-            // still kept, because losing unsaved work is its own harm -- but
-            // it has to be encrypted, and until bp-crypto exists that means
-            // the journal is refused rather than silently written in clear.
+            // The step that stops the store knowing what a document is about:
+            // it records the path and never the title. **Recovery is
+            // plaintext, and the menu says so** (ADR-0065).
+            //
+            // This row used to be described as the one that stops content
+            // leaving the machine. Nothing enforced that -- the `network`
+            // axis had no reader -- and nothing needs to: this product has no
+            // network code in any profile (ADR-0006, ADR-0082).
+            //
+            // It asked for an encrypted journal until ADR-0064 removed the
+            // sealed form, and that ADR set it to `Disabled` -- no journal --
+            // on ADR-0020's rule that a control which quietly weakens itself
+            // is worse than an absent one. The word doing the work there is
+            // **quietly**: this menu has always printed what the journal
+            // actually is, and it now prints "on, unencrypted".
+            //
+            // A journal on the local disk does not contradict what Private is
+            // for, which is keeping the store from indexing subjects. Losing a
+            // session's unsaved work to protect against an attacker who
+            // already has the disk is the wrong trade, and it is the one
+            // Confidential exists to make instead.
             Self::Private => Policy {
-                recovery: Recovery::Encrypted,
-                clipboard: Clipboard::InMemory,
+                recovery: Recovery::Plaintext,
                 metadata: Metadata::PathOnly,
-                embeddings: Embeddings::Local,
-                network: Network::Denied,
-                temporary_files: TemporaryFiles::Allowed,
-                zeroise: Zeroise::On,
             },
-            // Nothing is recorded about the document and nothing derived from
-            // it is computed. Clipboard history is off: a document at this
-            // level should not leave fragments in a list the user can page
-            // through from any other tab.
+            // Nothing is recorded about the document and nothing derived
+            // from it is computed -- and that includes the recovery journal,
+            // which is a copy of unsaved work sitting outside the file. This
+            // is where "no journal" belongs, because it is the profile whose
+            // whole subject is what touches the disk.
             Self::Confidential => Policy {
-                recovery: Recovery::Encrypted,
-                clipboard: Clipboard::Disabled,
+                recovery: Recovery::Disabled,
                 metadata: Metadata::Disabled,
-                embeddings: Embeddings::None,
-                network: Network::Denied,
-                temporary_files: TemporaryFiles::Denied,
-                zeroise: Zeroise::On,
             },
-            // The disk holds the file and nothing else. Recovery is disabled
-            // rather than encrypted, which is a real trade the user is
-            // making: a crash loses unsaved work, and that is the point.
+            // The disk holds the file and nothing else. A crash loses
+            // unsaved work, and that is the point rather than a gap.
+            //
+            // **The same policy as Confidential**, and it was before ADR-0082
+            // too: the four axes that told them apart had no reader. Two
+            // names for one policy is a question for Daniel, not something
+            // to settle by inventing a difference.
             Self::Maximum => Policy {
                 recovery: Recovery::Disabled,
-                clipboard: Clipboard::Disabled,
                 metadata: Metadata::Disabled,
-                embeddings: Embeddings::None,
-                network: Network::Denied,
-                temporary_files: TemporaryFiles::Denied,
-                zeroise: Zeroise::On,
             },
         }
     }
@@ -307,12 +242,7 @@ impl Privacy {
             Self::Off => policy,
             Self::On => Policy {
                 recovery: policy.recovery.max(Recovery::Disabled),
-                clipboard: policy.clipboard.max(Clipboard::Disabled),
                 metadata: policy.metadata.max(Metadata::Disabled),
-                embeddings: policy.embeddings.max(Embeddings::None),
-                network: policy.network.max(Network::Denied),
-                temporary_files: policy.temporary_files.max(TemporaryFiles::Denied),
-                zeroise: policy.zeroise.max(Zeroise::On),
             },
         }
     }
@@ -380,7 +310,7 @@ mod tests {
     #[test]
     fn the_named_profiles_are_monotonic_on_every_axis() {
         // The property that decays, and the reason this test is a loop over
-        // pairs rather than a list of assertions: an eighth axis added later
+        // pairs rather than a list of assertions: another axis added later
         // is covered by it automatically, which is exactly when the mistake
         // gets made -- the interesting rows get filled in and one profile is
         // left quietly more permissive than the stricter one below it.
@@ -411,12 +341,7 @@ mod tests {
                     s.recovery >= l.recovery,
                     "recovery: {stricter:?} vs {looser:?}"
                 );
-                assert!(s.clipboard >= l.clipboard, "clipboard");
                 assert!(s.metadata >= l.metadata, "metadata");
-                assert!(s.embeddings >= l.embeddings, "embeddings");
-                assert!(s.network >= l.network, "network");
-                assert!(s.temporary_files >= l.temporary_files, "temporary files");
-                assert!(s.zeroise >= l.zeroise, "zeroise");
             }
         }
     }
@@ -425,8 +350,8 @@ mod tests {
     fn standard_is_the_default_and_describes_todays_product() {
         // If this row and the product ever disagree, one of them is a bug.
         // The behaviours pinned here are the ones that exist right now:
-        // bp-history writes plaintext, bp-clipboard keeps history in memory
-        // only, and nothing is forbidden that currently happens.
+        // bp-history writes plaintext, and nothing is forbidden that
+        // currently happens.
         let policy = Security::default().policy();
 
         assert_eq!(Profile::default(), Profile::Standard);
@@ -436,41 +361,36 @@ mod tests {
             "bp-history writes plaintext today; the model must say so rather \
              than quietly promising otherwise"
         );
-        assert_eq!(policy.clipboard, Clipboard::InMemory);
-        assert_eq!(policy.temporary_files, TemporaryFiles::Allowed);
-        assert!(
-            !policy.needs_encryption(),
-            "the default must not require cryptography that does not exist yet"
-        );
     }
 
     #[test]
-    fn every_profile_above_standard_denies_the_network() {
-        // The line the profiles exist to draw. Whichever destinations turn
-        // out to be acceptable, they are acceptable only under Standard.
-        for profile in &Profile::all()[1..] {
+    fn the_journal_stops_at_confidential_and_not_before() {
+        // This asked which profiles *needed cryptography* until ADR-0064, and
+        // then whether any but Standard journalled at all. Both answers moved;
+        // the reason for pinning it has not. Getting it wrong in one direction
+        // disables recovery for no reason, and in the other writes unsaved
+        // work to disk for somebody who asked for it not to be.
+        //
+        // **The line is between Private and Confidential**, and that is the
+        // decision ADR-0065 took: a local journal does not contradict "stop
+        // content leaving the machine", and it does contradict "nothing is
+        // recorded about this document".
+        for profile in [Profile::Standard, Profile::Private] {
             assert_eq!(
-                profile.policy().network,
-                Network::Denied,
-                "{} must not permit content to leave the machine",
+                profile.policy().recovery,
+                Recovery::Plaintext,
+                "{} keeps a journal, and the menu says it is unencrypted",
                 profile.name()
             );
         }
-    }
-
-    #[test]
-    fn the_profiles_that_need_cryptography_are_the_ones_that_ask_for_it() {
-        // `needs_encryption` is what the journal checks before deciding
-        // whether it can honour a profile at all. Getting it wrong in one
-        // direction disables recovery for no reason; in the other it writes
-        // plaintext for a user who was told it was encrypted.
-        assert!(!Profile::Standard.policy().needs_encryption());
-        assert!(Profile::Private.policy().needs_encryption());
-        assert!(Profile::Confidential.policy().needs_encryption());
-        assert!(
-            !Profile::Maximum.policy().needs_encryption(),
-            "Maximum disables recovery outright, so there is nothing to encrypt"
-        );
+        for profile in [Profile::Confidential, Profile::Maximum] {
+            assert_eq!(
+                profile.policy().recovery,
+                Recovery::Disabled,
+                "{} journals work its user asked not to have written down",
+                profile.name()
+            );
+        }
     }
 
     #[test]
@@ -479,12 +399,7 @@ mod tests {
         // what it is handed is not one.
         let policy = Policy {
             recovery: Recovery::Disabled,
-            clipboard: Clipboard::Persistent,
             metadata: Metadata::Disabled,
-            embeddings: Embeddings::Cloud,
-            network: Network::Allowed,
-            temporary_files: TemporaryFiles::Denied,
-            zeroise: Zeroise::On,
         };
         let security = Security::Custom(policy);
 
@@ -496,17 +411,24 @@ mod tests {
     fn a_custom_policy_is_not_forced_into_the_monotonic_chain() {
         // Deliberate: constraining Custom would make it not custom. This
         // pins the decision so nobody "fixes" it later by clamping.
+        //
+        // Measured against Private, not Standard. Standard is the most
+        // permissive value on every axis left, so nothing can be looser than
+        // it anywhere, and a policy compared with it could only ever be
+        // stricter -- the test would pass while asserting nothing. The loose
+        // axis used to be clipboard, then embeddings, and each was *replaced*
+        // when its axis left (ADR-0061, ADR-0082) for exactly that reason.
+        let private = Profile::Private.policy();
         let mixed = Policy {
-            // Stricter than Standard on recovery...
+            // Stricter than Private on recovery...
             recovery: Recovery::Disabled,
-            // ...and more permissive on the clipboard.
-            clipboard: Clipboard::Persistent,
-            ..Profile::Standard.policy()
+            // ...and more permissive on metadata, which is what makes the two
+            // genuinely incomparable rather than merely different.
+            metadata: Metadata::Summary,
         };
-        let standard = Profile::Standard.policy();
 
-        assert!(!mixed.is_at_least_as_strict_as(&standard));
-        assert!(!standard.is_at_least_as_strict_as(&mixed));
+        assert!(!mixed.is_at_least_as_strict_as(&private));
+        assert!(!private.is_at_least_as_strict_as(&mixed));
     }
 
     #[test]
@@ -519,12 +441,7 @@ mod tests {
         // monotonic chain and is where an unclamped axis would hide.
         policies.push(Policy {
             recovery: Recovery::Disabled,
-            clipboard: Clipboard::Persistent,
             metadata: Metadata::Disabled,
-            embeddings: Embeddings::Cloud,
-            network: Network::Allowed,
-            temporary_files: TemporaryFiles::Denied,
-            zeroise: Zeroise::On,
         });
 
         for policy in policies {
@@ -564,12 +481,7 @@ mod tests {
         let clamped = Privacy::On.clamp(Profile::Standard.policy());
 
         assert_eq!(clamped.recovery, Recovery::Disabled);
-        assert_eq!(clamped.clipboard, Clipboard::Disabled);
         assert_eq!(clamped.metadata, Metadata::Disabled);
-        assert_eq!(clamped.embeddings, Embeddings::None);
-        assert_eq!(clamped.network, Network::Denied);
-        assert_eq!(clamped.temporary_files, TemporaryFiles::Denied);
-        assert_eq!(clamped.zeroise, Zeroise::On);
     }
 
     #[test]
@@ -607,16 +519,8 @@ mod tests {
         // The ordering is what `is_at_least_as_strict_as` means. A variant
         // added in the wrong position would invert the comparison for that
         // axis and silently break every check above.
-        assert!(Recovery::Plaintext < Recovery::Encrypted);
-        assert!(Recovery::Encrypted < Recovery::Disabled);
-        assert!(Clipboard::Persistent < Clipboard::InMemory);
-        assert!(Clipboard::InMemory < Clipboard::Disabled);
+        assert!(Recovery::Plaintext < Recovery::Disabled);
         assert!(Metadata::Summary < Metadata::PathOnly);
         assert!(Metadata::PathOnly < Metadata::Disabled);
-        assert!(Embeddings::Cloud < Embeddings::Local);
-        assert!(Embeddings::Local < Embeddings::None);
-        assert!(Network::Allowed < Network::Denied);
-        assert!(TemporaryFiles::Allowed < TemporaryFiles::Denied);
-        assert!(Zeroise::Off < Zeroise::On);
     }
 }

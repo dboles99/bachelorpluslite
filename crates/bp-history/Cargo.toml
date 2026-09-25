@@ -10,7 +10,6 @@ workspace = true
 [dependencies]
 # The journal writes document content to disk, so the document's profile
 # decides whether it may (ADR-0011, ADR-0020).
-bp-crypto = { path = "../bp-crypto" }
 bp-security = { path = "../bp-security" }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true

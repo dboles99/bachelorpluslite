@@ -23,7 +23,6 @@ Proposed tables:
 - filename_candidates
 - file_events
 - recovery_sessions
-- clipboard_items
 - security_events
 - signatures
 - integrity_checks

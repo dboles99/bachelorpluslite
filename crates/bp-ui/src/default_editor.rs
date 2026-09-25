@@ -148,9 +148,9 @@ fn body(report: &AssociationReport, plan: &RegistrationPlan, root: Option<&Path>
 
     // The one case `unknown_report` exists to let a UI special-case: when
     // nothing could be read, every row carries the identical reason, and
-    // seven copies of a four-line explanation is a dialog nobody finishes.
-    // The summary above already says "cannot tell which application opens
-    // the 7 selected file types"; what is left to add is *why*, once.
+    // one copy of a four-line explanation per row is a dialog nobody
+    // finishes. The summary above already counts the types; what is left
+    // to add is *why*, once.
     let unreadable = report
         .entries()
         .iter()
@@ -455,8 +455,14 @@ mod tests {
         // `Unclaimed`, and a dialog rendering "not the default" out of "could
         // not look" invites the user to fix something that is not broken.
         let body = body_for(Platform::Windows, "");
+        // Counted rather than spelled: the number is the preset's size, and
+        // a literal here goes stale the next time the table changes -- which
+        // it did, under ADR-0069.
+        let claimed = AssociationSelection::preset(PRESET).len();
         assert!(
-            body.contains("Cannot tell which application opens the 7 selected file types."),
+            body.contains(&format!(
+                "Cannot tell which application opens the {claimed} selected file types."
+            )),
             "Windows cannot read the association; got:\n{body}"
         );
         assert!(
@@ -698,8 +704,11 @@ mod tests {
             install_root(Platform::HOST, &env),
             "the root is bp-platform's answer, never one invented here"
         );
+        let claimed = AssociationSelection::preset(PRESET).len();
         assert!(
-            offer.body.contains("Registering claims 7 file types"),
+            offer
+                .body
+                .contains(&format!("Registering claims {claimed} file types")),
             "got:\n{}",
             offer.body
         );

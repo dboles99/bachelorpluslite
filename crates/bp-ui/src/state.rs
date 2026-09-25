@@ -13,13 +13,10 @@
 //!
 //! | Module | What it owns |
 //! | --- | --- |
-//! | [`security`] | Scan, redact, inspect, hash, sign, verify, the history they write into, and the profile and Privacy Mode switches that govern them |
-//! | [`data`] | The Data menu: which `bp-data` operation a menu id means for the format in front of the user |
-//! | [`encryption`] | The `.bpadx` passphrase flow: what the bar is asking, and what a wrong answer does |
+//! | [`privacy`] | The profile a document carries and the session override above it — what is left of `security` after ADR-0064 |
 //! | [`find`] | What the find bar is looking for, and which match the user is standing on |
 //! | [`organize`] | The local metadata store (ADR-0037): recording and tagging a document as it saves, Related Notes, and Duplicate Detection |
 //! | [`research`] | Research mode's synthesis half (ADR-0041, ADR-0046): what the *store* says the user has been writing about, and what the store holds |
-//! | [`citations`] | What the active document *cites* (ADR-0044) |
 //! | [`questions`] | What the active document *asks* (ADR-0046) |
 //! | [`inspectors`] | The Tools menu's three readouts: the policy in force, the file on disk, and where each setting came from (ADR-0048) |
 //!
@@ -47,27 +44,22 @@ use time::OffsetDateTime;
 
 use crate::menus::action;
 
-mod citations;
-mod data;
-mod encryption;
 mod find;
 mod inspectors;
 mod organize;
+mod privacy;
 mod questions;
 mod research;
-mod security;
 
 // The names the rest of the shell knows this module by. `dispatch` asks for a
 // redaction plan and a scan report by way of `crate::state`, and moving the
 // code that produces them is not a reason to move the path that names them.
 pub(crate) use find::find_query;
-pub(crate) use security::{RedactionPlan, secret_scan_report};
 // Not `pub(crate)`: `AppState::new` is the only caller and the path is
 // deliberately not reachable from outside `state`, because a second place
 // deciding where the signing key lives is the defect this field exists to
 // prevent. `default_store` is the same shape, for the same reason.
 use organize::default_store;
-use security::default_signing_key_path;
 
 /// How much of a document is enough to answer a question about its start.
 ///
@@ -130,6 +122,13 @@ pub struct AppState {
     /// one taller than the window has to be scrollable through, and a
     /// line-only anchor could only jump over it.
     pub(crate) anchor: bp_editor::view::Anchor,
+    /// Whether typing replaces what follows the caret -- the Insert key.
+    ///
+    /// The window's, not a document's: Notepad keeps the mode across tabs,
+    /// and it is what the next keystroke does wherever it lands. Never
+    /// persisted either, for the same reason no editor persists it -- a mode
+    /// that survives a restart is one the user has forgotten switching on.
+    pub(crate) overwrite: bool,
     /// How many rows fit in it. Slint measures and tells us.
     pub(crate) visible_rows: usize,
     /// How many characters fit across it, for wrapping. Slint measures this
@@ -190,12 +189,6 @@ pub struct AppState {
     /// from the box it is about.
     pub(crate) goto_status: String,
     pub(crate) journal: bp_history::Journal,
-    /// Where the security history is appended and read back.
-    ///
-    /// A field rather than a call to `audit::audit_path()` at each use, so a
-    /// test gets its own file. It is not configurable from outside: the
-    /// production value is set once, here, and nothing changes it.
-    pub(crate) audit_path: PathBuf,
     /// Size on disk of each open document, as `load` reported it.
     ///
     /// Kept so the status bar can say "Large file" without asking the
@@ -210,49 +203,14 @@ pub struct AppState {
     /// one. `None` means the menu is not open, in which case the rows fall
     /// back to the active tab.
     pub(crate) tab_context: Option<DocumentId>,
-    /// Passphrases for the encrypted documents open right now.
-    ///
-    /// Held for the session so that saving a `.bpadx` does not ask again on
-    /// every Ctrl+S -- which would train the user to type it reflexively,
-    /// which is worse than holding it. `Zeroizing` because these are wiped
-    /// when a document closes rather than left in freed memory.
-    ///
-    /// A document with an entry here is encrypted; one without is not. That
-    /// is the whole test, so there is no second flag to fall out of step.
-    pub(crate) passphrases: HashMap<DocumentId, zeroize::Zeroizing<String>>,
     /// Privacy Mode: a session-wide override that can only tighten.
     ///
     /// On `AppState` rather than on a document, because that is what it is
     /// for -- one switch when you are about to share a screen, instead of
     /// auditing every open tab.
     pub(crate) privacy: bp_security::Privacy,
-    /// What the passphrase bar is currently asking, if anything.
-    pub(crate) ask: Option<crate::passphrase::Ask>,
-    /// What the passphrase bar is reporting.
-    pub(crate) passphrase_status: String,
     /// Cross-file search results, indexed by the row the user clicks.
     pub(crate) file_hits: Vec<bp_search::FileHit>,
-    pub(crate) clips: bp_clipboard::History,
-    /// Where this machine's signing key is, if the environment says where
-    /// the user's profile is.
-    ///
-    /// **A field and not a function**, which is the third time this shape has
-    /// been needed in this crate and the second time it was learned the hard
-    /// way. A function reading the real profile directory means `cargo test`
-    /// writes there -- the security history did it once, and
-    /// `AppState::new()` built its recovery journal from the real path until
-    /// this session. The difference here is that a `cfg(test)` redirect on
-    /// the *function* would not have been enough: `has_signing_key` and the
-    /// signing that follows it must agree on one path, and a function
-    /// returning a fresh unique path per call would have them disagree.
-    pub(crate) signing_key: Option<PathBuf>,
-    /// How many rows the viewer actually drew last time.
-    ///
-    /// Not `visible_rows`: at the end of a file, and at any of
-    /// `display_lines`' three caps, a screenful is short. The status bar says
-    /// which lines are on screen, so it has to be told what was drawn rather
-    /// than what was asked for.
-    pub(crate) drawn_rows: usize,
     /// Which surface `refresh` last told the window to draw with.
     ///
     /// Kept so a *change* can be noticed, which is the only moment the caret
@@ -260,13 +218,6 @@ pub struct AppState {
     /// invisible. `None` until the first refresh, so the first one counts as
     /// a change and startup is not a special case.
     pub(crate) surface_shown: Option<bool>,
-    /// Documents served from disk in chunks rather than held in a rope.
-    ///
-    /// A document is in exactly one of `editors` and `viewers`, never both
-    /// and never neither, and that is the whole of the distinction: anything
-    /// reaching for `active_editor()` on one of these gets `None` and does
-    /// nothing. See `crate::viewer` and ADR-0030.
-    pub(crate) viewers: HashMap<DocumentId, crate::viewer::HugeView>,
     /// The local metadata store Organize reads and writes (ADR-0037).
     ///
     /// **A field, opened once, not a function called per use** -- the fourth
@@ -297,6 +248,7 @@ impl AppState {
             editors,
             editor_view: false,
             anchor: bp_editor::view::Anchor::default(),
+            overwrite: false,
             // Replaced by Slint's own measurement as soon as the surface has
             // a height; only Page Up before the first frame would see this.
             visible_rows: 30,
@@ -321,19 +273,11 @@ impl AppState {
             find_status: String::new(),
             goto_status: String::new(),
             journal: bp_history::Journal::new(recovery_dir()),
-            audit_path: crate::audit::audit_path(),
             sizes: HashMap::new(),
-            passphrases: HashMap::new(),
             privacy: bp_security::Privacy::default(),
-            ask: None,
-            passphrase_status: String::new(),
             tab_context: None,
             file_hits: Vec::new(),
-            clips: bp_clipboard::History::new(),
-            signing_key: default_signing_key_path(),
-            drawn_rows: 0,
             surface_shown: None,
-            viewers: HashMap::new(),
             store: default_store(),
             related_notes: Vec::new(),
         }
@@ -372,14 +316,7 @@ impl AppState {
             // open side by side can be governed differently, and the
             // stricter one must not be relaxed by the other being open.
             let recovery = doc.security().policy_under(self.privacy).recovery;
-            // Its own passphrase, if it has one. A sealed journal is
-            // encrypted with the document's key so that it can be recovered
-            // at unlock time and never needs a prompt of its own (ADR-0022).
-            let passphrase = self.passphrases.get(&id).map(|p| p.to_string());
-            match self
-                .journal
-                .checkpoint(id.get(), &entry, recovery, passphrase.as_deref())
-            {
+            match self.journal.checkpoint(id.get(), &entry, recovery) {
                 Ok(bp_history::Written::Yes) => {
                     if let Some(doc) = self.workspace.get_mut(id) {
                         doc.record_checkpoint(at);
@@ -621,11 +558,6 @@ impl AppState {
         let Some(id) = self.workspace.active_id() else {
             return;
         };
-        // `load` slurps. Reloading a document that was deliberately never
-        // loaded would undo the whole of ADR-0027 with one menu row.
-        if self.refuse_on_viewer(id, "Reloading") {
-            return;
-        }
         let Some(path) = self
             .workspace
             .get(id)
@@ -766,16 +698,6 @@ impl AppState {
     pub(crate) fn open(&mut self, path: PathBuf) {
         self.error = None;
 
-        // Classified from the *metadata*, before a byte of the document is
-        // read. `load` slurps the whole file, so asking it how big the file
-        // was is asking after the damage is done: ADR-0027 measured that a
-        // document past `HUGE_FILE_BYTES` must not reach a rope at all, and
-        // the only place that can be honoured is here, in front.
-        if self.is_too_large_to_load(&path) {
-            self.open_viewer(path);
-            return;
-        }
-
         let path2 = path.clone();
         match load(&path) {
             Ok(file) => {
@@ -794,87 +716,15 @@ impl AppState {
         }
     }
 
-    /// Open a document too large for a rope, served from disk in chunks.
+    /// Whether the custom surface draws this document.
     ///
-    /// It gets a tab and a `HugeView` and **no `Editor`**, which is what makes
-    /// every editing path a no-op rather than an edit to an empty document
-    /// that looks real. ADR-0030 has the rest: it draws in the custom surface
-    /// whether or not `--editor-view` was passed, because `TextInput` owns its
-    /// own text and cannot be handed a window of a file it does not have.
-    fn open_viewer(&mut self, path: PathBuf) {
-        let view = match crate::viewer::HugeView::open(&path) {
-            Ok(view) => view,
-            // The error already names the file and what is wrong with it,
-            // which is what the status bar wants. A file that cannot be
-            // opened is not a file that is too large.
-            Err(e) => {
-                self.error = Some(e.to_string());
-                return;
-            }
-        };
-        let bytes = view.len_bytes();
-        let message = view.access().message();
-
-        let id = self.workspace.open_path(path.clone(), now());
-        self.sizes.insert(id, bytes);
-        self.viewers.insert(id, view);
-        self.mark_in_step(id, &path);
-        // Said once, on open, rather than left for the reader to infer from a
-        // caret that never appears. It is `Access`'s own sentence: it names
-        // the size and distinguishes itself from a file that is read-only on
-        // disk, which is a different problem with a different way out.
-        self.error = Some(message);
-    }
-
-    /// Whether `id` is served from disk rather than held in a rope.
-    pub(crate) fn is_viewer(&self, id: DocumentId) -> bool {
-        self.viewers.contains_key(&id)
-    }
-
-    /// The active document's viewer, if it has one.
-    pub(crate) fn active_viewer_mut(&mut self) -> Option<&mut crate::viewer::HugeView> {
-        self.workspace
-            .active_id()
-            .and_then(|id| self.viewers.get_mut(&id))
-    }
-
-    /// Whether the active document is served from disk.
-    pub(crate) fn active_is_viewer(&self) -> bool {
-        self.workspace
-            .active_id()
-            .is_some_and(|id| self.is_viewer(id))
-    }
-
-    /// **Which surface draws the active document.** The one function that
-    /// decides, so the two views cannot come to disagree about which sizes
-    /// they claim.
-    ///
-    /// ADR-0030: a document the rope does not hold is drawn by
-    /// `EditorSurface` in every build, because it is the only surface that
-    /// can be handed a window of a file. `--editor-view` decides the rest.
+    /// **One term now, and that is ADR-0063's doing.** ADR-0030 added the
+    /// second: a document the rope did not hold was drawn by `EditorSurface`
+    /// in *every* build, because it was the only surface that can be handed a
+    /// window of a file. There is no such document, so the flag decides alone
+    /// again -- which is the answer D11 was asked and is no longer a question.
     pub(crate) fn uses_custom_surface(&self) -> bool {
-        self.editor_view || self.active_is_viewer()
-    }
-
-    /// Refuse an operation a document served from disk cannot support.
-    ///
-    /// `true` means refused, and `error` says so. **Every caller of this is a
-    /// path where doing nothing would not be harmless**: `text_of` a viewer is
-    /// the empty string, so a save that merely no-oped would write an empty
-    /// file over two gigabytes, and a reload would slurp the whole document
-    /// into memory — which is the one thing ADR-0027 exists to prevent.
-    ///
-    /// Named for the reason rather than for the size, because the user asked
-    /// to save and the answer is about what this document is.
-    fn refuse_on_viewer(&mut self, id: DocumentId, what: &str) -> bool {
-        if !self.is_viewer(id) {
-            return false;
-        }
-        self.error = Some(format!(
-            "{what} is not available for a document this large: it is read \
-             from disk as you scroll and is never held whole."
-        ));
-        true
+        self.editor_view
     }
 
     /// Outcome of a save attempt, so callers can tell the three cases apart.
@@ -883,11 +733,6 @@ impl AppState {
     /// refused" as success and then discard the buffer.
     pub(crate) fn save_document(&mut self, id: DocumentId, path: Option<PathBuf>) -> SaveResult {
         self.error = None;
-        // Before anything reads the document. `text_of` a viewer is the empty
-        // string, so without this a Ctrl+S writes nothing over everything.
-        if self.refuse_on_viewer(id, "Saving") {
-            return SaveResult::Failed;
-        }
         let Some(doc) = self.workspace.get(id) else {
             return SaveResult::Saved;
         };
@@ -907,26 +752,6 @@ impl AppState {
             LineEndingPolicy::Preserve,
         );
 
-        // An encrypted document stays encrypted. The passphrase is held for
-        // the session precisely so this does not ask again on every save --
-        // a prompt on every Ctrl+S trains the user to type it without
-        // reading, which is worse than holding it in memory.
-        let bytes = match self.passphrases.get(&id) {
-            None => bytes,
-            Some(passphrase) => {
-                match bp_crypto::seal(&bytes, passphrase, bp_crypto::SealOptions::default()) {
-                    Ok(sealed) => sealed,
-                    Err(e) => {
-                        // Refused rather than falling back to plaintext. A
-                        // save that silently wrote the document in clear
-                        // would be the worst failure this program has.
-                        self.error = Some(format!("not saved -- {e}"));
-                        return SaveResult::Failed;
-                    }
-                }
-            }
-        };
-
         match atomic_write(&target, &bytes, SaveOptions::default()) {
             Ok(_) => {
                 if let Some(doc) = self.workspace.get_mut(id) {
@@ -934,11 +759,8 @@ impl AppState {
                     // Only now, after a verified write, is the document clean.
                     doc.record_disk_save(now());
                 }
-                // Both forms of journal go once the work is on disk. The
-                // sealed one is keyed by path rather than by session id, so
-                // it has to be discarded by path.
+                // The journal goes once the work is on disk.
                 let _ = self.journal.discard(id.get());
-                let _ = self.journal.discard_sealed_for(&target);
                 // Re-stamp from what we just wrote, or our own save would
                 // look like somebody else's change on the next poll.
                 self.mark_in_step(id, &target);
@@ -973,12 +795,6 @@ impl AppState {
     /// real save would make the copy a different file from the original.
     pub(crate) fn save_copy(&mut self, id: DocumentId, target: &Path) -> SaveResult {
         self.error = None;
-        // Not destructive to the original, and refused anyway: an empty file
-        // presented as a copy of a 2 GB document is a worse outcome than a
-        // refusal, because it looks like it worked.
-        if self.refuse_on_viewer(id, "Saving a copy") {
-            return SaveResult::Failed;
-        }
         let Some(doc) = self.workspace.get(id) else {
             return SaveResult::Saved;
         };
@@ -1065,55 +881,6 @@ impl AppState {
         ))
     }
 
-    /// The active document as the bytes it would be written to disk as.
-    ///
-    /// The encoded form rather than the buffer, because a digest is a claim
-    /// about a *file*: hashing the buffer would print a digest that
-    /// `sha256sum` disagrees with for every document carrying a byte-order
-    /// mark, and a user comparing the two would conclude their file had been
-    /// tampered with.
-    ///
-    /// [`LineEndingPolicy::Preserve`], the same policy `save_document` uses,
-    /// and the two have to agree: a digest taken under one policy and a file
-    /// written under the other would differ for exactly the mixed-ending
-    /// documents somebody takes a digest to settle.
-    ///
-    /// A one-off on a menu click, like `report_statistics` -- it copies the
-    /// whole document twice over and must never move onto the typing path.
-    pub(crate) fn active_bytes(&self) -> Result<Vec<u8>, String> {
-        let Some(doc) = self.workspace.active() else {
-            return Err("there is no document to read".to_owned());
-        };
-        // Hashing, signing and verifying all come through here. For a
-        // document served from disk the answer would be a digest of the empty
-        // string presented as a digest of two gigabytes -- which is worse
-        // than no answer, because a signature over it would verify.
-        if self.active_is_viewer() {
-            return Err(
-                "this document is read from disk as you scroll and is never held whole, \
-                 so its bytes cannot be hashed or signed here"
-                    .to_owned(),
-            );
-        }
-        Ok(encode(
-            &self.active_text(),
-            doc.encoding(),
-            LineEndingPolicy::Preserve,
-        ))
-    }
-
-    /// Whether the active document differs from whatever is on disk.
-    ///
-    /// A never-saved document counts, which is why this is not simply
-    /// `is_dirty` at the call site: "there is no file on disk" and "the file
-    /// on disk is older than this" are the same fact as far as a digest or a
-    /// signature over these bytes is concerned.
-    pub(crate) fn active_differs_from_disk(&self) -> bool {
-        self.workspace
-            .active()
-            .is_some_and(|doc| doc.is_dirty() || doc.path().is_none())
-    }
-
     /// Insert a date or time stamp at the caret.
     ///
     /// The clock is read here rather than in `bp-naming`, which is pure and
@@ -1161,59 +928,6 @@ impl AppState {
         }
         self.mark_edited();
         true
-    }
-
-    /// What the status bar says about the active document's size.
-    ///
-    /// Empty for an ordinary document. `SizeClass::label` makes the argument:
-    /// "a status bar that labels the ordinary case teaches people to ignore
-    /// it", and it returns `""` for `Normal` for exactly that reason.
-    ///
-    /// The size is spelled out beside the class because "Large file" alone
-    /// invites the question this readout exists to answer -- how large, and
-    /// therefore how much of a pause to expect.
-    pub(crate) fn size_label(&self) -> String {
-        let Some(id) = self.workspace.active_id() else {
-            return String::new();
-        };
-        let Some(&bytes) = self.sizes.get(&id) else {
-            return String::new();
-        };
-        let class = bp_buffer::SizeClass::of(bytes);
-        if !class.is_large() {
-            return String::new();
-        }
-        format!("{} ({})", class.label(), human_bytes(bytes))
-    }
-
-    /// Whether this file must not reach a rope, judged from its metadata.
-    ///
-    /// **The size class comes from `bp-buffer`.** ADR-0027 measured the
-    /// thresholds and `SizeClass::must_stream` is the question they answer;
-    /// asking it here, before `load`, is the only place the answer can change
-    /// what happens, because `load` slurps.
-    ///
-    /// A file whose metadata cannot be read is *not* diverted here. It is
-    /// about to be opened, and `load` reports what is wrong with it far
-    /// better than a guess from a failed `stat` would.
-    fn is_too_large_to_load(&self, path: &Path) -> bool {
-        std::fs::metadata(path)
-            .map(|meta| bp_buffer::SizeClass::of(meta.len()).must_stream())
-            .unwrap_or(false)
-    }
-
-    /// Say something only if nothing more important is already being said.
-    ///
-    /// Every caller of `record_security_event` has just finished an operation
-    /// that put its own result in the status bar, and that result is what the
-    /// user asked for. A notice about the *history* of the operation must not
-    /// take the place of the operation's own answer -- "3 possible
-    /// credentials" is the thing somebody clicked for, and losing it to a
-    /// line about sealing would be the log making the product worse.
-    fn note_quietly(&mut self, message: String) {
-        if self.error.is_none() {
-            self.error = Some(message);
-        }
     }
 
     /// Which document the tab context menu's rows should act on.
@@ -1335,13 +1049,6 @@ impl AppState {
         self.error = None;
         if self.workspace.close(id).is_some() {
             self.editors.remove(&id);
-            // An open file handle and a line index, held for a tab that is
-            // gone. Closing thirty huge documents in a session would
-            // otherwise keep thirty handles open.
-            self.viewers.remove(&id);
-            // Holding a passphrase for the session is a deliberate trade;
-            // holding it past the document's life is just a leak.
-            self.forget_passphrase(id);
         }
         // Never leave the user staring at an empty frame with no way back.
         if self.workspace.is_empty() {
@@ -1375,14 +1082,6 @@ impl AppState {
     /// caret is reachable only through a property marked internal and
     /// undocumented, so the honest answer there is the thing we do know.
     pub(crate) fn cursor_label(&self) -> String {
-        // A viewer has no caret -- there is no rope for a position to be in --
-        // so it reports where in the document the screen is instead. Asked
-        // before the editor views, because it is neither of them.
-        if let Some(id) = self.workspace.active_id()
-            && let Some(view) = self.viewers.get(&id)
-        {
-            return crate::viewer::viewer_label(view.top(), self.drawn_rows);
-        }
         let lines = self.gutter_lines;
         if !self.editor_view {
             return format!("{lines} lines");
@@ -1607,34 +1306,6 @@ fn human_bytes(bytes: u64) -> String {
     }
 }
 
-/// The first few bytes of `path`, for deciding whether it is a `.bpadx`.
-///
-/// **A header, not a file.** This existed as `std::fs::read(&path)`, which
-/// answered a six-byte question by holding the whole document in memory --
-/// and then `bp_files::load` read it a second time. On a 2 GB file that was
-/// 4 GB of I/O and 2 GB resident before anything reached the screen, on the
-/// path taken by *every* open.
-///
-/// A short file is not an error. Fewer than `MAGIC_LEN` bytes cannot be the
-/// magic, and `is_bpadx` says so about whatever it is given.
-fn read_header(path: &Path) -> std::io::Result<Vec<u8>> {
-    use std::io::Read as _;
-
-    let mut header = vec![0_u8; bp_crypto::MAGIC_LEN];
-    let mut file = std::fs::File::open(path)?;
-    // Not `read` -- one call may return fewer bytes than asked for without
-    // being at the end, and a short read would report an encrypted document
-    // as plaintext and show the user its ciphertext.
-    let read = match file.read_exact(&mut header) {
-        Ok(()) => bp_crypto::MAGIC_LEN,
-        // A file shorter than the magic is a real file and a valid answer.
-        Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => 0,
-        Err(e) => return Err(e),
-    };
-    header.truncate(read);
-    Ok(header)
-}
-
 /// A document's path, if it has one.
 ///
 /// A free function so `set_security` can read it without holding a borrow of
@@ -1716,7 +1387,8 @@ pub(crate) fn diagnostics_report() -> String {
         dir.map_or_else(|| "not available".to_owned(), |p| p.display().to_string())
     };
     format!(
-        "BachelorPlusLite {}\n\nRenderer: {}\n\nConfig file: {}\nState directory: {}\nData directory: {}",
+        "{} {}\n\nRenderer: {}\n\nConfig file: {}\nState directory: {}\nData directory: {}",
+        bp_platform::DISPLAY_NAME,
         env!("CARGO_PKG_VERSION"),
         std::env::var("SLINT_BACKEND").unwrap_or_else(|_| "software".to_owned()),
         named(bp_config::config_path()),
@@ -1735,47 +1407,23 @@ mod tests {
     // --- where this machine's own state goes ---------------------------
 
     #[test]
-    fn the_journal_and_the_history_share_the_state_directory_and_not_a_name() {
+    fn the_journal_lives_in_the_state_directory() {
         // The rule, asserted against a fabricated state directory so it needs
-        // no real profile and both legs of CI check the same thing. They must
-        // be inside it -- neither is configuration, and the configuration
-        // directory roams on Windows while every path they hold is
-        // machine-specific -- and they must not be the same path.
+        // no real profile and both legs of CI check the same thing. It must
+        // be inside it -- a journal is not configuration, and the
+        // configuration directory roams on Windows while every path the
+        // journal holds is machine-specific.
+        //
+        // The security history was the other half of this until ADR-0064,
+        // and the pair is why the assertion was written: two paths derived
+        // from one another move together, silently. Only one is left.
         let state = PathBuf::from("/state/bachelorpad");
         let journal = recovery_dir_under(Some(&state));
-        let history = crate::audit::audit_path_under(Some(&state));
 
         assert!(journal.starts_with(&state), "{}", journal.display());
-        assert!(history.starts_with(&state), "{}", history.display());
-        assert_ne!(journal, history);
         assert_eq!(
             journal.file_name().and_then(|n| n.to_str()),
             Some(RECOVERY_DIR_NAME)
-        );
-        assert_ne!(
-            history.parent(),
-            Some(journal.as_path()),
-            "the history must not be inside the journal, where discarding \
-             every checkpoint would take it with them"
-        );
-    }
-
-    #[test]
-    fn neither_is_derived_from_the_others_last_component() {
-        // What this replaced: the history was `recovery_dir()` with its last
-        // component swapped. Renaming the recovery folder would have moved
-        // the security history with it, silently, and a history that moves is
-        // a history that starts again at sequence one.
-        let a = PathBuf::from("/state/one");
-        let b = PathBuf::from("/state/two");
-        assert_ne!(
-            crate::audit::audit_path_under(Some(&a)),
-            crate::audit::audit_path_under(Some(&b))
-        );
-        assert_eq!(
-            crate::audit::audit_path_under(Some(&a)).parent(),
-            Some(a.as_path()),
-            "the history sits directly in the state directory"
         );
     }
 
@@ -1854,34 +1502,6 @@ mod tests {
             std::fs::read(&path).unwrap(),
             b"crlf\r\nlf\nend",
             "both conventions survive a save exactly as the user left them"
-        );
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn the_digest_is_taken_over_the_same_bytes_a_save_would_write() {
-        // `active_bytes` and `save_document` have to agree on the policy, or
-        // a digest taken to settle a question about a file describes bytes
-        // that file does not contain -- and a mixed-ending document is
-        // exactly the kind somebody takes a digest to settle.
-        let dir = std::env::temp_dir().join(format!("bpad-ui-digest-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("mixed.txt");
-
-        let mut state = AppState::new();
-        let id = state.workspace.active_id().unwrap();
-        state.edit("crlf\r\nlf\nend".to_owned());
-
-        let hashed = state.active_bytes().expect("a document is open");
-        assert_eq!(
-            state.save_document(id, Some(path.clone())),
-            SaveResult::Saved
-        );
-        assert_eq!(
-            hashed,
-            std::fs::read(&path).unwrap(),
-            "the digest describes the file that was actually written"
         );
 
         let _ = std::fs::remove_dir_all(&dir);
@@ -2169,17 +1789,8 @@ mod tests {
             action::DUPLICATE_LINE,
             action::MOVE_LINE_UP,
             action::MOVE_LINE_DOWN,
-            action::DATA_VALIDATE,
-            action::DATA_REPORT,
-            action::DATA_CSV_TO_JSON,
-            action::DATA_CSV_TO_JSONL,
-            action::DATA_COLUMN_TYPES,
             action::NOTE_TITLE,
             action::NOTE_OUTLINE,
-            action::SCAN_SECRETS,
-            action::HASH_DOCUMENT,
-            action::SIGN_DOCUMENT,
-            action::VERIFY_SIGNATURE,
             // In the File menu, and therefore in the same *menu* as the
             // recent rows -- which is where an id landing in that window
             // would be least visible and most confusing.
@@ -2572,230 +2183,13 @@ mod tests {
     // --- size decides how a document is opened -----------------------------
 
     #[test]
-    fn an_ordinary_document_carries_no_size_label() {
-        // The argument `SizeClass::label` makes: a status bar that labels the
-        // ordinary case teaches people to ignore it.
-        let dir = tempfile::tempdir().expect("temp dir");
-        let path = dir.path().join("small.txt");
-        std::fs::write(&path, "a few lines\nof text\n").expect("write");
-
-        let mut state = AppState::new();
-        state.open(path);
-        assert!(state.error.is_none(), "{:?}", state.error);
-        assert_eq!(state.size_label(), "");
-    }
-
-    #[test]
-    fn a_large_document_says_so_and_says_how_large() {
-        // Past LARGE_FILE_BYTES it still opens and still edits -- the label
-        // exists to explain a pause, not to take anything away. "Large file"
-        // alone would invite the question the readout is here to answer.
-        let dir = tempfile::tempdir().expect("temp dir");
-        let path = dir.path().join("big.txt");
-        let line = "x".repeat(79);
-        let bytes = bp_buffer::LARGE_FILE_BYTES + 1024;
-        let mut text = String::with_capacity(bytes as usize + 128);
-        while (text.len() as u64) < bytes {
-            text.push_str(&line);
-            text.push('\n');
-        }
-        std::fs::write(&path, &text).expect("write");
-
-        let mut state = AppState::new();
-        state.open(path);
-        assert!(state.error.is_none(), "{:?}", state.error);
-        let label = state.size_label();
-        assert!(label.starts_with("Large file ("), "got {label:?}");
-        assert!(
-            label.contains("MiB"),
-            "the size belongs on the label: {label:?}"
-        );
-    }
-
-    /// A file past `HUGE_FILE_BYTES` whose first lines are real text.
-    ///
-    /// Written short and then extended with `set_len`, which is what makes
-    /// this affordable: both NTFS and ext4 record the length without writing
-    /// the bytes, so the fixture costs a few hundred bytes of I/O rather than
-    /// 192 MiB of it. The tail is NULs, which nothing here reads.
-    fn a_huge_file(dir: &std::path::Path) -> PathBuf {
-        let path = dir.join("enormous.log");
-        let mut text = String::new();
-        for n in 1..=200 {
-            let _ = writeln!(text, "line {n}");
-        }
-        std::fs::write(&path, &text).expect("the fixture's real lines");
-
-        let file = std::fs::OpenOptions::new()
-            .write(true)
-            .open(&path)
-            .expect("the fixture reopens");
-        file.set_len(bp_buffer::HUGE_FILE_BYTES + 1)
-            .expect("the fixture is extended");
-        assert!(
-            bp_buffer::SizeClass::of(bp_buffer::HUGE_FILE_BYTES + 1).must_stream(),
-            "this fixture is not actually huge"
-        );
-        path
-    }
-
-    #[test]
-    fn a_huge_document_opens_rather_than_being_refused() {
-        // What ADR-0030 changed. It used to be turned away at the door with a
-        // message saying the chunked reader was built and not yet connected
-        // to a view; it is connected now, so the document opens, gets a tab,
-        // and is drawn from disk.
-        let dir = tempfile::tempdir().expect("temp dir");
-        let path = a_huge_file(dir.path());
-
-        let mut state = AppState::new();
-        state.open(path);
-
-        let id = state.workspace.active_id().expect("a tab was opened");
-        assert!(state.is_viewer(id), "a huge document is served from disk");
-        assert!(
-            !state.editors.contains_key(&id),
-            "a viewer must have no editor: that is what makes every editing \
-             path a no-op rather than an edit to an empty document"
-        );
-        assert!(
-            state.size_label().starts_with("Huge file ("),
-            "got {:?}",
-            state.size_label()
-        );
-    }
-
-    #[test]
-    fn the_notice_is_access_s_own_sentence_and_blames_the_size() {
-        // Not this module's wording. `Access::ReadOnlyBySize` exists so a
-        // refusal can say *how* large and distinguish itself from a file that
-        // is read-only on disk -- a different problem with a different way
-        // out, and telling someone "read-only" without saying which leaves
-        // them clicking at permissions that were never at fault.
-        let dir = tempfile::tempdir().expect("temp dir");
-        let path = a_huge_file(dir.path());
-
-        let mut state = AppState::new();
-        state.open(path);
-
-        let notice = state.error.clone().expect("opening one says what it is");
-        assert_eq!(
-            notice,
-            bp_buffer::Access::ReadOnlyBySize {
-                bytes: bp_buffer::HUGE_FILE_BYTES + 1
-            }
-            .message()
-        );
-        assert!(
-            !notice.contains("not yet"),
-            "the viewer exists now; saying otherwise is how a limitation \
-             becomes folklore in the other direction: {notice}"
-        );
-        assert!(
-            !notice.contains("permission"),
-            "the size is the reason: {notice}"
-        );
-    }
-
-    #[test]
-    fn saving_a_document_served_from_disk_writes_nothing_at_all() {
-        // **The guard that matters.** `text_of` a viewer is the empty string,
-        // so a save that merely did nothing special would encode nothing and
-        // atomically write it over the document -- a Ctrl+S that destroys two
-        // gigabytes and reports success. The assertion is on the file, not on
-        // the return value.
-        let dir = tempfile::tempdir().expect("temp dir");
-        let path = a_huge_file(dir.path());
-        let before = std::fs::metadata(&path).expect("metadata").len();
-
-        let mut state = AppState::new();
-        state.open(path.clone());
-        let id = state.workspace.active_id().expect("a tab was opened");
-
-        assert_eq!(state.save_document(id, None), SaveResult::Failed);
-        assert_eq!(
-            std::fs::metadata(&path).expect("metadata").len(),
-            before,
-            "the document was written over"
-        );
-        assert_eq!(
-            state.save_copy(id, &dir.path().join("copy.log")),
-            SaveResult::Failed,
-            "an empty file presented as a copy is worse than a refusal"
-        );
-        assert!(
-            !dir.path().join("copy.log").exists(),
-            "and it must not be created either"
-        );
-
-        let notice = state.error.clone().unwrap_or_default();
-        assert!(
-            notice.contains("read from disk"),
-            "the refusal has to say why: {notice}"
-        );
-    }
-
-    #[test]
-    fn reloading_a_document_served_from_disk_refuses() {
-        // `load` slurps. Reloading a document that was deliberately never
-        // loaded would undo the whole of ADR-0027 with one menu row -- and it
-        // would do it by allocating two gigabytes, which is the failure mode
-        // hardest to recover from.
-        let dir = tempfile::tempdir().expect("temp dir");
-        let path = a_huge_file(dir.path());
-
-        let mut state = AppState::new();
-        state.open(path);
-        let id = state.workspace.active_id().expect("a tab was opened");
-
-        state.reload();
-        assert!(state.is_viewer(id), "still served from disk");
-        assert!(
-            !state.editors.contains_key(&id),
-            "reload put the document in a rope"
-        );
-    }
-
-    #[test]
-    fn the_bytes_of_a_document_served_from_disk_are_refused_rather_than_empty() {
-        // Hashing, signing and verifying all come through `active_bytes`. A
-        // digest of the empty string presented as a digest of two gigabytes
-        // is worse than no answer, because a signature over it verifies.
-        let dir = tempfile::tempdir().expect("temp dir");
-        let path = a_huge_file(dir.path());
-
-        let mut state = AppState::new();
-        state.open(path);
-
-        let refusal = state.active_bytes().expect_err("must not answer");
-        assert!(refusal.contains("never held whole"), "got {refusal}");
-    }
-
-    #[test]
-    fn a_huge_document_draws_in_the_custom_surface_whichever_flag_was_passed() {
-        // ADR-0030, and the reason there is one function rather than an `if`
-        // in two places: `TextInput` owns its own text and cannot be handed a
-        // window of a file, so there is no build in which this document opens
-        // for one user and is refused for another.
-        let dir = tempfile::tempdir().expect("temp dir");
-        let path = a_huge_file(dir.path());
-
-        for flag in [false, true] {
-            let mut state = AppState::new();
-            state.editor_view = flag;
-            state.open(path.clone());
-            assert!(
-                state.uses_custom_surface(),
-                "--editor-view={flag} left a huge document in a TextInput"
-            );
-        }
-    }
-
-    #[test]
-    fn an_ordinary_document_still_follows_the_flag() {
-        // The other half of the same function. ADR-0030 changed what a *huge*
-        // document does and nothing else; a flag that started claiming every
-        // document would have retired `TextInput` by accident, and with it
+    fn every_document_follows_the_flag() {
+        // ADR-0030 made this the *other half* of a two-branch function: a huge
+        // document drew in the custom surface whichever flag was passed, and
+        // this asserted an ordinary one still obeyed it. ADR-0063 removed the
+        // first branch, so this is now the whole of `uses_custom_surface` --
+        // which is worth more, not less: a flag that started claiming every
+        // document would retire `TextInput` by accident, and with it
         // input-method composition.
         let dir = tempfile::tempdir().expect("temp dir");
         let path = dir.path().join("small.txt");
@@ -2810,44 +2204,6 @@ mod tests {
     }
 
     #[test]
-    fn closing_a_viewer_lets_go_of_the_file() {
-        // An open handle and a line index per tab. Thirty huge documents
-        // opened and closed in a session would otherwise be thirty handles.
-        let dir = tempfile::tempdir().expect("temp dir");
-        let path = a_huge_file(dir.path());
-
-        let mut state = AppState::new();
-        state.open(path);
-        let id = state.workspace.active_id().expect("a tab was opened");
-        assert!(state.is_viewer(id));
-
-        state.close(id);
-        assert!(!state.viewers.contains_key(&id));
-    }
-
-    #[test]
-    fn the_readout_says_which_lines_are_on_screen() {
-        // A viewer has no caret, because a caret is a position in a rope and
-        // the rope is a disk. What it has instead is a viewport, and saying
-        // where that is answers the question a reader of a huge log has.
-        let dir = tempfile::tempdir().expect("temp dir");
-        let path = a_huge_file(dir.path());
-
-        let mut state = AppState::new();
-        state.open(path);
-        state.drawn_rows = 30;
-
-        assert_eq!(state.cursor_label(), "Ln 1-30");
-        assert!(
-            state
-                .active_viewer_mut()
-                .expect("the active document is a viewer")
-                .scroll_by(100, 30)
-        );
-        assert_eq!(state.cursor_label(), "Ln 101-130");
-    }
-
-    #[test]
     fn a_byte_count_reads_the_way_a_person_would_say_it() {
         assert_eq!(human_bytes(512), "512 bytes");
         assert_eq!(human_bytes(2048), "2.0 KiB");
@@ -2856,59 +2212,6 @@ mod tests {
     }
 
     // --- opening reads a header, not a file --------------------------------
-
-    #[test]
-    fn an_encrypted_document_is_recognised_from_its_header_alone() {
-        let dir = tempfile::tempdir().expect("temp dir");
-        let path = dir.path().join("secret.bpadx");
-        let sealed = bp_crypto::seal(
-            b"a document\n",
-            "correct horse",
-            bp_crypto::SealOptions::default(),
-        )
-        .expect("seal");
-        std::fs::write(&path, &sealed).expect("write");
-
-        let header = read_header(&path).expect("header");
-        assert_eq!(
-            header.len(),
-            bp_crypto::MAGIC_LEN,
-            "a header is read, not a file"
-        );
-        assert!(
-            bp_crypto::is_bpadx(&header),
-            "the magic must be recognisable from the header alone, or the user \
-             is shown their own ciphertext"
-        );
-    }
-
-    #[test]
-    fn a_file_shorter_than_the_magic_is_plaintext_and_not_an_error() {
-        // The short-read trap. `read` may return fewer bytes than asked for
-        // without being at the end, so this uses `read_exact` -- and a file
-        // genuinely shorter than the magic must still open, as the ordinary
-        // small text file it is.
-        let dir = tempfile::tempdir().expect("temp dir");
-        for (name, contents) in [("empty.txt", ""), ("tiny.txt", "hi")] {
-            let path = dir.path().join(name);
-            std::fs::write(&path, contents).expect("write");
-            let header = read_header(&path).expect("a short file is not an error");
-            assert!(
-                !bp_crypto::is_bpadx(&header),
-                "{name} is not encrypted and must not be treated as though it were"
-            );
-        }
-    }
-
-    #[test]
-    fn a_plaintext_document_that_starts_like_text_is_not_taken_for_a_bpadx() {
-        let dir = tempfile::tempdir().expect("temp dir");
-        let path = dir.path().join("notes.txt");
-        std::fs::write(&path, "BPAD is not BPADX\0 and this is prose").expect("write");
-        assert!(!bp_crypto::is_bpadx(&read_header(&path).expect("header")));
-    }
-
-    // --- new window, diagnostics -----------------------------------------
 
     #[test]
     fn a_new_window_launches_the_same_executable_with_no_arguments() {
@@ -2925,6 +2228,16 @@ mod tests {
             command.get_args().count(),
             0,
             "a fresh instance opens with no file, same as launching the app fresh"
+        );
+    }
+
+    /// The third of the eight sites ADR-0074 found.
+    #[test]
+    fn the_diagnostics_report_must_read_the_product_name_rather_than_spell_it() {
+        let report = diagnostics_report();
+        assert!(
+            report.starts_with(bp_platform::DISPLAY_NAME),
+            "diagnostics said: {report}"
         );
     }
 

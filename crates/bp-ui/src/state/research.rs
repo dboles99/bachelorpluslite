@@ -116,8 +116,10 @@ impl AppState {
     /// I been writing about?". The store is written to on every successful
     /// save without anyone being asked, so being able to see all of it in one
     /// row is not really a research feature -- it is the courtesy Security ▸
-    /// Inspect Metadata already extends about a single file, extended to the
-    /// one database this product keeps about all of them.
+    /// Inspect Metadata used to extend about a single file (removed under
+    /// ADR-0064), extended to the one database this product keeps about all
+    /// of them. **It is the only such courtesy left**, which makes it worth
+    /// more than it was.
     pub(crate) fn store_contents_report(&self) -> String {
         let Some(store) = &self.store else {
             return "There is no store on this machine.".to_owned();

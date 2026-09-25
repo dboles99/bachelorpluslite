@@ -19,7 +19,6 @@
 
 use std::fmt;
 
-use bp_crypto::{KdfParams, SealOptions};
 use proptest::test_runner::{Config, FileFailurePersistence};
 
 /// A `proptest` configuration that writes nothing into the checkout.
@@ -91,31 +90,5 @@ impl fmt::Debug for Pass {
 impl Pass {
     pub fn as_str(&self) -> &str {
         &self.0
-    }
-}
-
-/// `bp_crypto`'s shipping envelope with the key derivation turned down to
-/// the minimum the crate itself accepts.
-///
-/// Only [`KdfParams`] changes. The suite, the chunk framing, the nonce
-/// construction and the additional authenticated data are all the defaults,
-/// so what these tests exercise is the format that ships.
-pub fn cheap() -> SealOptions {
-    SealOptions {
-        kdf: KdfParams {
-            memory_kib: 8,
-            iterations: 1,
-            lanes: 1,
-        },
-        ..SealOptions::default()
-    }
-}
-
-/// The same, with a chunk size small enough that a test can straddle a chunk
-/// boundary without writing megabytes.
-pub fn cheap_with_chunk(chunk_size: u32) -> SealOptions {
-    SealOptions {
-        chunk_size,
-        ..cheap()
     }
 }

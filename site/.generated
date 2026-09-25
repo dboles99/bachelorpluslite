@@ -1,0 +1,35 @@
+# Written by scripts/Build-Site.ps1. Every file below is generated;
+# anything listed here and no longer produced is deleted on the next run.
+# Do not edit.
+index.html
+waitlist.html
+privacy.html
+us/index.html
+us/waitlist.html
+us/privacy.html
+fr/index.html
+fr/waitlist.html
+fr/privacy.html
+de/index.html
+de/waitlist.html
+de/privacy.html
+ja/index.html
+ja/waitlist.html
+ja/privacy.html
+zh-tw/index.html
+zh-tw/waitlist.html
+zh-tw/privacy.html
+llms.txt
+us/llms.txt
+fr/llms.txt
+de/llms.txt
+ja/llms.txt
+zh-tw/llms.txt
+sitemap-en.xml
+sitemap-us.xml
+sitemap-fr.xml
+sitemap-de.xml
+sitemap-ja.xml
+sitemap-zh-tw.xml
+sitemap.xml
+robots.txt

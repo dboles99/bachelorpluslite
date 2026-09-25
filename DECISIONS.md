@@ -63,9 +63,34 @@ Adding a decision means adding both.
 | BP-ADR-0053 | 2026-08-22 | `main` advances by pull request; opening one is an agent's job, merging is not. D13 closed after six sessions | Accepted | [ADR-0053](docs/decisions/ADR-0053.md) |
 | BP-ADR-0054 | 2026-08-23 | The command line becomes an interface: `--help`, `--version`, `--line=N`, a reported typo, and the licences every manifest already claimed | Accepted, shipped, confirmed at the window | [ADR-0054](docs/decisions/ADR-0054.md) |
 | BP-ADR-0055 | 2026-08-23 | Signing is deferred and self-signing refused outright; the archive, the checksums and a one-command signing step are built anyway. D15 closed | Accepted | [ADR-0055](docs/decisions/ADR-0055.md) |
-| BP-ADR-0056 | 2026-08-23 | All three embedding sources, as choices, with the profile as a ceiling and `Cloud` behind a per-use gesture — and the axis for them had existed since ADR-0020. D16 closed | Accepted | [ADR-0056](docs/decisions/ADR-0056.md) |
+| BP-ADR-0056 | 2026-08-23 | All three embedding sources, as choices, with the profile as a ceiling and `Cloud` behind a per-use gesture — and the axis for them had existed since ADR-0020. D16 closed | Superseded by [ADR-0082](docs/decisions/ADR-0082.md) | [ADR-0056](docs/decisions/ADR-0056.md) |
 | BP-ADR-0057 | 2026-08-29 | Executing anything is removed, and notebooks with it. Neither crate depended on the other; one shell module was the whole seam. ADR-0011's "never auto-runs" becomes vacuous rather than enforced | Accepted | [ADR-0057](docs/decisions/ADR-0057.md) |
 | BP-ADR-0058 | 2026-08-29 | `metadata/repository_manifest.json` is deleted rather than regenerated: 102 of its 181 hashes were wrong, 275 tracked files were never in it, and nothing read it. Git already content-addresses the tree | Accepted | [ADR-0058](docs/decisions/ADR-0058.md) |
+| BP-ADR-0059 | 2026-08-29 | The reduction is scoped: eight crates and huge-file mode leave in five ADRs, least-entangled first, 67,316 lines to ~40,000. `bp-security` is **kept and narrowed** -- it is the store's off switch, and four of its seven policy axes turned out to have no enforcing reader at all | Accepted | [ADR-0059](docs/decisions/ADR-0059.md) |
+| BP-ADR-0060 | 2026-08-29 | R1: `bp-research` leaves with the three Research rows that read the document. The menu keeps its name and its three store-reading rows -- ADR-0044's refusal to merge them is what made this a deletion rather than a rewrite | Accepted | [ADR-0060](docs/decisions/ADR-0060.md) |
+| BP-ADR-0061 | 2026-08-29 | R2: `bp-clipboard` leaves, and the `Clipboard` policy axis goes with it rather than waiting for R5 -- an axis outlives its subject by nothing. Four tests rewritten; one would have passed while asserting nothing | Accepted | [ADR-0061](docs/decisions/ADR-0061.md) |
+| BP-ADR-0062 | 2026-08-29 | R3: `bp-data` and the Data menu leave, superseding ADR-0023. `sniff` survives and loses the only thing that could contradict it -- the cross-crate agreement test that once caught it calling a pretty-printed array "JSON Lines" | Accepted | [ADR-0062](docs/decisions/ADR-0062.md) |
+| BP-ADR-0063 | 2026-08-30 | R4: huge-file mode leaves -- the engine, the viewer and `StreamSearch`, superseding ADR-0027, ADR-0030 and ADR-0042. No directory and no id block: a *mode* comes out as branches. D11 becomes inert and D2's own re-ask metric moves | Accepted | [ADR-0063](docs/decisions/ADR-0063.md) |
+| BP-ADR-0064 | 2026-08-30 | R5, the last: five security crates leave and `bp-security` stays as Privacy. `Recovery::Encrypted` is deleted rather than degraded to plaintext; `.bpadx` documents become unopenable with no migration; the Security menu is renamed for what four profiles and a toggle actually are | Accepted, amended | [ADR-0064](docs/decisions/ADR-0064.md) |
+| BP-ADR-0068 | 2026-08-30 | P2: the icon ships beside the executable and everything points at it there -- which removes the build-time resource dependency the row was sized around rather than adding it. Both halves of ADR-0012's registration had been naming an icon that did not exist | Accepted | [ADR-0068](docs/decisions/ADR-0068.md) |
+| BP-ADR-0067 | 2026-08-30 | P5: there is no installer. An unsigned one is worse than none (ADR-0055), winget needs a public URL a private repo has not, and ADR-0012 forbids the one job left -- registering file types. The archive is the delivery mechanism | Accepted | [ADR-0067](docs/decisions/ADR-0067.md) |
+| BP-ADR-0069 | 2026-08-30 | `.bpadx` leaves the registration table, `TypeGroup::Own` leaves the enum, and the test exemption that let an unopenable type be registered leaves with them. Every preset -- including Notepad Replacement -- was claiming a file type this build opens as ciphertext | Accepted | [ADR-0069](docs/decisions/ADR-0069.md) |
+| BP-ADR-0070 | 2026-08-30 | Removing the code that writes a file does not remove the file. Leftover state -- a frozen `security-history.log`, a `recent.toml` at a location abandoned when the list stopped roaming -- stays where it is and is named rather than swept, because a product that will not seize a file association does not get to delete out of `%APPDATA%` either | Accepted | [ADR-0070](docs/decisions/ADR-0070.md) |
+| BP-ADR-0066 | 2026-08-30 | R1 answered: read-only is the save refusing, and always was. `bp_buffer::Access` guarded every edit against a condition nothing has ever set -- one production call site, in the crate ADR-0063 deleted. The refusal now stats the file rather than listing three candidate causes | Accepted | [ADR-0066](docs/decisions/ADR-0066.md) |
+| BP-ADR-0065 | 2026-08-30 | Two of the reduction's three costs were *concurrent* rather than inherent, and are repaired: `sniff` gets a test-only parser that can contradict it again, and Private keeps an honestly-labelled plaintext journal. The third -- ADR-0050's golden vectors -- is inherent and stays paid | Accepted | [ADR-0065](docs/decisions/ADR-0065.md) |
+| BP-ADR-0071 | 2026-09-10 | **GPL-3.0-only**, and the `-only` is the decision. Every manifest claimed `MIT OR Apache-2.0` while the binary statically links fourteen `i-slint-*` crates whose tri-licence this repository had never elected -- ADR-0054 asked whether there was a *text* behind the claim and nobody asked whether the claim was *true*. Slint grants version 3 and no other, so `-or-later` would offer terms this project has not been granted. Four readers now: `--version`, About, `deny.toml`, and a generated `THIRD-PARTY-NOTICES.md` the gate checks | Accepted | [ADR-0071](docs/decisions/ADR-0071.md) |
+| BP-ADR-0072 | 2026-09-10 | **macOS is declined**, with what it would cost written down. It would *compile* today -- `Platform::HOST` reports anything non-Windows as Linux -- and would then put config in `~/.config` and write `.desktop` files nothing reads. A third platform rather than a third build, plus an Apple certificate before Gatekeeper would open it, plus no Mac here to check any of it on | Accepted | [ADR-0072](docs/decisions/ADR-0072.md) |
+| BP-ADR-0073 | 2026-09-10 | **Hosted CI is restored.** ADR-0016 rested on "GitHub Actions is not available to this project" and one `gh api` call disproved it -- trap 6, and the second time. The local gate stays authoritative; Actions judges pull requests from strangers, builds a release on a machine that has never built it (trap 7), and runs the advisory database the local leg cannot assume a network for | Accepted, amends ADR-0016 | [ADR-0073](docs/decisions/ADR-0073.md) |
+| BP-ADR-0074 | 2026-09-10 | **The product is `BachelorPad+ Lite`**, and the rename found the name spelled out at *eight* sites while `DISPLAY_NAME`'s doc comment said three and a green test proved a pair agreed. The window title was a `.slint` literal no Rust test could see -- the exact site the previous rename broke. All eight read the constant now, and three tests ask at three of the sites rather than at the constant | Accepted | [ADR-0074](docs/decisions/ADR-0074.md) |
+| BP-ADR-0075 | 2026-09-10 | **One documentation source, four destinations, nothing retyped.** `docs/` is the source; `docs/generated/`, `app-help/` and `wiki/` are generated and gate-checked for staleness. The half worth the ADR: three reference pages are generated from *code*, because the flag list, the shortcuts and the menu map already have a home there. In-app help opens **as a document**, never a browser, because this product launches no programs | Accepted | [ADR-0075](docs/decisions/ADR-0075.md) |
+| BP-ADR-0076 | 2026-09-10 | **The website is static and collects nothing except the waitlist.** No analytics, no cookies, no third-party scripts -- enforced by a CSP of `self` and a build step that greps for a tracker, because a promise on a web page is trap 3 exactly as a comment in Rust is. The waitlist promises features and no dates and no prices, from the list ADR-0057 and ADR-0059--0064 removed | Accepted | [ADR-0076](docs/decisions/ADR-0076.md) |
+| BP-ADR-0077 | 2026-09-10 | **Reporting a problem composes a document**, because this product cannot open a browser (ADR-0057) or reach the network (ADR-0006). Help > Report a Problem pre-fills the issue template with the diagnostics already in it and puts the URL on the clipboard. The constraint produced the *better* feature: the fields that make a report fixable are the ones somebody filing in a browser would have gone back for and mostly would not | Accepted | [ADR-0077](docs/decisions/ADR-0077.md) |
+| BP-ADR-0078 | 2026-09-10 | **Three unmaintained dependencies accepted by name, never as a category.** The first hosted CI run failed on three RustSec advisories the local gate had never been in a position to see, which is the case ADR-0073 made for hosted CI, demonstrated the same day. All three are `unmaintained` rather than `vulnerability`, and all three arrive through Slint. Ignored by id with a reason each, because `unmaintained = "warn"` would silence the next one too, and the next one is the one nobody has looked at | Accepted | [ADR-0078](docs/decisions/ADR-0078.md) |
+| BP-ADR-0079 | 2026-09-10 | **The fuzz harness silences the panic hook, because the hang budget was timing it.** `catch_unwind` does not return until the hook has finished, so with `RUST_BACKTRACE=1` a hosted Windows runner spent the whole 20 second budget symbolising a backtrace and reported an instant panic as a hang, discarding the message. A quiet hook for probe threads only; every other thread keeps the one it had. Raising the budget was rejected -- twenty seconds is not too short, the budget was measuring the wrong thing | Accepted | [ADR-0079](docs/decisions/ADR-0079.md) |
+| BP-ADR-0080 | 2026-09-25 | **The Insert key overtypes, and two surfaces stop mishandling named keys.** Found by driving the window under Xvfb with a marker after every key: Page Up and Page Down did nothing in the default surface, because `TextInput` pages by a `page-height` that defaults to zero and nothing set it; and in `--editor-view` F5, Insert and every unnamed key typed a private-use character into the document. Overtype's rule lives in `bp-editor` and both surfaces ask it -- the line break is never overtyped, a run undoes in one step. Conceded: two Ctrl+Z per character under `TextInput`, and caret offsets Slint marks internal | Accepted | [ADR-0080](docs/decisions/ADR-0080.md) |
+| BP-ADR-0081 | 2026-09-25 | **Two of the three Slint blockers were never blocked.** Checked against both 1.17.1 and 1.18.1 source: input-method composition is still refused by `FocusScope`. But `StyledText` has been public since Slint 1.15, with `StyledText::from_markdown` at runtime, so D14's premise was false the day it was answered; and a dropped file reaches the application through `slint::winit_030::WinitWindowAccessor::on_winit_window_event` without the backend, on Windows and X11 though not native Wayland. The record is corrected, drag and drop is queued, and D14 goes back to Daniel as a question | Accepted | [ADR-0081](docs/decisions/ADR-0081.md) |
+| BP-ADR-0048 | amended 2026-09-25 | Its answer to D14 rested on *"Slint 1.17.1 has no rich-text item"*, which was false -- `StyledText` shipped in 1.15. The answer stands withdrawn and the question is open again ([ADR-0081](docs/decisions/ADR-0081.md)) | Accepted | [ADR-0048](docs/decisions/ADR-0048.md) |
+| BP-ADR-0082 | 2026-09-25 | **Phase 10 is declined, and four policy axes nothing enforced leave with it.** `Cloud` embeddings contradict a product published as having no network, a `Local` model puts weights on a Notepad's startup path, and the need is met by Find ▸ In Folder and Related Notes. Removing `embeddings` meant counting readers: `network`, `temporary_files` and `zeroise` had none but the Security Inspector, which told a Confidential document *"Temporary files: never written"* while every save wrote one. ADR-0059 had decided all four would go; ADR-0064 deferred it on the ground that a doc comment admitted it. `Policy` is two axes, and `zeroize` leaves the graph. Confidential and Maximum are now visibly the same policy, which they always were -- Daniel's question | Accepted | [ADR-0082](docs/decisions/ADR-0082.md) |
 | BP-ADR-0017 | amended 2026-08-22 | Half of the renderer revert condition is now a number rather than a feeling: per-frame row building, and its independence from document size | Accepted, amended | [ADR-0017](docs/decisions/ADR-0017.md) |
 
 ## Decisions needed before the work they block
@@ -101,6 +126,361 @@ Adding a decision means adding both.
   the software renderer's time to first interaction cannot be measured, so
   half of ADR-0017's target has no number behind it.
 
+## What the keyboard taught, 2026-09-25
+
+Three things, all from pressing keys nobody had listed as worth pressing
+([ADR-0080](docs/decisions/ADR-0080.md)).
+
+### A default of zero is a feature switched off, and nothing reports it
+
+Page Up and Page Down did nothing in the default surface for the whole life of
+the product. `TextInput` pages by `page-height`, returns `false` when that is
+not taller than a line, and defaults it to zero. A refusal from inside a
+toolkit looks exactly like a key the product never claimed, so no test and no
+log could see it. **Five manual passes missed it because none of them pressed
+Page Down** -- a checklist of features does not list the keys everybody
+assumes work. When a toolkit property has a default, ask what the feature does
+at that default.
+
+### A comment that names a failure mode is not a test for it
+
+The test beside `translate_key` said a mismatch "would type invisible glyphs
+into the document", and asserted only the keys already on its list. F5 was
+not on it, and F5 typed U+F708 into the saved file. The comment was right
+about the failure and the test asked about the wrong keys: **it checked the
+ones that were handled, and the defect lived in the ones that were not.** The
+replacement sweeps the whole private-use block Slint borrows, which is the
+question the comment was actually asking. This is trap 3 from a new side: the
+claim was true, and still nothing would have failed if it stopped being.
+
+### Suspect the probe, and here is a new way the probe lies
+
+The first undo probe typed a marker straight after Ctrl+Z and read as data
+loss. Slint re-selects what an undo restores; the marker replaced it. The
+defect vanished when the marker moved to the end of the line, because it had
+never been one. `project/NEXT_SESSION.md` already said to suspect a manual pass
+before the product; the same holds for a scripted one, and **a probe that
+types is an edit, with every consequence an edit has.**
+
+## What re-checking the toolkit taught, 2026-09-25
+
+### A check answers the question it was asked
+
+Drag and drop and Markdown preview were each recorded as *blocked on Slint,
+checked in its source*, and both checks were honest. The drag-and-drop one
+proved that the winit **backend** had no file-drop plumbing, which was true,
+and concluded that the **application** had no route, which was not -- winit's
+events reach it directly ([ADR-0081](docs/decisions/ADR-0081.md)). The preview
+one looked for rich text where `Text` lives and did not find it, while
+`StyledText` had been public for seven months. **Each check looked where the
+author expected the feature to be.** The habit that catches both is cheap:
+before recording a dependency as blocking something, grep its public API for
+the noun -- `StyledText`, `winit_window_event` -- rather than for the
+mechanism you had in mind. And recheck against the *old* version as well as
+the new one, or a blocker that never existed reads as one that lifted.
+
+## What declining phase 10 taught, 2026-09-25
+
+### A true comment does not make a false screen honest
+
+ADR-0064 had the facts: it named the four policy axes nothing enforced, and
+left them in place because *"the doc comment on `security_inspector_report`
+names which three govern nothing, so the readout is not a claim the code fails
+to keep."* The readout was exactly such a claim. A Confidential document's
+owner opened Tools ▸ Security Inspector and read *"Temporary files: never
+written"* and *"buffers are overwritten when a document closes"*, and neither
+was true. **A claim is kept or broken where it is read**, and a doc comment is
+read by a developer while a readout is read by the person the claim is about.
+Trap 3 is about a comment claiming something of the code; this is its mirror,
+a comment conceding something the product still claims.
+
+### Take the inventory before the recommendation, too
+
+The plan that opened this session recommended *lexical search over the note
+store* as phase 10's replacement. One `CREATE TABLE` would have shown that the
+store holds paths, titles and tags and never content, so it could not have
+searched what the recommendation assumed. `WORK_QUEUE.md`'s rule --
+*take the inventory before the estimate* -- applies to a recommendation as
+much as to a queue item. The need turned out to be met already.
+
+## What the gate taught, 2026-09-25
+
+### A check that reads the clock expires
+
+`Build-Site.ps1` wrote `(Get-Date)` into every sitemap's `<lastmod>`, and the
+gate's `site` stage passes only when a fresh build equals the committed one.
+So the stage passed on 2026-09-10, the day the site was generated, and **failed
+on every day after it** -- on every branch, whatever the change. Nothing about
+the site had moved; the date had. The rule `bp-storage` states for itself --
+*time is a parameter, never a clock* -- applies to a generator whose output is
+checked, and applies harder: a test that reads the clock fails once, while a
+generator that does makes the check it feeds expire.
+
+The value was also false. A `lastmod` of *today* on every build claims that
+every page changed on every build, which is the one date that is never true.
+It is gone rather than derived from `git log`, because the commit that
+regenerates a sitemap is the commit that moves that date.
+
+### A script that falls off its end reports someone else's exit code
+
+`Test-Site.ps1` printed *"site/ passes all three checks"* and was reported as
+failed, because it ended without `exit 0` and `$LASTEXITCODE` still held the
+failure of the stage before it. One red became two, and the second one lied
+about the site. A PowerShell script the gate reads through `$LASTEXITCODE`
+must say how it ended.
+
+### And a host leg that names `.exe` is a Windows leg
+
+The `launch` stage could not start on a Linux host at all -- it named
+`bachelorpad.exe` unconditionally -- and `-Linux` on a Linux host called
+`wsl`, which does not exist there, as a terminating error *after* every stage
+had passed: thirteen passes and exit 1. Both were true for as long as the gate
+only ever ran on Windows, and stopped being true the first time a session ran
+it from Linux, which is what this repository's cloud sessions do. On a Linux
+host the native stages are the Linux leg, and the other leg is hosted CI.
+
+### A rename reaches the parsers, and nothing ran the parsers
+
+When the product became *BachelorPad+ Lite* ([ADR-0074](docs/decisions/ADR-0074.md)),
+the first line of `--version` gained a space. `release.yml`, `release-linux.sh`
+and `New-Release.ps1` all read that line as *name, then version* by taking
+the second field -- so every release script read the version as `Lite`, refused
+it as not semver, and **no release of 0.9.5 could be built on either
+platform**. ADR-0074 hunted the name through eight sites that *spell* it and
+missed three that *parse* it, and no stage of any gate runs a release script,
+so nothing failed until an outside review of PR #4 read the regex. The shape
+the scripts rely on -- last field the version, everything before it the name
+-- is now a test in `bp_config::cli`, because a contract that only a script
+reads is one that nothing checks.
+
+### And a comment promised the manual's links worked
+
+`Build-Docs.ps1` said "links between pages become links within the
+document". Nothing did it: every page was pasted in with its relative links
+untouched, and the manual published at `/docs` on the website sent 97 ADR
+links and every cross-page link to a 404. Trap 3, in a generator -- and a
+generator's claim is worse than a function's, because its output is checked
+against itself and so cannot disagree with it. The rewrite now happens, and
+the build refuses a manual with any relative file link left in it.
+
+## What going public taught, 2026-09-10
+
+Six decisions in one session, and **five of the six were found by preparing to
+publish rather than by anything that could fail**. That pattern is worth more
+than any of the individual findings.
+
+### A licence claim with a text behind it is not a licence claim that is true
+
+[ADR-0054](docs/decisions/ADR-0054.md) found `MIT OR Apache-2.0` in every
+manifest with neither licence file present, and fixed it properly: correct
+SPDX expression, both texts committed, the string threaded into `--version`.
+The repository then had a licence claim that looked thoroughly handled.
+
+**Looking thoroughly handled is what kept anybody from noticing it described a
+fraction of the binary.** Slint is tri-licensed, the archives shipped no Slint
+notice at all, and the election had never been made anywhere.
+
+> **"Is there a text behind this claim?" and "is this claim true?" are
+> different questions, and answering the first one well is what stops anybody
+> asking the second.**
+
+The check is not about licences. **Name the thing the claim is about, then go
+and look at that thing.** The claim was about a 21 MB executable, and nobody
+had looked inside it.
+
+### A test that proves two things agree is evidence about two things
+
+`DISPLAY_NAME`'s doc comment says the product name "must not be spelled out at
+the three places that show it", and records that the previous rename broke
+exactly that. The test written in response --
+`version_names_the_product_the_desktop_registration_names` -- has passed every
+run since, and the comment says why: *both halves of that pair read this*.
+
+**Which is the whole defect.** Renaming to BachelorPad+ Lite found the name
+written out at **eight** sites, including the window title in `app.slint` --
+the site the previous rename actually broke, and the one no Rust test can see.
+
+> **Before trusting a constant as the one home for a value, grep for the
+> value. If the count is higher than the number of readers, the constant is a
+> convention rather than a mechanism.**
+
+Counting is the check. Testing was not: the test was green throughout.
+
+### An accepted ADR is where a false premise goes to be safe
+
+[ADR-0016](docs/decisions/ADR-0016.md) opens *"GitHub Actions is not available
+to this project"*, and everything in it follows from that sentence. One
+`gh api` call returns `{"enabled": true}`.
+
+It was almost certainly true when written. It became false silently, and a
+decision document has no mechanism that would ever say so. **This is trap 6,
+and it is the second time** -- D13 sat five sessions on a premise one
+`git merge-base` disproved. The habit was installed for questions in
+`DECISIONS_NEEDED.md` and not for premises inside decisions already accepted,
+which read as settled and are therefore never re-read looking for something to
+disprove.
+
+> **An ADR whose reasoning rests on an external fact should name the command
+> that would test it.**
+
+### A rule does not follow the product onto a new surface
+
+[ADR-0006](docs/decisions/ADR-0006.md) is about the application, and every
+crate honours it. A website is a different artefact, on different
+infrastructure, in a different language -- and the default for that artefact,
+the thing every template ships with, is an analytics tag.
+
+Nothing would have failed. No test covers a website and the gate never sees
+one.
+
+> **Ask of each new surface which of this project's existing rules it is now
+> the exception to, and answer in writing before the surface exists -- because
+> afterwards it is a change rather than a decision.**
+
+The answer here was a CSP of `self` plus a build step that greps for trackers,
+so that the promise has a reader.
+
+### The dangerous unsupported platform compiles
+
+macOS was declined ([ADR-0072](docs/decisions/ADR-0072.md)), and the reason is
+not effort. `Platform::HOST` reports any non-Windows target as Linux -- a
+deliberate, well-argued fallback for a target nobody ships.
+
+Ship one, and it becomes a working editor that puts files in the wrong place
+and reports a successful file-type registration that has done nothing. Both
+findable only by somebody sitting at a Mac.
+
+> **A target that refuses to build announces itself. One that compiles and
+> answers as something else does not, and nothing in the code marks the
+> boundary between those two states.**
+
+### A gate pinned to one machine ages with that machine
+
+Hosted CI failed on its first run for two reasons, and the second was not one
+ADR-0073 had anticipated. `clippy::chunks_exact_to_as_chunks` fired in
+`bp-files` on the runners and fires nowhere on this workstation, because the
+local toolchain is 1.97.1 and `dtolnay/rust-toolchain@stable` takes whatever
+stable is that morning.
+
+The local gate is thorough, and it had been green on both legs minutes
+earlier. **It cannot report a lint it does not have.**
+
+> **A gate that runs only where it was written cannot tell you the world has
+> moved.** New lints, new advisories, and a dependency that stops compiling on
+> a newer compiler all arrive from outside the repository, and nothing inside
+> it changes when they do.
+
+The fix was one line and better code -- `as_chunks::<2>()` hands back real
+arrays instead of slices that must be indexed back into one -- which is the
+usual shape of a new lint. That is not the point. The point is that nobody
+here would have seen it until a contributor did, and a contributor's first
+experience of the project would have been a red build they did not cause.
+
+### Two failures in the same red are not the same failure
+
+`cargo deny` reports an unmaintained crate and a vulnerable one identically:
+same `error`, same colour, same exit code. Both symmetric responses are wrong.
+Treat them all as blocking and you cannot ship over a crate that works and
+simply has nobody watching it; treat them all as noise and one day you ship
+over a real one.
+
+Of the three this project accepted
+([ADR-0078](docs/decisions/ADR-0078.md)), two have no runtime surface worth
+worrying about and the third parses fonts, which are untrusted input. That is
+not a distinction a category setting can make.
+
+> **Ask what would have to be true for this to hurt somebody, and answer it
+> per item rather than per category.**
+
+And the smaller, more repeatable half: **when a tool offers to silence a
+category, enumerate the instances instead.** The category setting is a
+statement about things nobody has seen yet, and there are no grounds for one.
+
+### A constraint can be a design brief
+
+"In-app feedback" almost always means a button that opens a browser. Two
+existing decisions made that impossible: this product launches no programs
+([ADR-0057](docs/decisions/ADR-0057.md)) and makes no network connection
+([ADR-0006](docs/decisions/ADR-0006.md)). The natural response is to record
+the feature as blocked.
+
+What the refusal actually forced was the question *what makes a bug report
+useful?* The answer is the diagnostics, which were already a menu row away and
+which most people filing in a browser would never have gone back for. So the
+version this product is allowed to build delivers better reports than the one
+it is not.
+
+> **A constraint that forecloses the obvious implementation is worth reading
+> as a design brief rather than as an obstacle** -- and the check is to ask
+> what the feature is *for*, once its usual shape is unavailable.
+
+### An absence here is not evidence the thing does not exist
+
+The website's signup was designed from scratch, with a page of reasoning about
+why holding no personal data is safest. `dboles99/af-site` sits on the same
+domain, is owned by the same person, and had solved the identical problem
+three days earlier: Azure Function, Table Storage, Kit, GDPR consent
+versioning this version had not thought about. It also had the locale
+directory shape, the sitemap naming, `llms.txt`, the PayPal handle and the
+deploy configuration.
+
+The tell was available and ignored: **the domain was already in use.**
+`bpad.prompt-forge.dev` is a subdomain of a site that exists, and asking what
+the parent site does would have produced the whole answer.
+
+> **Trap 6 says a claim in the record is not a property of the repository.
+> This is its neighbour: an absence in *this* repository is not evidence that
+> the thing does not exist.** Before designing a mechanism, look for the one
+> already running next door.
+
+### And the documentation version of trap 3
+
+The first design of the documentation pipeline had a
+`docs/reference/shortcuts.md` in it: a table of keyboard shortcuts typed out
+beside a constant that already held them, with nothing to make the two agree.
+It would have been correct on the day it was written.
+
+> **If this page and the code disagreed, what would fail?** For a page
+> describing what a tab is *for* -- nothing, and prose is the right home. For
+> a page listing the flags -- nothing either, which is precisely why that page
+> has to be generated instead.
+
+Three pages are generated from code now. Asking the question of the existing
+documentation found `MENU_MAP.md`'s Help section carrying **two rows for one
+menu**, one a subset of the other, coexisting in the file whose entire job is
+to be the one home for what each menu holds.
+
+### And the stopwatch version of it
+
+The fuzz harness gave every input a twenty second budget and called anything
+past it a hang. On a hosted Windows runner it reported `Hang { budget: 20s }`
+for a probe whose entire body is `panic!("the message")`.
+
+`catch_unwind` does not return until the panic hook has finished. The hook
+runs inside the window the parent is timing, and with `RUST_BACKTRACE=1` it
+was symbolising a backtrace against the PDBs of a large debug binary. So the
+harness was timing itself reporting on the input, and calling the number a
+property of the input ([ADR-0079](docs/decisions/ADR-0079.md)).
+
+> **A timeout measures everything inside it, including the code that reports
+> the result.** The comment above the constant said "a slow machine under a
+> cold cache is not a defect. Anything past this is not slow, it is stuck."
+> Nothing about reading it would have found the error, because the sentence is
+> about the input and the budget was not.
+
+The fix that was *available* was to raise the number, and it would have turned
+the run green. It was rejected for the reason worth keeping: twenty seconds is
+not too short. **The budget was measuring the wrong thing, and a bigger number
+measures the wrong thing for longer.**
+
+And the half that keeps recurring: **the local gate is not the hosted gate.**
+Twice in one day the difference was the whole point --
+[ADR-0078](docs/decisions/ADR-0078.md) found three advisories a machine with
+no network can never see, and this found a cost that only appears on a machine
+with cold symbols. [ADR-0073](docs/decisions/ADR-0073.md) argued for hosted CI
+on the grounds that it would see things the local gate cannot. It has now done
+so twice before anyone downloaded a release.
+
 ## Recently closed, and what each one cost to learn
 
 Moved here from `README.md` on 2026-08-22. It was 3,586 words -- roughly
@@ -116,6 +496,279 @@ in the fourth.
 Kept rather than deleted, because every one of these went stale the same
 way — a fix landing without the record moving — and because the lesson in each
 is worth more than the fact.
+
+- **A decision is often already made by the decisions around it, and an
+  estimate is often already invalidated by them.** Two queue rows fell in one
+  afternoon and neither needed new information.
+
+  P5 asked for *"an installer, or a decision that there is not one"*. The
+  answer came from two ADRs that were already in the record:
+  [ADR-0055](docs/decisions/ADR-0055.md) refused an unsigned trust gesture,
+  and [ADR-0012](docs/decisions/ADR-0012.md) refused a silent file
+  association. Between them an installer is left with one Start Menu shortcut
+  to justify itself, so there is not one
+  ([ADR-0067](docs/decisions/ADR-0067.md)).
+
+  P2 then read: *"Windows takes the icon from the executable, which needs a
+  build-time resource -- a new dependency, so an ADR."* True when written.
+  **ADR-0067 invalidated it an hour before anyone took the row**: with no
+  installer to place an icon in a theme, the icon travels in the archive, and
+  a registry `DefaultIcon` takes any path. The dependency was not needed at
+  all ([ADR-0068](docs/decisions/ADR-0068.md)).
+
+  **The row still read as authoritative because it was written down in a
+  table**, which is the same tell as the five research rows ADR-0046 deleted
+  and the 38 "planned" menu rows ADR-0048 found. The habit: before taking a
+  sized row, check whether anything decided since has moved the constraint it
+  names.
+
+- **Driving the window takes the keyboard from whoever is at the machine, and
+  the contaminated run looks exactly like a clean one.** `Drive-Window.ps1`
+  already guarded the case it knew about -- `SetForegroundWindow` failing
+  silently, so keys land somewhere else -- and that guard is useless against
+  the reverse: the *right* window is in front, and the keystrokes arriving are
+  a person's rather than the script's.
+
+  On 2026-08-30 a manual pass ran seven launches while Daniel was using the
+  desktop. Nine characters he typed were captured into the document under
+  test, reached the recovery journal, and **a defect was nearly reported out of
+  that evidence** -- "saving does not clear the journal", which was wrong twice
+  over, because `-Kill` also makes every run look like a crash and a journal
+  surviving a crash is correct.
+
+  Two habits, and the second is the one that generalises. Say before driving
+  the window and let the person say when. And **when a manual pass produces a
+  surprising result, suspect the pass before the product** -- an automated test
+  that is wrong usually fails, while a manual one that is wrong quietly
+  produces a finding.
+
+- **Deleting the code that writes a file does not delete the file, and the
+  record has to say which of those two happened.** Ten crates of features left
+  this session; the removal ADRs describe the code, because the code is what
+  the commits touched and what the tests cover. **The bytes already on a disk
+  have no compiler and no test**, so they went unmentioned -- and they are the
+  part a user actually meets.
+
+  Two were still there: a `security-history.log` frozen at the moment
+  [ADR-0064](docs/decisions/ADR-0064.md) took the audit log, and a `recent.toml`
+  at the location the recent list left when it stopped roaming. The first is
+  the one that matters, because **it does not rebuild and it looks
+  maintained** -- trap 3 in a file rather than a comment.
+
+  They stay. A product that hands the user a `.reg` to read rather than
+  seizing a file association ([ADR-0012](docs/decisions/ADR-0012.md)) does not
+  get to delete out of `%APPDATA%` on its own judgement
+  ([ADR-0070](docs/decisions/ADR-0070.md)).
+
+  The check is one question at the end of every removal: **what did this
+  feature leave behind, and where?** For nine of the ten the answer was
+  nothing. It only takes one.
+
+  A first draft of that ADR said the whole `%APPDATA%\bachelorpad` directory
+  was orphaned. It is not -- it is `DirKind::Config` and holds `config.toml`
+  as soon as configuration is saved. **The directory is live and two files in it
+  are dead**, which is the difference between removing a folder and not, and
+  one `grep` for `DirKind::Config` told it.
+
+- **An exemption outlives the reason for it, because an exemption is a
+  `filter`, and a `filter` cannot notice.** The one agreement between the
+  registration table and the parser -- *claiming a file type the editor cannot
+  open is the failure a user experiences as a broken machine* -- was asserted
+  by a test that skipped `TypeGroup::Own`. That skip was correct when written:
+  `.bpadx` was genuinely unparseable and genuinely openable. ADR-0064 removed
+  the second half and could not remove the first, so the test went on passing
+  while **every preset, including Notepad Replacement, registered an extension
+  that double-clicks into a window of ciphertext**
+  ([ADR-0069](docs/decisions/ADR-0069.md)).
+
+  The failure arrives dressed as success, in Explorer, which is worse than
+  Windows saying it cannot open the file at all.
+
+  Trap 3 says a claim in a comment is not a property of the code; this is trap
+  3 with a `filter` in place of the comment, and it is worse, because **a
+  stale comment is read by a person who may doubt it and a stale `filter` is
+  read by nothing.** The habit: when a decision removes a capability, search
+  the *tests* for what stopped being checked, not only the code for what
+  stopped being called. It is the same `grep` either way -- who produces this,
+  and who reads it?
+
+- **Two more claims nothing kept, and both were user-visible.** ADR-0068's
+  inventory found that File ▸ Set as Default Editor had *always* registered
+  file types to an icon that did not exist: Windows wrote `DefaultIcon` as
+  `"<exe>",0` and the executable has never carried an icon resource, and Linux
+  wrote a theme name nothing had ever installed. Every registered type
+  rendered blank in Explorer.
+
+  This is the "type with no producer" pattern again, and the difference is
+  worth noting: those were internal and cost nothing until somebody read them.
+  **This one shipped, and a user could see it.** The lesson is the same and
+  the stakes are not, so the same `grep` -- *who produces this, and who reads
+  it* -- is worth running against anything the product writes *outward*: a
+  registry value, a `.desktop` entry, a file on somebody else's disk.
+
+- **A type with no producer is not an implementation, it is a claim** -- and
+  three of them turned up in one sequence, in three different hiding places.
+
+  - Four of `Policy`'s seven axes are computed, stored and printed by the
+    Security Inspector as *the policy in force*, and consulted by nothing
+    ([ADR-0059](docs/decisions/ADR-0059.md)).
+  - `Format::has_data_operations` answered a question whose only asker was a
+    menu that had left ([ADR-0062](docs/decisions/ADR-0062.md)).
+  - `bp_buffer::Access` guarded `insert` and `remove` against a condition
+    **nothing has ever set** ([ADR-0066](docs/decisions/ADR-0066.md)). Not a
+    casualty of the reduction either: before any of it, its one production
+    call site was `LargeFile::open`, and a huge document had no `Buffer` at
+    all -- so the guard on the rope has never once fired.
+
+  **None would fail a build, a test, or a review of the file it lives in.**
+  Each one reads perfectly well locally; what is missing is somewhere else.
+  All three fall out of one question asked of the *workspace* rather than of a
+  file: **who produces this, and who reads it?** That is a `grep`, and it is
+  the same `grep` that would have caught both of this session's own trap-6
+  mistakes.
+
+- **Ask whether a cost is *inherent* to a change or merely *concurrent* with
+  it.** [ADR-0059](docs/decisions/ADR-0059.md)'s five removals reported three
+  things as materially weaker, and all three were recorded honestly as
+  consequences. [ADR-0065](docs/decisions/ADR-0065.md) found that only one of
+  them had to be paid.
+
+  - **Inherent**: ADR-0050's golden envelope vectors. No format, no vector.
+    Nothing can restore them and pretending otherwise would be worse.
+  - **Concurrent**: `bp_formats::sniff` lost the only thing that could
+    contradict it -- but a *test* does not need a menu, and `serde_json` was
+    already in the tree, so the claim came back for the price of one file and
+    no dependency.
+  - **Concurrent**: Private lost its recovery journal, on ADR-0020's rule that
+    a control which quietly weakens itself is worse than an absent one. **The
+    qualifier was doing more work than it got credit for**: the Privacy menu
+    has always printed what the journal actually is, so the failure that rule
+    forbids could not occur. Private keeps a plaintext journal and the row
+    says "on, unencrypted".
+
+  **Recording a cost is not the same as accepting it**, and a sequence with
+  momentum will file both the same way. The check is cheap and belongs after
+  the change lands rather than during it: *would this still be true if the
+  removal had happened on its own?*
+
+- **A rule with a qualifier should be read with the qualifier.** ADR-0020 says
+  a control that **quietly** weakens itself is worse than an absent one.
+  ADR-0064 read that as "weakens itself" and disabled the journal; ADR-0065
+  read the whole sentence and kept it, with the readout as the licence -- and
+  a test that says in as many words that if the readout stops naming the
+  journal's form, the journal goes away again.
+
+- **The last removal in a sequence is the one that changes what stays.**
+  R1 to R4 of [ADR-0059](docs/decisions/ADR-0059.md) were deletions: a crate
+  left, its callers left with it, and the survivors were untouched. R5 could
+  not be, because `bp-security` was never a security *feature* -- it was the
+  governor of features, and four of the things it governed had already gone.
+  What was left was a governor with two subjects and a name describing its
+  origins rather than its job.
+
+  **A thing that decides on behalf of other things outlives them, and it
+  should be renamed when it does.** Keeping "Security" over four profiles and
+  a toggle would have been free, and would have left every future reader
+  believing this product does something it does not.
+
+- **A deleted match arm is not a compile failure, it is a menu row that stops
+  working.** [ADR-0064](docs/decisions/ADR-0064.md) removed nine security
+  dispatch arms as one block, and took `SET_DEFAULT_EDITOR` with them by
+  accident. File ▸ Set as Default Editor would have shipped doing nothing.
+
+  **It surfaced as a dead-code *warning* on a constant in another module**,
+  not as an error, and `no_menu_offers_a_row_that_does_nothing` does not catch
+  it either -- the row still has an action id, and the id still exists. The
+  habit that saves this is the one R4 already named: delete the *callee*
+  first, so the compiler audits the callers. Here the callee was `rfd` and
+  `bp-platform`, which are staying, so nothing was owed an error.
+
+- **A test that checks a label's length catches its first new offender.**
+  ADR-0049 found a clipped menu label by driving the window and mechanised it.
+  The Privacy menu's new readout -- "Recorded about this document: path, title
+  and tags" -- was 50 characters and would have been elided. This is the first
+  time that test has failed for a label written *after* it existed, which is
+  the whole point of mechanising a manual finding: the second occurrence costs
+  nothing to find.
+
+- **A grep before a question, and the person who wrote the rule broke it.**
+  A survey during ADR-0064 reported that `bp_crypto::stable_name` named
+  *every* recovery journal file, so removing crypto would orphan unsaved work
+  -- and a whole redesign of journal naming was scoped on that premise.
+  It was wrong: `stable_name` named only the *sealed* journal, and plaintext
+  journals are `{document_id}.json`. One `grep` settled it.
+
+  That is trap 6, committed while warning about trap 6, in the same session
+  that had already read a pull-request listing from the wrong repository.
+  **Both were confident readings of something adjacent to the answer.** The
+  cheap check is not "is this plausible" but "which line of code says so".
+
+- **A capability with no directory of its own is removed by deleting
+  *branches*, and a gate that is always open is a gate a reader has to
+  check.** [ADR-0063](docs/decisions/ADR-0063.md) took out huge-file mode:
+  2,391 of `bp-buffer`'s 2,854 lines, `bp-search`'s `StreamSearch`, and nine
+  files in `bp-ui`. Unlike R1 to R3 there was no crate to `git rm` and no
+  action-id block to free -- it was reached by *opening a file*, so every
+  trace of it was a condition inside code that stays.
+
+  Every one of those nine files had the same shape: **`if this document is
+  served from disk, do the other thing`.** Deleting the other thing is easy.
+  The risk is the `if`, because a condition pinned to `true` and a condition
+  deleted compile identically and read differently to everyone afterwards. The
+  File menu is the clearest case: `let writable = !served_from_disk` gated four
+  rows, and setting it to `true` would have left them all asking a question
+  with one possible answer forever.
+
+  **The tell that you have pinned rather than removed** is a local variable, a
+  parameter or a field whose value is now a constant. `menus::file` lost a
+  `bool` parameter, `AppState` lost `drawn_rows`, and `uses_custom_surface`
+  lost a term -- each found by the compiler only because the thing behind it
+  was deleted first. Delete the callee before simplifying the caller and the
+  compiler does the audit; simplify first and it cannot.
+
+- **A test that asserted the branch you did not change becomes the whole
+  statement when you delete the other one.**
+  `an_ordinary_document_still_follows_the_flag` existed because ADR-0030 made
+  `uses_custom_surface` two-branched, and something had to hold the branch that
+  ADR *did not* touch. With the huge-document branch gone it is the whole of
+  that function, so it was renamed rather than deleted -- and it is now
+  load-bearing in a way it never was, because a flag that started claiming
+  every document would retire `TextInput` by accident and take input-method
+  composition with it.
+
+- **A decision not to unify two things is worth as much as a decision to
+  unify them, and it is only visible when one of them leaves.**
+  [ADR-0044](docs/decisions/ADR-0044.md) declined to merge citation reading
+  with the store's synthesis, on the grounds that they answer different
+  questions about different subjects -- one reads the document in front of
+  you, the other reads what you have written over time. At the time that read
+  as a refusal to tidy up two things that shared a menu.
+
+  It is what made [ADR-0060](docs/decisions/ADR-0060.md) a deletion instead of
+  a rewrite. `bp-research` was 5,208 lines with **one dependant and one file
+  in it** -- the seam was a `mod` line and a `use`. Had "research mode" been
+  built as one thing, removing citations would have meant unpicking it from
+  the survivor.
+
+  **The general form:** a refusal to merge is a cheap thing to argue against
+  and an expensive thing to undo, and its payoff arrives only if one half is
+  ever removed. That payoff is invisible while both halves are alive, which is
+  why the argument for merging always sounds better than it is.
+
+- **The same crate borrowed a caller's reason twice, in two consecutive
+  removals.** `bp_semantic::is_fence` said it recognised both fence characters
+  *"because `bp-notebook` reads both"* (ADR-0057). `bp_semantic::questions`
+  explained itself by citing *"the same split `bp-research` draws between
+  finding a DOI and resolving one"* (ADR-0060). Both rules were correct and
+  unchanged; both justifications named a crate that had just been deleted.
+
+  **Twice in the same crate is a pattern, and the pattern has a cause.**
+  `bp-semantic` is a crate of *rules*, and a rule is most tempting to justify
+  by naming the caller that wanted it -- which is the weakest reason
+  available, because the caller is the one thing guaranteed to change. A rule
+  worth keeping has a reason that survives its callers; if the only reason to
+  hand is "X needs it", that is worth noticing before X leaves rather than
+  after.
 
 - **A record that is 44% right is more dangerous than one that is wholly
   stale.** `metadata/repository_manifest.json` sat in this repository from the
@@ -771,9 +1424,9 @@ is worth more than the fact.
 [ROADMAP.md](ROADMAP.md) has per-phase status;
 [MENU_MAP.md](docs/product/MENU_MAP.md) says which menu rows are real;
 [ARCHITECTURE.md](docs/architecture/ARCHITECTURE.md) has the crate map and the
-editor-view constraint; [WORK_QUEUE.md](project/WORK_QUEUE.md) lists what is
+editor-view constraint; `project/WORK_QUEUE.md` lists what is
 ready to take and what cannot run in parallel;
-[NEXT_SESSION.md](project/NEXT_SESSION.md) is the plan for picking this up
+`project/NEXT_SESSION.md` is the plan for picking this up
 again.
 
 ## What the tiers taught

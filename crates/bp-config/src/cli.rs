@@ -213,8 +213,15 @@ pub struct Package {
     /// `env!("CARGO_PKG_VERSION")` at the shell.
     pub version: &'static str,
     /// `env!("CARGO_PKG_LICENSE")` at the shell. The workspace manifest is
-    /// the one home for this string; `LICENSE-MIT` and `LICENSE-APACHE` at
-    /// the repository root are the texts behind it.
+    /// the one home for this string and `LICENSE` at the repository root is
+    /// the text behind it (ADR-0071).
+    ///
+    /// **"The one home" was false for as long as nothing asked.** The About
+    /// box in `bp-ui` carried the licence as a string literal, so the two
+    /// disagreed the moment either changed -- trap 4, and it survived a
+    /// relicence being planned rather than being found by one. About now
+    /// reads `CARGO_PKG_LICENSE` too, which is what makes this sentence a
+    /// property of the code rather than a wish about it.
     pub license: &'static str,
 }
 
@@ -361,7 +368,7 @@ mod tests {
 
     const PACKAGE: Package = Package {
         version: "9.9.9",
-        license: "MIT OR Apache-2.0",
+        license: "GPL-3.0-only",
     };
 
     #[test]
@@ -473,6 +480,36 @@ mod tests {
     }
 
     #[test]
+    fn the_first_version_line_is_the_name_then_a_space_then_the_version() {
+        // Both release scripts and `release.yml` read this line, and they
+        // read it as *last field = version, everything before = name*. They
+        // used to read the second field, which broke the day the name gained
+        // a space (ADR-0074): every archive was named "Lite" and no release
+        // could be built. This is the contract they rely on, asked here
+        // because no script test runs on every commit.
+        //
+        // Asked of the version that will actually ship, not a test constant:
+        // a release candidate is cut by bumping it to `x.y.z-rc.n`, and that
+        // is the string the scripts will be handed.
+        let shipping = Package {
+            version: env!("CARGO_PKG_VERSION"),
+            license: PACKAGE.license,
+        };
+        let rendered = version(shipping);
+        let first = rendered.lines().next().unwrap_or_default();
+        let (name, number) = first.rsplit_once(' ').unwrap_or_default();
+        assert_eq!(name, bp_platform::DISPLAY_NAME, "got {first:?}");
+        assert_eq!(number, shipping.version, "got {first:?}");
+        // The scripts match `^\d+\.\d+\.\d+`: a pre-release suffix may
+        // follow it, and a name-shaped word may not.
+        let core = number.split('-').next().unwrap_or_default();
+        assert!(
+            core.split('.').count() == 3 && core.split('.').all(|part| part.parse::<u32>().is_ok()),
+            "the release scripts refuse a version that does not start x.y.z: {number:?}"
+        );
+    }
+
+    #[test]
     fn version_names_the_product_the_desktop_registration_names() {
         // Trap 4: two claims about the same product coexist for as long as
         // nothing asks. This asks. `AppInfo::bachelorpad` is what writes the
@@ -490,7 +527,7 @@ mod tests {
     fn version_reports_the_version_and_licence_it_was_handed() {
         let rendered = version(PACKAGE);
         assert!(rendered.contains("9.9.9"), "got {rendered}");
-        assert!(rendered.contains("MIT OR Apache-2.0"), "got {rendered}");
+        assert!(rendered.contains("GPL-3.0-only"), "got {rendered}");
     }
 
     #[test]

@@ -1,12 +1,23 @@
 # Hostile-input harnesses
 
 Phase 19 asked for "fuzz targets for parsers, encrypted envelopes, notebook
-import and malformed inputs". This is those targets, less one: **notebook
-import no longer exists to target.** [ADR-0057](../docs/decisions/ADR-0057.md)
-removed `bp-notebook` and `bp-execution`, so the harness that fed arbitrary
-JSON to `import_ipynb` went with the function it was protecting, and its
-fifteen corpus entries with it — a corpus is evidence about a parser, and
-there is no parser left for it to be evidence about.
+import and malformed inputs". **Two of those five harnesses remain**, and the reduction is why:
+[ADR-0057](../docs/decisions/ADR-0057.md) removed `bp-notebook` and its
+`import_ipynb` target, [ADR-0062](../docs/decisions/ADR-0062.md) removed
+`bp-data` with the YAML target and corpus, and
+[ADR-0064](../docs/decisions/ADR-0064.md) removed `bp-crypto` with the
+envelope target and its three golden vectors.
+
+**A corpus is evidence about a parser, and there is no parser left for any of
+those to be evidence about.** What remains — `bp_formats::sniff` and
+`bp_files::load` — is every parser this product still points at a file
+somebody else wrote.
+
+**Losing the envelope target is the largest single reduction in assurance
+here**, and it is worth saying rather than leaving to be inferred from a
+shorter file: it did exhaustive single-byte corruption, every prefix of a real
+document, and the only assertion anywhere about a document *this build did not
+write*.
 
 Read the next section before you describe any of this to anyone, because they
 are not fuzzing.
@@ -72,15 +83,15 @@ How each is detected:
 
 ### Stack size is part of the harness
 
-ADR-0023 measured YAML's nesting limit against **the 1 MiB main thread**,
-which is the stack the application parses on. libtest gives a test thread
-considerably more, so a cap validated on the default stack proves nothing
-about the shipped binary. Every probe runs on a thread pinned to
-`bp_fuzz::MAIN_THREAD_STACK`.
+Every probe runs on a thread pinned to `bp_fuzz::MAIN_THREAD_STACK` — **the
+1 MiB main thread**, which is the stack the application parses on. libtest
+gives a test thread considerably more, so a limit validated on the default
+stack proves nothing about the shipped binary.
 
-Run the suite in **debug** for the depth probes. Release builds use fewer
-bytes per frame — ADR-0023 measured 500–1000 levels there against 280–290
-unoptimised — so debug is the harsher question.
+This was ADR-0023's rule and it outlived that ADR. The depth probes it was
+written for went with `bp-data` (ADR-0062); the pinning stays, because
+`bp_files::load` recurses on hostile input too and the reasoning was never
+about YAML.
 
 ## Running it
 
@@ -91,20 +102,19 @@ in the shipped application's graph. `.gitignore` already anticipates it
 
 ```powershell
 cd fuzz
-cargo test                          # the whole suite, ~2 minutes
-cargo test --test yaml              # one target
-cargo test --release --test yaml    # faster; weaker as a depth probe
+cargo test                            # the whole suite, ~2 minutes
+cargo test --test files            # one target
+cargo test --release --test files  # faster
 
 # A deliberate soak. The default case count is sized for a gate, not a
 # fuzzing session.
-$env:BP_FUZZ_CASES=100000; cargo test --release --test yaml
+$env:BP_FUZZ_CASES=100000; cargo test --release --test files
 
 # Regenerate the corpus. Only needed if a format changed -- see below.
 cargo run --bin seed-corpus
 
 # The pre-authentication KDF cost measurement, which is ignored by default
 # because it allocates a gigabyte.
-cargo test --release --test envelope -- --ignored --nocapture
 ```
 
 `BP_FUZZ_CASES` sets how many cases each `proptest` block runs; the default
@@ -127,56 +137,29 @@ out of `-Quick` and why pre-push rather than pre-commit is where they land.
 
 Priority order, which is also value order.
 
-### 1. `tests/yaml.rs` — `bp_data`'s YAML entry points
+### 1. `tests/data.rs` — `bp_formats::sniff` and `detect`
 
-The highest-value target here, and the reason the directory exists.
-ADR-0023 caps nesting at 128 levels and alias expansion at 1,000,000 nodes
-because `saphyr`'s loader recurses one stack frame per level and **a 200-byte
-input crashed the process**. Those two caps *are* the mitigation; this asks
-whether they hold.
+**Narrowed by [ADR-0062](../docs/decisions/ADR-0062.md), not deleted.** It
+covered every `&str` entry point in `bp_data`; `sniff` was here too, and is
+covered nowhere else. The filename now names the corpus it reads
+(`corpus/data/`) rather than the crate it exercises.
 
-Covers `yaml_validate`, `yaml_document_count`, `yaml_format`, `yaml_minify`,
-`yaml_to_json` and `json_to_yaml` — all of them, because the guard runs in
-`scan_yaml` before a tree is built and every other entry point goes on to
-build one. Depth is walked in single steps from 0 to 140 and then out to
-100,000, in flow *and* block style; the alias bomb is walked from 2 levels to
-100.
+`sniff` is total — it returns a `Format`, never a `Result` — so a panic is its
+only possible failure, and it runs on every file the editor opens before
+anything else looks at it. Two hundred lines of prefix matching over the first
+kilobyte.
 
-### 2. `tests/envelope.rs` — `bp_crypto::open`
+**What the narrowing cost is worth reading before trusting a green run.**
+`sniff` used to have a consumer that could contradict it: `bp-data` had to
+parse a document as whatever `sniff` called it, and a cross-crate test
+asserted the two agreed. *That test found a real defect* — `sniff` counted
+lines beginning with `{` and classified a pretty-printed JSON array as JSON
+Lines. Nothing can ask that question now. So this target gained one property
+that is not survival — **appending text past the first kilobyte must not
+change the verdict** — which is checkable without a parser and is the most
+that can honestly be asserted.
 
-An envelope parser reads a header before it has a key, so it acts on whatever
-an attacker wrote before it can authenticate anything — `header.rs` says so
-itself. Covers `open` under three passphrases (right, wrong, empty),
-`is_bpadx` and `stable_name`, plus:
-
-- **every** prefix of a real document (all truncations);
-- **every** single-byte corruption of a real document, at three bit masks —
-  exhaustive, not sampled, because "no flipped byte produces plaintext" is a
-  total claim;
-- arbitrary bytes behind a valid magic, so the header parser is actually
-  reached rather than rejected in the first comparison;
-- a real document with a random slice overwritten, which is the highest-yield
-  generator in the file;
-- `seal`/`open` round trips over arbitrary options;
-- **the three golden vectors**, which are the only assertion anywhere about a
-  document this build did not write. See "The corpus", below.
-
-### 3. `tests/data.rs` — JSON, JSONL, TOML, CSV, and `bp_formats::sniff`
-
-Every `&str` entry point in `bp_data` except the YAML ones, run over the same
-input regardless of what the input looks like — a CSV reader handed JSON is
-what happens when a user picks the wrong menu item. Includes the YAML corpus
-pointed at these readers, nesting depth for the formats with their own limits
-(`serde_json`'s 128, which ADR-0023 chose the YAML cap to match), extreme
-table shapes (10,000 columns; 20,000 rows; a 50,000-character unterminated
-quoted field), and a round-trip property: whatever `json_format`,
-`json_minify` and `json_sort_keys` write must parse back.
-
-`bp_formats::sniff` is here because it is total — it returns a `Format`,
-never a `Result` — which means a panic is its only possible failure, and it
-runs on every file the editor opens.
-
-### 4. `tests/files.rs` — `bp_files::load`
+### 2. `tests/files.rs` — `bp_files::load`
 
 The first thing that touches a file the user picked. The UTF-16 decoder is
 hand-written, so it is exactly what this is for. Covers arbitrary bytes,
@@ -192,60 +175,53 @@ throughout. See "What was found" for the one place where the *text* does not.
 
 `corpus/<target>/`, checked in, written by `src/bin/seed-corpus.rs`. Every
 entry has a comment there saying where it came from and what it is meant to
-provoke. Re-running the seeder is **not** idempotent for `corpus/envelope/` —
-`seal` draws a fresh random salt per document — so only re-run it if a format
-actually changed.
+provoke. It is idempotent now: `corpus/envelope/` was the one directory it was
+not, because `seal` drew a fresh salt per document, and that directory is
+gone.
 
-**Three of those entries are golden vectors, and that is a stronger claim than
-the rest of the corpus makes.** `envelope/sealed.bpadx`, `sealed-aes.bpadx`
-and `sealed-multichunk.bpadx` were sealed once, under a known passphrase over
-known plaintext, and `a_document_sealed_by_an_earlier_build_still_opens`
-asserts that this build still opens each of them to exactly those bytes. It is
-the only test in the repository that says anything about a document *this*
-build did not write — every other round trip seals and opens with the same
-build, which proves the two halves agree with each other and cannot prove
-either agrees with what is on somebody's disk (ADR-0050).
-
-So **regenerating `corpus/envelope/` is the one action that would make that
-test pass vacuously.** If it fails, the format changed: decide whether that was
-meant before reaching for the seeder.
+**The three golden vectors are gone.** `envelope/sealed.bpadx`,
+`sealed-aes.bpadx` and `sealed-multichunk.bpadx` were sealed once under a
+known passphrase and asserted to still open, and they were the only test in
+the repository that said anything about a document *this* build did not write
+([ADR-0050](../docs/decisions/ADR-0050.md)). They went with `bp-crypto` under
+[ADR-0064](../docs/decisions/ADR-0064.md). Nothing here replaces them, and
+nothing can: the claim needed a format to make it about.
 
 The pathological entries, which came from the ADRs and crate docs rather than
 being invented here:
 
 | Entry | Source |
 | --- | --- |
-| `yaml/nesting-at-cap.yaml`, `nesting-over-cap.yaml` | ADR-0023's 128 |
-| `yaml/nesting-block-384.yaml` | the nested block mappings ADR-0023 measured dying at 290 |
-| `yaml/nesting-flow-100000.yaml` | the depth ADR-0023 says the event stream reads without touching the stack |
-| `yaml/billion-laughs.yaml` | `bp_data`'s own `an_alias_bomb_is_refused_before_it_is_expanded` — 10^10 nodes, under a kilobyte, ten levels deep |
-| `yaml/billion-laughs-x2.yaml` | the same at twenty levels: 10^20, which overflows a non-saturating `u64` |
-| `yaml/duplicate-key.yaml` | ADR-0023's "a duplicate mapping key is an error, not a merge" |
-| `yaml/implicit-key-over-1024.yaml` | the 1025-character key `yaml_format` refuses because the emitter would write something that will not parse back |
-| `yaml/recursive-alias.yaml` | an alias to the anchor being defined |
-| `envelope/truncated-body.bpadx`, `truncated-header.bpadx` | a partial copy or an interrupted sync |
-| `envelope/flipped-ciphertext-byte.bpadx`, `flipped-header-byte.bpadx` | ADR-0021 authenticates the header as additional data, so both must refuse |
-| `envelope/kdf-cost-raised.bpadx`, `kdf-cost-absurd.bpadx` | one inside the format's cost ceiling, one past it |
-| `envelope/sealed.bpadx`, `sealed-aes.bpadx`, `sealed-multichunk.bpadx` | golden vectors: ADR-0021's promise that a document written today opens in ten years |
 | `files/utf16le-odd-length.bin` | `LoadError::TruncatedUtf16` — an odd body, so the last code unit is cut in half |
 | `files/utf16le-unpaired-high-surrogate.bin` and three siblings | `LoadError::UnpairedSurrogate`, in both byte orders and at end-of-file |
 | `files/utf16le-lone-bom.bin` | a file that is nothing but a mark: a valid empty document, not an error |
 | `files/utf8-bom-then-zwnbsp.bin` | found by this harness — see below |
 
 Plus, in each directory, the ordinary and the merely awkward: empty files,
-comments only, merge keys, complex keys, `.nan`/`.inf`, overlong UTF-8, lone
-surrogate escapes in JSON, and ragged and quote-damaged CSV.
+comments only, overlong UTF-8, lone surrogate escapes in JSON, and ragged and
+quote-damaged CSV.
+
+**`corpus/yaml/` is gone**, with the eight pathological entries this table
+used to lead with ([ADR-0062](../docs/decisions/ADR-0062.md)). They were
+evidence about `bp-data`'s YAML loader and there is no loader; keeping a
+corpus that crash-loops any language server reading workspace YAML, for a
+parser this product no longer ships, is not a trade worth making. `corpus/data/`
+stays and feeds `sniff`.
 
 ## What was found
 
 **No panic. No abort. No hang.** Across the corpus, the exhaustive sweeps and
 several hundred thousand property cases per target, every one of the targets
-held its invariant. There were five when that was written and there are four
-now, and the notebook target is not among the ones that found something --
-its removal costs this section no finding. In particular ADR-0023's two caps hold: nothing
-between 0 and 100,000 levels of YAML nesting reached a stack overflow on a
-1 MiB stack in a debug build, in either flow or block style, and the alias
-bomb is refused at every size from 2 levels to 100.
+held its invariant.
+
+**There were five targets when that was written and there are three.** Neither
+removed target — notebook import (ADR-0057) or YAML (ADR-0062) — is among the
+ones that found something, so this section loses no finding. What it does lose
+is a claim: ADR-0023's two caps held under every probe, nothing between 0 and
+100,000 levels of YAML nesting reached a stack overflow on a 1 MiB stack, and
+the alias bomb was refused at every size from 2 to 100. **That was true and is
+now unrepeatable**, because the code it was true of has been deleted. It is
+recorded here as history rather than as assurance.
 
 Two observations that are not crashes and are recorded rather than fixed.
 Neither crate was touched — other agents are working in this tree.
@@ -270,58 +246,15 @@ Test:
 `files::a_leading_zwnbsp_saved_without_a_bom_is_read_back_as_a_bom`.
 Corpus: `files/utf8-bom-then-zwnbsp.bin`.
 
-### A document's declared KDF cost is paid before anything is authenticated
+### The corpus was hostile to the editor, too
 
-`bp-crypto`. `open` parses the header, derives a key at the cost the header
-declares, and only then checks a tag. It cannot be otherwise — a tag check
-needs a key — but it means the cost written in an **unauthenticated** header
-is paid in full before the reader can say the document is rubbish. A single
-flipped bit in the cost field of a real document is enough.
+**This hazard is gone with the corpus** ([ADR-0062](../docs/decisions/ADR-0062.md)
+deleted `corpus/yaml/`), and the account is kept because the *shape* recurs:
+any committed corpus is input somebody's tooling will read without being told
+what it is. Read it as a warning about the next one, not a live problem.
 
-`KdfParams::validate` is the bound, and it is doing its job: a cost one KiB
-past the ceiling is refused in microseconds. Measured on this machine
-(release, `--ignored`), 2026-08-22:
-
-```text
-declared cost       8 KiB ->   55.3µs to refuse
-declared cost    1024 KiB ->    1.3ms to refuse
-declared cost   65536 KiB ->   96.0ms to refuse
-declared cost  262144 KiB ->  407.4ms to refuse
-64 MiB at   1 passes ->  104.9ms to refuse
-64 MiB at   8 passes ->  583.6ms to refuse
-64 MiB at  16 passes ->     1.1s to refuse
-declared cost 256 MiB + 1 KiB -> refused immediately
-```
-
-The ceiling `validate` permits is **256 MiB × 16 passes × 64 lanes**
-([ADR-0035](../docs/decisions/ADR-0035.md), which lowered it from 1 GiB and 64
-passes). ADR-0035 measured that corner in release at **~5.56 s**, down from the
-~75 s the old ceiling allowed -- a quarter of a gigabyte of resident memory per
-attempt, on an unauthenticated header, before the user is told the file is
-damaged. The sweep above walks memory and passes; it does not isolate the lane
-multiplier, which is why the corner's number comes from the ADR rather than
-from this table.
-
-That is a bound rather than an unbounded denial-of-service, which is what
-ADR-0021 set out to achieve, and it is written down here because "generous but
-finite" is easier to review with the number attached. Test:
-`envelope::the_declared_kdf_cost_is_paid_before_anything_is_authenticated`.
-
-**This table was wrong for a session and the shape of the mistake is worth
-keeping.** It carried the 1 GiB ceiling after ADR-0035 lowered it, so three of
-its rows -- 512 MiB, 1 GiB, and 64 passes -- were past the bound and were
-timing an *instant refusal* rather than the work. The numbers were real
-measurements of the wrong thing, which is the hardest kind of stale figure to
-notice. The control is now one KiB past the ceiling rather than sixteen times
-past it: a bound is only demonstrated at its edge.
-
-### The corpus is hostile to the editor, too
-
-Not a defect in anything this repository ships, and recorded because it costs
-somebody a confusing hour otherwise.
-
-`corpus/yaml/billion-laughs.yaml` is 570 bytes and it kills the YAML language
-server that Google's Cloud Code extension for VS Code runs. That server
+`corpus/yaml/billion-laughs.yaml` was 570 bytes and it killed the YAML
+language server that Google's Cloud Code extension for VS Code runs. That server
 defaults to `cloudcode.yaml.yamlFileMatcher = "**/*.yaml"` — the whole
 workspace — and expands aliases eagerly, with no equivalent of ADR-0023's cap.
 Opening the workspace is enough. It climbs to the ~4 GB Node heap ceiling in
@@ -357,38 +290,41 @@ which files are matched against schemas, not which are parsed, and the log says
 `Server initialization failed`: it dies during startup, before the setting
 spares it anything. There is no checked-in setting that prevents this.
 
-What works is not installing the extension, or disabling it for this
-workspace — it is a GCP, Kubernetes and Skaffold extension, and the only match
-for any of those words in this tree is this paragraph. VS Code keeps
-per-workspace extension enablement in its own state rather than in `.vscode/`,
-so that cannot be committed for everyone; it is one action per clone, from the
-Extensions view.
+What worked was not installing the extension, or disabling it for this
+workspace. VS Code keeps per-workspace extension enablement in its own state
+rather than in `.vscode/`, so that could not be committed for everyone; it was
+one action per clone.
 
-Two things generalise beyond one extension. **Any tool that walks the tree
-looking for YAML is a candidate** — the `.claude/worktrees/` copies multiply
-every hit, and the same corpus is reachable from editors, indexers and search
-tools that were never told what this directory is. And the caps ADR-0023
-argues for are not belt-and-braces: this is what the same input does to a
-mature parser written by somebody else that does not have them.
+**Three things generalise past the extension and past the file.** Any tool
+that walks the tree looking for a format a corpus contains is a candidate —
+the `.claude/worktrees/` copies multiply every hit, and a corpus is reachable
+from editors, indexers and search tools that were never told what the
+directory is. The caps ADR-0023 argued for were not belt-and-braces: this is
+what the same input does to a mature parser that lacks them.
+
+And the third is the one this session added. On the morning of 2026-08-29 the
+answer here was **"the corpus is untouched and the listing is narrowed
+instead"**, because the corpus was evidence about a parser this product
+shipped. By the afternoon ADR-0062 had removed that parser, and the same file
+went from *valuable and awkward* to *purely a hazard* without changing a byte.
+**What a committed artefact is worth is a function of what still reads it**,
+and that is not a property of the artefact.
 
 ## Deliberately not covered
 
 - **Anything requiring nightly or a sanitizer.** No ASan, no MSan, no
   libFuzzer. Stated at the top, repeated here because it is the largest gap.
-- **`bp-crypto`'s cryptographic claims.** Nothing here asserts that a
-  document *cannot* be opened without the passphrase, only that trying does
-  not crash. Confidentiality is a property of the primitives and of ADR-0021's
-  construction; a survival harness is the wrong instrument for it.
-- **`bp_crypto::sign`.** Ed25519 signatures landed alongside the envelope and
-  have no target here. They should get one.
-- **The recovery journal (ADR-0022), `bp-secrets`, and the security profile
-  (ADR-0020).** All parse or deserialise stored state, all are reachable from
-  a file on disk, none is covered.
+- **Nothing cryptographic.** `bp-crypto` and `bp-integrity` are gone
+  ([ADR-0064](../docs/decisions/ADR-0064.md)), so there is no envelope, no
+  signature and no key material anywhere in this product.
+- **The recovery journal and the privacy profile (ADR-0020).** Both parse or
+  deserialise stored state, both are reachable from a file on disk, neither is
+  covered.
 - **`bp_files::save`**, `atomic_write` and `resolve_in_dir` — the write half.
   Hostile *paths* rather than hostile bytes, which is a different target with
   different setup, and it is missing.
-- **`bp-config`, `bp-history`, `bp-clipboard`, `bp-search`, `bp-redaction`,
-  `bp-integrity`.** Not surveyed at all. Several read files.
+- **`bp-config`, `bp-history`, `bp-search`, `bp-storage`.** Not surveyed at
+  all. Several read files.
 - **Concurrency.** Every probe is single-threaded. Nothing here would find a
   race, and `bp-files`' watch/reload path has one to be found or ruled out.
 - **Memory growth as a failure.** A hang is detected by a clock; an input

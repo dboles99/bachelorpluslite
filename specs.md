@@ -8,7 +8,7 @@ BachelorPad+ is a cross-platform Rust-native semantic text-processing appliance 
 - Windows 11
 - Linux
 
-It must remain usable as a very fast plain-text editor when all semantic, research, clipboard-history, and cloud-connected features are disabled.
+It must remain usable as a very fast plain-text editor when all semantic, research and cloud-connected features are disabled.
 
 Canonical positioning:
 
@@ -96,13 +96,19 @@ Required:
 
 ## 5. Large files and Rust-specific performance
 
-Required:
+**The large-file half is deleted.** [ADR-0063](docs/decisions/ADR-0063.md)
+removed large-file detection, the memory-mapped read-only mode, streaming
+search and the read-only handling for very large files. A document is loaded
+whole into the rope or fails trying, which is what Notepad does.
 
-- large-file detection
-- memory-mapped read-only mode
-- streaming search
+**The performance half survives and is the reason this section stays.**
+`bp-buffer`'s rope, incremental rendering and non-blocking background work are
+untouched, and `bp-editor/benches/scroll.rs` still holds ADR-0017's revert
+condition: a document a thousand times larger costs 1.19x per frame.
+
+Required, of what is left:
+
 - incremental rendering
-- read-only initial handling for very large files
 - parallel multi-file analysis
 - non-blocking background operations
 - high-performance recursive search
@@ -156,7 +162,11 @@ Format profiles:
 - Source Code
 - Notebook
 - Log
-- Research Note
+
+*Research Note* was on this list and was never built -- no `Profile` in
+`bp-formats` ever carried it -- and the capability it would have grouped
+formats for left under [ADR-0060](docs/decisions/ADR-0060.md). Removed rather
+than left to read as planned.
 
 ## 8. Markdown
 
@@ -171,43 +181,23 @@ Format profiles:
 
 ## 9. Structured data
 
-### YAML
-- validate
-- format
-- sort keys
-- duplicate-key detection
-- outline/folding
-- JSON/TOML conversion
+**Deleted, in full.** [ADR-0062](docs/decisions/ADR-0062.md) removed `bp-data`
+and the Data menu -- validate, format, minify and convert for JSON, JSON
+Lines, TOML, YAML and delimited text, plus the CSV shape report and column
+types. Windows Notepad does none of it.
 
-### JSON
-- raw/tree/split
-- validate
-- pretty/minify
-- sort keys
-- structural selection
-- JSONPath-like copying
+What this section asked for that **survives**: *recognition*. `bp-formats`
+still identifies every format this section listed, and the status bar still
+names it. [ADR-0008](docs/decisions/ADR-0008.md)'s distinction between what a
+format *is* and what can be *done* with it is what made that separable -- the
+predicate naming a capability (`has_data_operations`) went, the one naming a
+kind (`Profile`) stayed.
 
-### JSONL / NDJSON
-- streaming validation
-- record count
-- malformed-record detection
-- field extraction
-- schema inference
-- deduplication
-- statistics
-- filter/sort/query
-- table view
-- JSON/CSV conversion
-
-### CSV / TSV
-- delimiter detection
-- table/raw views
-- column typing
-- filtering/sorting
-- statistics
-- missing values
-- duplicate rows
-- JSON/JSONL conversion
+[ADR-0023](docs/decisions/ADR-0023.md)'s YAML safety rules go with the parser
+they guarded: the 128-level nesting cap, the million-node alias-expansion
+ceiling and the refusal of duplicate mapping keys. They were correct, they
+held under every probe in `fuzz/`, and they existed to let this product parse
+a YAML file -- which it no longer does.
 
 ## 10. Semantic layer
 
@@ -304,62 +294,58 @@ BachelorPad+ remains a text appliance, not a full IDE.
 
 ## 14. Clipboard
 
-Context menu includes:
+**Deleted, less one row.** [ADR-0061](docs/decisions/ADR-0061.md) removed
+`bp-clipboard` -- the history, pinning, kind detection and the format-aware
+paste transformations -- along with the `Clipboard` policy axis that decided
+whether a history could persist. Windows Notepad has no clipboard history and
+neither does a note-organising layer.
 
-- Paste
-- Paste Special
-- Clipboard History
-- Windows native clipboard history where available
-- BachelorPad+ local clipboard panel
-- pinned items
-- search
-- type detection
-- format-aware paste transformations
+**Cut, Copy and Paste survive and always did**, as `bp_editor::Command` values
+over the OS clipboard. They shared a word with the history and nothing else.
+*Paste Special* was this section's name for the transformations and goes with
+them.
 
-Potential types:
-
-- plain text
-- Markdown
-- JSON
-- YAML
-- URL
-- path
-- code
-- structured data
-
-Persistent clipboard history is opt-in.
+The rule this section ended on -- *persistent clipboard history is opt-in* --
+is removed rather than kept, by ADR-0057's rule: there is no history to make
+opt-in, and a constraint that cannot fail reads as live when it is vacuous.
 
 ## 15. Security and cryptography
 
-Required security concepts:
+**Almost all of it is deleted.** [ADR-0064](docs/decisions/ADR-0064.md)
+removed the `.bpadx` encrypted format, encrypted recovery and edit journals,
+secret scanning, redaction, document hashing, digital signatures, the audit
+history and the key-protection work that would have followed. Five crates and
+13,742 lines. Windows Notepad has none of it, and a text editor that offers
+cryptography it cannot maintain is worse than one that offers none.
 
-- `.bpadx` encrypted file format
-- passphrase protection
-- Argon2id KDF
-- established AEAD encryption implementation
-- platform-neutral encrypted format
-- Windows DPAPI/key protection where appropriate
-- Windows Hello-assisted unlock where supported
-- Linux secret-service/keyring integration where supported
-- per-document security profiles: Standard, Private, Confidential, Maximum, Custom
-- Privacy Mode
-- encrypted recovery
-- encrypted edit journals
-- encrypted revision history
-- secure clipboard
-- timed clipboard clearing
-- secret scanning
-- auto-lock
-- document hashing
-- digital signatures
-- redaction
-- metadata inspector
-- security audit history
-- semantic privacy controls
-- security inspector
-- sensitive-memory wrappers/zeroization where practical
+**Two things survive, and they are the ones that were never about
+cryptography:**
 
-No custom cryptography.
+- **Per-document profiles** -- Standard, Private, Confidential, Maximum,
+  Custom -- resolving to a policy, with the named ones checked to be monotonic
+  ([ADR-0020](docs/decisions/ADR-0020.md)).
+- **Privacy Mode**, a session-wide override that can only tighten, and that
+  acts on what is already written rather than only on what comes next.
+
+They survive because they still *govern* something: whether the recovery
+journal is written, and what the metadata store may record. The menu they live
+in is called **Privacy** now, for the same reason.
+
+Two consequences worth stating plainly rather than leaving to be discovered:
+
+- **A `.bpadx` document already on a disk cannot be opened by this build**,
+  and there is no migration.
+- **Confidential and Maximum keep no recovery journal.** Standard and Private
+  keep a plaintext one, and the Privacy menu names it as unencrypted on a row
+  of its own. The encrypted variant was *deleted* rather than pointed silently
+  at plaintext (ADR-0064), and Private then kept an honestly-labelled journal
+  ([ADR-0065](docs/decisions/ADR-0065.md)) -- ADR-0020 forbids a control that
+  **quietly** weakens itself, and a printed readout is not quiet.
+
+[ADR-0011](docs/decisions/ADR-0011.md)'s "no custom cryptography -- compose
+vetted primitives" is **removed rather than kept**: there is no cryptography
+to implement badly, so the rule cannot fail, and a constraint that cannot fail
+reads as live when it is vacuous.
 
 ## 16. Themes
 
@@ -391,7 +377,6 @@ The optional BachelorPad+ personality mode may use original appliance terminolog
 - Semantic Filing Apparatus
 - Automatic Document Identification
 - Recall Engine
-- Clipboard Retention Chamber
 - Emergency Recovery System
 - Cryptographic Containment
 - Heavy-Duty Text Intake
@@ -451,13 +436,19 @@ a list -- a second list is a list that goes stale (ADR-0054).
 Two flags this section used to show are gone, and neither was a decision when
 it was written:
 
-- `--large-file` is **deleted**. ADR-0027 and ADR-0030 make size decide how a
-  document opens, from metadata, before a byte is read; a flag forcing it is
-  either a no-op or a worse answer than the automatic one.
-- `--readonly` is **not a flag**. Read-only is a property of a document, not
-  of an invocation -- the huge-document viewer is already read-only and
-  Security > Lock Document already exists. It wants a design pass, and
-  `project/WORK_QUEUE.md` has it.
+- `--large-file` is **deleted**. ADR-0027 and ADR-0030 made size decide how a
+  document opens, from metadata, before a byte was read, so a flag forcing it
+  was either a no-op or a worse answer. Both of those ADRs have since been
+  superseded by [ADR-0063](docs/decisions/ADR-0063.md), which removes the
+  choice the flag would have forced: the flag stays deleted for a second
+  reason now.
+- `--readonly` is **not a flag, and it is not a document property either**
+  ([ADR-0066](docs/decisions/ADR-0066.md)). It was declined as a flag here and
+  the capability left open, on the belief that `bp_buffer::Access` carried it.
+  That type had no producer anywhere and never had one, so **read-only in this
+  product is the save refusing** -- which is what Notepad does. The refusal
+  now stats the file and names Save As rather than listing three candidate
+  causes.
 
 The `bpad` short spelling this block also showed is **kept and unbuilt**: it
 is a second name for the same executable, which is something an installer
@@ -490,7 +481,6 @@ SQLite recommended for:
 - filename candidates
 - file events
 - recovery sessions
-- clipboard items
 - artifacts
 - security events
 - signatures
@@ -521,7 +511,7 @@ Throughput and responsiveness:
 - 1 MB text: effectively instant
 - 10 MB: near-instant
 - 100 MB: comfortably usable
-- multi-GB: usable in large-file mode
+- multi-GB: **no longer a target** (ADR-0063)
 - typing latency: imperceptible
 - background save: non-blocking
 - core network requirement: none
@@ -540,7 +530,6 @@ Required:
 - malformed parser inputs
 - corrupted ciphertext
 - wrong-passphrase and authentication-failure tests
-- large-file tests
 - default-association integration tests
 
 ## 24. Threat-model categories
@@ -548,7 +537,6 @@ Required:
 - stolen device
 - malicious files
 - local-user exposure
-- clipboard leakage
 - plaintext recovery
 - cloud transmission
 - secret persistence

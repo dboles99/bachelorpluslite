@@ -79,9 +79,18 @@ pub(crate) fn decode(body: &[u8], endian: Endian) -> Result<String, Utf16Error> 
         return Err(Utf16Error::OddByteCount { bytes: body.len() });
     }
 
-    let units = body
-        .chunks_exact(2)
-        .map(|pair| endian.unit([pair[0], pair[1]]));
+    // `as_chunks::<2>` rather than `chunks_exact(2)`, which hands back real
+    // `[u8; 2]` arrays instead of slices that have to be indexed back into
+    // one. The remainder is provably empty -- the length was checked above --
+    // and discarding it here says so.
+    //
+    // Changed because a *newer* clippy than this machine's has
+    // `chunks_exact_to_as_chunks`, and the first hosted CI run failed on it
+    // (ADR-0073). The local toolchain is 1.97.1 and the runners take the
+    // latest stable, so this is the class of finding no local gate can
+    // produce: the lint did not exist here.
+    let (pairs, _rest) = body.as_chunks::<2>();
+    let units = pairs.iter().map(|&pair| endian.unit(pair));
 
     // One byte of UTF-8 per code unit is the floor, and the common case for
     // the Latin text this editor mostly sees; growing past it is cheap.

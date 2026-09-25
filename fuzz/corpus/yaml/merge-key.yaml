@@ -1,4 +1,0 @@
-base: &b {a: 1}
-derived:
-  <<: *b
-  b: 2
