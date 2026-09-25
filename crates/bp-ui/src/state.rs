@@ -189,6 +189,14 @@ pub struct AppState {
     /// from the box it is about.
     pub(crate) goto_status: String,
     pub(crate) journal: bp_history::Journal,
+    /// Checkpoints an earlier run left, whose work has been restored into
+    /// this one and is waiting to be held here before they are forgotten.
+    ///
+    /// Forgotten by the first checkpoint pass that holds every unsaved
+    /// document -- not at the moment of restoring. A checkpoint that could not
+    /// be written, or that the document's profile refuses, would otherwise
+    /// leave the restored work with no copy on disk at all (ADR-0084).
+    pub(crate) superseded: Vec<bp_history::Entry>,
     /// Size on disk of each open document, as `load` reported it.
     ///
     /// Kept so the status bar can say "Large file" without asking the
@@ -273,6 +281,7 @@ impl AppState {
             find_status: String::new(),
             goto_status: String::new(),
             journal: bp_history::Journal::new(recovery_dir()),
+            superseded: Vec::new(),
             sizes: HashMap::new(),
             privacy: bp_security::Privacy::default(),
             tab_context: None,
@@ -289,9 +298,14 @@ impl AppState {
     /// specs.md section 3 is emphatic that a checkpoint is not a save, and
     /// `bp-core` enforces that: `record_checkpoint` deliberately leaves the
     /// document dirty.
+    ///
+    /// When every unsaved document is held -- written here, or not unsaved at
+    /// all -- the earlier run's entries in [`Self::superseded`] are forgotten,
+    /// and not before.
     pub(crate) fn checkpoint_all(&mut self) {
         let ids: Vec<DocumentId> = self.workspace.iter().map(Document::id).collect();
         let at = now();
+        let mut all_held = true;
 
         for id in ids {
             let Some(doc) = self.workspace.get(id) else {
@@ -325,12 +339,18 @@ impl AppState {
                 // A profile doing what it was set to do is not news; one that
                 // cannot be honoured is. `notice` decides which this was.
                 Ok(bp_history::Written::Refused(refusal)) => {
+                    all_held = false;
                     if let Some(message) = refusal.notice() {
                         self.error = Some(message.to_owned());
                     }
                 }
-                Err(_) => {}
+                Err(_) => all_held = false,
             }
+        }
+
+        if all_held && !self.superseded.is_empty() && self.journal.forget(&self.superseded).is_ok()
+        {
+            self.superseded.clear();
         }
     }
 
@@ -1600,6 +1620,52 @@ mod tests {
             "● Unsaved │ Recovery 8:05 PM │ Last disk save 8:01 PM"
         );
         assert!(!label.contains("Saved 8:05"), "a checkpoint is not a save");
+    }
+
+    #[test]
+    fn restored_work_keeps_its_old_checkpoint_until_this_run_holds_it() {
+        // Found in review of PR #6. Forgetting the earlier run's entry the
+        // moment it was restored assumed the re-checkpoint had been written;
+        // `checkpoint_all` swallows write failures, and a profile can refuse
+        // a journal outright. Either way the restored work would have had no
+        // copy on disk, and a crash before saving would lose it.
+        let dir = tempfile::tempdir().expect("temp dir");
+        let earlier = bp_history::Journal::new(dir.path().to_path_buf());
+        let entry = bp_history::Checkpoint {
+            path: None,
+            name: "Untitled".to_owned(),
+            text: "restored work".to_owned(),
+            written_at: bp_history::now_unix(),
+            encoding: bp_history::CheckpointEncoding::Utf8,
+            line_ending: None,
+        };
+        earlier
+            .checkpoint(1, &entry, bp_security::Recovery::Plaintext)
+            .expect("the earlier run's checkpoint");
+
+        let mut state = AppState::new();
+        state.journal = bp_history::Journal::new(dir.path().to_path_buf());
+        let left = state.journal.left_behind();
+        state.superseded = left.iter().map(|(entry, _)| entry.clone()).collect();
+        state.restore(left.into_iter().map(|(_, checkpoint)| checkpoint));
+
+        // Privacy mode refuses the journal, so this run cannot hold the work.
+        state.privacy = bp_security::Privacy::On;
+        state.checkpoint_all();
+        assert_eq!(
+            state.journal.left_behind().len(),
+            1,
+            "the only copy of the restored work on disk was forgotten"
+        );
+
+        state.privacy = bp_security::Privacy::Off;
+        state.checkpoint_all();
+        assert!(
+            state.journal.left_behind().is_empty(),
+            "once this run holds the work, the earlier copy must go, or the \
+             next launch offers it again"
+        );
+        assert_eq!(state.journal.pending().len(), 1, "this run's copy stays");
     }
 
     #[test]

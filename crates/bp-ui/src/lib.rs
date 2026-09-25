@@ -1400,11 +1400,12 @@ fn ask_about_recovery(
                 {
                     s.close(blank);
                 }
-                // Checkpointed under this run first, and only then is the old
-                // copy forgotten: in the other order there is a moment when
-                // neither holds the work.
+                // Not forgotten here. The checkpoint pass forgets them once
+                // this run holds every unsaved document; a write that fails,
+                // or a profile that refuses one, keeps the old copy rather
+                // than leaving the work with none.
+                s.superseded.extend(entries);
                 s.checkpoint_all();
-                let _ = s.journal.forget(&entries);
             }
             dialog::Recovery::Forget => {
                 let _ = cell.borrow().journal.forget(&entries);
