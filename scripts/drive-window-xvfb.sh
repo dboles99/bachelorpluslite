@@ -55,8 +55,11 @@ if ! xdotool getmouselocation >/dev/null 2>&1; then
     Xvfb "$DISPLAY" -screen 0 1280x900x24 >/dev/null 2>&1 &
     sleep 2
 fi
-# Two instances at the same origin take each other's clicks.
-for p in $(pgrep -x bachelorpad); do kill "$p"; done
+# Only instances on this display. Two there take each other's clicks; one on
+# the real desktop is somebody's editor, and killing it could cost them work.
+for p in $(pgrep -x bachelorpad); do
+    tr '\0' '\n' <"/proc/$p/environ" 2>/dev/null | grep -qxF "DISPLAY=$DISPLAY" && kill "$p"
+done
 
 # shellcheck disable=SC2086 -- an empty flag must vanish, not become "".
 "$bin" $flag "$run/doc.txt" >"$run/app.log" 2>&1 &

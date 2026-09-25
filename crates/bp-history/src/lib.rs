@@ -214,13 +214,34 @@ fn new_session() -> String {
     format!("{nanos:x}.{:x}.{count:x}", std::process::id())
 }
 
+/// Whether any file in `dir` was written under `session`.
+fn session_in_use(dir: &Path, session: &str) -> bool {
+    let prefix = format!("{session}-");
+    std::fs::read_dir(dir).is_ok_and(|entries| {
+        entries
+            .filter_map(Result::ok)
+            .any(|entry| entry.file_name().to_string_lossy().starts_with(&prefix))
+    })
+}
+
+/// How old a temporary file must be before it is debris rather than a
+/// checkpoint being written. A write and its rename take milliseconds; a
+/// minute is long enough that nothing live is that slow.
+const STALE_TEMPORARY: std::time::Duration = std::time::Duration::from_secs(60);
+
 impl Journal {
     /// Use `dir` for checkpoints, as a new session.
+    ///
+    /// A tag already on disk is refused and another drawn. Time, process and
+    /// counter make a repeat all but impossible, and "all but" is not good
+    /// enough when a repeat would have this run overwrite an earlier one's
+    /// unsaved work and then treat it as its own.
     pub fn new(dir: PathBuf) -> Self {
-        Self {
-            dir,
-            session: new_session(),
+        let mut session = new_session();
+        while session_in_use(&dir, &session) {
+            session = new_session();
         }
+        Self { dir, session }
     }
 
     /// The directory checkpoints are written to, for showing the user.
@@ -352,13 +373,26 @@ impl Journal {
     }
 
     /// Delete stray temporary files left by a crash mid-checkpoint.
+    ///
+    /// **Only stale ones.** The directory is shared by every run, and another
+    /// instance may be between writing its temporary file and renaming it;
+    /// deleting that would make its rename fail and cost it the checkpoint.
+    /// Nothing reads a `.tmp`, so one left a little longer does no harm.
     pub fn clean_temporaries(&self) {
         let Ok(entries) = std::fs::read_dir(&self.dir) else {
             return;
         };
+        let now = std::time::SystemTime::now();
         for entry in entries.filter_map(Result::ok) {
             let path = entry.path();
-            if path.extension().is_some_and(|e| e == "tmp") {
+            if !path.extension().is_some_and(|e| e == "tmp") {
+                continue;
+            }
+            let stale = entry.metadata().and_then(|m| m.modified()).is_ok_and(|at| {
+                now.duration_since(at)
+                    .is_ok_and(|age| age >= STALE_TEMPORARY)
+            });
+            if stale {
                 let _ = std::fs::remove_file(path);
             }
         }
@@ -529,8 +563,11 @@ mod tests {
             .checkpoint(1, &checkpoint("survivable"), Recovery::Plaintext)
             .unwrap();
 
-        // Simulate the debris of an interrupted write.
-        std::fs::write(journal.location().join("1.json.tmp"), "{ half writ").unwrap();
+        // Simulate the debris of an interrupted write -- an old one, because
+        // a fresh temporary file may be another instance's write in progress.
+        let debris = journal.location().join("1.json.tmp");
+        std::fs::write(&debris, "{ half writ").unwrap();
+        age(&debris);
 
         let pending = journal.pending();
         assert_eq!(
@@ -769,6 +806,50 @@ mod tests {
             first.pending().len(),
             2,
             "document 1 of each run must be two files, not one overwritten"
+        );
+    }
+
+    /// Backdate a file past `STALE_TEMPORARY`.
+    fn age(path: &Path) {
+        let then =
+            std::time::SystemTime::now() - STALE_TEMPORARY - std::time::Duration::from_secs(5);
+        std::fs::File::options()
+            .write(true)
+            .open(path)
+            .and_then(|f| f.set_modified(then))
+            .expect("backdate the file");
+    }
+
+    #[test]
+    fn a_fresh_temporary_file_is_another_runs_write_in_progress_and_is_left_alone() {
+        // Found in review of PR #6. Every run shares the directory, and a
+        // launch that deleted every `.tmp` could take one another instance
+        // was about to rename, failing that checkpoint.
+        let (_dir, journal) = journal();
+        std::fs::create_dir_all(journal.location()).unwrap();
+        let live = journal.location().join("other-run-1.json.tmp");
+        std::fs::write(&live, "{ being written").unwrap();
+
+        next_run(&journal).clean_temporaries();
+
+        assert!(live.exists(), "a write in progress was deleted");
+    }
+
+    #[test]
+    fn a_session_tag_already_on_disk_is_never_reused() {
+        // Found in review of PR #6: a reused process id and a clock that
+        // repeats could draw a tag an earlier run used, and the new run would
+        // overwrite that run's work and call it its own.
+        let (_dir, journal) = journal();
+        journal
+            .checkpoint(1, &checkpoint("earlier"), Recovery::Plaintext)
+            .unwrap();
+
+        assert!(session_in_use(journal.location(), &journal.session));
+        assert!(!session_in_use(journal.location(), "a-tag-nobody-used"));
+        assert!(
+            !session_in_use(&journal.location().join("missing"), &journal.session),
+            "a directory that does not exist holds no sessions"
         );
     }
 }

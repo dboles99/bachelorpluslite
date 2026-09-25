@@ -54,7 +54,8 @@ Private goes back to writing no journal at all.
 
 **Privacy Mode** is a session-wide override that can only tighten, never
 loosen -- and it *acts*: journals already written are removed when you turn it
-on.
+on, including unsaved work an earlier run left and you have not yet restored.
+The status bar says how many of those it removed.
 
 There is no setting that gives you crash recovery without writing your text
 somewhere, because that is not a thing that can exist.

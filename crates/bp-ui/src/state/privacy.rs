@@ -67,12 +67,42 @@ impl AppState {
             encoding: checkpoint_encoding_of(encoding),
             line_ending: Some(checkpoint_line_ending_of(line_ending)),
         };
+        let path = entry.path.clone();
         if let Ok(bp_history::Written::Refused(refusal)) =
             self.journal.checkpoint(id.get(), &entry, policy.recovery)
             && let Some(message) = refusal.notice()
         {
             self.error = Some(message.to_owned());
         }
+        // An earlier run's checkpoint of the same file is the same plaintext
+        // under a profile that now forbids it. The refused checkpoint above
+        // only reaches this run's own (ADR-0084).
+        if policy.recovery == bp_security::Recovery::Disabled
+            && let Some(path) = path
+        {
+            self.forget_earlier_runs(|checkpoint| checkpoint.path.as_deref() == Some(&path));
+        }
+    }
+
+    /// Forget what earlier runs left in the journal, where `which` says so.
+    /// Returns how many were forgotten.
+    ///
+    /// Only ever for a privacy control the user has just tightened. A
+    /// recovery question left unanswered keeps the work (ADR-0084); asking
+    /// for no plaintext on disk is an answer.
+    fn forget_earlier_runs(&mut self, which: impl Fn(&bp_history::Checkpoint) -> bool) -> usize {
+        let doomed: Vec<bp_history::Entry> = self
+            .journal
+            .left_behind()
+            .into_iter()
+            .filter(|(_, checkpoint)| which(checkpoint))
+            .map(|(entry, _)| entry)
+            .collect();
+        if self.journal.forget(&doomed).is_err() {
+            return 0;
+        }
+        self.superseded.retain(|entry| !doomed.contains(entry));
+        doomed.len()
     }
 
     /// Turn Privacy Mode on or off, and make the world match.
@@ -95,7 +125,15 @@ impl AppState {
         // and a journal left behind for a background tab is exactly what it
         // was switched on to prevent.
         self.checkpoint_all();
-        self.error = Some("Privacy Mode on -- journals removed".to_owned());
+        // And what earlier runs left: switching it on is asking for no
+        // plaintext on disk, and the manual promises journals already written
+        // are removed -- not only this run's.
+        let earlier = self.forget_earlier_runs(|_| true);
+        self.error = Some(if earlier == 0 {
+            "Privacy Mode on -- journals removed".to_owned()
+        } else {
+            format!("Privacy Mode on -- journals removed, including {earlier} an earlier run left")
+        });
     }
 }
 
@@ -188,6 +226,80 @@ mod tests {
         assert!(
             state.journal.pending().is_empty(),
             "tightening a profile left the journal a looser one wrote"
+        );
+    }
+
+    fn earlier_run_left(dir: &std::path::Path, path: &str, text: &str) {
+        let entry = bp_history::Checkpoint {
+            path: Some(std::path::PathBuf::from(path)),
+            name: path.to_owned(),
+            text: text.to_owned(),
+            written_at: bp_history::now_unix(),
+            encoding: bp_history::CheckpointEncoding::Utf8,
+            line_ending: None,
+        };
+        bp_history::Journal::new(dir.to_path_buf())
+            .checkpoint(1, &entry, bp_security::Recovery::Plaintext)
+            .expect("an earlier run's checkpoint");
+    }
+
+    #[test]
+    fn privacy_mode_also_removes_what_an_earlier_run_left() {
+        // Found in review of PR #6. Each run now removes only its own
+        // checkpoints, so turning Privacy Mode on after answering Not Now left
+        // the earlier run's plaintext on disk -- and the manual says journals
+        // already written are removed. Asking for no plaintext is an answer
+        // to the recovery question, where a dismissed dialog is not.
+        let dir = tempfile::tempdir().expect("temp dir");
+        earlier_run_left(dir.path(), "/notes/a.txt", "left behind");
+        let mut state = AppState::new();
+        state.journal = bp_history::Journal::new(dir.path().to_path_buf());
+        assert_eq!(state.journal.left_behind().len(), 1);
+
+        state.set_privacy(bp_security::Privacy::On);
+
+        assert!(
+            state.journal.pending().is_empty(),
+            "an earlier run's plaintext survived"
+        );
+        assert!(
+            state
+                .error
+                .as_deref()
+                .is_some_and(|e| e.contains("1 an earlier run left")),
+            "the status must say what was removed: {:?}",
+            state.error
+        );
+    }
+
+    #[test]
+    fn tightening_a_profile_removes_an_earlier_runs_checkpoint_of_that_file_only() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        earlier_run_left(dir.path(), "/notes/secret.txt", "this file");
+        earlier_run_left(dir.path(), "/notes/other.txt", "another file");
+        let mut state = AppState::new();
+        state.journal = bp_history::Journal::new(dir.path().to_path_buf());
+        // The open document stands for /notes/secret.txt.
+        let id = state.workspace.open_path(
+            std::path::PathBuf::from("/notes/secret.txt"),
+            super::super::now(),
+        );
+        state.editors.insert(id, bp_editor::Editor::new("text"));
+
+        state.set_security(bp_security::Security::Named(
+            bp_security::Profile::Confidential,
+        ));
+
+        let left: Vec<String> = state
+            .journal
+            .left_behind()
+            .into_iter()
+            .map(|(_, c)| c.text)
+            .collect();
+        assert_eq!(
+            left,
+            ["another file"],
+            "only the tightened file's checkpoint goes"
         );
     }
 }

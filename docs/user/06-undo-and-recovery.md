@@ -33,7 +33,7 @@ answers:
 | | What happens |
 | --- | --- |
 | **Restore** | The work opens as unsaved changes, exactly as you left it, and you decide where it goes. Nothing is written over anything |
-| **Discard** | The work is deleted. This is the only answer that deletes it |
+| **Discard** | The work is deleted. This is the only answer to the question that deletes it; the other thing that does is turning on Privacy Mode, which is what Privacy Mode is for |
 | **Not Now** | The work stays where it is and you are asked again next time. Escape, and closing the window with the question still up, mean the same |
 
 **A question you did not answer never costs you the work**

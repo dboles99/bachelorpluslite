@@ -634,7 +634,13 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
             if dirty.is_empty() {
                 return slint::CloseRequestResponse::HideWindow;
             }
-            close_window_asking(weak.clone(), Rc::clone(&cell), Rc::clone(&dialogs), dirty);
+            close_window_asking(
+                weak.clone(),
+                Rc::clone(&cell),
+                Rc::clone(&dialogs),
+                dirty,
+                Vec::new(),
+            );
             slint::CloseRequestResponse::KeepWindowShown
         });
     }
@@ -1320,8 +1326,20 @@ fn close_window_asking(
     cell: Rc<RefCell<state::AppState>>,
     dialogs: Rc<dialog::Dialogs>,
     mut remaining: std::collections::VecDeque<DocumentId>,
+    mut discarded: Vec<DocumentId>,
 ) {
     let Some(id) = remaining.pop_front() else {
+        // Every answer is in. The documents answered Don't Save are closed
+        // now, in the same turn as the window hides, which also removes their
+        // checkpoints: left open until exit, the checkpoint timer would write
+        // the deliberately discarded work back, and the next launch would
+        // offer to recover it.
+        {
+            let mut s = cell.borrow_mut();
+            for id in discarded {
+                s.close(id);
+            }
+        }
         if let Some(ui) = ui.upgrade() {
             let _ = ui.hide();
         }
@@ -1332,7 +1350,7 @@ fn close_window_asking(
         (s.is_dirty(id), s.display_name(id))
     };
     if !dirty {
-        close_window_asking(ui, cell, dialogs, remaining);
+        close_window_asking(ui, cell, dialogs, remaining, discarded);
         return;
     }
 
@@ -1343,16 +1361,16 @@ fn close_window_asking(
                 let (u, c, dd) = (ui.clone(), Rc::clone(&cell), Rc::clone(&dialogs));
                 save_with_prompt(&u, &c, &dd, id, move |result| {
                     if result == state::SaveResult::Saved {
-                        close_window_asking(ui, cell, dialogs, remaining);
+                        close_window_asking(ui, cell, dialogs, remaining, discarded);
                     }
                 });
             }
             dialog::Unsaved::Discard => {
-                // Declined, so its checkpoint must not come back at the next
-                // launch offering to recover what was deliberately thrown
-                // away.
-                let _ = cell.borrow().journal.discard(id.get());
-                close_window_asking(ui, cell, dialogs, remaining);
+                // Not closed yet: a Cancel on a later document keeps the
+                // window, and this one with it. Closed with the rest once
+                // every answer is in -- see the top of this function.
+                discarded.push(id);
+                close_window_asking(ui, cell, dialogs, remaining, discarded);
             }
             dialog::Unsaved::Stay => {}
         }

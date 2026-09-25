@@ -212,7 +212,17 @@ fn a_crash_midway_through_a_checkpoint_leaves_the_previous_one_recoverable() {
     journal
         .checkpoint(1, &good, Recovery::Plaintext)
         .expect("checkpoint");
-    std::fs::write(fixture.dir.join("1.json.tmp"), b"{ truncated").expect("debris");
+    let debris = fixture.dir.join("1.json.tmp");
+    std::fs::write(&debris, b"{ truncated").expect("debris");
+    // Old debris, as a crash leaves it. A fresh `.tmp` may be another running
+    // instance's checkpoint half-way through its rename, and is left alone
+    // (ADR-0084), so debris younger than a minute is not what this tests.
+    let an_hour_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
+    std::fs::File::options()
+        .write(true)
+        .open(&debris)
+        .and_then(|f| f.set_modified(an_hour_ago))
+        .expect("backdate the debris");
 
     let journal = fixture.after_a_restart();
     let pending = journal.pending();
