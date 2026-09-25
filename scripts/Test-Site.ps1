@@ -120,3 +120,8 @@ else { Write-Host 'No third-party subresources. (A link and a canonical are not 
 
 if ($failures -gt 0) { exit 1 }
 Write-Host 'site/ passes all three checks.' -ForegroundColor Green
+# Explicit, because a script that falls off its end leaves `$LASTEXITCODE` as
+# the last native command set it -- and the gate reads it. When the `site`
+# stage before this one failed, this printed "passes all three checks" and
+# was reported as failed, which turns one red into two.
+exit 0

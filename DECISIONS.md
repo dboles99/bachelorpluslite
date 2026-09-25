@@ -122,6 +122,42 @@ Adding a decision means adding both.
   the software renderer's time to first interaction cannot be measured, so
   half of ADR-0017's target has no number behind it.
 
+## What the gate taught, 2026-09-25
+
+### A check that reads the clock expires
+
+`Build-Site.ps1` wrote `(Get-Date)` into every sitemap's `<lastmod>`, and the
+gate's `site` stage passes only when a fresh build equals the committed one.
+So the stage passed on 2026-09-10, the day the site was generated, and **failed
+on every day after it** -- on every branch, whatever the change. Nothing about
+the site had moved; the date had. The rule `bp-storage` states for itself --
+*time is a parameter, never a clock* -- applies to a generator whose output is
+checked, and applies harder: a test that reads the clock fails once, while a
+generator that does makes the check it feeds expire.
+
+The value was also false. A `lastmod` of *today* on every build claims that
+every page changed on every build, which is the one date that is never true.
+It is gone rather than derived from `git log`, because the commit that
+regenerates a sitemap is the commit that moves that date.
+
+### A script that falls off its end reports someone else's exit code
+
+`Test-Site.ps1` printed *"site/ passes all three checks"* and was reported as
+failed, because it ended without `exit 0` and `$LASTEXITCODE` still held the
+failure of the stage before it. One red became two, and the second one lied
+about the site. A PowerShell script the gate reads through `$LASTEXITCODE`
+must say how it ended.
+
+### And a host leg that names `.exe` is a Windows leg
+
+The `launch` stage could not start on a Linux host at all -- it named
+`bachelorpad.exe` unconditionally -- and `-Linux` on a Linux host called
+`wsl`, which does not exist there, as a terminating error *after* every stage
+had passed: thirteen passes and exit 1. Both were true for as long as the gate
+only ever ran on Windows, and stopped being true the first time a session ran
+it from Linux, which is what this repository's cloud sessions do. On a Linux
+host the native stages are the Linux leg, and the other leg is hosted CI.
+
 ## What going public taught, 2026-09-10
 
 Six decisions in one session, and **five of the six were found by preparing to

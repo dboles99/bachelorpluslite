@@ -322,7 +322,13 @@ try {
         cargo build --workspace --quiet
         if ($LASTEXITCODE -ne 0) { throw "build failed" }
 
-        $exe = Join-Path $Root 'target/debug/bachelorpad.exe'
+        # `.exe` on Windows only. This stage used to name it unconditionally,
+        # so on a Linux host it failed to *start* rather than failing the
+        # check -- which reads like a broken binary and is not one. Asked of
+        # `$env:OS` rather than `$IsWindows`, which Windows PowerShell 5.1
+        # does not define and would read as false.
+        $exe = Join-Path $Root 'target/debug/bachelorpad'
+        if ($env:OS -eq 'Windows_NT') { $exe += '.exe' }
         $out = Join-Path ([System.IO.Path]::GetTempPath()) "bpad-selfcheck-$PID.txt"
 
         $proc = Start-Process -FilePath $exe -ArgumentList '--self-check' `
@@ -462,7 +468,16 @@ try {
     }
 
     # --- linux ---------------------------------------------------------
-    if (-not $Linux) {
+    # On a Linux host the stages above *were* the Linux leg, and there is no
+    # `wsl` to call -- which used to be a terminating error after every stage
+    # had passed, so the run printed thirteen passes and exited 1. The other
+    # leg on such a host is Windows, and that is hosted CI's `ci.yml`
+    # (ADR-0073), not something this script can reach.
+    $hostIsLinux = ($env:OS -ne 'Windows_NT') -and ($PSVersionTable.PSVersion.Major -ge 6) -and $IsLinux
+    if ($hostIsLinux) {
+        Skip-Stage 'linux (wsl)' 'this host is Linux, so the stages above were the Linux leg; the Windows leg is hosted CI'
+    }
+    elseif (-not $Linux) {
         Skip-Stage 'linux (wsl)' 'pass -Linux to run the Linux leg'
     }
     else {
@@ -558,7 +573,7 @@ try {
             # passed: it skips itself when the distro or its toolchain is
             # missing, and a record claiming a leg that skipped would let
             # pre-push wave through a push nothing had checked on Linux.
-            linux     = [bool](
+            linux     = $hostIsLinux -or [bool](
                 $script:Results | Where-Object {
                     $_.Stage -like 'linux*' -and $_.Status -eq 'pass'
                 }

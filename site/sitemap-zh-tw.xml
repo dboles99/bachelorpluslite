@@ -4,7 +4,6 @@
         xmlns:xhtml="http://www.w3.org/1999/xhtml">
   <url>
     <loc>https://bpad.prompt-forge.dev/zh-tw/</loc>
-    <lastmod>2026-09-10</lastmod>
     <changefreq>weekly</changefreq>
     <priority>1.0</priority>
     <xhtml:link rel="alternate" hreflang="en-GB" href="https://bpad.prompt-forge.dev/"/>
@@ -17,7 +16,6 @@
   </url>
   <url>
     <loc>https://bpad.prompt-forge.dev/zh-tw/waitlist.html</loc>
-    <lastmod>2026-09-10</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
     <xhtml:link rel="alternate" hreflang="en-GB" href="https://bpad.prompt-forge.dev/waitlist.html"/>
@@ -30,7 +28,6 @@
   </url>
   <url>
     <loc>https://bpad.prompt-forge.dev/zh-tw/privacy.html</loc>
-    <lastmod>2026-09-10</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.3</priority>
     <xhtml:link rel="alternate" hreflang="en-GB" href="https://bpad.prompt-forge.dev/privacy.html"/>

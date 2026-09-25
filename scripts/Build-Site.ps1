@@ -158,7 +158,6 @@ foreach ($l in $locales) {
         $values['alternates'] = Get-Alternates -Page $page
         $values['switcher'] = Get-Switcher -Page $page -Current $l.Code
         $values['otherPage'] = if ($page -eq 'index') { "$homePath" + 'waitlist.html' } else { $homePath }
-        $values['year'] = (Get-Date).Year
 
         # An attribute-safe copy of every string, as `{{keyAttr}}`.
         #
@@ -298,7 +297,17 @@ project has not been granted.
 # be submitted, diagnosed and re-crawled on its own. A single file mixing six
 # languages reports one coverage number for all of them.
 
-$today = (Get-Date).ToString('yyyy-MM-dd')
+# **No `<lastmod>`, because the only date this script knows is today's.** It
+# used to write `(Get-Date)` into every entry, which made `-Check` fail on
+# every day after the one the site was generated -- the gate compares a fresh
+# build with the committed one, and the fresh one was always dated now. It
+# was also the one value that is never true: it claimed every page changed on
+# every build, and Google reads `lastmod` only where it is consistently
+# accurate. The sitemap protocol makes it optional; absent is honest.
+#
+# A date from `git log` over the sources was considered and refused. The
+# commit that regenerates a sitemap is the commit that moves that date, so
+# the file would be stale in the same commit that wrote it.
 $sitemapNames = @()
 
 foreach ($l in $locales) {
@@ -318,7 +327,6 @@ foreach ($l in $locales) {
         @"
   <url>
     <loc>$($p.Url)</loc>
-    <lastmod>$today</lastmod>
     <changefreq>weekly</changefreq>
     <priority>$priority</priority>
 $($alt -join "`n")
@@ -342,7 +350,6 @@ $indexEntries = foreach ($name in $sitemapNames) {
     @"
   <sitemap>
     <loc>$Origin/$name</loc>
-    <lastmod>$today</lastmod>
   </sitemap>
 "@
 }
