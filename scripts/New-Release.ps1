@@ -104,18 +104,23 @@ $reported = @(Get-Content $versionFile -ErrorAction SilentlyContinue)
 Remove-Item $versionFile -ErrorAction SilentlyContinue
 
 if ($reported.Count -lt 1) { throw '--version printed nothing; cannot name an archive' }
-$parts = $reported[0] -split '\s+'
-if ($parts.Count -lt 2 -or $parts[1] -notmatch '^\d+\.\d+\.\d+') {
-    throw "cannot read a version out of '$($reported[0])'"
+# The *last* field is the version and everything before it is the name. The
+# name has a space in it since ADR-0074, so reading the second field got
+# "Lite" and refused it as not semver -- no release could be built on either
+# leg. `bp_config::cli` has a test pinning this shape of the first line.
+$firstLine = $reported[0].Trim()
+$split = $firstLine.LastIndexOf(' ')
+if ($split -lt 1 -or $firstLine.Substring($split + 1) -notmatch '^\d+\.\d+\.\d+') {
+    throw "cannot read a version out of '$firstLine'"
 }
-$version = $parts[1]
+$version = $firstLine.Substring($split + 1)
 # The product name and the licence come from the same three lines, for the
 # reason the version already did: BUILD.txt used to carry both as literals,
 # and the Linux leg's literal said "BachelorPad+" while this one said
 # "BachelorPlusLite" -- the naming defect ADR-0054 fixed in `--version`,
 # still alive in the half nobody had re-read. A literal cannot disagree with
 # the binary if there is no literal.
-$displayName = $parts[0]
+$displayName = $firstLine.Substring(0, $split)
 $declaredLicence = if ($reported.Count -ge 3) { $reported[2].Trim() } else { throw '--version did not report a licence' }
 Write-Note "version $version, from the binary"
 Write-Note "name $displayName, licence $declaredLicence, from the same three lines"

@@ -93,7 +93,10 @@ jobs:
         run: |
           set -eu
           version_lines=$(./target/release/bachelorpad --version)
-          version=$(printf '%s\n' "$version_lines" | sed -n '1s/^[^ ]* *\([^ ]*\).*/\1/p')
+          # The *last* field of line 1: the name before it has a space in it
+          # (ADR-0074), and reading the second field named every archive
+          # "Lite". `bp_config::cli` has a test pinning this shape.
+          version=$(printf '%s\n' "$version_lines" | sed -n '1s/^.* \([^ ]*\)$/\1/p')
           test -n "$version" || { echo '--version printed nothing; cannot name an archive' >&2; exit 1; }
           mkdir -p artifacts/releases
           ./scripts/release-linux.sh "$version" "${{ github.sha }}" "$PWD/artifacts/releases"

@@ -480,6 +480,26 @@ mod tests {
     }
 
     #[test]
+    fn the_first_version_line_is_the_name_then_a_space_then_the_version() {
+        // Both release scripts and `release.yml` read this line, and they
+        // read it as *last field = version, everything before = name*. They
+        // used to read the second field, which broke the day the name gained
+        // a space (ADR-0074): every archive was named "Lite" and no release
+        // could be built. This is the contract they rely on, asked here
+        // because no script test runs on every commit.
+        let rendered = version(PACKAGE);
+        let first = rendered.lines().next().unwrap_or_default();
+        let (name, number) = first.rsplit_once(' ').unwrap_or_default();
+        assert_eq!(name, bp_platform::DISPLAY_NAME, "got {first:?}");
+        assert_eq!(number, PACKAGE.version, "got {first:?}");
+        assert!(
+            number.split('.').count() == 3
+                && number.split('.').all(|part| part.parse::<u32>().is_ok()),
+            "the release scripts refuse anything but semver: {number:?}"
+        );
+    }
+
+    #[test]
     fn version_names_the_product_the_desktop_registration_names() {
         // Trap 4: two claims about the same product coexist for as long as
         // nothing asks. This asks. `AppInfo::bachelorpad` is what writes the

@@ -239,6 +239,30 @@ only ever ran on Windows, and stopped being true the first time a session ran
 it from Linux, which is what this repository's cloud sessions do. On a Linux
 host the native stages are the Linux leg, and the other leg is hosted CI.
 
+### A rename reaches the parsers, and nothing ran the parsers
+
+When the product became *BachelorPad+ Lite* ([ADR-0074](docs/decisions/ADR-0074.md)),
+the first line of `--version` gained a space. `release.yml`, `release-linux.sh`
+and `New-Release.ps1` all read that line as *name, then version* by taking
+the second field -- so every release script read the version as `Lite`, refused
+it as not semver, and **no release of 0.9.5 could be built on either
+platform**. ADR-0074 hunted the name through eight sites that *spell* it and
+missed three that *parse* it, and no stage of any gate runs a release script,
+so nothing failed until an outside review of PR #4 read the regex. The shape
+the scripts rely on -- last field the version, everything before it the name
+-- is now a test in `bp_config::cli`, because a contract that only a script
+reads is one that nothing checks.
+
+### And a comment promised the manual's links worked
+
+`Build-Docs.ps1` said "links between pages become links within the
+document". Nothing did it: every page was pasted in with its relative links
+untouched, and the manual published at `/docs` on the website sent 97 ADR
+links and every cross-page link to a 404. Trap 3, in a generator -- and a
+generator's claim is worse than a function's, because its output is checked
+against itself and so cannot disagree with it. The rewrite now happens, and
+the build refuses a manual with any relative file link left in it.
+
 ## What going public taught, 2026-09-10
 
 Six decisions in one session, and **five of the six were found by preparing to

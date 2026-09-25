@@ -129,11 +129,21 @@ pub(crate) fn overtype_end(
     if !state.overwrite || cursor_byte != anchor_byte {
         return None;
     }
-    let key = translate_key(text)?;
-    let bp_editor::Command::Insert(typed) =
-        bp_editor::keys::command_for(key, modifiers, state.visible_rows)
-    else {
-        return None;
+    // Several characters in one event is an input method committing, and the
+    // widget will insert all of them -- so all of them are what overtypes.
+    // `translate_key` keeps only the first character, which would select one
+    // and replace it with several. The custom surface's key handler makes
+    // the same distinction, for the same reason.
+    let typed = if text.chars().count() > 1 && !modifiers.control {
+        text.to_owned()
+    } else {
+        let key = translate_key(text)?;
+        let bp_editor::Command::Insert(typed) =
+            bp_editor::keys::command_for(key, modifiers, state.visible_rows)
+        else {
+            return None;
+        };
+        typed
     };
     if typed.contains(['\n', '\r']) {
         return None;
@@ -525,6 +535,22 @@ mod tests {
         assert!(!state.overwrite, "a second press turns it back off");
         apply_editor_command(&mut state, &bp_editor::Command::Insert("s".to_owned()));
         assert_eq!(state.active_text(), "cust", "and typing inserts again");
+    }
+
+    #[test]
+    fn an_input_method_commit_overtypes_as_many_characters_as_it_inserts() {
+        // One event carrying three characters is an IME committing; the
+        // widget inserts all three, so three must be selected first.
+        let mut state = AppState::new();
+        state.edit("abcdef".to_owned());
+        state.overwrite = true;
+        let none = bp_editor::Modifiers::default();
+        assert_eq!(overtype_end(&state, 0, 0, "日本語", none), Some(3));
+        assert_eq!(
+            overtype_end(&state, 4, 4, "日本語", none),
+            Some(6),
+            "and still stops at the end of the text"
+        );
     }
 
     #[test]

@@ -213,6 +213,12 @@ because it has to know where the caret is (ADR-0018).
 {0}
 '@ -f $menus
 
+# The tables' links were written for `docs/product/`, and this page lives two
+# directories deeper -- so `../decisions/` pointed at a directory that does
+# not exist, thirty times.
+$menusPage = Convert-RelativeLinks -Text $menusPage -From 'docs/product/MENU_MAP.md' `
+    -To 'docs/generated/reference/menus.md'
+
 Write-Generated -Path (Join-Path $Out 'reference/menus.md') -Content $menusPage
 
 # --- manual.md and manual.html -------------------------------------------
@@ -248,6 +254,16 @@ $manualPages = @(
 $body = New-Object System.Collections.Generic.List[string]
 $toc = New-Object System.Collections.Generic.List[string]
 
+# Where each page lives in the repository, and the anchor its section gets in
+# the manual -- so a link from one page to another can become a jump within
+# the one file rather than a path to a file that is not beside it.
+$repoUrl = 'https://github.com/dboles99/bachelorpluslite'
+$manualAnchors = @{}
+foreach ($page in $manualPages) {
+    $repoPath = if ($page.ContainsKey('Generated')) { "docs/generated/$($page.Generated)" } else { $page.Path }
+    $manualAnchors[$repoPath] = ConvertTo-Anchor $page.Title
+}
+
 foreach ($page in $manualPages) {
     # The extra parentheses are load-bearing. Inside a method call the comma
     # is an *argument separator*, not an array constructor, so
@@ -266,6 +282,8 @@ foreach ($page in $manualPages) {
     $text = ($text -split "`n" | ForEach-Object {
             if ($_ -match '^#{1,5} ') { '#' + $_ } else { $_ }
         }) -join "`n"
+    $repoPath = if ($page.ContainsKey('Generated')) { "docs/generated/$($page.Generated)" } else { $page.Path }
+    $text = Convert-RelativeLinks -Text $text -From $repoPath -Anchors $manualAnchors -Repo $repoUrl
     $body.Add($text.TrimEnd())
     $body.Add('')
 }
@@ -285,6 +303,14 @@ Windows 10, Windows 11 and Linux. GPL-3.0-only.
 
 {1}
 '@ -f ($toc -join "`n"), ($body -join "`n")
+
+# The manual is published on its own, at /docs on the website, with nothing
+# beside it -- so a relative link to a file is a 404 there, however right it
+# looks in this repository. Refused here rather than trusted to the rewrite.
+$stray = [regex]::Matches($manual, '\]\((?![a-zA-Z][a-zA-Z0-9+.-]*:|#)[^)]*\)')
+if ($stray.Count -gt 0) {
+    throw "the manual has $($stray.Count) relative link(s) that cannot work once published, first: $($stray[0].Value)"
+}
 
 Write-Generated -Path (Join-Path $Out 'manual.md') -Content $manual
 

@@ -226,6 +226,49 @@ function Resolve-RepoRelative {
 }
 
 <#
+    Rewrite every relative link in `Text`, written for a file at repo path
+    `From`, into what it must be once that text lives somewhere else.
+
+    `-Anchors` maps repo paths to an in-document anchor: a link to one of
+    those becomes `#anchor` (or the link's own `#fragment`), because in a
+    single-file manual the page it named is further down the same file.
+    Anything else becomes a link that works wherever the text lands:
+    relative to `-To` when given (a generated page that still lives in this
+    repository), or an absolute URL under `-Repo` (a page published off it).
+
+    Written because the manual promised in a comment that "links between
+    pages become links within the document" while nothing did it, so every
+    cross-page and ADR link in the published manual was a 404 (a review of
+    PR #4 found it; `docs/generated/reference/menus.md` had 30 of its own).
+#>
+function Convert-RelativeLinks {
+    param(
+        [Parameter(Mandatory)][string]$Text,
+        [Parameter(Mandatory)][string]$From,
+        [hashtable]$Anchors = @{},
+        [string]$To,
+        [string]$Repo
+    )
+    $pattern = '\]\((?<target>[^)\s#]+)(?<frag>#[^)\s]*)?\)'
+    return [regex]::Replace($Text, $pattern, {
+            param($m)
+            $target = $m.Groups['target'].Value
+            $frag = $m.Groups['frag'].Value
+            if ($target -match '^[a-zA-Z][a-zA-Z0-9+.-]*:') { return $m.Value }
+            $resolved = Resolve-RepoRelative -From $From -Target $target
+            if ($Anchors.ContainsKey($resolved)) {
+                $anchor = if ($frag) { $frag } else { '#' + $Anchors[$resolved] }
+                return "]($anchor)"
+            }
+            if ($To) {
+                $depth = @(((Split-Path -Parent $To) -replace '\\', '/') -split '/' | Where-Object { $_ }).Count
+                return "](" + ('../' * $depth) + $resolved + $frag + ")"
+            }
+            return "]($Repo/blob/main/$resolved$frag)"
+        })
+}
+
+<#
     A GitHub-style anchor for a heading, for the manual's table of contents.
 #>
 function ConvertTo-Anchor {

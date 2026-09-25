@@ -81,7 +81,12 @@ cp "assets/$ICON" "$DIR/$ICON"
 # SIGPIPE when the second closes early, and under `set -o pipefail` that is a
 # failure with no message. `sed 1q` reads one line and exits 0.
 version_lines=$("$DIR/bachelorpad" --version)
-reported=$(printf '%s\n' "$version_lines" | sed -n '1s/^[^ ]* *\([^ ]*\).*/\1/p')
+# The *last* field of the first line, and the name is everything before it.
+# The name has a space in it since ADR-0074, so "the second field" read the
+# version as "Lite" and the name as "BachelorPad+" -- and no release could be
+# built. `bp_config::cli` pins the shape this relies on.
+first_line=$(printf '%s\n' "$version_lines" | sed -n '1p')
+reported=${first_line##* }
 if [ "$reported" != "$VERSION" ]; then
     echo "the Linux build reports '$reported'; the Windows build reports '$VERSION'" >&2
     exit 1
@@ -93,7 +98,7 @@ fi
 # the naming defect ADR-0054 fixed in `--version` still alive in the half of
 # the release script nobody re-read. Two literals cannot disagree if there are
 # none.
-DISPLAY_NAME=${version_lines%% *}
+DISPLAY_NAME=${first_line% *}
 DECLARED_LICENCE=$(printf '%s\n' "$version_lines" | sed -n '3p')
 test -n "$DISPLAY_NAME" || { echo "--version did not report a name" >&2; exit 1; }
 test -n "$DECLARED_LICENCE" || { echo "--version did not report a licence" >&2; exit 1; }

@@ -45,9 +45,9 @@
 </ul>
 <h2 id="installation-and-first-launch">Installation and first launch</h2>
 <p>BachelorPad+ Lite runs on <strong>Windows 10, Windows 11 and Linux</strong> (x86-64).
-macOS is not built, and <a href="../decisions/ADR-0072.md">ADR-0072</a> says why.</p>
+macOS is not built, and <a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0072.md">ADR-0072</a> says why.</p>
 <p><strong>There is no installer, and that is a decision</strong>
-(<a href="../decisions/ADR-0067.md">ADR-0067</a>). You unpack an archive wherever you
+(<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0067.md">ADR-0067</a>). You unpack an archive wherever you
 want the program to live and run it. Nothing is written outside that folder
 until you ask for it.</p>
 <h3 id="download">Download</h3>
@@ -73,7 +73,7 @@ until you ask for it.</p>
 <h3 id="the-archives-are-unsigned-and-you-should-know-that-before-you-click">The archives are unsigned, and you should know that before you click</h3>
 <p>Windows SmartScreen will warn you when you download and again when you first
 run it. That is deferred code signing
-(<a href="../decisions/ADR-0055.md">ADR-0055</a>) -- a certificate has not been bought.
+(<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0055.md">ADR-0055</a>) -- a certificate has not been bought.
 Self-signing was refused outright, because a self-signed certificate is only
 satisfied once you install a root certificate you have no reason to trust,
 which is a worse thing to ask of somebody than a warning is.</p>
@@ -133,7 +133,7 @@ C:\Apps\BachelorPadLite\bachelorpad.exe
 </table>
 <p>Both icons ship because they are read by different things: Explorer needs a
 real <code>.ico</code>, and the toolkit that draws the window can decode only PNG and
-JPEG (<a href="../decisions/ADR-0068.md">ADR-0068</a>).</p>
+JPEG (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0068.md">ADR-0068</a>).</p>
 <p><strong>Desktop and Start Menu shortcuts are made by hand.</strong> With no installer there
 is no step that could make them, which is exactly the cost ADR-0067 accepted.</p>
 <h3 id="linux">Linux</h3>
@@ -151,13 +151,13 @@ been written anywhere yet, and nothing will be until you save.</p>
 <li><strong>Pick a theme.</strong> View &gt; Theme offers Light, Dark, Organic and Green, plus
 System, which follows the desktop.</li>
 <li><strong>Look at Privacy.</strong> The Privacy menu governs what this product records
-about the documents you open -- see <a href="11-privacy.md">Privacy</a>. The default
+about the documents you open -- see <a href="#privacy-and-security">Privacy</a>. The default
 is deliberately modest, and it is worth knowing what it is rather than
 assuming.</li>
 <li><strong>Decide about file associations</strong>, if you want double-clicking a <code>.txt</code> to
 open this. File &gt; Set as Default Editor never seizes anything; it shows you
 what it would do and hands you a script to run. See
-<a href="../tutorials/02-default-editor.md">Making it your default editor</a>.</li>
+<a href="#making-it-your-default-editor">Making it your default editor</a>.</li>
 </ol>
 <h3 id="where-it-puts-things">Where it puts things</h3>
 <p>Nothing goes in the folder you unpacked. Everything the product writes about
@@ -198,7 +198,7 @@ directories above as well.</p>
 <p>If you registered file types, undo that first through the same File &gt; Set as
 Default Editor screen, or through Windows Settings &gt; Default apps. <strong>This
 product will not delete anything out of your profile on your behalf</strong>, and
-<a href="../decisions/ADR-0070.md">ADR-0070</a> explains why that is deliberate rather
+<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0070.md">ADR-0070</a> explains why that is deliberate rather
 than an omission.</p>
 <h2 id="your-first-note-start-to-finish">Your first note, start to finish</h2>
 <p>Ten minutes, and it touches most of what makes this product different from
@@ -255,13 +255,13 @@ so this one says which.</p>
 anything is your choice, per document. The other axis is whether a recovery
 journal is written -- the thing that saves your work when the power goes out,
 by writing your text to disk before you asked it to.</p>
-<p>Both trades are real and neither has a free option. <a href="../user/11-privacy.md">Privacy</a>
+<p>Both trades are real and neither has a free option. <a href="#privacy-and-security">Privacy</a>
 lays them out in a table.</p>
 <h3 id="what-next">What next</h3>
 <ul>
-<li><a href="02-default-editor.md">Making it your default editor</a></li>
-<li><a href="03-search-across-files.md">Searching across a folder</a></li>
-<li><a href="../user/09-notes.md">The note layer in full</a></li>
+<li><a href="#making-it-your-default-editor">Making it your default editor</a></li>
+<li><a href="#searching-across-a-folder">Searching across a folder</a></li>
+<li><a href="#the-note-layer">The note layer in full</a></li>
 </ul>
 <h2 id="creating-opening-and-saving-documents">Creating, opening and saving documents</h2>
 <h3 id="new-and-open">New and Open</h3>
@@ -318,7 +318,7 @@ bpad --line 427 server.log
 <h3 id="opening-a-large-file">Opening a large file</h3>
 <p>A document is loaded whole. There is no separate mode for a big one and no
 flag to choose one -- a large file loads or it fails trying, which is what
-Notepad does (<a href="../decisions/ADR-0063.md">ADR-0063</a>).</p>
+Notepad does (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0063.md">ADR-0063</a>).</p>
 <p>Editing itself does not care about size. The text is held in a rope, so an
 insert in the middle of a very large document costs the same as an insert
 anywhere else, and scrolling costs what is on screen rather than what is in
@@ -339,9 +339,9 @@ delete your files. Use your file manager, where deletion goes to a recycle
 bin or trash you can get things back out of.</p>
 <p>The same reasoning covers everything else this product will not do on your
 behalf: it will not seize a file association
-(<a href="../decisions/ADR-0012.md">ADR-0012</a>), it will not clean up files left behind
-by features that have been removed (<a href="../decisions/ADR-0070.md">ADR-0070</a>), and
-it will not run anything (<a href="../decisions/ADR-0057.md">ADR-0057</a>).</p>
+(<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0012.md">ADR-0012</a>), it will not clean up files left behind
+by features that have been removed (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0070.md">ADR-0070</a>), and
+it will not run anything (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0057.md">ADR-0057</a>).</p>
 <h3 id="when-the-file-changes-underneath-you">When the file changes underneath you</h3>
 <p>If a document changes on disk while it is open, you are told and asked what to
 do. Nothing is overwritten and nothing is discarded until you say which one
@@ -371,13 +371,13 @@ you want.</p>
 </table>
 <p>Anything unsaved prompts. If the program stops without getting the chance to
 ask -- a crash, a power cut, a <code>kill</code> -- see
-<a href="06-undo-and-recovery.md">Undo, history and recovery</a>, because the work is
+<a href="#undo-history-and-recovery">Undo, history and recovery</a>, because the work is
 probably still there.</p>
 <h2 id="editing">Editing</h2>
 <p>Typing, selecting, cut, copy, paste and select-all behave the way they do
 everywhere else. This page covers the parts that are this product's own.</p>
 <p>The full key list is in
-<a href="../generated/reference/shortcuts.md">the shortcuts reference</a>, which is
+<a href="#keyboard-shortcuts">the shortcuts reference</a>, which is
 generated from the same constant the Help &gt; Keyboard Shortcuts dialog shows,
 so the two cannot disagree.</p>
 <h3 id="line-operations">Line operations</h3>
@@ -421,7 +421,7 @@ a run of typing does.</p>
 <h3 id="zoom">Zoom</h3>
 <p><code>Ctrl+=</code> and <code>Ctrl+-</code> change the editor font size; <code>Ctrl+0</code> puts it back.
 This is the same setting as <code>font_size</code> in the config file, so a zoom you
-like can be made permanent by writing it down -- see <a href="08-settings.md">Settings</a>.</p>
+like can be made permanent by writing it down -- see <a href="#settings-and-customisation">Settings</a>.</p>
 <h3 id="indentation">Indentation</h3>
 <p><strong>Format &gt; Indentation</strong> chooses between a literal tab and spaces, and sets
 how many columns a tab advances to (2, 4 or 8).</p>
@@ -469,18 +469,18 @@ they have to know where the caret is.</p>
 </table>
 <p>The reason is that the toolkit's text widget will not say where the caret is,
 and a feature that has to know cannot be built on it
-(<a href="../decisions/ADR-0018.md">ADR-0018</a>). Everything that does <em>not</em> need the
+(<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0018.md">ADR-0018</a>). Everything that does <em>not</em> need the
 caret -- Find, Find Next, Go to Line, the note layer, saving, encoding --
 works identically in both.</p>
 <p>The default is the toolkit's widget because it is the better-behaved one for
 ordinary typing on every platform. <code>--editor-view</code> is opt-in, and the decision
 to keep both has been re-examined and reaffirmed.</p>
 <h3 id="what-this-product-will-not-do-while-you-type">What this product will not do while you type</h3>
-<p><strong>It does not run anything</strong> (<a href="../decisions/ADR-0057.md">ADR-0057</a>). There is
+<p><strong>It does not run anything</strong> (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0057.md">ADR-0057</a>). There is
 no execution in this product at all -- no scripts, no cells, no interpreters,
 nothing auto-triggered by content.</p>
 <p><strong>It does not reach the network.</strong> Core editing never depends on a cloud or AI
-service (<a href="../decisions/ADR-0006.md">ADR-0006</a>). The product works identically
+service (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0006.md">ADR-0006</a>). The product works identically
 with the network cable out.</p>
 <h2 id="tabs-and-windows">Tabs and windows</h2>
 <p>Every open document is a tab. Files named on the command line each open in
@@ -503,7 +503,7 @@ answer, and it is the one that works with the window manager you already use.</p
 <p><strong>Dropping a file on the window does not open it yet.</strong> This page used to
 call that a toolkit limitation, and it was not one: the drop reaches the
 application through the windowing layer beneath the toolkit, on Windows and on
-an X11 Linux session (<a href="../decisions/ADR-0081.md">ADR-0081</a>). It is queued. On a
+an X11 Linux session (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0081.md">ADR-0081</a>). It is queued. On a
 native Wayland session it will not work even once it is built, because that
 layer does not report a dropped file there.</p>
 <p>Use File &gt; Open, Open Recent, or the command line.</p>
@@ -512,7 +512,7 @@ layer does not report a dropped file there.</p>
 <p><strong>Open tabs do not.</strong> Starting the program gives you an empty <em>Untitled</em>
 document rather than restoring what was open. Unsaved work is a separate
 question and is handled by the recovery journal -- see
-<a href="06-undo-and-recovery.md">Undo, history and recovery</a>.</p>
+<a href="#undo-history-and-recovery">Undo, history and recovery</a>.</p>
 <h2 id="find-and-replace">Find and replace</h2>
 <p><code>Ctrl+F</code> opens the find bar. It takes the caret; typing goes into the search
 box, not into your document.</p>
@@ -525,7 +525,7 @@ twice in the find box used to replace the match with a line break, and the
 cause was a comment asserting that Find Next, Go to Line and a cross-file
 result were &quot;each a single deliberate jump the user makes once&quot; -- three
 claims, one of them true. It is fixed, and
-<a href="../decisions/ADR-0052.md">ADR-0052</a> is the record, because the shape of the
+<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0052.md">ADR-0052</a> is the record, because the shape of the
 mistake is more useful than the fix.</p>
 <p><strong>Replace</strong> and <strong>Replace All</strong> work on the current document. Replace All is a
 single undo entry, so <code>Ctrl+Z</code> puts every one of them back at once.</p>
@@ -585,7 +585,7 @@ exact text appear</em> but <em>what else have I written that is about this</em>.
 off the notes index -- tags and keywords -- rather than a literal search.</p>
 <p>It is the better tool when you cannot remember the wording, which is most of
 the time. It needs the index, so it needs a privacy profile that permits one;
-see <a href="../user/11-privacy.md">Privacy</a>.</p>
+see <a href="#privacy-and-security">Privacy</a>.</p>
 <h3 id="what-it-does-not-do">What it does not do</h3>
 <p><strong>It does not index the contents of files you have not opened.</strong> The index
 knows about documents you have worked on. A folder search reads the files
@@ -634,12 +634,12 @@ left it, and you decide where it goes.</p>
 <em>Untitled</em> buffer has no path, so its journal names none -- which matters if
 you ever go looking, because such a file matches no filter you might write.</p>
 <p><strong>Whether a journal is written at all is a privacy setting.</strong> It is one of the
-two axes the profile model governs; see <a href="11-privacy.md">Privacy</a>. A profile
+two axes the profile model governs; see <a href="#privacy-and-security">Privacy</a>. A profile
 that writes no journal means unsaved work does not survive a crash, and that
 is the trade being made rather than a defect.</p>
 <h3 id="what-is-not-kept">What is not kept</h3>
 <p><strong>No clipboard history.</strong> It existed and was removed
-(<a href="../decisions/ADR-0061.md">ADR-0061</a>).</p>
+(<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0061.md">ADR-0061</a>).</p>
 <p><strong>No open-tab session.</strong> Starting the program gives you an empty document, not
 what you had open last time. Open Recent is what remembers.</p>
 <h2 id="encoding-line-endings-and-file-formats">Encoding, line endings and file formats</h2>
@@ -654,7 +654,7 @@ is what everything else on both supported platforms now writes.</p>
 entry.</p>
 <h3 id="line-endings">Line endings</h3>
 <p><strong>Format &gt; Line Ending</strong> offers <strong>LF</strong> and <strong>CRLF</strong>.</p>
-<p>A line is <code>\n</code> or <code>\r\n</code>, and nothing else (<a href="../decisions/ADR-0029.md">ADR-0029</a>).
+<p>A line is <code>\n</code> or <code>\r\n</code>, and nothing else (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0029.md">ADR-0029</a>).
 That is narrower than Unicode's definition of a line break, which also counts
 things like <code>\u{2028}</code> -- treating those as line breaks makes line numbers
 disagree with every other tool you would compare them against, so this product
@@ -667,7 +667,7 @@ languages are <strong>recognised</strong> -- the format is detected and shown in
 bar, and used by the note layer for things like finding a title.</p>
 <p><strong>Recognition, not transformation.</strong> There is no format, validate, sort-keys
 or convert. Those operations existed in this product and were removed
-(<a href="../decisions/ADR-0062.md">ADR-0062</a>) as part of scoping it down to Notepad
+(<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0062.md">ADR-0062</a>) as part of scoping it down to Notepad
 plus a note layer. The full BachelorPad+ is where they live.</p>
 <p>What recognition is used for:</p>
 <ul>
@@ -681,7 +681,7 @@ rather than changing it.</li>
 <p><strong>No Markdown preview.</strong> This page used to say the toolkit could not render
 one. It can, and could when that was written: its styled-text element renders
 emphasis, links, lists and inline code, though not headings or tables
-(<a href="../decisions/ADR-0081.md">ADR-0081</a>). Whether this product should have a
+(<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0081.md">ADR-0081</a>). Whether this product should have a
 preview is now an open question rather than a technical one. Writing it to
 HTML and opening a browser is still ruled out -- this product does not launch
 programs.</p>
@@ -750,7 +750,7 @@ has no business crossing a network at sign-out.</p>
 bpad --editor-view
 bpad --line 427 server.log
 </code></pre>
-<p>The full list is in <a href="../generated/reference/cli.md">the CLI reference</a>, which
+<p>The full list is in <a href="#command-line">the CLI reference</a>, which
 is generated from <code>--help</code> -- so it is the binary's own answer rather than a
 copy of it.</p>
 <p><code>--help</code> and <code>--version</code> are handled before configuration is loaded, on
@@ -778,7 +778,7 @@ page is optional, local, and off the network.</p>
 <p>The product keeps a small index of documents you have opened -- their paths,
 their titles, and keywords drawn from their text. Nothing leaves your machine,
 and <strong>what is recorded at all is governed by your privacy profile</strong>; see
-<a href="11-privacy.md">Privacy</a>.</p>
+<a href="#privacy-and-security">Privacy</a>.</p>
 <table>
 <thead>
 <tr>
@@ -875,7 +875,7 @@ reason in its own label is more use than a row that is not there.</p>
 if your profile permits it.</p>
 <h2 id="making-it-your-default-editor">Making it your default editor</h2>
 <p><strong>This product never seizes a file association</strong>
-(<a href="../decisions/ADR-0012.md">ADR-0012</a>). It tells you what is registered now,
+(<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0012.md">ADR-0012</a>). It tells you what is registered now,
 plans a change, shows you the plan, and hands you the means to apply it. The
 last step is always yours.</p>
 <h3 id="look-before-you-change-anything">Look before you change anything</h3>
@@ -892,7 +892,7 @@ is the modest one: plain text and logs.</li>
 <p><strong><code>.bpadx</code> is not in any preset</strong>, including <em>Notepad Replacement</em>. It used
 to be in all of them, and this build opens such a file as ciphertext because
 it has no decryption in it. Registering a file type you cannot open is worse
-than not registering it (<a href="../decisions/ADR-0069.md">ADR-0069</a>).</p>
+than not registering it (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0069.md">ADR-0069</a>).</p>
 </blockquote>
 <h3 id="windows-2">Windows</h3>
 <p>Choose a preset and confirm. You get a <strong><code>.reg</code> file</strong>, written where you can
@@ -907,7 +907,7 @@ nothing needs administrator rights.</p>
 application can make it for you.</p>
 <p>Explorer will draw the icon from <code>bachelorpad.ico</code> <strong>beside the executable</strong>.
 If you move the executable and leave the icon behind, every registered type
-draws blank (<a href="../decisions/ADR-0068.md">ADR-0068</a>) -- move the whole folder.</p>
+draws blank (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0068.md">ADR-0068</a>) -- move the whole folder.</p>
 <h3 id="linux-1">Linux</h3>
 <p>Confirm, and two things are written under your home directory:</p>
 <ul>
@@ -930,13 +930,13 @@ system theme.</p>
 entries can be removed by hand if you want them gone entirely.</p>
 <p>Linux: delete the two files and run the two commands again.</p>
 <p>This product will not remove them for you, which is the same rule as
-everywhere else (<a href="../decisions/ADR-0070.md">ADR-0070</a>).</p>
+everywhere else (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0070.md">ADR-0070</a>).</p>
 <h2 id="windows-and-linux-differences">Windows and Linux differences</h2>
 <p><strong>Windows 10, Windows 11 and Linux are equal targets</strong>
-(<a href="../decisions/ADR-0001.md">ADR-0001</a>), and both legs are tested on every
+(<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0001.md">ADR-0001</a>), and both legs are tested on every
 change. The differences below are the operating systems' rather than this
 product's.</p>
-<p>macOS is not a target. <a href="../decisions/ADR-0072.md">ADR-0072</a> says why, and what
+<p>macOS is not a target. <a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0072.md">ADR-0072</a> says why, and what
 it would cost.</p>
 <h3 id="where-things-are-kept">Where things are kept</h3>
 <table>
@@ -986,7 +986,7 @@ case are two files on one and one file on the other -- which the product knows
 about when it asks whether you are about to overwrite something.</p>
 <h3 id="default-editor-registration">Default-editor registration</h3>
 <p>Different mechanisms, the same rule: <strong>this product never seizes a file
-association</strong> (<a href="../decisions/ADR-0012.md">ADR-0012</a>). It shows you what it
+association</strong> (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0012.md">ADR-0012</a>). It shows you what it
 would do and hands you the means to do it.</p>
 <table>
 <thead>
@@ -1017,7 +1017,7 @@ would do and hands you the means to do it.</p>
 <p>Both are named for you and neither is run for you. A library that spawns
 processes on your behalf is a library that can be talked into spawning a
 different one.</p>
-<p>See <a href="../tutorials/02-default-editor.md">Making it your default editor</a>.</p>
+<p>See <a href="#making-it-your-default-editor">Making it your default editor</a>.</p>
 <h3 id="the-console-on-windows">The console, on Windows</h3>
 <p>A Windows release build is a GUI-subsystem executable and has no console of
 its own, so <code>--help</code> and <code>--version</code> print to a terminal when you run it from
@@ -1037,10 +1037,10 @@ signing key and signing was removed.</p>
 <h2 id="privacy-and-security">Privacy and security</h2>
 <h3 id="the-short-version">The short version</h3>
 <p><strong>Nothing you type leaves your machine.</strong> Core editing never depends on a
-cloud or an AI service (<a href="../decisions/ADR-0006.md">ADR-0006</a>), and this
+cloud or an AI service (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0006.md">ADR-0006</a>), and this
 product makes no network connection at all -- no telemetry, no update check,
 no crash reporting, no analytics.</p>
-<p><strong>This product executes nothing</strong> (<a href="../decisions/ADR-0057.md">ADR-0057</a>).
+<p><strong>This product executes nothing</strong> (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0057.md">ADR-0057</a>).
 There is no scripting, no macro language, no cell execution and no
 interpreter. Opening a document cannot run anything, because there is nothing
 to run.</p>
@@ -1056,7 +1056,7 @@ until you save.</li>
 title, its keywords, in the notes index.</li>
 </ol>
 <p>Those two are what is left of a larger profile model, narrowed to the axes
-that actually govern something (<a href="../decisions/ADR-0064.md">ADR-0064</a>). A
+that actually govern something (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0064.md">ADR-0064</a>). A
 smaller editor should not know more about you than the larger one did.</p>
 <p>Profiles are per document, so a note you are relaxed about and one you are not
 can be treated differently in the same session.</p>
@@ -1096,9 +1096,9 @@ can be treated differently in the same session.</p>
 cannot click, saying what the current profile has decided. They are greyed
 because they are answers, not buttons.</p>
 <p><strong>The journal readout says &quot;on, unencrypted&quot; and that wording is
-load-bearing.</strong> There was an encrypted journal; <a href="../decisions/ADR-0064.md">ADR-0064</a>
+load-bearing.</strong> There was an encrypted journal; <a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0064.md">ADR-0064</a>
 deleted the variant rather than quietly pointing it at plaintext, and
-<a href="../decisions/ADR-0065.md">ADR-0065</a> kept Private's journal <em>because</em> the row
+<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0065.md">ADR-0065</a> kept Private's journal <em>because</em> the row
 names its form honestly. A test asserts that if the row ever stops saying so,
 Private goes back to writing no journal at all.</p>
 <p><strong>Privacy Mode</strong> is a session-wide override that can only tighten, never
@@ -1113,7 +1113,7 @@ line in Tools &gt; Security Inspector is something the program actually does.</p
 temporary files and wiping memory -- were shown as the policy in force and
 enforced by nothing, so a Confidential document was told <em>&quot;Temporary files:
 never written&quot;</em> while every save wrote one. They were removed rather than
-explained (<a href="../decisions/ADR-0082.md">ADR-0082</a>). Nothing leaves the machine
+explained (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0082.md">ADR-0082</a>). Nothing leaves the machine
 under any profile, because this product has no network code at all; and a
 save writes a temporary file beside the document and renames it into place,
 under every profile, because that is what makes a save survive a crash.</p>
@@ -1122,12 +1122,12 @@ only the four removed lines ever told them apart.</p>
 <h3 id="what-is-deliberately-absent">What is deliberately absent</h3>
 <p><strong>No encryption.</strong> <code>.bpadx</code> encrypted documents, the audit log, secret
 scanning, metadata redaction and document signing were all in this product and
-were all removed (<a href="../decisions/ADR-0064.md">ADR-0064</a>). They are features of
+were all removed (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0064.md">ADR-0064</a>). They are features of
 the full BachelorPad+.</p>
 <p><strong>Do not open a <code>.bpadx</code> file with this build.</strong> It opens as ciphertext --
 bytes, not text. An earlier release registered <code>.bpadx</code> as a file type this
 program handles, including in the preset called <em>Notepad Replacement</em>; that
-was wrong and is fixed (<a href="../decisions/ADR-0069.md">ADR-0069</a>).</p>
+was wrong and is fixed (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0069.md">ADR-0069</a>).</p>
 <p><strong>No password manager, no keychain integration.</strong> What would have gone in them
 was a signing key, and signing is gone.</p>
 <h3 id="files-an-older-build-may-have-left-behind">Files an older build may have left behind</h3>
@@ -1138,14 +1138,14 @@ longer read by anything:</p>
 <li><code>%APPDATA%\bachelorpad\recent.toml</code> (the list has since moved)</li>
 </ul>
 <p><strong>They are not deleted for you</strong>, on purpose
-(<a href="../decisions/ADR-0070.md">ADR-0070</a>). The first is a frozen record of every
+(<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0070.md">ADR-0070</a>). The first is a frozen record of every
 privacy-profile change the product made while the audit log existed, and it is
 your record of your own machine -- this product does not get to decide it is
 worthless. A product that will not silently claim a file association does not
 get to silently delete out of your profile either.</p>
 <p>Delete them by hand if you want them gone. Nothing will miss them.</p>
 <h3 id="reporting-a-security-problem">Reporting a security problem</h3>
-<p>See <a href="../../SECURITY.md">SECURITY.md</a>. Please do not open a public issue for a
+<p>See <a href="https://github.com/dboles99/bachelorpluslite/blob/main/SECURITY.md">SECURITY.md</a>. Please do not open a public issue for a
 vulnerability.</p>
 <h2 id="troubleshooting">Troubleshooting</h2>
 <p>Start with <strong>Help &gt; Diagnostics</strong>. It prints the version, the renderer in use,
@@ -1153,7 +1153,7 @@ and every directory as resolved on your machine -- which is what most of the
 questions below turn out to be about.</p>
 <h3 id="windows-warns-me-before-it-will-run-this">Windows warns me before it will run this</h3>
 <p>SmartScreen, because the archives are unsigned
-(<a href="../decisions/ADR-0055.md">ADR-0055</a>). <em>More info</em> then <em>Run anyway</em>.</p>
+(<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0055.md">ADR-0055</a>). <em>More info</em> then <em>Run anyway</em>.</p>
 <p>Verify the download first if you would rather:</p>
 <pre><code class="language-powershell">(Get-FileHash -Algorithm SHA256 .\bachelorpad-lite-0.9.5-windows-x86_64.zip).Hash
 </code></pre>
@@ -1173,7 +1173,7 @@ why you cannot filter these safely -- open them.</p>
 </code></pre>
 <h3 id="the-window-has-no-icon-or-a-file-type-shows-a-blank-page-in-explorer">The window has no icon, or a file type shows a blank page in Explorer</h3>
 <p>The icons ship <strong>beside</strong> the executable, not inside it
-(<a href="../decisions/ADR-0068.md">ADR-0068</a>). If you moved <code>bachelorpad.exe</code> out of
+(<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0068.md">ADR-0068</a>). If you moved <code>bachelorpad.exe</code> out of
 the unpacked folder and left <code>bachelorpad.ico</code> and
 <code>io.github.dboles99.BachelorPadPlus.png</code> behind, both break.</p>
 <p>Move the whole folder, or unpack it again.</p>
@@ -1193,29 +1193,29 @@ it from PowerShell or a command prompt.</p>
 </code></pre>
 <p>The default surface is the toolkit's text widget, which will not say where the
 caret is -- and a feature that has to know cannot be built on it
-(<a href="../decisions/ADR-0018.md">ADR-0018</a>). See
-<a href="03-editing.md#the-two-editor-surfaces">Editing</a>.</p>
+(<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0018.md">ADR-0018</a>). See
+<a href="#the-two-editor-surfaces">Editing</a>.</p>
 <h3 id="dropping-a-file-on-the-window-does-nothing">Dropping a file on the window does nothing</h3>
 <p>Not implemented yet. It is buildable on Windows and on an X11 Linux session,
 and will not work on a native Wayland one, whose window system does not hand
-this toolkit a dropped file (<a href="../decisions/ADR-0081.md">ADR-0081</a>). Until
+this toolkit a dropped file (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0081.md">ADR-0081</a>). Until
 then, use File &gt; Open, Open Recent, or name the file on the command line.</p>
 <h3 id="a-file-opens-as-gibberish">A file opens as gibberish</h3>
 <p>If it is a <code>.bpadx</code>, that is expected -- it is encrypted, and this build has no
-decryption in it (<a href="../decisions/ADR-0064.md">ADR-0064</a>). It opens as
+decryption in it (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0064.md">ADR-0064</a>). It opens as
 ciphertext because that is literally what is in the file.</p>
 <p>Otherwise the file is probably not UTF-8. This product reads and writes UTF-8
 and UTF-8 with BOM, and nothing else; see
-<a href="07-encoding-and-formats.md">Encoding</a> for why.</p>
+<a href="#encoding-line-endings-and-file-formats">Encoding</a> for why.</p>
 <h3 id="related-notes-is-empty-or-research-report-says-there-is-nothing">Related Notes is empty, or Research Report says there is nothing</h3>
 <p>Your privacy profile is probably set to record nothing, which is a valid
 choice and not a fault. The rows say so in their own labels rather than
-appearing broken. See <a href="11-privacy.md">Privacy</a>.</p>
+appearing broken. See <a href="#privacy-and-security">Privacy</a>.</p>
 <h3 id="reporting-a-problem">Reporting a problem</h3>
 <p><a href="https://github.com/dboles99/bachelorpluslite/issues">Open an issue</a> with the
 output of Help &gt; Diagnostics, what you did, and what happened instead.</p>
 <p><strong>For a security vulnerability, do not open a public issue</strong> -- see
-<a href="../../SECURITY.md">SECURITY.md</a>.</p>
+<a href="https://github.com/dboles99/bachelorpluslite/blob/main/SECURITY.md">SECURITY.md</a>.</p>
 <h2 id="keyboard-shortcuts">Keyboard shortcuts</h2>
 <p><em>Generated from <code>bp_ui::dispatch::SHORTCUTS</code> by <code>scripts/Build-Docs.ps1</code>. Do
 not edit.</em></p>
@@ -1379,7 +1379,7 @@ because it has to know where the caret is (ADR-0018).</p>
 <tbody>
 <tr>
 <td>New, Open, Open Recent, Save All, Close Tab</td>
-<td><strong>live</strong>. Every document is loaded whole into the rope. It was classified by size first and served from disk past 192 MiB (ADR-0027, ADR-0030) until <a href="../decisions/ADR-0063.md">ADR-0063</a>; a large file now loads or fails trying, which is what Notepad does</td>
+<td><strong>live</strong>. Every document is loaded whole into the rope. It was classified by size first and served from disk past 192 MiB (ADR-0027, ADR-0030) until <a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0063.md">ADR-0063</a>; a large file now loads or fails trying, which is what Notepad does</td>
 </tr>
 <tr>
 <td>Save, Save As, Reload</td>
@@ -1391,7 +1391,7 @@ because it has to know where the caret is (ADR-0018).</p>
 </tr>
 <tr>
 <td>Set as Default Editor...</td>
-<td><strong>live</strong> — <code>bp_platform::editor</code>, under ADR-0012. The row's hint names the preset it registers for (Notepad Replacement), because the preset is a real choice and one made out of sight is one nobody made. <strong>Every extension any preset offers is one this build can open</strong> (<a href="../decisions/ADR-0069.md">ADR-0069</a> removed <code>.bpadx</code>, which every preset had claimed, and removed the test exemption that let it). A click <strong>reports before it offers</strong>: the dialog opens with what opens each of those types today, from <code>association_report</code>. On Windows that reads &quot;cannot tell what opens .txt files&quot;, never &quot;nothing is set to&quot; — <code>AssociationState::Unknown</code> is not <code>Unclaimed</code>, and rendering the second from the first invites the user to fix something that may not be broken. Then it shows the whole plan — the exact files, the root they go under, the commands that still have to run — and only an explicit OK becomes <code>Consent::Granted</code>. On Linux <code>install</code> writes the <code>.desktop</code> entry and the MIME package under the root <code>install_root</code> names, and the shell then <strong>shows the <code>xdg-mime default</code> command rather than pretending the job is done</strong>; nothing here runs it, because running it is deciding for the user, which is the thing ADR-0012 draws its line around. On Windows <code>install</code> refuses, in the capability register's own words, so a status bar line and a refusal cannot drift apart; what the user gets instead is the <code>.reg</code> script, saved where <em>they</em> chose, plus <code>ms-settings:defaultapps</code> to paste into Run. <strong>No key belonging to another application is ever written, and Notepad is never named</strong>: <code>bp-platform</code> refuses to build such a plan and the shell re-checks with <code>registry_objections</code> before a <code>.reg</code> reaches a Save dialog, because that path does not go through <code>install</code> at all</td>
+<td><strong>live</strong> — <code>bp_platform::editor</code>, under ADR-0012. The row's hint names the preset it registers for (Notepad Replacement), because the preset is a real choice and one made out of sight is one nobody made. <strong>Every extension any preset offers is one this build can open</strong> (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0069.md">ADR-0069</a> removed <code>.bpadx</code>, which every preset had claimed, and removed the test exemption that let it). A click <strong>reports before it offers</strong>: the dialog opens with what opens each of those types today, from <code>association_report</code>. On Windows that reads &quot;cannot tell what opens .txt files&quot;, never &quot;nothing is set to&quot; — <code>AssociationState::Unknown</code> is not <code>Unclaimed</code>, and rendering the second from the first invites the user to fix something that may not be broken. Then it shows the whole plan — the exact files, the root they go under, the commands that still have to run — and only an explicit OK becomes <code>Consent::Granted</code>. On Linux <code>install</code> writes the <code>.desktop</code> entry and the MIME package under the root <code>install_root</code> names, and the shell then <strong>shows the <code>xdg-mime default</code> command rather than pretending the job is done</strong>; nothing here runs it, because running it is deciding for the user, which is the thing ADR-0012 draws its line around. On Windows <code>install</code> refuses, in the capability register's own words, so a status bar line and a refusal cannot drift apart; what the user gets instead is the <code>.reg</code> script, saved where <em>they</em> chose, plus <code>ms-settings:defaultapps</code> to paste into Run. <strong>No key belonging to another application is ever written, and Notepad is never named</strong>: <code>bp-platform</code> refuses to build such a plan and the shell re-checks with <code>registry_objections</code> before a <code>.reg</code> reaches a Save dialog, because that path does not go through <code>install</code> at all</td>
 </tr>
 <tr>
 <td>New Window</td>
@@ -1422,7 +1422,7 @@ because it has to know where the caret is (ADR-0018).</p>
 </tr>
 <tr>
 <td>Clipboard History, Paste transformations</td>
-<td><strong>Removed</strong> (<a href="../decisions/ADR-0061.md">ADR-0061</a>). Both were live. Cut, Copy and Paste above are the OS clipboard and are untouched — the history shared a word with them and nothing else</td>
+<td><strong>Removed</strong> (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0061.md">ADR-0061</a>). Both were live. Cut, Copy and Paste above are the OS clipboard and are untouched — the history shared a word with them and nothing else</td>
 </tr>
 <tr>
 <td>Sort / Deduplicate / Reverse / Trim lines</td>
@@ -1438,7 +1438,7 @@ because it has to know where the caret is (ADR-0018).</p>
 </tr>
 <tr>
 <td>Multi-cursor, column selection</td>
-<td><strong>Not a row</strong> (<a href="../decisions/ADR-0048.md">ADR-0048</a>). <code>TextInput</code> has one caret and cannot draw a second, so it could only work under <code>--editor-view</code> — and <code>bp-editor</code> would have to carry a set of carets through every command, selection and undo entry. A real feature, and it comes back as a queue item with a design behind it rather than as a row that has sat in a menu since the scaffold commit</td>
+<td><strong>Not a row</strong> (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0048.md">ADR-0048</a>). <code>TextInput</code> has one caret and cannot draw a second, so it could only work under <code>--editor-view</code> — and <code>bp-editor</code> would have to carry a set of carets through every command, selection and undo entry. A real feature, and it comes back as a queue item with a design behind it rather than as a row that has sat in a menu since the scaffold commit</td>
 </tr>
 </tbody>
 </table>
@@ -1469,7 +1469,7 @@ because it has to know where the caret is (ADR-0018).</p>
 </tr>
 <tr>
 <td>Split / Preview</td>
-<td><strong>Not a row, and D14 is open again</strong> (<a href="../decisions/ADR-0081.md">ADR-0081</a>). <a href="../decisions/ADR-0048.md">ADR-0048</a> answered it on the premise that Slint 1.17.1 had no rich-text item; it had one, <code>StyledText</code>, public since Slint 1.15, which renders emphasis, links, lists and inline code but not headings, tables or images. Handing HTML to the system browser is still ruled out -- this product launches no programs (ADR-0075). Whether a product reduced to Notepad wants a preview at all is Daniel's question. <em>Split</em> -- two panes over one document -- is a separate feature and was never the hard half</td>
+<td><strong>Not a row, and D14 is open again</strong> (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0081.md">ADR-0081</a>). <a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0048.md">ADR-0048</a> answered it on the premise that Slint 1.17.1 had no rich-text item; it had one, <code>StyledText</code>, public since Slint 1.15, which renders emphasis, links, lists and inline code but not headings, tables or images. Handing HTML to the system browser is still ruled out -- this product launches no programs (ADR-0075). Whether a product reduced to Notepad wants a preview at all is Daniel's question. <em>Split</em> -- two panes over one document -- is a separate feature and was never the hard half</td>
 </tr>
 </tbody>
 </table>
@@ -1492,7 +1492,7 @@ because it has to know where the caret is (ADR-0018).</p>
 </tr>
 <tr>
 <td>Citation</td>
-<td>Not a row, and now not possible either. <code>bp-research</code> modelled citations and left under <a href="../decisions/ADR-0060.md">ADR-0060</a>; there is nothing to insert <em>from</em></td>
+<td>Not a row, and now not possible either. <code>bp-research</code> modelled citations and left under <a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0060.md">ADR-0060</a>; there is nothing to insert <em>from</em></td>
 </tr>
 </tbody>
 </table>
@@ -1538,7 +1538,7 @@ because it has to know where the caret is (ADR-0018).</p>
 </tr>
 <tr>
 <td>Recovery Checkpoints</td>
-<td><strong>live</strong> — what the crash-recovery journal holds for this document, and <em>before the count</em>, whether this profile writes one at all. <strong>Not &quot;Revision History&quot;</strong>, which this file named until 2026-08-22: <code>bp-history</code> holds the pending checkpoint and discards it the moment a save succeeds, so the name promised successive versions to go back to (<a href="../decisions/ADR-0048.md">ADR-0048</a>)</td>
+<td><strong>live</strong> — what the crash-recovery journal holds for this document, and <em>before the count</em>, whether this profile writes one at all. <strong>Not &quot;Revision History&quot;</strong>, which this file named until 2026-08-22: <code>bp-history</code> holds the pending checkpoint and discards it the moment a save succeeds, so the name promised successive versions to go back to (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0048.md">ADR-0048</a>)</td>
 </tr>
 <tr>
 <td>Related Notes</td>
@@ -1565,7 +1565,7 @@ because it has to know where the caret is (ADR-0018).</p>
 </tr>
 <tr>
 <td>Recovery journal: …</td>
-<td><strong>live</strong> — a readout, greyed because it is not clickable. Standard and Private journal unsaved work in plaintext and this row says <em>&quot;on, unencrypted&quot;</em>; Confidential and Maximum journal nothing. <strong>Not &quot;encrypted&quot;</strong> — ADR-0064 deleted that variant rather than pointing it at plaintext. <strong>This row is load-bearing</strong> (<a href="../decisions/ADR-0065.md">ADR-0065</a>): Private keeps a journal <em>because</em> the row names its form, and a test says that if the row stops doing so, Private goes back to no journal</td>
+<td><strong>live</strong> — a readout, greyed because it is not clickable. Standard and Private journal unsaved work in plaintext and this row says <em>&quot;on, unencrypted&quot;</em>; Confidential and Maximum journal nothing. <strong>Not &quot;encrypted&quot;</strong> — ADR-0064 deleted that variant rather than pointing it at plaintext. <strong>This row is load-bearing</strong> (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0065.md">ADR-0065</a>): Private keeps a journal <em>because</em> the row names its form, and a test says that if the row stops doing so, Private goes back to no journal</td>
 </tr>
 <tr>
 <td>Recorded: …</td>
@@ -1577,7 +1577,7 @@ because it has to know where the caret is (ADR-0018).</p>
 </tr>
 <tr>
 <td>Encrypt Document, Scan for Secrets, Redact, Inspect Metadata, Hash, Sign, Verify, Security History, Lock Document</td>
-<td><strong>Removed</strong> (<a href="../decisions/ADR-0064.md">ADR-0064</a>). All nine were live. <code>.bpadx</code> documents already on a disk cannot be opened by this build, and there is no migration — the ADR says why</td>
+<td><strong>Removed</strong> (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0064.md">ADR-0064</a>). All nine were live. <code>.bpadx</code> documents already on a disk cannot be opened by this build, and there is no migration — the ADR says why</td>
 </tr>
 </tbody>
 </table>
@@ -1592,7 +1592,7 @@ because it has to know where the caret is (ADR-0018).</p>
 <tbody>
 <tr>
 <td>Related Notes</td>
-<td><strong>live</strong> — a collapsible panel of documents sharing tags with the active one (<a href="../decisions/ADR-0037.md">ADR-0037</a>)</td>
+<td><strong>live</strong> — a collapsible panel of documents sharing tags with the active one (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0037.md">ADR-0037</a>)</td>
 </tr>
 <tr>
 <td>Duplicate Detection</td>
@@ -1604,7 +1604,7 @@ because it has to know where the caret is (ADR-0018).</p>
 </tr>
 <tr>
 <td>Project</td>
-<td>Not a row. Nothing in this product has a concept of a project, and inventing one to fill a menu row is how a feature nobody asked for gets built (<a href="../decisions/ADR-0048.md">ADR-0048</a>)</td>
+<td>Not a row. Nothing in this product has a concept of a project, and inventing one to fill a menu row is how a feature nobody asked for gets built (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0048.md">ADR-0048</a>)</td>
 </tr>
 <tr>
 <td>Topics</td>
@@ -1612,7 +1612,7 @@ because it has to know where the caret is (ADR-0018).</p>
 </tr>
 <tr>
 <td>Semantic search</td>
-<td><strong>Declined</strong> with phase 10 (<a href="../decisions/ADR-0082.md">ADR-0082</a>). Find ▸ In Folder searches the text of every note and Related Notes answers <em>what else is about this</em>; ranking by meaning is the part that would need a model, and a model is what this product declined</td>
+<td><strong>Declined</strong> with phase 10 (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0082.md">ADR-0082</a>). Find ▸ In Folder searches the text of every note and Related Notes answers <em>what else is about this</em>; ranking by meaning is the part that would need a model, and a model is what this product declined</td>
 </tr>
 <tr>
 <td>Entities, smart collections</td>
@@ -1631,19 +1631,19 @@ because it has to know where the caret is (ADR-0018).</p>
 <tbody>
 <tr>
 <td>Research Report</td>
-<td><strong>live</strong> — dominant themes, stale clusters, under-connected documents, consolidation candidates, each naming the documents behind it, and a closing section stating every threshold it applied (<a href="../decisions/ADR-0041.md">ADR-0041</a>, <a href="../decisions/ADR-0046.md">ADR-0046</a>)</td>
+<td><strong>live</strong> — dominant themes, stale clusters, under-connected documents, consolidation candidates, each naming the documents behind it, and a closing section stating every threshold it applied (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0041.md">ADR-0041</a>, <a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0046.md">ADR-0046</a>)</td>
 </tr>
 <tr>
 <td>Citation Metadata, Find Identifiers, Check Bibliography</td>
-<td><strong>Removed</strong> (<a href="../decisions/ADR-0060.md">ADR-0060</a>). All three were live and all three read the document through <code>bp-research</code>, which has left. The three rows below read the <em>store</em>, which is why they stay</td>
+<td><strong>Removed</strong> (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0060.md">ADR-0060</a>). All three were live and all three read the document through <code>bp-research</code>, which has left. The three rows below read the <em>store</em>, which is why they stay</td>
 </tr>
 <tr>
 <td>Open Questions</td>
-<td><strong>live</strong> — every question the document asks, at the line it begins on; code inside a fence is skipped (<a href="../decisions/ADR-0046.md">ADR-0046</a>)</td>
+<td><strong>live</strong> — every question the document asks, at the line it begins on; code inside a fence is skipped (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0046.md">ADR-0046</a>)</td>
 </tr>
 <tr>
 <td>What the Store Holds</td>
-<td><strong>live</strong> — the store's own contents, and the statement that it never holds the text of a document (<a href="../decisions/ADR-0046.md">ADR-0046</a>)</td>
+<td><strong>live</strong> — the store's own contents, and the statement that it never holds the text of a document (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0046.md">ADR-0046</a>)</td>
 </tr>
 </tbody>
 </table>
@@ -1662,11 +1662,11 @@ because it has to know where the caret is (ADR-0018).</p>
 </tr>
 <tr>
 <td>Security Inspector</td>
-<td><strong>live</strong> — the policy in force on <strong>all six</strong> axes. The Privacy menu shows the two that anything enforces; embeddings, network, temporary files and zeroising are reported here and consulted by nothing (<a href="../decisions/ADR-0059.md">ADR-0059</a> §4), which the code says out loud rather than leaving the readout to imply otherwise. Every axis Privacy Mode overrode shows the profile's own answer too</td>
+<td><strong>live</strong> — the policy in force on <strong>all six</strong> axes. The Privacy menu shows the two that anything enforces; embeddings, network, temporary files and zeroising are reported here and consulted by nothing (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0059.md">ADR-0059</a> §4), which the code says out loud rather than leaving the readout to imply otherwise. Every axis Privacy Mode overrode shows the profile's own answer too</td>
 </tr>
 <tr>
 <td>File Analysis</td>
-<td><strong>live</strong> — the <em>file</em>, which is a different object from the document: size, whether it is marked read-only, and whether it changed on disk since it was opened. The size class left with huge-file mode (<a href="../decisions/ADR-0063.md">ADR-0063</a>)</td>
+<td><strong>live</strong> — the <em>file</em>, which is a different object from the document: size, whether it is marked read-only, and whether it changed on disk since it was opened. The size class left with huge-file mode (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0063.md">ADR-0063</a>)</td>
 </tr>
 <tr>
 <td>Configuration</td>
@@ -1674,11 +1674,11 @@ because it has to know where the caret is (ADR-0018).</p>
 </tr>
 <tr>
 <td>Benchmarks</td>
-<td>Not a row. <code>benches/</code> holds a README and no benchmark, and a row named for a suite that does not exist is the promise &quot;DOI Lookup&quot; was (<a href="../decisions/ADR-0048.md">ADR-0048</a>)</td>
+<td>Not a row. <code>benches/</code> holds a README and no benchmark, and a row named for a suite that does not exist is the promise &quot;DOI Lookup&quot; was (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0048.md">ADR-0048</a>)</td>
 </tr>
 <tr>
 <td>Conversions</td>
-<td>Not a row, and no longer possible — the Data menu owned format conversion and left under <a href="../decisions/ADR-0062.md">ADR-0062</a></td>
+<td>Not a row, and no longer possible — the Data menu owned format conversion and left under <a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0062.md">ADR-0062</a></td>
 </tr>
 </tbody>
 </table>
@@ -1693,11 +1693,11 @@ because it has to know where the caret is (ADR-0018).</p>
 <tbody>
 <tr>
 <td>User Guide</td>
-<td><strong>live</strong> (<a href="../decisions/ADR-0075.md">ADR-0075</a>). Opens <code>app-help/index.md</code>, shipped beside the executable, <strong>as a document in a new tab</strong> -- never in a browser, because this product launches no programs (<a href="../decisions/ADR-0057.md">ADR-0057</a>). Reports where it looked if the executable has been moved out of the unpacked folder, which is the same way the icon breaks (<a href="../decisions/ADR-0068.md">ADR-0068</a>)</td>
+<td><strong>live</strong> (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0075.md">ADR-0075</a>). Opens <code>app-help/index.md</code>, shipped beside the executable, <strong>as a document in a new tab</strong> -- never in a browser, because this product launches no programs (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0057.md">ADR-0057</a>). Reports where it looked if the executable has been moved out of the unpacked folder, which is the same way the icon breaks (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0068.md">ADR-0068</a>)</td>
 </tr>
 <tr>
 <td>Report a Problem</td>
-<td><strong>live</strong> (<a href="../decisions/ADR-0077.md">ADR-0077</a>). Composes a pre-filled bug report <strong>as a document in a new tab</strong>, with Help &gt; Diagnostics already in it, and puts the issues URL on the clipboard. It opens no browser and sends nothing: the product launches no programs (<a href="../decisions/ADR-0057.md">ADR-0057</a>) and makes no network connection (<a href="../decisions/ADR-0006.md">ADR-0006</a>). The third row of this shape, after Set as Default Editor and User Guide: prepare the artefact, name the step, let the person take it</td>
+<td><strong>live</strong> (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0077.md">ADR-0077</a>). Composes a pre-filled bug report <strong>as a document in a new tab</strong>, with Help &gt; Diagnostics already in it, and puts the issues URL on the clipboard. It opens no browser and sends nothing: the product launches no programs (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0057.md">ADR-0057</a>) and makes no network connection (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0006.md">ADR-0006</a>). The third row of this shape, after Set as Default Editor and User Guide: prepare the artefact, name the step, let the person take it</td>
 </tr>
 <tr>
 <td>Keyboard Shortcuts</td>
@@ -1705,7 +1705,7 @@ because it has to know where the caret is (ADR-0018).</p>
 </tr>
 <tr>
 <td>About</td>
-<td><strong>live</strong>. Names the product, version, renderer and licence -- every one of them read from a constant or the manifest rather than written out (<a href="../decisions/ADR-0071.md">ADR-0071</a>, <a href="../decisions/ADR-0074.md">ADR-0074</a>)</td>
+<td><strong>live</strong>. Names the product, version, renderer and licence -- every one of them read from a constant or the manifest rather than written out (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0071.md">ADR-0071</a>, <a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0074.md">ADR-0074</a>)</td>
 </tr>
 <tr>
 <td>Diagnostics</td>
@@ -1834,7 +1834,7 @@ own pass.</p>
 <p><strong>Say so and give the reason.</strong> Dependency choices are ADR material here, and
 a new one has to pass <code>cargo deny check licenses</code> -- the allow-list in
 <code>deny.toml</code> is the GPL-3.0-only compatibility audit written down
-(<a href="../decisions/ADR-0071.md">ADR-0071</a>).</p>
+(<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0071.md">ADR-0071</a>).</p>
 <p>If it changes the graph, regenerate the notices:</p>
 <pre><code class="language-powershell">./scripts/New-ThirdPartyNotices.ps1
 </code></pre>
@@ -1850,7 +1850,7 @@ a new one has to pass <code>cargo deny check licenses</code> -- the allow-list i
 <code>test</code>, <code>doctests</code>, <code>launch</code>, <code>log hygiene</code>, <code>fuzz</code>, and the Linux leg through
 WSL.</p>
 <p><code>.github/workflows/ci.yml</code> runs the same stages under the same names on
-Windows and Ubuntu runners (<a href="../decisions/ADR-0073.md">ADR-0073</a>). <strong>When the
+Windows and Ubuntu runners (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0073.md">ADR-0073</a>). <strong>When the
 two disagree, the local one is right.</strong></p>
 <p>Three rules about running it:</p>
 <ul>
@@ -1872,7 +1872,7 @@ by somebody who does not have the file open.</p>
 counter: that is unique within a run and reused by the next process that gets
 the same pid. It made the suite flakier the more it was run -- 5,862 leftover
 files across 495 pids, and a recycled pid inheriting an earlier run's history
-(<a href="../decisions/ADR-0049.md">ADR-0049</a>).</p>
+(<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0049.md">ADR-0049</a>).</p>
 <p><strong>Never read the real profile directory.</strong> A function that does means
 <code>cargo test</code> writes there. The fix is a field on <code>AppState</code>, not a function.</p>
 <p><strong>Do not let <code>std::path</code> answer for a <code>Platform</code> parameter.</strong>
@@ -1899,7 +1899,7 @@ a byte vector somebody committed <em>before</em> the change.</p>
 <p><strong>A test that proves two things agree is evidence about two things.</strong> Before
 trusting a constant as the one home for a value, grep for the value. If the
 count is higher than the number of readers, the constant is a convention
-rather than a mechanism (<a href="../decisions/ADR-0074.md">ADR-0074</a>).</p>
+rather than a mechanism (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0074.md">ADR-0074</a>).</p>
 </blockquote>
 <h3 id="what-no-test-can-catch">What no test can catch</h3>
 <blockquote>
@@ -1933,13 +1933,13 @@ deliberate rather than leftover. <code>catch_unwind</code> does not return until
 has finished, so with <code>RUST_BACKTRACE=1</code> the hook symbolising a backtrace was
 being charged to the hang budget -- a hosted Windows runner reported a probe
 whose body is <code>panic!()</code> as a hang and threw the message away
-(<a href="../decisions/ADR-0079.md">ADR-0079</a>).</p>
+(<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0079.md">ADR-0079</a>).</p>
 <p>If you remove it, two tests fail by name. The trade is the automatic backtrace
 on a finding, which you can get back by dropping the hook locally; the corpus
 entry is checked in and the failure names it.</p>
 <h2 id="cutting-a-release">Cutting a release</h2>
 <p>Two ways, producing the same archives. The scripts are the definition; the
-workflow runs them on a clean machine (<a href="../decisions/ADR-0073.md">ADR-0073</a>).</p>
+workflow runs them on a clean machine (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0073.md">ADR-0073</a>).</p>
 <h3 id="by-hand">By hand</h3>
 <pre><code class="language-powershell">./scripts/Invoke-LocalCI.ps1 -Linux    # green on both legs first
 ./scripts/New-Release.ps1 -Linux
@@ -1970,20 +1970,20 @@ GPL-3.0-only
 <p>Three lines, and the scripts take the name from the first, the version from
 the first, and the licence from the third. A manifest can be edited without a
 rebuild; the binary cannot. So the name on the archive is what the executable
-inside it will tell a user (<a href="../decisions/ADR-0054.md">ADR-0054</a>), and
+inside it will tell a user (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0054.md">ADR-0054</a>), and
 <code>BUILD.txt</code> cannot disagree with the program it sits beside.</p>
 <p>That last property is a fix rather than a flourish. <code>BUILD.txt</code> carried the
 product name as a literal in <em>both</em> scripts, and the two literals said
-different things (<a href="../decisions/ADR-0074.md">ADR-0074</a>).</p>
+different things (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0074.md">ADR-0074</a>).</p>
 <h3 id="what-goes-in-an-archive">What goes in an archive</h3>
 <p><code>bachelorpad</code> (<code>.exe</code>), the short spelling (<code>bpad.cmd</code> or a <code>bpad</code> symlink),
 both icons on Windows and the PNG on Linux, <code>app-help/</code>, <code>README.md</code>,
 <code>LICENSE</code>, <code>THIRD-PARTY-NOTICES.md</code>, and <code>BUILD.txt</code>.</p>
 <p><code>LICENSE</code> is GPL-3.0-only and <code>THIRD-PARTY-NOTICES.md</code> lists the 626 crates
 linked into the binary. Both are obligations rather than courtesies
-(<a href="../decisions/ADR-0071.md">ADR-0071</a>).</p>
+(<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0071.md">ADR-0071</a>).</p>
 <h3 id="they-are-unsigned-and-every-run-says-so">They are unsigned, and every run says so</h3>
-<p><a href="../decisions/ADR-0055.md">ADR-0055</a> deferred code signing and <strong>refused
+<p><a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0055.md">ADR-0055</a> deferred code signing and <strong>refused
 self-signing outright</strong> -- a self-signed Authenticode certificate is only
 satisfied once the user installs a root certificate they have no reason to
 trust.</p>
@@ -2017,35 +2017,35 @@ fact repeated in four files is a fact that will be updated in three.</p>
 </thead>
 <tbody>
 <tr>
-<td><a href="../architecture/ARCHITECTURE.md"><code>docs/architecture/ARCHITECTURE.md</code></a></td>
+<td><a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/architecture/ARCHITECTURE.md"><code>docs/architecture/ARCHITECTURE.md</code></a></td>
 <td>Crates, modules, sizes, seams</td>
 </tr>
 <tr>
-<td><a href="../product/MENU_MAP.md"><code>docs/product/MENU_MAP.md</code></a></td>
+<td><a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/product/MENU_MAP.md"><code>docs/product/MENU_MAP.md</code></a></td>
 <td>Every menu row and its state</td>
 </tr>
 <tr>
-<td><a href="../../DECISIONS.md"><code>DECISIONS.md</code></a></td>
+<td><a href="https://github.com/dboles99/bachelorpluslite/blob/main/DECISIONS.md"><code>DECISIONS.md</code></a></td>
 <td>The ADR index, <strong>and every lesson learned</strong></td>
 </tr>
 <tr>
-<td><a href="../decisions/"><code>docs/decisions/ADR-*.md</code></a></td>
+<td><a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions"><code>docs/decisions/ADR-*.md</code></a></td>
 <td>One decision each, with its reasoning</td>
 </tr>
 <tr>
-<td><a href="../../ROADMAP.md"><code>ROADMAP.md</code></a></td>
+<td><a href="https://github.com/dboles99/bachelorpluslite/blob/main/ROADMAP.md"><code>ROADMAP.md</code></a></td>
 <td>Phase status, and what is blocked on what</td>
 </tr>
 <tr>
-<td><a href="../governance/"><code>docs/governance/</code></a></td>
+<td><a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/governance"><code>docs/governance/</code></a></td>
 <td>The gate, the definition of done, the work model</td>
 </tr>
 <tr>
-<td><a href="../../README.md"><code>README.md</code></a></td>
+<td><a href="https://github.com/dboles99/bachelorpluslite/blob/main/README.md"><code>README.md</code></a></td>
 <td>What works today, for a reader who has never seen the project</td>
 </tr>
 <tr>
-<td><a href="../../specs.md"><code>specs.md</code></a></td>
+<td><a href="https://github.com/dboles99/bachelorpluslite/blob/main/specs.md"><code>specs.md</code></a></td>
 <td>The original specification. <strong>Historical</strong> -- several sections describe things since removed</td>
 </tr>
 </tbody>
@@ -2074,7 +2074,7 @@ is asked again.</li>
 <li>A round trip through one build says nothing about another build.</li>
 </ol>
 <p>Trap 6 is the one this project has been caught by twice, most recently by
-<a href="../decisions/ADR-0073.md">ADR-0073</a>: an accepted ADR rested on <em>GitHub
+<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0073.md">ADR-0073</a>: an accepted ADR rested on <em>GitHub
 Actions is not available to this project</em>, and one API call disproved it.</p>
 <p><strong>An ADR whose reasoning rests on an external fact should name the command
 that would test it.</strong></p>
@@ -2088,63 +2088,63 @@ that would test it.</strong></p>
 </thead>
 <tbody>
 <tr>
-<td><a href="../decisions/ADR-0001.md">ADR-0001</a></td>
+<td><a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0001.md">ADR-0001</a></td>
 <td>Windows 10, Windows 11 and Linux are equal targets</td>
 </tr>
 <tr>
-<td><a href="../decisions/ADR-0006.md">ADR-0006</a></td>
+<td><a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0006.md">ADR-0006</a></td>
 <td>Core editing never depends on cloud or AI services</td>
 </tr>
 <tr>
-<td><a href="../decisions/ADR-0016.md">ADR-0016</a>, <a href="../decisions/ADR-0073.md">ADR-0073</a></td>
+<td><a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0016.md">ADR-0016</a>, <a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0073.md">ADR-0073</a></td>
 <td>The local gate is authoritative; hosted CI judges pull requests</td>
 </tr>
 <tr>
-<td><a href="../decisions/ADR-0018.md">ADR-0018</a></td>
+<td><a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0018.md">ADR-0018</a></td>
 <td>Two editor surfaces, and why the custom one is opt-in</td>
 </tr>
 <tr>
-<td><a href="../decisions/ADR-0055.md">ADR-0055</a></td>
+<td><a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0055.md">ADR-0055</a></td>
 <td>Unsigned releases, and self-signing refused outright</td>
 </tr>
 <tr>
-<td><a href="../decisions/ADR-0057.md">ADR-0057</a></td>
+<td><a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0057.md">ADR-0057</a></td>
 <td>This product executes nothing</td>
 </tr>
 <tr>
-<td><a href="../decisions/ADR-0059.md">ADR-0059</a>--<a href="../decisions/ADR-0064.md">ADR-0064</a></td>
+<td><a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0059.md">ADR-0059</a>--<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0064.md">ADR-0064</a></td>
 <td>The reduction: what was removed to make this Lite, and why</td>
 </tr>
 <tr>
-<td><a href="../decisions/ADR-0067.md">ADR-0067</a></td>
+<td><a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0067.md">ADR-0067</a></td>
 <td>No installer</td>
 </tr>
 <tr>
-<td><a href="../decisions/ADR-0071.md">ADR-0071</a></td>
+<td><a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0071.md">ADR-0071</a></td>
 <td>GPL-3.0-only, and why not <code>-or-later</code></td>
 </tr>
 <tr>
-<td><a href="../decisions/ADR-0072.md">ADR-0072</a></td>
+<td><a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0072.md">ADR-0072</a></td>
 <td>macOS declined, with what it would cost</td>
 </tr>
 <tr>
-<td><a href="../decisions/ADR-0074.md">ADR-0074</a></td>
+<td><a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0074.md">ADR-0074</a></td>
 <td>The product is BachelorPad+ Lite</td>
 </tr>
 <tr>
-<td><a href="../decisions/ADR-0075.md">ADR-0075</a></td>
+<td><a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0075.md">ADR-0075</a></td>
 <td>One documentation source, four destinations</td>
 </tr>
 <tr>
-<td><a href="../decisions/ADR-0076.md">ADR-0076</a></td>
+<td><a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0076.md">ADR-0076</a></td>
 <td>The website: what it may collect, and why it does not follow af-site on analytics</td>
 </tr>
 <tr>
-<td><a href="../decisions/ADR-0077.md">ADR-0077</a></td>
+<td><a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0077.md">ADR-0077</a></td>
 <td>Reporting a problem composes a document, because this product opens no browser</td>
 </tr>
 <tr>
-<td><a href="../decisions/ADR-0078.md">ADR-0078</a></td>
+<td><a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0078.md">ADR-0078</a></td>
 <td>Three unmaintained dependencies accepted by name, never as a category</td>
 </tr>
 </tbody>
