@@ -321,7 +321,7 @@ impl Dialogs {
         if self.queue.borrow().is_empty() {
             if let Some(ui) = self.ui.upgrade() {
                 ui.set_dialog_open(false);
-                ui.invoke_focus_editor_soon();
+                ui.invoke_focus_after_question();
             }
         } else {
             self.show_front();

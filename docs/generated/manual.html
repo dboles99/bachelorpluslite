@@ -650,10 +650,18 @@ searchable by string and not by relatedness.</p>
 <h2 id="undo-history-and-recovery">Undo, history and recovery</h2>
 <h3 id="undo-and-redo">Undo and redo</h3>
 <p><code>Ctrl+Z</code> and <code>Ctrl+Y</code>, per document. Each tab has its own history and they do
-not interfere.</p>
+not interfere. <code>Ctrl+Shift+Z</code> redoes as well.</p>
 <p>Undo entries are grouped the way you would expect: a run of typing is one
 entry rather than one per character, and Replace All is one entry rather than
 one per replacement.</p>
+<p><strong>An operation on the whole document can be undone until you type.</strong> Replace
+All and the line operations in the Edit menu -- the two Sort Lines, Remove
+Duplicate Lines, Reverse Lines and Trim Trailing Whitespace -- each rewrite
+the document as one entry, and <code>Ctrl+Z</code> puts it back. In the default surface
+the text box keeps the history of your typing and the program keeps the
+history of those operations, so once you type after one, <code>Ctrl+Z</code> undoes the
+typing and then stops: the operation before it can no longer be undone. Under <code>--editor-view</code> there is
+one history, and everything undoes in order.</p>
 <p><strong>A no-op does not create an undo entry.</strong> Choosing the encoding a document
 already has, or replacing text with itself, leaves the history alone -- so
 <code>Ctrl+Z</code> after one of those undoes the last thing you actually did, rather

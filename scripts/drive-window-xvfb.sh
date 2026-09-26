@@ -16,8 +16,9 @@
 #   WINDOW_SIZE=800x260 scripts/drive-window-xvfb.sh "ctrl+Home F10 Right End"
 #   FIXTURE_LINE='日本語 %s テキスト' scripts/drive-window-xvfb.sh "ctrl+g 3 Return Escape Z"
 #
-# The last is the long-document crash (ADR-0083): Slint 1.17.1's software
-# renderer panicked past about 2,000 lines, or 1,100 at a scale factor of 2.
+# The one with FIXTURE_LINES=5000 is the long-document crash (ADR-0083):
+# Slint 1.17.1's software renderer panicked past about 2,000 lines, or 1,100
+# at a scale factor of 2.
 # A panic in the log fails the run whatever the diff says, because a Slint
 # panic inside the event loop can leave the window up and the save working.
 #
@@ -38,7 +39,9 @@ set -u
 keys=${1:?usage: drive-window-xvfb.sh "<xdotool keys>" [flag]}
 flag=${2:-}
 root=$(cd "$(dirname "$0")/.." && pwd)
-bin="$root/target/debug/bachelorpad"
+# DRIVE_BIN runs another build -- the one before a change, to watch a check
+# written for the change fail.
+bin=${DRIVE_BIN:-$root/target/debug/bachelorpad}
 [ -x "$bin" ] || { echo "no $bin -- run: cargo build -p bachelorpad" >&2; exit 2; }
 
 # A throwaway profile, so a run never writes to the real one (trap 1) and

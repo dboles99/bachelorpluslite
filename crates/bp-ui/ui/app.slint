@@ -151,6 +151,11 @@ export component AppWindow inherits Window {
 
     /// Overtype mode -- the Insert key. Both surfaces read it; Rust owns it.
     in property <bool> overwrite;
+    /// Undo or redo under `TextInput`, asked of Rust first: true when Rust
+    /// stepped an operation on the whole document -- Sort Lines, Replace
+    /// All -- which the widget's own history cannot, because Slint clears it
+    /// whenever the text is replaced from outside (W1-05).
+    callback step-history(bool) -> bool;
     /// The Insert key under `TextInput`, which answers "toggled", "copy" or
     /// "paste" -- `bp_editor::keys` decides, so Shift+Insert means the same
     /// thing on both surfaces.
@@ -359,6 +364,26 @@ export component AppWindow inherits Window {
         root.pending-focus = PendingFocus.dialog;
     }
 
+    /// Hand the caret back when the last question closes: to the bar open
+    /// behind it, or else to the document.
+    ///
+    /// Not `focus-editor-soon`, which declines while a bar is open -- rightly,
+    /// since the caret must not leave a find box -- and nothing else then
+    /// took it. So after answering Replace All's question every key went
+    /// nowhere, Ctrl+S included, until a click. Found by W1-05's drive of
+    /// Replace All then Ctrl+Z; a keyboard-only reader had no way out.
+    public function focus-after-question() {
+        if (root.find-open) {
+            root.pending-focus = PendingFocus.find;
+        } else if (root.goto-open) {
+            root.pending-focus = PendingFocus.goto;
+        } else if (root.passphrase-open) {
+            root.pending-focus = PendingFocus.passphrase;
+        } else {
+            root.pending-focus = PendingFocus.editor;
+        }
+    }
+
     /// Give the caret to whichever surface is drawing the document -- but not
     /// if anything else wants it.
     ///
@@ -457,9 +482,13 @@ export component AppWindow inherits Window {
         if (root.use-editor-view) {
             root.menu-action(action);
         } else if (action == 100) {
-            editor.undo();
+            if (!root.step-history(false)) {
+                editor.undo();
+            }
         } else if (action == 101) {
-            editor.redo();
+            if (!root.step-history(true)) {
+                editor.redo();
+            }
         } else if (action == 102) {
             editor.cut();
         } else if (action == 103) {
@@ -854,6 +883,22 @@ export component AppWindow inherits Window {
                             // no mode for. This handler runs before the
                             // widget's own; rejecting lets the key through.
                             key-pressed(event) => {
+                                // Undo and redo, which may belong to Rust --
+                                // see `step-history`. Both redo keys, because
+                                // the widget's is Ctrl+Y on Windows and
+                                // Ctrl+Shift+Z elsewhere, and the shortcut
+                                // list promises Ctrl+Y everywhere.
+                                if (event.modifiers.control && !event.modifiers.alt && (event.text == "z" || event.text == "Z" || event.text == "y" || event.text == "Y")) {
+                                    let redo = event.text == "y" || event.text == "Y" || event.modifiers.shift;
+                                    if (!root.step-history(redo)) {
+                                        if (redo) {
+                                            self.redo();
+                                        } else {
+                                            self.undo();
+                                        }
+                                    }
+                                    return accept;
+                                }
                                 if (event.text == Key.Insert) {
                                     let what = root.insert-key(event.modifiers.control, event.modifiers.shift, event.modifiers.alt);
                                     if (what == "copy") {

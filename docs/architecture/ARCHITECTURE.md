@@ -34,7 +34,7 @@ and this table carries the intent until then.
 | `bp-theme` | **live** | Palettes as data (ADR-0009). Green is the default. | 1, 17 |
 | `bp-config` | **live** | Settings precedence, config file, recent-files list, recovery from bad input, and **the inventory of what the command line accepts** (`cli`, which renders `--help` and `--version` from it -- ADR-0054). | 1 |
 | `bp-ui` | **live** | The Slint application shell (ADR-0015). Split into modules — see below. | 1 |
-| `bp-buffer` | **live** | Rope buffer, character indices, line/column maths, and nothing else — 360 lines. The large-file engine (ADR-0027) was 2,391 of them and left under [ADR-0063](../decisions/ADR-0063.md); `Access` left under [ADR-0066](../decisions/ADR-0066.md), which found it had never been set by anything. | 2 |
+| `bp-buffer` | **live** | Rope buffer, character indices, line/column maths, and the one span where another text differs (`change_to`, for the widget's reports) — 538 lines with its tests. The large-file engine (ADR-0027) was 2,391 of them and left under [ADR-0063](../decisions/ADR-0063.md); `Access` left under [ADR-0066](../decisions/ADR-0066.md), which found it had never been set by anything. | 2 |
 | `bp-editor` | **live** | Caret, selection, motion, transaction-based undo/redo, line operations, key-to-command mapping, document-to-screen geometry. The editor's storage — see below. | 2 |
 | `bp-history` | **live** | Crash-safe recovery journal and autosave checkpoints. | 3 |
 | `bp-formats` | **live** | Format detection and profiles (ADR-0008). | 5 |
@@ -131,7 +131,7 @@ had as comment banners:
 
 | Module | Lines | Owns |
 | --- | ---: | --- |
-| `state.rs` | 2,236 | `AppState` itself: documents, workspace, opening, saving, reloading, format detection, the gutter and the status labels |
+| `state.rs` | 2,452 | `AppState` itself: documents, workspace, opening, saving, reloading, format detection, the gutter and the status labels |
 | `menus.rs` | 2,006 | Menu contents and the action-id map |
 | `lib.rs` | 1,418 | `run_with`, `refresh`, the Slint callback wiring, and the flows that wait on an answer: save, close a tab, close the window, recovery (ADR-0084) |
 | `dispatch.rs` | 947 | The menu-action match, and the file pickers its arms share |
@@ -249,7 +249,7 @@ There are two views over it:
 | --- | --- | --- |
 | Storage | the rope | the rope |
 | Caret and selection | Slint's, unreadable | `bp-editor`'s |
-| Undo | Slint's | `bp-editor`'s transactions |
+| Undo | Slint's for typing; `bp-editor`'s for Replace All and the line operations | `bp-editor`'s transactions |
 | Status bar | line count | **Ln/Col** |
 | Word wrap | yes | yes |
 | Input-method composition | yes | **no, and cannot be** |
@@ -268,8 +268,10 @@ document opens for one user and is refused for another.
 
 `TextInput` owns its own text, caret and undo stack and exposes the caret only
 through a property marked *"internal, undocumented, only exposed for tests"*,
-which is why text arriving from it lands in the rope as a single undoable
-replacement rather than as keystrokes.
+which is why text arriving from it is mirrored into the rope -- the one span
+that changed, found by `Buffer::change_to` -- with no undo step of its own.
+Each report is the whole document, and recorded as a step it kept two copies
+per key for a history nothing read (W1-05, ADR-0018 amended).
 
 The custom surface exists to own none of those things either. Every decision
 is in `bp-editor` — motion in `Editor`, chords in `keys`, document-to-screen

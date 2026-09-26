@@ -602,7 +602,7 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
         let weak = ui.as_weak();
         ui.on_text_edited(move |text| {
             {
-                cell.borrow_mut().edit(text.to_string());
+                cell.borrow_mut().widget_edited(&text);
             }
             if let Some(ui) = weak.upgrade() {
                 // PushText::No -- the widget already holds this text. Pushing
@@ -676,6 +676,17 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
                 refresh(&ui, &mut cell.borrow_mut(), state::PushText::No);
             }
             what.name().into()
+        });
+    }
+    {
+        let cell = Rc::clone(&state);
+        let weak = ui.as_weak();
+        ui.on_step_history(move |redo| {
+            let stepped = cell.borrow_mut().step_operation(redo);
+            if stepped && let Some(ui) = weak.upgrade() {
+                refresh(&ui, &mut cell.borrow_mut(), state::PushText::Yes);
+            }
+            stepped
         });
     }
     {
@@ -1125,7 +1136,7 @@ pub fn latency_probe() {
             .collect();
 
         let mut state = state::AppState::new();
-        state.edit(text.clone());
+        state.widget_edited(&text);
         state.sync_gutter();
 
         let mut timings = Vec::with_capacity(SAMPLES);
@@ -1133,7 +1144,7 @@ pub fn latency_probe() {
             text.push('y');
             let next = text.clone();
             let start = std::time::Instant::now();
-            state.edit(next);
+            state.widget_edited(&next);
             state.sync_gutter();
             timings.push(start.elapsed());
         }
