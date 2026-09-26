@@ -224,6 +224,9 @@ fn register(
 
 /// Select a character range in the editor **and take the caret with it**.
 ///
+/// The range is in characters, like everything this workspace hands around;
+/// it is converted to the bytes `TextInput` counts here and nowhere else.
+///
 /// [`reveal`] does the selecting; this adds the focus, and the focus is the
 /// whole difference between them. Use it when the action came from somewhere
 /// that is not a text box -- a results panel, a list of related notes -- so
@@ -246,8 +249,8 @@ pub(crate) fn select(ui: &AppWindow, state: &mut AppState, range: &std::ops::Ran
         ui.invoke_focus_editor();
         return;
     }
-    let start = i32::try_from(range.start).unwrap_or(i32::MAX);
-    let end = i32::try_from(range.end).unwrap_or(i32::MAX);
+    // Bytes, not characters: see `AppState::widget_range`.
+    let (start, end) = state.widget_range(range);
     ui.invoke_select_range(start, end);
 }
 
@@ -285,8 +288,8 @@ pub(crate) fn reveal(ui: &AppWindow, state: &mut AppState, range: &std::ops::Ran
         draw_editor_view(ui, state);
         return;
     }
-    let start = i32::try_from(range.start).unwrap_or(i32::MAX);
-    let end = i32::try_from(range.end).unwrap_or(i32::MAX);
+    // Bytes, not characters: see `AppState::widget_range`.
+    let (start, end) = state.widget_range(range);
     ui.invoke_preview_range(start, end);
 }
 

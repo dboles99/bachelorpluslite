@@ -4,9 +4,16 @@
 //! expression matching, case sensitivity, whole-word matching, and a replace
 //! that can be previewed before it is applied.
 //!
-//! Offsets are **character** indices, not bytes, because they are handed
-//! straight to the editor to select a match. A byte offset would land inside
-//! a multi-byte character and select the wrong thing -- or nothing.
+//! Offsets are **character** indices, not bytes, because the rope and the
+//! custom editor surface count characters, and a byte offset would land
+//! inside a multi-byte character there.
+//!
+//! **They are not "handed straight to the editor", as this header used to
+//! say.** The default surface is Slint's `TextInput`, which counts UTF-8
+//! bytes, and for as long as the sentence stood every match in a non-ASCII
+//! document was selected in the wrong place (W1-04). The conversion is
+//! `bp_ui`'s `AppState::widget_range`, the one place that talks to that
+//! widget; this crate stays in characters.
 
 #![forbid(unsafe_code)]
 

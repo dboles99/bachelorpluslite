@@ -138,12 +138,17 @@ ADR-0083 to ADR-0089. Four are done; the rest are decided and waiting on work.
 | Signing | [ADR-0086](docs/decisions/ADR-0086.md) | **Not a blocker**: the RC ships unsigned; 1.0 is SignPath or the Store |
 
 The work items and their order are in the release-candidate plan, in the
-private planning repository. The other blockers that plan names -- offsets
-passed to the widget in characters where it counts bytes, Enter writing `\n`
-into a CRLF file, the widget's own undo stack growing without bound, a
-second instance being offered the first one's live checkpoints, the dynamic C
-runtime on Windows, and no release existing yet -- are defects rather than decisions, and did not need
-one.
+private planning repository. The other blockers that plan names are defects
+rather than decisions, and did not need one:
+
+- ~~offsets passed to the widget in characters where it counts bytes~~ --
+  **fixed** (W1-04): Find and Go to Line selected the wrong text in any
+  document with a character outside ASCII, and the next key typed replaced it;
+- Enter writing `\n` into a CRLF file;
+- the widget's own undo stack growing without bound;
+- a second instance being offered the first one's live checkpoints;
+- the dynamic C runtime on Windows;
+- no release existing yet.
 
 ## Two numbering schemes, reconciled
 

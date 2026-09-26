@@ -635,6 +635,30 @@ impl AppState {
             .and_then(|id| self.editors.get_mut(&id))
     }
 
+    /// A character range in the active document, as `TextInput` wants it:
+    /// UTF-8 byte offsets.
+    ///
+    /// **Everything in this workspace counts characters** -- search, go to
+    /// line, the rope -- and `set-selection-offsets` counts bytes. Handed
+    /// characters, it selected the wrong text in any document with a
+    /// character outside ASCII, and the next key typed replaced that text:
+    /// going to line 3 of a Japanese file and typing one letter joined lines
+    /// 1 and 2 and left line 3 alone (W1-04). Found by an audit, reproduced
+    /// by driving the window, and invisible in an ASCII document because
+    /// there the two counts agree.
+    ///
+    /// Only the `TextInput` surface needs this; the custom surface is drawn
+    /// from the rope and selects in characters.
+    pub(crate) fn widget_range(&self, range: &std::ops::Range<usize>) -> (i32, i32) {
+        let byte = |char_idx: usize| {
+            let byte_idx = self
+                .active_editor()
+                .map_or(char_idx, |editor| editor.buffer().char_to_byte(char_idx));
+            i32::try_from(byte_idx).unwrap_or(i32::MAX)
+        };
+        (byte(range.start), byte(range.end))
+    }
+
     /// The active document as one string.
     ///
     /// Allocates: a rope is not contiguous, so "the whole document as text"
@@ -2217,6 +2241,39 @@ mod tests {
         custom.edit(text);
 
         assert_eq!(plain.go_to_line("3"), custom.go_to_line("3"));
+    }
+
+    #[test]
+    fn a_character_range_reaches_the_widget_as_bytes() {
+        // "b" is character 2 and byte 6: each of the two characters before
+        // it is three bytes in UTF-8.
+        let mut state = AppState::new();
+        state.edit("日本b".to_owned());
+        assert_eq!(state.widget_range(&(2..3)), (6, 7));
+    }
+
+    #[test]
+    fn going_to_a_line_in_a_japanese_document_selects_that_line_in_the_widget() {
+        // The defect as it was found: line 3 is characters 8..11, and passed
+        // to `TextInput` as bytes those land inside line 1.
+        let mut state = AppState::new();
+        state.edit("日本語\n日本語\nabc".to_owned());
+        let range = state.go_to_line("3").expect("line 3 exists");
+        assert_eq!(range, 8..11, "the rope counts characters");
+        assert_eq!(
+            state.widget_range(&range),
+            (20, 23),
+            "each earlier line is three three-byte characters and a newline"
+        );
+    }
+
+    #[test]
+    fn an_ascii_range_is_the_same_in_bytes_and_characters() {
+        // Why every test before this one passed: in ASCII the two counts
+        // agree, so the conversion is invisible where most fixtures live.
+        let mut state = AppState::new();
+        state.edit("one\ntwo\nthree".to_owned());
+        assert_eq!(state.widget_range(&(4..7)), (4, 7));
     }
 
     // --- tab context menu -------------------------------------------------
