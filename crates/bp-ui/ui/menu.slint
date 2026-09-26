@@ -8,14 +8,34 @@ import { MenuItem, Palette } from "types.slint";
 
 export component MenuLabel inherits Rectangle {
     in property <string> label;
+    /// What a screen reader says instead of `label`, for the labels that are
+    /// a symbol: "×" is announced as "times" and "◂" as nothing useful, so a
+    /// close button needs to say what it closes. Empty means `label` is
+    /// already the name.
+    in property <string> name;
     in property <bool> open;
+    /// A menu-bar label, which opens something rather than doing something.
+    /// Slint 1.18 has no menu roles to offer markup, so a menu title is a
+    /// button that says whether its menu is expanded -- which is how a
+    /// reader tells "File, collapsed" from a button that acts at once.
+    in property <bool> expandable;
     callback clicked();
     height: 26px;
     width: txt.preferred-width + 22px;
     background: root.open || ta.has-hover ? Palette.edge : transparent;
 
+    accessible-role: button;
+    accessible-label: root.name != "" ? root.name : root.label;
+    accessible-expandable: root.expandable;
+    accessible-expanded: root.open;
+    accessible-action-default => {
+        root.clicked();
+    }
+
     txt := Text {
         text: root.label;
+        // The label is named above, and "×" read a second time is noise.
+        accessible-role: none;
         color: Palette.ink;
         font-size: 13px;
         vertical-alignment: center;
@@ -31,17 +51,44 @@ export component MenuLabel inherits Rectangle {
 
 export component MenuRow inherits Rectangle {
     in property <MenuItem> item;
+    /// The row the keyboard is on. Drawn whether or not the row is enabled:
+    /// a greyed row's label is often the reason it is greyed, and a keyboard
+    /// user who cannot land on it cannot read it.
+    in property <bool> highlighted;
+    in property <int> index;
+    in property <int> count;
     callback chosen(int);
     height: 28px;
-    background: root.item.enabled && ta.has-hover ? Palette.edge : Palette.panel;
+    background: root.highlighted || (root.item.enabled && ta.has-hover) ? Palette.edge : Palette.panel;
+
+    accessible-role: list-item;
+    accessible-label: root.item.label;
+    // "unavailable" in words as well as in the enabled flag, because the flag
+    // does not reach Linux: AccessKit 0.19's AT-SPI mapping reports every
+    // list item Enabled and Sensitive whatever it is told, so without this
+    // Orca would read a greyed row exactly like a live one.
+    accessible-description: root.item.enabled ? root.item.shortcut
+        : (root.item.shortcut == "" ? "unavailable" : root.item.shortcut + ", unavailable");
+    accessible-enabled: root.item.enabled;
+    accessible-item-selectable: true;
+    accessible-item-selected: root.highlighted;
+    accessible-item-index: root.index;
+    accessible-item-count: root.count;
+    accessible-action-default => {
+        if (root.item.enabled) {
+            root.chosen(root.item.action);
+        }
+    }
 
     HorizontalLayout {
         padding-left: 14px;
         padding-right: 14px;
         spacing: 24px;
 
+        // Both texts are the row's name and description already.
         Text {
             text: root.item.label;
+            accessible-role: none;
             // Greyed when inert, so a readout is visible rather than
             // discovered by clicking.
             color: root.item.enabled ? Palette.ink : Palette.ink-dim;
@@ -61,6 +108,7 @@ export component MenuRow inherits Rectangle {
 
         Text {
             text: root.item.shortcut;
+            accessible-role: none;
             color: Palette.ink-dim;
             font-size: 12px;
             vertical-alignment: center;
@@ -78,6 +126,8 @@ export component MenuRow inherits Rectangle {
 
 export component MenuPopup inherits PopupWindow {
     in property <[MenuItem]> items;
+    /// The menu's name, for a screen reader: "File", "Edit".
+    in property <string> title;
     in property <length> menu-width: 280px;
     /// How tall this menu may grow before its rows start scrolling.
     ///
@@ -95,44 +145,156 @@ export component MenuPopup inherits PopupWindow {
     /// layout property and cannot be redeclared.
     in property <length> menu-max-height: 400px;
     callback chosen(int);
+    /// Left or Right: the neighbouring menu, -1 or +1. The window owns the
+    /// order of the menus, so it decides which one that is.
+    callback stepped(int);
+    /// Whether Left and Right mean anything. They do in a menu-bar menu,
+    /// where they walk to the next menu; they do not in the tab strip's
+    /// context menu, which has no neighbours and must not close on them.
+    in property <bool> in-bar: true;
+
+    /// Whether this opening came from the keyboard, which decides only
+    /// whether a row starts highlighted. Bound by the window rather than
+    /// passed in: a parent cannot call into a `PopupWindow` in Slint 1.18.
+    in property <bool> from-keyboard;
+
+    /// The row the keyboard is on, or -1 for none -- which is where a menu
+    /// opened with the mouse starts, as it does in Notepad.
+    private property <int> highlight: -1;
+    private property <bool> has-keys;
+
+    // **A popup does not get the keyboard by opening.** Slint's `show_popup`
+    // takes the focus away from the editor and gives it to nothing
+    // (`i-slint-core` `window.rs`), so without this every key but Escape went
+    // nowhere while a menu was open. It cannot be taken in `init` either:
+    // `show_popup` builds the popup *before* it takes the focus, so focus set
+    // there is what it would take -- and would then hand back, on close, to
+    // an element that no longer exists. The next tick is after both, which
+    // is R011 trap 9's answer to the same race.
+    Timer {
+        interval: 1ms;
+        running: !root.has-keys;
+        triggered => {
+            root.has-keys = true;
+            root.highlight = root.from-keyboard && root.items.length > 0 ? 0 : -1;
+            keys.focus();
+        }
+    }
+
+    function move(by: int) {
+        if (root.items.length == 0) {
+            return;
+        }
+        if (root.highlight < 0) {
+            root.highlight = by > 0 ? 0 : root.items.length - 1;
+        } else {
+            root.highlight = Math.mod(root.highlight + by + root.items.length, root.items.length);
+        }
+    }
+
+    // Keeps the highlighted row on screen in a menu long enough to scroll.
+    // Rows are told their own position rather than computed here because the
+    // separators make row heights uneven.
+    function reveal(top: length, height: length) {
+        if (top + flick.content-y < 0px) {
+            flick.content-y = -top;
+        } else if (top + height + flick.content-y > flick.height) {
+            flick.content-y = flick.height - top - height;
+        }
+    }
 
     width: root.menu-width;
     height: min(content.preferred-height, root.menu-max-height);
 
-    Rectangle {
-        background: Palette.panel;
-        border-color: Palette.edge;
-        border-width: 1px;
+    keys := FocusScope {
+        accessible-role: list;
+        accessible-label: root.title;
+        // The list holds the keyboard, but the row is what a reader should
+        // announce as each arrow lands. The rows are this list's accessible
+        // children in order -- the separators have no role -- so the row
+        // index is the child index. -1, nothing highlighted, parses as no
+        // child and leaves the list itself focused.
+        accessible-delegate-focus: root.highlight;
 
-        Flickable {
-            // Both viewport dimensions are set. Height is the point of the
-            // exercise, but width has to be pinned to the visible width or the
-            // viewport sizes itself to the content's preferred width instead
-            // -- and a recent-files hint is far wider than the menu. Every row
-            // would then be laid out over-wide, putting the shortcut column
-            // past the right edge, where a Flickable clips it. Before this was
-            // a Flickable that text simply overflowed the popup and drew
-            // outside it, so nothing was lost; now it would be.
-            content-width: self.width;
-            content-height: content.preferred-height;
+        // Every key is claimed while a menu is open, as a native menu does:
+        // a letter typed with File open must not land in the document
+        // behind it.
+        key-pressed(event) => {
+            if (event.text == Key.DownArrow) {
+                root.move(1);
+            } else if (event.text == Key.UpArrow) {
+                root.move(-1);
+            } else if (event.text == Key.Home) {
+                root.highlight = root.items.length > 0 ? 0 : -1;
+            } else if (event.text == Key.End) {
+                root.highlight = root.items.length - 1;
+            } else if (event.text == Key.LeftArrow && root.in-bar) {
+                // Not closed here: opening the neighbour closes this one,
+                // because Slint closes a popup's siblings before it shows
+                // another -- and does it before taking the focus, so the
+                // focus it hands back is the editor's rather than this menu's.
+                root.stepped(-1);
+            } else if (event.text == Key.RightArrow && root.in-bar) {
+                root.stepped(1);
+            } else if (event.text == Key.Return || event.text == " ") {
+                if (root.highlight >= 0 && root.items[root.highlight].enabled) {
+                    // Chosen, then closed: the order a click takes, where the
+                    // row's handler runs and the popup closes after it. A row
+                    // that opens a bar or a question already copes with that
+                    // order (R011 trap 9), and one path is less to get wrong
+                    // than two.
+                    root.chosen(root.items[root.highlight].action);
+                    root.close();
+                }
+            } else if (event.text == Key.Escape || event.text == Key.F10) {
+                root.close();
+            }
+            accept
+        }
 
-            content := VerticalLayout {
-                alignment: start;
-                padding: 4px;
-                for item in root.items: VerticalLayout {
-                    MenuRow {
-                        item: item;
-                        chosen(action) => {
-                            root.chosen(action);
+        Rectangle {
+            background: Palette.panel;
+            border-color: Palette.edge;
+            border-width: 1px;
+
+            flick := Flickable {
+                // Both viewport dimensions are set. Height is the point of the
+                // exercise, but width has to be pinned to the visible width or the
+                // viewport sizes itself to the content's preferred width instead
+                // -- and a recent-files hint is far wider than the menu. Every row
+                // would then be laid out over-wide, putting the shortcut column
+                // past the right edge, where a Flickable clips it. Before this was
+                // a Flickable that text simply overflowed the popup and drew
+                // outside it, so nothing was lost; now it would be.
+                content-width: self.width;
+                content-height: content.preferred-height;
+
+                content := VerticalLayout {
+                    alignment: start;
+                    padding: 4px;
+                    for item[i] in root.items: slot := VerticalLayout {
+                        MenuRow {
+                            item: item;
+                            index: i;
+                            count: root.items.length;
+                            highlighted: i == root.highlight;
+                            chosen(action) => {
+                                root.chosen(action);
+                            }
+                            changed highlighted => {
+                                if (self.highlighted) {
+                                    root.reveal(slot.y, self.height);
+                                }
+                            }
                         }
-                    }
 
-                    if item.separator-after: Rectangle {
-                        height: 5px;
-                        Rectangle {
-                            height: 1px;
-                            y: 2px;
-                            background: Palette.edge;
+                        if item.separator-after: Rectangle {
+                            height: 5px;
+                            Rectangle {
+                                height: 1px;
+                                y: 2px;
+                                background: Palette.edge;
+                            }
                         }
                     }
                 }

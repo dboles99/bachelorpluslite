@@ -64,6 +64,9 @@ export component EditorSurface inherits Rectangle {
     // `preferred-width` is still zero.
     probe := Text {
         text: "MMMMMMMMMMMMMMMMMMMM";
+        // A ruler, invisible on screen. Left exposed it was the first "text"
+        // a screen reader found in the document.
+        accessible-role: none;
         font-family: "Consolas";
         font-size: root.font-size;
         opacity: 0;
@@ -165,6 +168,9 @@ export component EditorSurface inherits Rectangle {
             x: root.pad;
             y: root.pad + i * root.line-height;
             width: root.gutter-width - 10px;
+            // Line numbers, not content -- the same as the other surface's
+            // gutter in `app.slint`.
+            accessible-role: none;
             height: root.line-height;
             text: row.number;
             color: Palette.ink-dim;

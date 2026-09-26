@@ -348,6 +348,45 @@ The full key list is in
 generated from the same constant the Help > Keyboard Shortcuts dialog shows,
 so the two cannot disagree.
 
+### The menus from the keyboard
+
+**F10 opens File.** From there:
+
+| | |
+| --- | --- |
+| `Left` / `Right` | The menu beside this one. Left from File is Help, and Right from Help is File |
+| `Up` / `Down`, `Home` / `End` | Move through the rows |
+| `Enter` or `Space` | Run the row |
+| `Esc` or `F10` | Close the menu and go back to the document |
+
+A menu opened with the mouse answers the same keys. The keyboard can land on
+a greyed row, because a greyed row's label is often the reason it is greyed;
+`Enter` on it does nothing. While a menu is open, what you type goes to the
+menu and never to the document.
+
+**A bare `Alt` does not open the menus**, as it does in Notepad. On Linux a
+window that loses the keyboard to `Alt+Tab` is sent the `Alt` release before
+it is told it has lost focus, so it cannot tell `Alt+Tab` from `Alt` pressed
+alone. Every `Alt+Tab` away would open File behind you.
+[ADR-0088](https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0088.md) has the detail.
+
+#### Screen readers
+
+The menus and their rows, the tabs, the find and replace bar, Go to Line and
+the questions the program asks all say what they are to a screen reader,
+through UI Automation on Windows and AT-SPI on Linux. **It has not yet been
+tried with NVDA or Orca**, so it is not called accessible; that pass is
+planned for 1.0 ([ADR-0088](https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0088.md)). What is known:
+
+- **On Linux a menu does not say whether it is open.** The toolkit reports it
+  on Windows only.
+- **A greyed menu row says "unavailable"** in its description, because on
+  Linux the disabled state itself does not reach the screen reader.
+- **Under `--editor-view` the document is not a text box to a screen
+  reader.** Its visible lines are there as separate labels, with no caret and
+  nothing to say they can be edited. The default surface is a standard text
+  box.
+
 ### Line operations
 
 | | |
@@ -1304,6 +1343,7 @@ this page cannot disagree.
 | `Ctrl+Shift+S` | Save As |
 | `Ctrl+W` | Close tab |
 | `Ctrl+F` | Find and replace |
+| `Ctrl+G` | Go to line |
 | `Ctrl+Z / Ctrl+Y` | Undo / Redo |
 | `Ctrl+X/C/V` | Cut / Copy / Paste |
 | `Ctrl+A` | Select all |
@@ -1314,6 +1354,7 @@ this page cannot disagree.
 | `Ctrl+0` | Reset zoom |
 | `Ctrl+D` | Duplicate line |
 | `Alt+Up / Down` | Move line up / down |
+| `F10` | Menus: arrows to move, Enter to run, Esc to close |
 
 ### Two of these need the custom editor surface
 

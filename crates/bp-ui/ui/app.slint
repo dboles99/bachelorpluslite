@@ -412,6 +412,41 @@ export component AppWindow inherits Window {
     // Typing goes to the editor unless the user clicks elsewhere.
     forward-focus: editor;
 
+    /// Open menu `index` of the bar, counting from File as 0 and wrapping at
+    /// both ends, so Left from File is Help as it is in Notepad.
+    ///
+    /// **The one way a menu-bar menu opens**, from a click, from F10 and from
+    /// Left or Right inside another menu. `from-keyboard` decides only
+    /// whether a row starts highlighted; every menu takes the keyboard
+    /// however it was opened (see `MenuPopup`).
+    function open-menu(index: int, from-keyboard: bool) {
+        root.menu-by-keyboard = from-keyboard;
+        let i = Math.mod(index + 11, 11);
+        if (i == 0) {
+            file-menu.show();
+        } else if (i == 1) {
+            edit-menu.show();
+        } else if (i == 2) {
+            view-menu.show();
+        } else if (i == 3) {
+            insert-menu.show();
+        } else if (i == 4) {
+            format-menu.show();
+        } else if (i == 5) {
+            note-menu.show();
+        } else if (i == 6) {
+            organize-menu.show();
+        } else if (i == 7) {
+            research-menu.show();
+        } else if (i == 8) {
+            privacy-menu.show();
+        } else if (i == 9) {
+            tools-menu.show();
+        } else {
+            help-menu.show();
+        }
+    }
+
     // Editor-local menu actions.
     //
     // Under `TextInput` these call functions on the widget, because Slint
@@ -545,6 +580,19 @@ export component AppWindow inherits Window {
                 root.focus-goto();
             }
         }
+        // The menu bar from the keyboard (ADR-0088). F10 rather than a bare
+        // Alt: on X11, winit sends a synthetic Alt release when the window
+        // loses focus, *before* it reports the focus loss, so every Alt+Tab
+        // away would look like Alt pressed and released alone -- and open
+        // File in a window nobody is looking at. Telling the two apart needs
+        // winit's window events, which Slint exposes only behind the unstable
+        // feature ADR-0081 named.
+        KeyBinding {
+            keys: @keys(F10);
+            activated => {
+                root.open-menu(0, true);
+            }
+        }
         KeyBinding {
             keys: @keys(Escape);
             activated => {
@@ -570,68 +618,90 @@ export component AppWindow inherits Window {
 
                     file-label := MenuLabel {
                         label: "File";
+                        expandable: true;
+                        open: file-menu.is-open;
                         clicked => {
-                            file-menu.show();
+                            root.open-menu(0, false);
                         }
                     }
                     edit-label := MenuLabel {
                         label: "Edit";
+                        expandable: true;
+                        open: edit-menu.is-open;
                         clicked => {
-                            edit-menu.show();
+                            root.open-menu(1, false);
                         }
                     }
                     view-label := MenuLabel {
                         label: "View";
+                        expandable: true;
+                        open: view-menu.is-open;
                         clicked => {
-                            view-menu.show();
+                            root.open-menu(2, false);
                         }
                     }
                     insert-label := MenuLabel {
                         label: "Insert";
+                        expandable: true;
+                        open: insert-menu.is-open;
                         clicked => {
-                            insert-menu.show();
+                            root.open-menu(3, false);
                         }
                     }
                     format-label2 := MenuLabel {
                         label: "Format";
+                        expandable: true;
+                        open: format-menu.is-open;
                         clicked => {
-                            format-menu.show();
+                            root.open-menu(4, false);
                         }
                     }
                     note-label := MenuLabel {
                         label: "Note";
+                        expandable: true;
+                        open: note-menu.is-open;
                         clicked => {
-                            note-menu.show();
+                            root.open-menu(5, false);
                         }
                     }
                     organize-label := MenuLabel {
                         label: "Organize";
+                        expandable: true;
+                        open: organize-menu.is-open;
                         clicked => {
-                            organize-menu.show();
+                            root.open-menu(6, false);
                         }
                     }
                     research-label := MenuLabel {
                         label: "Research";
+                        expandable: true;
+                        open: research-menu.is-open;
                         clicked => {
-                            research-menu.show();
+                            root.open-menu(7, false);
                         }
                     }
                     privacy-label := MenuLabel {
                         label: "Privacy";
+                        expandable: true;
+                        open: privacy-menu.is-open;
                         clicked => {
-                            privacy-menu.show();
+                            root.open-menu(8, false);
                         }
                     }
                     tools-label := MenuLabel {
                         label: "Tools";
+                        expandable: true;
+                        open: tools-menu.is-open;
                         clicked => {
-                            tools-menu.show();
+                            root.open-menu(9, false);
                         }
                     }
                     help-label := MenuLabel {
                         label: "Help";
+                        expandable: true;
+                        open: help-menu.is-open;
                         clicked => {
-                            help-menu.show();
+                            root.open-menu(10, false);
                         }
                     }
                 }
@@ -643,6 +713,8 @@ export component AppWindow inherits Window {
             Rectangle {
                 height: 32px;
                 background: Palette.shell;
+                accessible-role: tab-list;
+                accessible-label: "Open documents";
                 HorizontalLayout {
                     padding-left: 6px;
                     spacing: 2px;
@@ -650,6 +722,8 @@ export component AppWindow inherits Window {
 
                     for tab[i] in root.tabs: Tab {
                         label: tab.label;
+                        index: i;
+                        count: root.tabs.length;
                         dirty: tab.dirty;
                         active: tab.active;
                         selected => {
@@ -671,6 +745,7 @@ export component AppWindow inherits Window {
 
                     MenuLabel {
                         label: "+";
+                        name: "New document";
                         clicked => {
                             root.new-document();
                         }
@@ -733,6 +808,10 @@ export component AppWindow inherits Window {
 
                         if root.show-gutter: Text {
                             text: root.gutter;
+                            // Line numbers are a picture of where the lines
+                            // are, not content: read aloud they were every
+                            // number in the document before its first word.
+                            accessible-role: none;
                             color: Palette.ink-dim;
                             font-family: "Consolas";
                             font-size: root.font-size;
@@ -744,6 +823,7 @@ export component AppWindow inherits Window {
 
                         editor := TextInput {
                             text <=> root.doc-text;
+                            accessible-label: "Document";
                             color: Palette.ink;
                             selection-background-color: Palette.accent;
                             font-family: "Consolas";
@@ -973,95 +1053,149 @@ export component AppWindow inherits Window {
     // it reads as a menu that ends rather than one that is cut off, and the
     // floor stops a very short window producing a menu with no rows in it.
     property <length> menu-max-height: max(160px, root.height - 28px - 12px);
+    /// Whether the menu being opened was opened from the keyboard. Set by
+    /// `open-menu` just before `show()`, and read by the popup through a
+    /// binding, because nothing outside a popup can reach into it.
+    property <bool> menu-by-keyboard;
 
     file-menu := MenuPopup {
         x: file-label.x + 4px;
         y: 28px;
+        title: "File";
+        from-keyboard: root.menu-by-keyboard;
         menu-max-height: root.menu-max-height;
         items: root.file-items;
         chosen(a) => {
             root.dispatch(a);
         }
+        stepped(by) => {
+            root.open-menu(0 + by, true);
+        }
     }
     edit-menu := MenuPopup {
         x: edit-label.x + 4px;
         y: 28px;
+        title: "Edit";
+        from-keyboard: root.menu-by-keyboard;
         menu-max-height: root.menu-max-height;
         items: root.edit-items;
         chosen(a) => {
             root.dispatch(a);
         }
+        stepped(by) => {
+            root.open-menu(1 + by, true);
+        }
     }
     view-menu := MenuPopup {
         x: view-label.x + 4px;
         y: 28px;
+        title: "View";
+        from-keyboard: root.menu-by-keyboard;
         menu-max-height: root.menu-max-height;
         items: root.view-items;
         chosen(a) => {
             root.dispatch(a);
         }
+        stepped(by) => {
+            root.open-menu(2 + by, true);
+        }
     }
     insert-menu := MenuPopup {
         x: insert-label.x + 4px;
         y: 28px;
+        title: "Insert";
+        from-keyboard: root.menu-by-keyboard;
         menu-max-height: root.menu-max-height;
         items: root.insert-items;
         chosen(a) => {
             root.dispatch(a);
         }
+        stepped(by) => {
+            root.open-menu(3 + by, true);
+        }
     }
     format-menu := MenuPopup {
         x: format-label2.x + 4px;
         y: 28px;
+        title: "Format";
+        from-keyboard: root.menu-by-keyboard;
         menu-max-height: root.menu-max-height;
         items: root.format-items;
         chosen(a) => {
             root.dispatch(a);
         }
+        stepped(by) => {
+            root.open-menu(4 + by, true);
+        }
     }
     note-menu := MenuPopup {
         x: note-label.x + 4px;
         y: 28px;
+        title: "Note";
+        from-keyboard: root.menu-by-keyboard;
         menu-max-height: root.menu-max-height;
         items: root.note-items;
         chosen(a) => {
             root.dispatch(a);
         }
+        stepped(by) => {
+            root.open-menu(5 + by, true);
+        }
     }
     organize-menu := MenuPopup {
         x: organize-label.x + 4px;
         y: 28px;
+        title: "Organize";
+        from-keyboard: root.menu-by-keyboard;
         menu-max-height: root.menu-max-height;
         items: root.organize-items;
         chosen(a) => {
             root.dispatch(a);
         }
+        stepped(by) => {
+            root.open-menu(6 + by, true);
+        }
     }
     research-menu := MenuPopup {
         x: research-label.x + 4px;
         y: 28px;
+        title: "Research";
+        from-keyboard: root.menu-by-keyboard;
         menu-max-height: root.menu-max-height;
         items: root.research-items;
         chosen(a) => {
             root.dispatch(a);
         }
+        stepped(by) => {
+            root.open-menu(7 + by, true);
+        }
     }
     privacy-menu := MenuPopup {
         x: privacy-label.x + 4px;
         y: 28px;
+        title: "Privacy";
+        from-keyboard: root.menu-by-keyboard;
         menu-max-height: root.menu-max-height;
         items: root.privacy-items;
         chosen(a) => {
             root.dispatch(a);
         }
+        stepped(by) => {
+            root.open-menu(8 + by, true);
+        }
     }
     tools-menu := MenuPopup {
         x: tools-label.x + 4px;
         y: 28px;
+        title: "Tools";
+        from-keyboard: root.menu-by-keyboard;
         menu-max-height: root.menu-max-height;
         items: root.tools-items;
         chosen(a) => {
             root.dispatch(a);
+        }
+        stepped(by) => {
+            root.open-menu(9 + by, true);
         }
     }
     // The tab strip's context menu. `x` is set from the tab that was clicked
@@ -1074,6 +1208,8 @@ export component AppWindow inherits Window {
     tab-menu := MenuPopup {
         x: root.tab-menu-x;
         y: 60px;
+        title: "Tab";
+        in-bar: false;
         menu-max-height: root.menu-max-height;
         items: root.tab-items;
         chosen(a) => {
@@ -1083,10 +1219,15 @@ export component AppWindow inherits Window {
     help-menu := MenuPopup {
         x: help-label.x + 4px;
         y: 28px;
+        title: "Help";
+        from-keyboard: root.menu-by-keyboard;
         menu-max-height: root.menu-max-height;
         items: root.help-items;
         chosen(a) => {
             root.dispatch(a);
+        }
+        stepped(by) => {
+            root.open-menu(10 + by, true);
         }
     }
 }

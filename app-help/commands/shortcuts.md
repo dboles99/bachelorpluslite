@@ -14,6 +14,7 @@ this page cannot disagree.
 | `Ctrl+Shift+S` | Save As |
 | `Ctrl+W` | Close tab |
 | `Ctrl+F` | Find and replace |
+| `Ctrl+G` | Go to line |
 | `Ctrl+Z / Ctrl+Y` | Undo / Redo |
 | `Ctrl+X/C/V` | Cut / Copy / Paste |
 | `Ctrl+A` | Select all |
@@ -24,6 +25,7 @@ this page cannot disagree.
 | `Ctrl+0` | Reset zoom |
 | `Ctrl+D` | Duplicate line |
 | `Alt+Up / Down` | Move line up / down |
+| `F10` | Menus: arrows to move, Enter to run, Esc to close |
 
 ## Two of these need the custom editor surface
 

@@ -3,7 +3,8 @@
 # where the caret went as a diff rather than a picture (ADR-0080).
 #
 # Opens a 200-line fixture, clicks into it, presses each key in KEYS, saves
-# with Ctrl+S, and prints what changed. Put a marker letter after the key
+# with Ctrl+S, and prints what changed. A `click:X,Y` in KEYS clicks there, in
+# window coordinates, instead of pressing a key. Put a marker letter after the key
 # under test -- "ctrl+Home A Page_Down F" -- and where F lands in the saved
 # file is where Page Down put the caret. Evidence in bytes: nothing to
 # interpret.
@@ -11,6 +12,8 @@
 #   scripts/drive-window-xvfb.sh "ctrl+Home A Page_Down F"
 #   scripts/drive-window-xvfb.sh "ctrl+Home Insert X Y" --editor-view
 #   FIXTURE_LINES=5000 SLINT_SCALE_FACTOR=2 scripts/drive-window-xvfb.sh "ctrl+End Z"
+#   scripts/drive-window-xvfb.sh "ctrl+Home click:70,14 Down Down Return X"
+#   WINDOW_SIZE=800x260 scripts/drive-window-xvfb.sh "ctrl+Home F10 Right End"
 #
 # The last is the long-document crash (ADR-0083): Slint 1.17.1's software
 # renderer panicked past about 2,000 lines, or 1,100 at a scale factor of 2.
@@ -71,6 +74,11 @@ for _ in $(seq 1 60); do
     sleep 0.5
 done
 [ -n "$window" ] || { echo "no window appeared" >&2; cat "$run/app.log" >&2; kill "$app"; exit 1; }
+# A short window makes a long menu scroll, which is the only way to see that
+# the keyboard's row is kept on screen.
+if [ -n "${WINDOW_SIZE:-}" ]; then
+    xdotool windowsize "$window" "${WINDOW_SIZE%x*}" "${WINDOW_SIZE#*x}"
+fi
 sleep 6
 
 xdotool windowfocus "$window"
@@ -81,7 +89,15 @@ xdotool windowfocus "$window"
 xdotool click 1
 sleep 1
 for key in $keys; do
-    xdotool key --delay 80 "$key"
+    case $key in
+        # A click at window coordinates, for a key sequence that starts from
+        # something the mouse opened -- a menu, say, then the arrows.
+        click:*,*)
+            xy=${key#click:}
+            xdotool mousemove --window "$window" "${xy%,*}" "${xy#*,}" click 1
+            ;;
+        *) xdotool key --delay 80 "$key" ;;
+    esac
     sleep 0.25
 done
 xdotool key ctrl+s

@@ -10,6 +10,8 @@ export component Tab inherits Rectangle {
     in property <string> label;
     in property <bool> dirty;
     in property <bool> active;
+    in property <int> index;
+    in property <int> count;
     callback selected();
     callback closed();
     /// Right-clicked, with the x offset of the tab within the strip so the
@@ -23,6 +25,19 @@ export component Tab inherits Rectangle {
     background: root.active ? Palette.panel : Palette.shell;
     border-color: Palette.edge;
     border-width: 1px;
+
+    // The dot is the only thing on screen that says a document is unsaved,
+    // and a reader does not see dots.
+    accessible-role: tab;
+    accessible-label: root.label;
+    accessible-description: root.dirty ? "unsaved changes" : "";
+    accessible-item-selectable: true;
+    accessible-item-selected: root.active;
+    accessible-item-index: root.index;
+    accessible-item-count: root.count;
+    accessible-action-default => {
+        root.selected();
+    }
 
     select-area := TouchArea {
         // Both buttons, because a right-click has to be seen to be acted on;
@@ -46,8 +61,10 @@ export component Tab inherits Rectangle {
 
         // A dot rather than the usual asterisk: it matches the status bar's
         // unsaved marker, so one symbol means "not on disk" everywhere.
+        // The tab's name and description say all three of these.
         Text {
             text: root.dirty ? "●" : "";
+            accessible-role: none;
             color: Palette.accent;
             font-size: 13px;
             vertical-alignment: center;
@@ -55,6 +72,7 @@ export component Tab inherits Rectangle {
 
         Text {
             text: root.label;
+            accessible-role: none;
             color: root.active ? Palette.ink : Palette.ink-dim;
             font-size: 13px;
             overflow: elide;
@@ -65,8 +83,14 @@ export component Tab inherits Rectangle {
         Rectangle {
             width: 18px;
             background: close-area.has-hover ? Palette.edge : transparent;
+            accessible-role: button;
+            accessible-label: "Close " + root.label;
+            accessible-action-default => {
+                root.closed();
+            }
             Text {
                 text: "×";
+                accessible-role: none;
                 color: Palette.ink-dim;
                 font-size: 15px;
                 vertical-alignment: center;

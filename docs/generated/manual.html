@@ -383,6 +383,59 @@ everywhere else. This page covers the parts that are this product's own.</p>
 <a href="#keyboard-shortcuts">the shortcuts reference</a>, which is
 generated from the same constant the Help &gt; Keyboard Shortcuts dialog shows,
 so the two cannot disagree.</p>
+<h3 id="the-menus-from-the-keyboard">The menus from the keyboard</h3>
+<p><strong>F10 opens File.</strong> From there:</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Left</code> / <code>Right</code></td>
+<td>The menu beside this one. Left from File is Help, and Right from Help is File</td>
+</tr>
+<tr>
+<td><code>Up</code> / <code>Down</code>, <code>Home</code> / <code>End</code></td>
+<td>Move through the rows</td>
+</tr>
+<tr>
+<td><code>Enter</code> or <code>Space</code></td>
+<td>Run the row</td>
+</tr>
+<tr>
+<td><code>Esc</code> or <code>F10</code></td>
+<td>Close the menu and go back to the document</td>
+</tr>
+</tbody>
+</table>
+<p>A menu opened with the mouse answers the same keys. The keyboard can land on
+a greyed row, because a greyed row's label is often the reason it is greyed;
+<code>Enter</code> on it does nothing. While a menu is open, what you type goes to the
+menu and never to the document.</p>
+<p><strong>A bare <code>Alt</code> does not open the menus</strong>, as it does in Notepad. On Linux a
+window that loses the keyboard to <code>Alt+Tab</code> is sent the <code>Alt</code> release before
+it is told it has lost focus, so it cannot tell <code>Alt+Tab</code> from <code>Alt</code> pressed
+alone. Every <code>Alt+Tab</code> away would open File behind you.
+<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0088.md">ADR-0088</a> has the detail.</p>
+<h4 id="screen-readers">Screen readers</h4>
+<p>The menus and their rows, the tabs, the find and replace bar, Go to Line and
+the questions the program asks all say what they are to a screen reader,
+through UI Automation on Windows and AT-SPI on Linux. <strong>It has not yet been
+tried with NVDA or Orca</strong>, so it is not called accessible; that pass is
+planned for 1.0 (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0088.md">ADR-0088</a>). What is known:</p>
+<ul>
+<li><strong>On Linux a menu does not say whether it is open.</strong> The toolkit reports it
+on Windows only.</li>
+<li><strong>A greyed menu row says &quot;unavailable&quot;</strong> in its description, because on
+Linux the disabled state itself does not reach the screen reader.</li>
+<li><strong>Under <code>--editor-view</code> the document is not a text box to a screen
+reader.</strong> Its visible lines are there as separate labels, with no caret and
+nothing to say they can be edited. The default surface is a standard text
+box.</li>
+</ul>
 <h3 id="line-operations">Line operations</h3>
 <table>
 <thead>
@@ -1296,6 +1349,10 @@ this page cannot disagree.</p>
 <td>Find and replace</td>
 </tr>
 <tr>
+<td><code>Ctrl+G</code></td>
+<td>Go to line</td>
+</tr>
+<tr>
 <td><code>Ctrl+Z / Ctrl+Y</code></td>
 <td>Undo / Redo</td>
 </tr>
@@ -1334,6 +1391,10 @@ this page cannot disagree.</p>
 <tr>
 <td><code>Alt+Up / Down</code></td>
 <td>Move line up / down</td>
+</tr>
+<tr>
+<td><code>F10</code></td>
+<td>Menus: arrows to move, Enter to run, Esc to close</td>
 </tr>
 </tbody>
 </table>

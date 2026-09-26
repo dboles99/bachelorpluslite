@@ -21,8 +21,19 @@ import { Palette } from "types.slint";
 // found something, and there would be nothing on screen to say why.
 component FindToggle inherits Rectangle {
     in property <string> label;
+    /// What the option is called aloud. "Aa" and ".*" are pictures of the
+    /// option, and read out they are noise.
+    in property <string> name;
     in property <bool> active;
     callback toggled();
+
+    accessible-role: checkbox;
+    accessible-label: root.name;
+    accessible-checkable: true;
+    accessible-checked: root.active;
+    accessible-action-default => {
+        root.toggled();
+    }
 
     // 26px is `MenuLabel`'s height, which is what the rest of this bar is
     // built from and what is known to sit correctly in its 26px content area.
@@ -36,6 +47,7 @@ component FindToggle inherits Rectangle {
 
     txt := Text {
         text: root.label;
+        accessible-role: none;
         color: Palette.ink;
         font-size: 12px;
         vertical-alignment: center;
@@ -107,6 +119,7 @@ export component FindBar inherits Rectangle {
                 padding-right: 6px;
                 find-input := TextInput {
                     text <=> root.find-query;
+                    accessible-label: "Find";
                     color: Palette.ink;
                     selection-background-color: Palette.accent;
                     font-size: 13px;
@@ -127,6 +140,7 @@ export component FindBar inherits Rectangle {
         // to move through what it found.
         FindToggle {
             label: "Aa";
+            name: "Match case";
             active: root.case-sensitive;
             toggled => {
                 root.case-sensitive = !root.case-sensitive;
@@ -135,6 +149,7 @@ export component FindBar inherits Rectangle {
         }
         FindToggle {
             label: "Word";
+            name: "Whole word";
             active: root.whole-word;
             toggled => {
                 root.whole-word = !root.whole-word;
@@ -143,6 +158,7 @@ export component FindBar inherits Rectangle {
         }
         FindToggle {
             label: ".*";
+            name: "Regular expression";
             active: root.regex;
             toggled => {
                 root.regex = !root.regex;
@@ -152,12 +168,14 @@ export component FindBar inherits Rectangle {
 
         MenuLabel {
             label: "◂";
+            name: "Previous match";
             clicked => {
                 root.find-previous();
             }
         }
         MenuLabel {
             label: "▸";
+            name: "Next match";
             clicked => {
                 root.find-next();
             }
@@ -188,6 +206,7 @@ export component FindBar inherits Rectangle {
                 padding-right: 6px;
                 TextInput {
                     text <=> root.replace-query;
+                    accessible-label: "Replace with";
                     color: Palette.ink;
                     selection-background-color: Palette.accent;
                     font-size: 13px;
@@ -206,6 +225,7 @@ export component FindBar inherits Rectangle {
 
         MenuLabel {
             label: "In Folder...";
+            name: "Search in folder";
             clicked => {
                 root.search-folder();
             }
@@ -215,6 +235,7 @@ export component FindBar inherits Rectangle {
 
         MenuLabel {
             label: "×";
+            name: "Close find bar";
             clicked => {
                 root.closed();
             }

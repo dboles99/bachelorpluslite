@@ -39,6 +39,7 @@ component DialogButton inherits Rectangle {
 
     txt := Text {
         text: root.label;
+        accessible-role: none;
         color: Palette.ink;
         font-size: 13px;
         vertical-alignment: center;
@@ -119,6 +120,18 @@ export component MessageDialog inherits Rectangle {
         border-color: root.warning ? Palette.accent : Palette.edge;
 
         keys := FocusScope {
+            // A reader is handed the question and then the button Enter would
+            // press, which is the one fact about a dialog nobody can see
+            // without looking. Its accessible children are the heading, the
+            // body, then the buttons that exist, in order -- so the
+            // highlighted button is child 2, 3 or 4, and Cancel's number
+            // depends on whether there is a Decline before it.
+            accessible-role: groupbox;
+            accessible-label: root.heading;
+            accessible-delegate-focus: root.highlight == 0 ? 2
+                : root.highlight == 1 ? 3
+                : root.decline-label != "" ? 4 : 3;
+
             // Every key is claimed. A key this does not use must not reach
             // the document underneath -- typing into a file while being asked
             // whether to save it is exactly the confusion a modal exists to
