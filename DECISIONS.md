@@ -141,6 +141,22 @@ Adding a decision means adding both.
   the software renderer's time to first interaction cannot be measured, so
   half of ADR-0017's target has no number behind it.
 
+## What the offsets taught, 2026-09-26
+
+One thing, from W1-04, where Find and Go to Line selected the wrong text in
+any non-ASCII document and the next key typed replaced it.
+
+### A unit mismatch hides in every fixture that is all ASCII
+
+Every range in this workspace is in characters; `TextInput` counts bytes.
+In ASCII the two are the same number, so every test, every fixture and
+every manual pass agreed with the code -- and `bp-search`'s own header said
+its offsets were "handed straight to the editor", which read as the reason
+they were right. A Japanese fixture broke it with one keystroke. **Where two
+components meet, find out what unit each side counts in, and test with data
+on which the units disagree**: for text, one multi-byte character before the
+thing selected. `drive-window-xvfb.sh` takes `FIXTURE_LINE` for exactly this.
+
 ## What the screen reader's tree taught, 2026-09-26
 
 Two things, from reading the accessibility tree instead of the markup

@@ -14,6 +14,7 @@
 #   FIXTURE_LINES=5000 SLINT_SCALE_FACTOR=2 scripts/drive-window-xvfb.sh "ctrl+End Z"
 #   scripts/drive-window-xvfb.sh "ctrl+Home click:70,14 Down Down Return X"
 #   WINDOW_SIZE=800x260 scripts/drive-window-xvfb.sh "ctrl+Home F10 Right End"
+#   FIXTURE_LINE='日本語 %s テキスト' scripts/drive-window-xvfb.sh "ctrl+g 3 Return Escape Z"
 #
 # The last is the long-document crash (ADR-0083): Slint 1.17.1's software
 # renderer panicked past about 2,000 lines, or 1,100 at a scale factor of 2.
@@ -48,7 +49,15 @@ export HOME=$run/home XDG_CONFIG_HOME=$run/config XDG_DATA_HOME=$run/data \
     XDG_STATE_HOME=$run/state XDG_CACHE_HOME=$run/cache
 mkdir -p "$HOME" "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME"
 
-fixture() { for i in $(seq -w 1 "${FIXTURE_LINES:-200}"); do echo "line $i abcdefghij"; done; }
+# FIXTURE_LINE is a printf format with one %s for the line number, for a
+# fixture that is not ASCII: a character offset and a byte offset agree on
+# every line of the default one, so it cannot tell them apart.
+fixture() {
+    for i in $(seq -w 1 "${FIXTURE_LINES:-200}"); do
+        # shellcheck disable=SC2059 -- the format is the point of the variable.
+        printf "${FIXTURE_LINE:-line %s abcdefghij}\n" "$i"
+    done
+}
 fixture > "$run/doc.txt"
 
 export DISPLAY=${XVFB_DISPLAY:-:99}
