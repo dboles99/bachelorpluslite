@@ -171,7 +171,7 @@ contributions need a sign-off.
 
 Before touching `crates/bp-ui/`, read
 [`prompts/rosettas/R011_WIRE_CAPABILITY_INTO_SHELL.md`](prompts/rosettas/R011_WIRE_CAPABILITY_INTO_SHELL.md).
-It holds ten traps that have each cost somebody a session.
+It holds the traps that have each cost somebody a session.
 
 **For a security problem, do not open a public issue** --
 [`SECURITY.md`](SECURITY.md).

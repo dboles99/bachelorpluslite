@@ -1630,7 +1630,7 @@ The shape worth knowing before you change anything:
   own gate stages.
 
 **Before touching `crates/bp-ui/`, read
-`prompts/rosettas/R011_WIRE_CAPABILITY_INTO_SHELL.md`.** It holds ten traps
+`prompts/rosettas/R011_WIRE_CAPABILITY_INTO_SHELL.md`.** It holds the traps
 that have each cost somebody a session -- action-id ranges, the two editor
 views, Slint `if` scoping, and the one about a menu callback that cannot take
 the keyboard focus, which shipped a defect that typed a passphrase into the

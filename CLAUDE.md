@@ -22,7 +22,7 @@ away. If this file grows past a screen or two it has stopped doing its job.
    costs the most.
 2. `project/WORK_QUEUE.md` — what is *ready*. Take the top item.
 3. `prompts/rosettas/R011_WIRE_CAPABILITY_INTO_SHELL.md` — **required** before
-   touching `crates/bp-ui/`. It holds ten traps that have each cost somebody a
+   touching `crates/bp-ui/`. It holds the traps that have each cost somebody a
    session.
 4. `project/NEXT_SESSION.md` — what matters most, which is not the same list
    as what is ready.

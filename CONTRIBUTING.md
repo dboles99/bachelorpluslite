@@ -88,7 +88,7 @@ PowerShell 7 (`pwsh`) runs the gate and the build scripts on both platforms.
 
 **Before touching `crates/bp-ui/`, read
 [`prompts/rosettas/R011_WIRE_CAPABILITY_INTO_SHELL.md`](prompts/rosettas/R011_WIRE_CAPABILITY_INTO_SHELL.md).**
-Ten traps, each of which has cost somebody a session -- action-id ranges, the
+The traps, each of which has cost somebody a session -- action-id ranges, the
 two editor views, Slint `if` scoping, and the one about a menu callback that
 cannot take the keyboard focus, which shipped a defect that typed a passphrase
 into the open document.
