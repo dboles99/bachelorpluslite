@@ -16,7 +16,8 @@
 #   3. a menu opened a second time takes the keyboard again;
 #   4. Left walks back, and wraps from File to Help and back;
 #   5. Return on a greyed row does nothing;
-#   6. a menu opened with the mouse answers the arrows too.
+#   6. a menu opened with the mouse answers the arrows too, and starts with
+#      nothing highlighted even after the keyboard opened it.
 #
 # Needs what `drive-window-xvfb.sh` needs, and a built binary.
 set -u
@@ -74,5 +75,11 @@ fi
 # with nothing highlighted, so the sixth Down reaches Select All.
 expect "a menu opened with the mouse answers the arrows" \
     "ctrl+Home click:70,14 $down5 Down Return X" "$replaced"
+# The same menu opened by the keyboard first, where the highlight started on
+# row 0. Slint builds a new popup on every `show()`, so the mouse-opened one
+# starts from nothing again; if it did not, six Downs would land on Sort
+# Lines instead of Select All.
+expect "a menu reopened with the mouse starts with nothing highlighted" \
+    "ctrl+Home F10 Right Escape click:70,14 $down5 Down Return X" "$replaced"
 
 exit $failed
