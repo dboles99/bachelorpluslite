@@ -6,7 +6,12 @@
 
 import { Palette } from "types.slint";
 
+// A readout after a separator. The separator is drawn and not said: read
+// aloud, "│ UTF-8" is "vertical line UTF-8", five times along one bar.
 component StatusText inherits Text {
+    in property <string> value;
+    text: "│ " + root.value;
+    accessible-label: root.value;
     color: Palette.ink-dim;
     font-size: 12px;
     vertical-alignment: center;
@@ -63,12 +68,13 @@ export component StatusBar inherits Rectangle {
                 font-size: 12px;
                 vertical-alignment: center;
             }
-            StatusText { text: "│ " + root.format-label; }
-            StatusText { text: "│ " + root.encoding-label; }
-            StatusText { text: "│ " + root.line-ending-label; }
-            StatusText { text: "│ " + root.cursor-label; }
+            StatusText { value: root.format-label; }
+            StatusText { value: root.encoding-label; }
+            StatusText { value: root.line-ending-label; }
+            StatusText { value: root.cursor-label; }
             if root.overwrite: Text {
                 text: "│ Overtype";
+                accessible-label: "Overtype";
                 color: Palette.accent;
                 font-size: 12px;
                 vertical-alignment: center;
@@ -78,6 +84,7 @@ export component StatusBar inherits Rectangle {
             // is a statement about where this document's data may go.
             if root.security-label != "": Text {
                 text: "│ " + root.security-label;
+                accessible-label: root.security-label;
                 color: Palette.accent;
                 font-size: 12px;
                 vertical-alignment: center;
@@ -86,8 +93,16 @@ export component StatusBar inherits Rectangle {
             Rectangle {
                 width: theme-label.preferred-width + 16px;
                 background: theme-area.has-hover ? Palette.edge : transparent;
+                // It looks like a readout and is a button: a click moves to
+                // the next theme. Saying so is the only way a reader finds out.
+                accessible-role: button;
+                accessible-label: "Theme: " + root.theme-name + ". Next theme";
+                accessible-action-default => {
+                    root.cycle-theme();
+                }
                 theme-label := Text {
                     text: "│ " + root.theme-name;
+                    accessible-role: none;
                     color: Palette.accent;
                     font-size: 12px;
                     vertical-alignment: center;

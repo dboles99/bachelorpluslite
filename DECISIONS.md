@@ -99,6 +99,7 @@ Adding a decision means adding both.
 | BP-ADR-0088 | 2026-09-25 | **The release candidate is reachable by keyboard and names its controls; 1.0 is tested with a screen reader.** Answers D26. Zero `accessible-*` properties and a menu bar no keyboard can reach. RC: Alt/F10 into the menus, and roles and labels on menus, tabs and the find and go-to inputs. 1.0: an NVDA and Orca pass, a high-contrast palette, and a contrast test over every theme. Not yet built (W4-02) | Accepted | [ADR-0088](docs/decisions/ADR-0088.md) |
 | BP-ADR-0089 | 2026-09-25 | **The website claims only what ships, and names no date.** Answers D27 and D28. "Everything Notepad does", "nothing is written outside that folder" and "uninstalling is deleting the folder" were false, and the installation page contradicted its own table; all corrected in six languages and at the source. The 10 October countdown is removed rather than moved: a later date would be the same promise with the same lack of a plan | Accepted | [ADR-0089](docs/decisions/ADR-0089.md) |
 | BP-ADR-0084 | built 2026-09-25 | **Built (W1-02).** Every question is drawn in the window and answered through a continuation, since a Slint dialog cannot block; only an explicit Discard or Don't Save destroys anything, and that rule is three tested functions. Building it found the journal keyed by document ids that restart at 1 in every run, so each launch's clean Untitled deleted the last run's `1.json` within five seconds -- hidden while `rfd` blocked, fatal once the question waited. The journal now writes per run. `scripts/drive-recovery-xvfb.sh` passes on both surfaces and fails against the build before | Accepted | [ADR-0084](docs/decisions/ADR-0084.md) |
+| BP-ADR-0088 | built 2026-09-26 | **Release-candidate half built (W4-02).** F10 opens the menus and the arrows, Enter and Esc work them, from a click as well; menus, rows, tabs, the find bar, Go to Line and the dialogs are named. F10 rather than a bare Alt, because on X11 an Alt+Tab away arrives as Alt pressed and released alone. AccessKit 0.19 publishes no expanded or disabled state over AT-SPI, so greyed rows say "unavailable" in words. The AT-SPI tree is read in a container by `scripts/check-accessibility-xvfb.sh`; nothing has been spoken yet, which is the 1.0 half | Accepted | [ADR-0088](docs/decisions/ADR-0088.md) |
 | BP-ADR-0055 | amended 2026-09-25 | Its EV row -- reputation *immediately* -- was false when written; Microsoft removed the bypass in 2024. The deferral stands; EV is off the table ([ADR-0086](docs/decisions/ADR-0086.md)) | Accepted, amended | [ADR-0055](docs/decisions/ADR-0055.md) |
 | BP-ADR-0057 | amended 2026-09-25 | "Executes nothing" had an unrecorded exception: `rfd` runs `zenity` on Linux. The message dialogs are moving into the window; the file pickers' fallback is named ([ADR-0084](docs/decisions/ADR-0084.md)) | Accepted, amended | [ADR-0057](docs/decisions/ADR-0057.md) |
 | BP-ADR-0067 | amended 2026-09-25 | Its winget premise -- a private repository, no release artefacts -- is gone, and winget needs no installer. No installer still stands ([ADR-0086](docs/decisions/ADR-0086.md)) | Accepted, amended | [ADR-0067](docs/decisions/ADR-0067.md) |
@@ -139,6 +140,30 @@ Adding a decision means adding both.
 - **specs.md section 22's warm-start target** (75 ms) is still unverified —
   the software renderer's time to first interaction cannot be measured, so
   half of ADR-0017's target has no number behind it.
+
+## What the screen reader's tree taught, 2026-09-26
+
+Two things, from reading the accessibility tree instead of the markup
+([ADR-0088](docs/decisions/ADR-0088.md)).
+
+### Read what the reader is handed, not what you wrote
+
+Every `accessible-*` property was reviewed before the tree was read, and the
+tree still found four defects: line numbers announced before the first word,
+"vertical line" before every status readout, each button's own text read a
+second time, and a dialog whose focus was the window rather than its default
+button. None was a wrong property; each was a *missing* one on an element
+nobody thought of as speaking. **The markup says what was labelled; only the
+tree says what is heard.** `at-spi2-core`, a private bus and forty lines of
+`pyatspi` produce it anywhere Xvfb runs -- no screen reader, no person.
+
+### A toolkit's mapping is a second author
+
+Slint accepted `accessible-expanded` and `accessible-enabled`, and AccessKit's
+AT-SPI layer then dropped both. Nothing warned. **A property the code sets is
+a request, and the platform tree is the answer** -- which is trap 3 in
+another form, and the same test answers it: read the far end. Where a state
+cannot survive the crossing, say it in words that can.
 
 ## What the dialogs taught, 2026-09-25
 

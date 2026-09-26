@@ -74,7 +74,10 @@ would cost). No printing. No Markdown preview, which is undecided rather than
 impossible ([ADR-0081](docs/decisions/ADR-0081.md)). No drag and drop to open
 yet -- it is buildable, and does not work on a native Wayland session when it
 is (the same ADR). No encryption; that left with
-[ADR-0064](docs/decisions/ADR-0064.md).
+[ADR-0064](docs/decisions/ADR-0064.md). No claim to be accessible yet: F10
+reaches the menus and the controls are named for a screen reader, but nobody
+has run NVDA or Orca on it, and until somebody has it does not say so
+([ADR-0088](docs/decisions/ADR-0088.md)).
 
 Duplicate line, move line and the Insert menu need `--editor-view`, because
 they have to know where the caret is and the toolkit's text widget will not
@@ -168,7 +171,7 @@ contributions need a sign-off.
 
 Before touching `crates/bp-ui/`, read
 [`prompts/rosettas/R011_WIRE_CAPABILITY_INTO_SHELL.md`](prompts/rosettas/R011_WIRE_CAPABILITY_INTO_SHELL.md).
-It holds ten traps that have each cost somebody a session.
+It holds the traps that have each cost somebody a session.
 
 **For a security problem, do not open a public issue** --
 [`SECURITY.md`](SECURITY.md).

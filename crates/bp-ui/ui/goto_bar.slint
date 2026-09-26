@@ -59,6 +59,7 @@ export component GotoBar inherits Rectangle {
                 padding-right: 6px;
                 input := TextInput {
                     text <=> root.line-text;
+                    accessible-label: "Go to line number";
                     color: Palette.ink;
                     selection-background-color: Palette.accent;
                     font-size: 13px;
@@ -94,6 +95,7 @@ export component GotoBar inherits Rectangle {
 
         MenuLabel {
             label: "×";
+            name: "Close go to line";
             clicked => {
                 root.closed();
             }

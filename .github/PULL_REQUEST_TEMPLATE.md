@@ -7,8 +7,8 @@
      Nobody will push you to.
 
   2. If this touches crates/bp-ui/, read
-     prompts/rosettas/R011_WIRE_CAPABILITY_INTO_SHELL.md first. Ten traps,
-     each of which has cost somebody a session.
+     prompts/rosettas/R011_WIRE_CAPABILITY_INTO_SHELL.md first. The traps
+     in it have each cost somebody a session.
 -->
 
 ## What this changes, and why

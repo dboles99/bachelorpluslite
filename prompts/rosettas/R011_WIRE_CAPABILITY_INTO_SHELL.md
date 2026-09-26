@@ -107,6 +107,16 @@ Each of these has already cost somebody a debugging session.
    identifier that carries document text or secrets fails the build. Log
    *about* a document — its path, its size — never what it contains.
 
+11. **A control a screen reader cannot name is a control it cannot find**
+   (ADR-0088). A `Rectangle` with a `TouchArea` is nothing to a reader.
+   Use `MenuLabel`, which is a named button, and give it a `name` when its
+   label is a symbol -- "×" is read as "times". Text *inside* a named control
+   gets `accessible-role: none`, or it is read twice. A new `PopupWindow`
+   gets no keyboard by opening and cannot be handed it from outside: copy
+   `MenuPopup`'s timer. Then run `scripts/check-accessibility-xvfb.sh`, add a
+   line for the new control, and read the tree rather than the markup -- the
+   markup review missed four defects the tree showed at once.
+
 ## Constraints
 
 - Windows 10, Windows 11 and Linux are equal targets (ADR-0001)
@@ -157,7 +167,8 @@ From `docs/governance/DEFINITION_OF_DONE.md`, the parts that apply here:
 ./scripts/Invoke-LocalCI.ps1 -Linux
 ```
 
-This **is** the gate — there is no hosted CI (ADR-0016). Every commit in this
+This **is** the gate. Hosted CI exists as well (ADR-0073, which reversed
+ADR-0016), and when the two disagree this one is right. Every commit in this
 repository has passed it. It runs `fmt`, `check --locked`, `clippy -D
 warnings`, `test`, an actual binary launch, and the log-hygiene scan, then the
 whole lot again inside WSL.

@@ -76,6 +76,9 @@ export component PassphraseBar inherits Rectangle {
                 padding-left: 6px;
                 padding-right: 6px;
                 input := TextInput {
+                    // The prompt says what the passphrase is for; the box is
+                    // the passphrase either way.
+                    accessible-label: "Passphrase";
                     color: Palette.ink;
                     selection-background-color: Palette.accent;
                     font-size: 13px;
@@ -110,6 +113,7 @@ export component PassphraseBar inherits Rectangle {
 
         MenuLabel {
             label: "×";
+            name: "Cancel";
             clicked => {
                 root.cancelled();
             }

@@ -199,7 +199,7 @@ files rather than one 1,189-line one:
 | File | Owns |
 | --- | --- |
 | `types.slint` | The five structs and the `Palette` global — the boundary `slint-build` generates into Rust |
-| `menu.slint` | `MenuLabel`, `MenuRow`, `MenuPopup` |
+| `menu.slint` | `MenuLabel`, `MenuRow`, `MenuPopup`. A popup **takes the keyboard itself, a tick after it opens**: Slint gives it none, and a parent cannot call into a `PopupWindow` (ADR-0088) |
 | `editor_surface.slint` | `EditorSurface`: the custom view's drawing, measurement and input |
 | `tab.slint` | One tab |
 | `find_bar.slint` | Find and replace, including `focus-query` |

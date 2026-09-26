@@ -24,6 +24,7 @@ Ctrl+S          Save
 Ctrl+Shift+S    Save As
 Ctrl+W          Close tab
 Ctrl+F          Find and replace
+Ctrl+G          Go to line
 Ctrl+Z / Ctrl+Y Undo / Redo
 Ctrl+X/C/V      Cut / Copy / Paste
 Ctrl+A          Select all
@@ -33,7 +34,8 @@ Shift+Insert    Paste
 Ctrl+= / Ctrl+- Zoom in / out
 Ctrl+0          Reset zoom
 Ctrl+D          Duplicate line
-Alt+Up / Down   Move line up / down";
+Alt+Up / Down   Move line up / down
+F10             Menus: arrows to move, Enter to run, Esc to close";
 
 /// The About box, as text, so the claim in it has a test behind it.
 ///
