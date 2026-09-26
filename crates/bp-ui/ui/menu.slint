@@ -58,6 +58,12 @@ export component MenuRow inherits Rectangle {
     in property <int> index;
     in property <int> count;
     callback chosen(int);
+    /// Chosen by a screen reader's "activate", which is neither a click nor
+    /// a key: the popup closes itself after a click and after Enter, and
+    /// nothing closed it after this -- the command ran and the menu stayed
+    /// up, still holding the keyboard. The popup decides what closing means,
+    /// so the row only reports which way it was chosen.
+    callback activated(int);
     height: 28px;
     background: root.highlighted || (root.item.enabled && ta.has-hover) ? Palette.edge : Palette.panel;
 
@@ -76,7 +82,7 @@ export component MenuRow inherits Rectangle {
     accessible-item-count: root.count;
     accessible-action-default => {
         if (root.item.enabled) {
-            root.chosen(root.item.action);
+            root.activated(root.item.action);
         }
     }
 
@@ -280,6 +286,11 @@ export component MenuPopup inherits PopupWindow {
                             highlighted: i == root.highlight;
                             chosen(action) => {
                                 root.chosen(action);
+                            }
+                            // The same order as Enter: chosen, then closed.
+                            activated(action) => {
+                                root.chosen(action);
+                                root.close();
                             }
                             changed highlighted => {
                                 if (self.highlighted) {

@@ -65,7 +65,9 @@ busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled 
 busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status ScreenReaderEnabled b true
 
 failed=0
-# Launch, press KEYS, and leave the tree in $run/tree.
+# Launch, press KEYS, and leave the tree in $run/tree. With a second argument,
+# activate the object of that name as a screen reader would, then read the
+# tree again.
 state() {
     "$bin" "$run/doc.txt" >"$run/app.log" 2>&1 &
     local app=$! window=
@@ -83,10 +85,14 @@ state() {
         sleep 0.3
     done
     sleep 1
+    if [ -n "${2:-}" ]; then
+        "$python" "$root/scripts/atspi-tree.py" bachelorpad --do "$2"
+        sleep 1
+    fi
     "$python" "$root/scripts/atspi-tree.py" bachelorpad >"$run/tree" 2>&1
     kill "$app"
     wait "$app" 2>/dev/null
-    echo "-- ${1:-(opened)}"
+    echo "-- ${1:-(opened)}${2:+, then activate $2}"
 }
 has() {
     if grep -qF -- "$1" "$run/tree"; then
@@ -125,6 +131,12 @@ lacks "[label] '×'"
 state "F10 Right Down Down"
 has "[list box] 'Edit'"
 has "[list item] 'Cut' desc='Ctrl+X' {selected,sensitive,focused}"
+
+# A reader's "activate" is neither a click nor Enter, and the menu has to
+# close after it as it does after both.
+state "F10 Right" "Select All"
+lacks "[list box] 'Edit'"
+has "[entry] 'Document' {sensitive,focused}"
 
 state "F10 Right End Up Up Up"
 has "[list item] 'Duplicate Line' desc='Ctrl+D, unavailable'"
