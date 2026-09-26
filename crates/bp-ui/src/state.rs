@@ -110,9 +110,12 @@ pub struct AppState {
     /// One editor per document: the rope is the storage, and the caret,
     /// selection and undo stack belong to us.
     ///
-    /// True whichever view is drawing. `TextInput` still owns *its* caret and
-    /// undo when it is the one on screen, but the text it hands back lands
-    /// here as a single undoable replacement, so there is one document.
+    /// True whichever view is drawing. `TextInput` still owns *its* caret, and
+    /// the undo of typing, when it is the one on screen; the text it hands
+    /// back is mirrored here with no undo step
+    /// ([`widget_edited`](Self::widget_edited)), so there is one document.
+    /// What this stack holds under `TextInput` is operations -- Replace All,
+    /// the line operations -- and only until the next keystroke.
     editors: HashMap<DocumentId, bp_editor::Editor>,
     /// Draw with the custom surface rather than Slint's `TextInput`.
     pub(crate) editor_view: bool,

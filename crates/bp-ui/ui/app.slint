@@ -475,9 +475,12 @@ export component AppWindow inherits Window {
     // Editor-local menu actions.
     //
     // Under `TextInput` these call functions on the widget, because Slint
-    // owns its text, selection and undo stack and Rust cannot reach them.
-    // Under the custom surface the opposite is true -- we own all three -- so
-    // every row goes to Rust instead.
+    // owns its text, selection and the undo of typing and Rust cannot reach
+    // them -- **except Undo and Redo, which ask Rust first**
+    // (`step-history`): an operation on the whole document is undone from
+    // the rope, since Slint clears its own history when Rust replaces the
+    // text. Under the custom surface we own all of it, so every row goes to
+    // Rust.
     function dispatch(action: int) {
         if (root.use-editor-view) {
             root.menu-action(action);

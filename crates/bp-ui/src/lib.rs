@@ -15,13 +15,15 @@
 //! be separated at all.
 //!
 //! So there are two views over one model. Under `TextInput`, still the
-//! default, text arriving from the widget lands in the rope as a single
-//! undoable replacement rather than as keystrokes, undo is Slint's, and the
-//! status bar can offer only a line count. Under `--editor-view` this crate
-//! owns the caret, `bp-editor`'s transactions are the undo, and the status
-//! bar shows Ln/Col; `editor_view.rs` owns that path.
+//! default, text arriving from the widget is mirrored into the rope with no
+//! undo step of its own (`AppState::widget_edited`), typing is undone by
+//! Slint, an operation on the whole document -- Replace All, a line
+//! operation -- is undone from the rope, and the status bar can offer only a
+//! line count. Under `--editor-view` this crate owns the caret,
+//! `bp-editor`'s transactions are the undo, and the status bar shows Ln/Col;
+//! `editor_view.rs` owns that path.
 //!
-//! Both costs are measured. The `TextInput` path copies the document on
+//! Both costs are measured. The `TextInput` path reads the whole document on
 //! every keystroke, so it stays inside a frame budget only to roughly 40 MB;
 //! the rope path does not care how large the document is. See
 //! `--latency-probe`, ADR-0018 and `docs/architecture/ARCHITECTURE.md`.
