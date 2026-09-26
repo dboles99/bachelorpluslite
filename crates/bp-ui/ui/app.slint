@@ -30,6 +30,7 @@ import { FindBar } from "find_bar.slint";
 import { GotoBar } from "goto_bar.slint";
 import { PassphraseBar } from "passphrase_bar.slint";
 import { ListPanel } from "list_panel.slint";
+import { MessageDialog } from "message_dialog.slint";
 import { StatusBar } from "status_bar.slint";
 import { Tab } from "tab.slint";
 import { EditorRow, MenuItem, Palette, SearchHit, SelectionBox, TabInfo } from "types.slint";
@@ -47,6 +48,7 @@ enum PendingFocus {
     goto,
     passphrase,
     editor,
+    dialog,
 }
 
 export component AppWindow inherits Window {
@@ -224,6 +226,19 @@ export component AppWindow inherits Window {
     callback passphrase-submitted(string);
     callback passphrase-cancelled();
 
+    // --- the message dialog (ADR-0084) -----------------------------------
+    // Rust owns the queue of questions and what each answer does; this owns
+    // only what is on screen. See `message_dialog.slint`.
+    in property <bool> dialog-open;
+    in property <string> dialog-heading;
+    in property <string> dialog-body;
+    in property <bool> dialog-warning;
+    in property <string> dialog-accept;
+    in property <string> dialog-decline;
+    in property <string> dialog-cancel;
+    in property <int> dialog-default;
+    callback dialog-answered(int);
+
     /// Select a range in the editor. Called from Rust once it has worked out
     /// where the next match is -- `set-selection-offsets` is a function on
     /// the widget, so only Slint can invoke it.
@@ -315,6 +330,8 @@ export component AppWindow inherits Window {
                 passphrase-bar.focus-input();
             } else if (root.pending-focus == PendingFocus.editor) {
                 root.focus-editor();
+            } else if (root.pending-focus == PendingFocus.dialog) {
+                message-dialog.take-focus();
             }
             root.pending-focus = PendingFocus.none;
         }
@@ -333,6 +350,13 @@ export component AppWindow inherits Window {
     public function focus-passphrase() {
         root.passphrase-open = true;
         root.pending-focus = PendingFocus.passphrase;
+    }
+
+    /// Hand the caret to the question on screen, on the next tick for the
+    /// same reason as the bars: a dialog opened from a menu row loses a
+    /// direct `focus()` to the popup closing behind it.
+    public function focus-dialog() {
+        root.pending-focus = PendingFocus.dialog;
     }
 
     /// Give the caret to whichever surface is drawing the document -- but not
@@ -355,7 +379,7 @@ export component AppWindow inherits Window {
     /// asked for it this tick outranks a surface that merely changed.
     public function focus-editor-soon() {
         if (root.pending-focus == PendingFocus.none && !root.find-open && !root.goto-open
-            && !root.passphrase-open) {
+            && !root.passphrase-open && !root.dialog-open) {
             root.pending-focus = PendingFocus.editor;
         }
     }
@@ -366,8 +390,18 @@ export component AppWindow inherits Window {
         passphrase-bar.clear();
     }
 
-    /// Put the caret back in whichever editor is in use.
+    /// Put the caret back in whichever editor is in use -- unless a question
+    /// is on screen, which keeps it.
+    ///
+    /// `dispatch` calls this after every menu row, including the rows that
+    /// open a dialog. Without the first branch the caret would be in the
+    /// document, behind the question, for the tick before `focus-dialog`
+    /// lands, and a key pressed then would edit the file being asked about.
     public function focus-editor() {
+        if (root.dialog-open) {
+            message-dialog.take-focus();
+            return;
+        }
         if (root.use-editor-view) {
             surface.focus();
         } else {
@@ -907,6 +941,25 @@ export component AppWindow inherits Window {
                     root.cycle-theme();
                 }
             }
+        }
+    }
+
+    // Outside the shortcut `FocusScope` above, and after it so it is drawn
+    // on top. Inside it, Ctrl+W and the rest would still fire through the
+    // dialog at the document behind it -- see `message_dialog.slint`.
+    message-dialog := MessageDialog {
+        width: root.width;
+        height: root.height;
+        open: root.dialog-open;
+        heading: root.dialog-heading;
+        body: root.dialog-body;
+        warning: root.dialog-warning;
+        accept-label: root.dialog-accept;
+        decline-label: root.dialog-decline;
+        cancel-label: root.dialog-cancel;
+        default-choice: root.dialog-default;
+        answered(choice) => {
+            root.dialog-answered(choice);
         }
     }
 

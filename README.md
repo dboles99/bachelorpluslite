@@ -44,7 +44,9 @@ than what the file weighs.
 - **per-document privacy profiles** governing what is written down at all
 
 **Recovery.** A journal keeps unsaved work through a crash, a kill or a power
-cut, and asks on the next launch.
+cut, and asks on the next launch -- and keeps it until you say Discard, not
+merely until you close the question
+([ADR-0084](docs/decisions/ADR-0084.md)).
 
 **Default-editor registration** on Windows and Linux, which never seizes an
 association -- it shows you what it would do and hands you the means

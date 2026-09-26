@@ -103,10 +103,11 @@ proptest! {
             .expect("checkpoint");
         prop_assert_eq!(written, Written::Yes);
 
-        let pending = fixture.after_a_restart().pending();
+        // `left_behind`, because what matters is what a restart is offered.
+        let pending = fixture.after_a_restart().left_behind();
         prop_assert_eq!(pending.len(), 1);
-        let (id, recovered) = &pending[0];
-        prop_assert_eq!(*id, 7u64);
+        let (entry, recovered) = &pending[0];
+        prop_assert_eq!(entry.id(), 7u64);
         prop_assert!(recovered == &original, "the recovered checkpoint differs from the one written");
         prop_assert!(
             Buffer::from_text(&recovered.text).to_string() == doc.0,
@@ -187,10 +188,13 @@ fn several_documents_recover_independently_and_newest_first() {
             .expect("checkpoint");
     }
 
-    let pending = fixture.after_a_restart().pending();
+    let pending = fixture.after_a_restart().left_behind();
     assert_eq!(pending.len(), 3);
     assert_eq!(
-        pending.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
+        pending
+            .iter()
+            .map(|(entry, _)| entry.id())
+            .collect::<Vec<_>>(),
         vec![2, 3, 1],
         "checkpoints must be offered newest first"
     );
@@ -208,7 +212,17 @@ fn a_crash_midway_through_a_checkpoint_leaves_the_previous_one_recoverable() {
     journal
         .checkpoint(1, &good, Recovery::Plaintext)
         .expect("checkpoint");
-    std::fs::write(fixture.dir.join("1.json.tmp"), b"{ truncated").expect("debris");
+    let debris = fixture.dir.join("1.json.tmp");
+    std::fs::write(&debris, b"{ truncated").expect("debris");
+    // Old debris, as a crash leaves it. A fresh `.tmp` may be another running
+    // instance's checkpoint half-way through its rename, and is left alone
+    // (ADR-0084), so debris younger than a minute is not what this tests.
+    let an_hour_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
+    std::fs::File::options()
+        .write(true)
+        .open(&debris)
+        .and_then(|f| f.set_modified(an_hour_ago))
+        .expect("backdate the debris");
 
     let journal = fixture.after_a_restart();
     let pending = journal.pending();
@@ -240,7 +254,7 @@ fn an_unreadable_checkpoint_does_not_cost_the_user_the_others() {
 }
 
 #[test]
-fn declining_recovery_removes_every_plaintext_checkpoint() {
+fn declining_recovery_removes_every_checkpoint_that_was_offered() {
     let fixture = fixture();
     let journal = fixture.after_a_restart();
     for id in 1..=3u64 {
@@ -253,7 +267,16 @@ fn declining_recovery_removes_every_plaintext_checkpoint() {
             .expect("checkpoint");
     }
 
-    journal.discard_all().expect("discard all");
+    // Declined in the next run, which is where the question is asked, and
+    // for exactly what it was offered (ADR-0084).
+    let next = fixture.after_a_restart();
+    let offered: Vec<_> = next
+        .left_behind()
+        .into_iter()
+        .map(|(entry, _)| entry)
+        .collect();
+    assert_eq!(offered.len(), 3);
+    next.forget(&offered).expect("forget");
 
     assert!(fixture.after_a_restart().pending().is_empty());
 }

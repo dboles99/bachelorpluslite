@@ -98,10 +98,12 @@ Adding a decision means adding both.
 | BP-ADR-0087 | 2026-09-25 | **The Linux build runs on glibc 2.35 and later.** Answers D25. `ubuntu-latest` linked a hard GLIBC_2.39 requirement from std's weak `pidfd_*` references, so the binary would not start on Ubuntu 22.04, Debian 12 or Mint 21. Build on `ubuntu-22.04` and fail the release above 2.35; RHEL and Debian 11 declined until somebody asks. Not yet built (W3-01) | Accepted | [ADR-0087](docs/decisions/ADR-0087.md) |
 | BP-ADR-0088 | 2026-09-25 | **The release candidate is reachable by keyboard and names its controls; 1.0 is tested with a screen reader.** Answers D26. Zero `accessible-*` properties and a menu bar no keyboard can reach. RC: Alt/F10 into the menus, and roles and labels on menus, tabs and the find and go-to inputs. 1.0: an NVDA and Orca pass, a high-contrast palette, and a contrast test over every theme. Not yet built (W4-02) | Accepted | [ADR-0088](docs/decisions/ADR-0088.md) |
 | BP-ADR-0089 | 2026-09-25 | **The website claims only what ships, and names no date.** Answers D27 and D28. "Everything Notepad does", "nothing is written outside that folder" and "uninstalling is deleting the folder" were false, and the installation page contradicted its own table; all corrected in six languages and at the source. The 10 October countdown is removed rather than moved: a later date would be the same promise with the same lack of a plan | Accepted | [ADR-0089](docs/decisions/ADR-0089.md) |
+| BP-ADR-0084 | built 2026-09-25 | **Built (W1-02).** Every question is drawn in the window and answered through a continuation, since a Slint dialog cannot block; only an explicit Discard or Don't Save destroys anything, and that rule is three tested functions. Building it found the journal keyed by document ids that restart at 1 in every run, so each launch's clean Untitled deleted the last run's `1.json` within five seconds -- hidden while `rfd` blocked, fatal once the question waited. The journal now writes per run. `scripts/drive-recovery-xvfb.sh` passes on both surfaces and fails against the build before | Accepted | [ADR-0084](docs/decisions/ADR-0084.md) |
 | BP-ADR-0055 | amended 2026-09-25 | Its EV row -- reputation *immediately* -- was false when written; Microsoft removed the bypass in 2024. The deferral stands; EV is off the table ([ADR-0086](docs/decisions/ADR-0086.md)) | Accepted, amended | [ADR-0055](docs/decisions/ADR-0055.md) |
 | BP-ADR-0057 | amended 2026-09-25 | "Executes nothing" had an unrecorded exception: `rfd` runs `zenity` on Linux. The message dialogs are moving into the window; the file pickers' fallback is named ([ADR-0084](docs/decisions/ADR-0084.md)) | Accepted, amended | [ADR-0057](docs/decisions/ADR-0057.md) |
 | BP-ADR-0067 | amended 2026-09-25 | Its winget premise -- a private repository, no release artefacts -- is gone, and winget needs no installer. No installer still stands ([ADR-0086](docs/decisions/ADR-0086.md)) | Accepted, amended | [ADR-0067](docs/decisions/ADR-0067.md) |
 | BP-ADR-0076 | amended 2026-09-25 | The countdown and the 10 October date are withdrawn; the feature list stays ([ADR-0089](docs/decisions/ADR-0089.md)) | Accepted, amended | [ADR-0076](docs/decisions/ADR-0076.md) |
+| BP-ADR-0076 | amended 2026-09-25 | Only `main` deploys the site. Pull requests each got a staging environment nothing closed, the Free tier's quota filled by PR #6, and every later PR touching `site/` or `docs/` went red at a step its diff could not fix. PRs are still built and checked | Accepted, amended | [ADR-0076](docs/decisions/ADR-0076.md) |
 | BP-ADR-0081 | amended 2026-09-25 | Its "no upgrade in this change" was overtaken the same day by the long-document overflow ([ADR-0083](docs/decisions/ADR-0083.md)); its three answers stand | Accepted, amended | [ADR-0081](docs/decisions/ADR-0081.md) |
 | BP-ADR-0017 | amended 2026-08-22 | Half of the renderer revert condition is now a number rather than a feeling: per-frame row building, and its independence from document size | Accepted, amended | [ADR-0017](docs/decisions/ADR-0017.md) |
 
@@ -137,6 +139,39 @@ Adding a decision means adding both.
 - **specs.md section 22's warm-start target** (75 ms) is still unverified —
   the software renderer's time to first interaction cannot be measured, so
   half of ADR-0017's target has no number behind it.
+
+## What the dialogs taught, 2026-09-25
+
+Three things, from taking the product's questions away from `rfd`
+([ADR-0084](docs/decisions/ADR-0084.md)).
+
+### A failure that comes back looking like an answer is a decision somebody made
+
+`rfd` without `zenity` returns `Cancel`. The recovery prompt matched `Yes`
+and put the discard in the `else`, so a dialog that never appeared answered
+*delete the work* -- and nothing between the two had done anything wrong on
+its own terms. **Where a branch destroys something, match the answer that
+asks for it and nothing else.** The `else` of a destructive `if` is where a
+failure goes to be read as consent.
+
+### Make something stop blocking, and ask what it used to prevent
+
+The dialog had to become non-blocking, and that let the rest of the program
+run while a question waited. The rest of the program had been relying on not
+running: the five-second checkpoint pass discarded the journal of every clean
+document, and every launch opens a clean Untitled as document 1 -- the same
+name as the last run's unsaved document 1. The collision had been there all
+along; blocking was the only thing keeping it from running first. **A
+blocking call guards more than its caller, and nothing records what.** Before
+making one asynchronous, list what used to be impossible while it waited.
+
+### An id that restarts every run is not a name for anything that outlives it
+
+Document ids were fine as keys inside a run, and the journal, which exists
+precisely to outlive a run, used them anyway. Two instances open at once had
+the same defect from the other side. The fix was not a better id; it was
+naming the run. Anything written to disk under a counter should say whose
+counter it was.
 
 ## What the keyboard taught, 2026-09-25
 

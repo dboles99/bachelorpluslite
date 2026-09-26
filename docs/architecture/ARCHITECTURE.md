@@ -126,15 +126,16 @@ Two deliberate non-dependencies:
 ## Inside `bp-ui`
 
 The shell was one 2,675-line file and the single-writer bottleneck for every
-piece of wiring work. It is now thirteen, split along seams the files already
+piece of wiring work. It is now fourteen, split along seams the files already
 had as comment banners:
 
 | Module | Lines | Owns |
 | --- | ---: | --- |
 | `state.rs` | 2,236 | `AppState` itself: documents, workspace, opening, saving, reloading, format detection, the gutter and the status labels |
 | `menus.rs` | 2,006 | Menu contents and the action-id map |
-| `lib.rs` | 1,182 | `run_with`, `refresh`, and the Slint callback wiring |
-| `dispatch.rs` | 773 | The menu-action match, and the dialogs its arms share |
+| `lib.rs` | 1,418 | `run_with`, `refresh`, the Slint callback wiring, and the flows that wait on an answer: save, close a tab, close the window, recovery (ADR-0084) |
+| `dispatch.rs` | 947 | The menu-action match, and the file pickers its arms share |
+| `dialog.rs` | 425 | Every question the window asks, the queue that shows one at a time, and the rule that only an explicit answer destroys anything (ADR-0084) |
 | `state/research.rs` | 758 | Research Report: aggregate reads over `bp-storage`, worded as insights, each naming the documents behind it and closing with the rules it applied (ADR-0041, ADR-0046); and what the store holds |
 | `default_editor.rs` | 754 | File ▸ Set as Default Editor: the report, the consent dialog, the artefacts (ADR-0012) |
 | `state/organize.rs` | 585 | Related Notes, duplicate detection and Suggested Folder, over `bp-storage` (ADR-0037, ADR-0048) |
@@ -205,6 +206,7 @@ files rather than one 1,189-line one:
 | `list_panel.slint` | The bottom panel that lists things you can click. **One component, two uses**: cross-file search results and Organize ▸ Related Notes. It was two near-identical files until ADR-0045 — `diff` with the names normalised showed differences in their comments and nothing else. Its third use, Notebook ▸ Cell Outline, left under ADR-0057 |
 | `status_bar.slint` | Both status rows |
 | `goto_bar.slint` | Go to Line |
+| `message_dialog.slint` | The window's own message box. **Outside the shortcut `FocusScope`**, or Ctrl+W would close the tab behind a question (ADR-0084) |
 | `passphrase_bar.slint` | The one-field bar every passphrase in this product is typed into — a document's, and a signing key's |
 | `app.slint` | The window's properties and callbacks, the shortcut bindings, the menu bar and its popups, both editor views, the tab strip, and the layout |
 

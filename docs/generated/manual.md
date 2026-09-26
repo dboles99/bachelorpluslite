@@ -623,9 +623,22 @@ While a document has unsaved changes, the product keeps a journal so the work
 survives the program stopping without being able to ask you anything -- a
 crash, a power cut, a `kill`.
 
-On the next launch you are asked whether to restore it. Nothing is written
-over anything: a restored document arrives as unsaved changes, exactly as you
-left it, and you decide where it goes.
+On the next launch you are asked what to do with it, and there are three
+answers:
+
+| | What happens |
+| --- | --- |
+| **Restore** | The work opens as unsaved changes, exactly as you left it, and you decide where it goes. Nothing is written over anything |
+| **Discard** | The work is deleted. This is the only answer to the question that deletes it; the other thing that does is turning on Privacy Mode, which is what Privacy Mode is for |
+| **Not Now** | The work stays where it is and you are asked again next time. Escape, and closing the window with the question still up, mean the same |
+
+**A question you did not answer never costs you the work**
+([ADR-0084](https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0084.md)). That was not always true: on a Linux
+desktop without `zenity`, the question could not be drawn at all and was
+answered *discard* on your behalf.
+
+Closing a document with **Don't Save** deletes its journal too. Otherwise the
+next launch would offer to recover work you had just chosen to throw away.
 
 | | Windows | Linux |
 | --- | --- | --- |
@@ -634,6 +647,9 @@ left it, and you decide where it goes.
 Each journal is a small JSON file naming the document it belongs to. An
 *Untitled* buffer has no path, so its journal names none -- which matters if
 you ever go looking, because such a file matches no filter you might write.
+The file names begin with a tag for the run that wrote them, so two runs of
+the program -- one after a crash, or two open at once -- never write over, or
+tidy away, each other's work.
 
 **Whether a journal is written at all is a privacy setting.** It is one of the
 two axes the profile model governs; see [Privacy](#privacy-and-security). A profile
@@ -1103,7 +1119,8 @@ Private goes back to writing no journal at all.
 
 **Privacy Mode** is a session-wide override that can only tighten, never
 loosen -- and it *acts*: journals already written are removed when you turn it
-on.
+on, including unsaved work an earlier run left and you have not yet restored.
+The status bar says how many of those it removed.
 
 There is no setting that gives you crash recovery without writing your text
 somewhere, because that is not a thing that can exist.

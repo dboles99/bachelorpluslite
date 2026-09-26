@@ -74,9 +74,18 @@ Each of these has already cost somebody a debugging session.
    typed. Getting it wrong either clones the document on every keystroke or
    leaves the widget showing stale text.
 
-7. **Never hold a `RefCell` borrow across a native dialog.** `rfd` dialogs
-   pump events, and a re-entrant callback on a live `borrow_mut()` panics.
-   Compute what you need, end the borrow, then show the dialog.
+7. **Never hold a `RefCell` borrow across a native dialog.** The `rfd` file
+   pickers pump events, and a re-entrant callback on a live `borrow_mut()`
+   panics. Compute what you need, end the borrow, then show the dialog.
+
+   **And a question is not a native dialog any more** (ADR-0084). Every
+   message box is `dialog::Dialogs::ask`, drawn in the window, and it returns
+   *before* it is answered -- Slint has no nested event loop. Whatever must
+   follow the answer goes in the closure you hand it, never on the line after
+   the call; code there runs while the question is still on screen. A new
+   question that can lose work gets an `Answer::Decline` only from an explicit
+   button, never from Escape or a failure: that one rule is what the change
+   was for.
 
 8. **Do not enable rfd's `common-controls-v6`.** It has been tried. The binary
    fails to start with `STATUS_ENTRYPOINT_NOT_FOUND` before `main`. The

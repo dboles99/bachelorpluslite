@@ -614,9 +614,36 @@ restoring one cannot silently convert CRLF to LF.</p>
 <p>While a document has unsaved changes, the product keeps a journal so the work
 survives the program stopping without being able to ask you anything -- a
 crash, a power cut, a <code>kill</code>.</p>
-<p>On the next launch you are asked whether to restore it. Nothing is written
-over anything: a restored document arrives as unsaved changes, exactly as you
-left it, and you decide where it goes.</p>
+<p>On the next launch you are asked what to do with it, and there are three
+answers:</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>What happens</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Restore</strong></td>
+<td>The work opens as unsaved changes, exactly as you left it, and you decide where it goes. Nothing is written over anything</td>
+</tr>
+<tr>
+<td><strong>Discard</strong></td>
+<td>The work is deleted. This is the only answer to the question that deletes it; the other thing that does is turning on Privacy Mode, which is what Privacy Mode is for</td>
+</tr>
+<tr>
+<td><strong>Not Now</strong></td>
+<td>The work stays where it is and you are asked again next time. Escape, and closing the window with the question still up, mean the same</td>
+</tr>
+</tbody>
+</table>
+<p><strong>A question you did not answer never costs you the work</strong>
+(<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0084.md">ADR-0084</a>). That was not always true: on a Linux
+desktop without <code>zenity</code>, the question could not be drawn at all and was
+answered <em>discard</em> on your behalf.</p>
+<p>Closing a document with <strong>Don't Save</strong> deletes its journal too. Otherwise the
+next launch would offer to recover work you had just chosen to throw away.</p>
 <table>
 <thead>
 <tr>
@@ -635,7 +662,10 @@ left it, and you decide where it goes.</p>
 </table>
 <p>Each journal is a small JSON file naming the document it belongs to. An
 <em>Untitled</em> buffer has no path, so its journal names none -- which matters if
-you ever go looking, because such a file matches no filter you might write.</p>
+you ever go looking, because such a file matches no filter you might write.
+The file names begin with a tag for the run that wrote them, so two runs of
+the program -- one after a crash, or two open at once -- never write over, or
+tidy away, each other's work.</p>
 <p><strong>Whether a journal is written at all is a privacy setting.</strong> It is one of the
 two axes the profile model governs; see <a href="#privacy-and-security">Privacy</a>. A profile
 that writes no journal means unsaved work does not survive a crash, and that
@@ -1114,7 +1144,8 @@ names its form honestly. A test asserts that if the row ever stops saying so,
 Private goes back to writing no journal at all.</p>
 <p><strong>Privacy Mode</strong> is a session-wide override that can only tighten, never
 loosen -- and it <em>acts</em>: journals already written are removed when you turn it
-on.</p>
+on, including unsaved work an earlier run left and you have not yet restored.
+The status bar says how many of those it removed.</p>
 <p>There is no setting that gives you crash recovery without writing your text
 somewhere, because that is not a thing that can exist.</p>
 <h4 id="two-controls-both-real">Two controls, both real</h4>

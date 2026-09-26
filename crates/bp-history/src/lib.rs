@@ -31,6 +31,14 @@
 //! * A journal is discarded only after a successful save. Deleting it any
 //!   earlier would open a window in which neither the file nor the journal
 //!   holds the work.
+//!
+//! **Every run writes under its own session tag** (ADR-0084). A document id
+//! is a counter that starts at 1 in every run, so a file named only by it
+//! was shared by every run that ever had a document 1 -- and the clean,
+//! empty *Untitled* each launch opens is document 1. Its checkpoint pass
+//! discarded the previous run's `1.json` within seconds, before anybody had
+//! answered whether to recover it. A run now discards only what it wrote,
+//! and a previous run's work stays until somebody decides about it.
 
 #![forbid(unsafe_code)]
 
@@ -151,12 +159,89 @@ impl Refusal {
 #[derive(Debug, Clone)]
 pub struct Journal {
     dir: PathBuf,
+    session: String,
 }
 
+/// Which checkpoint on disk an entry is, so a decision about it can name it
+/// rather than "everything".
+///
+/// Opaque on purpose: what matters is that forgetting an entry removes that
+/// file and no other, not how the file is named.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Entry {
+    stem: String,
+    id: u64,
+    session: Option<String>,
+}
+
+impl Entry {
+    /// The document id the checkpoint was written under, in the run that
+    /// wrote it. Meaningless in any other run.
+    #[must_use]
+    pub const fn id(&self) -> u64 {
+        self.id
+    }
+
+    /// Read a file stem: `<session>-<id>` from this build, or a bare `<id>`
+    /// from a build before sessions existed, which must still be offered.
+    fn parse(stem: &str) -> Option<Self> {
+        let (session, id) = match stem.rsplit_once('-') {
+            Some((session, id)) if !session.is_empty() => (Some(session.to_owned()), id),
+            Some(_) => return None,
+            None => (None, stem),
+        };
+        Some(Self {
+            stem: stem.to_owned(),
+            id: id.parse().ok()?,
+            session,
+        })
+    }
+}
+
+/// A tag no earlier run can have had: the time, the process, and a counter
+/// for journals made within one process.
+///
+/// Time and process id alone are not enough. A process id is reused by a
+/// later run (trap 5 in `DECISIONS.md`), and on Windows the clock ticks in
+/// 100 ns steps, so two journals made back to back in one process can read
+/// the same instant.
+fn new_session() -> String {
+    static MADE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    let count = MADE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    format!("{nanos:x}.{:x}.{count:x}", std::process::id())
+}
+
+/// Whether any file in `dir` was written under `session`.
+fn session_in_use(dir: &Path, session: &str) -> bool {
+    let prefix = format!("{session}-");
+    std::fs::read_dir(dir).is_ok_and(|entries| {
+        entries
+            .filter_map(Result::ok)
+            .any(|entry| entry.file_name().to_string_lossy().starts_with(&prefix))
+    })
+}
+
+/// How old a temporary file must be before it is debris rather than a
+/// checkpoint being written. A write and its rename take milliseconds; a
+/// minute is long enough that nothing live is that slow.
+const STALE_TEMPORARY: std::time::Duration = std::time::Duration::from_secs(60);
+
 impl Journal {
-    /// Use `dir` for checkpoints.
+    /// Use `dir` for checkpoints, as a new session.
+    ///
+    /// A tag already on disk is refused and another drawn. Time, process and
+    /// counter make a repeat all but impossible, and "all but" is not good
+    /// enough when a repeat would have this run overwrite an earlier one's
+    /// unsaved work and then treat it as its own.
     pub fn new(dir: PathBuf) -> Self {
-        Self { dir }
+        let mut session = new_session();
+        while session_in_use(&dir, &session) {
+            session = new_session();
+        }
+        Self { dir, session }
     }
 
     /// The directory checkpoints are written to, for showing the user.
@@ -165,7 +250,7 @@ impl Journal {
     }
 
     fn file_for(&self, id: u64) -> PathBuf {
-        self.dir.join(format!("{id}.json"))
+        self.dir.join(format!("{}-{id}.json", self.session))
     }
 
     /// Write a checkpoint for `id` if the document's policy permits it.
@@ -215,10 +300,13 @@ impl Journal {
         Ok(Written::Yes)
     }
 
-    /// Forget the checkpoint for `id`.
+    /// Forget this session's checkpoint for `id`.
     ///
     /// Call this only after a successful save. Earlier, and there is a window
     /// where neither the file nor the journal holds the work.
+    ///
+    /// **Only this session's.** Another run's document with the same id is a
+    /// different document.
     pub fn discard(&self, id: u64) -> std::io::Result<()> {
         match std::fs::remove_file(self.file_for(id)) {
             Ok(()) => Ok(()),
@@ -228,26 +316,27 @@ impl Journal {
         }
     }
 
-    /// Every checkpoint currently on disk, newest first.
+    /// Every checkpoint currently on disk, this session's included, newest
+    /// first.
     ///
     /// Unreadable or corrupt entries are skipped rather than failing the
     /// whole scan: one bad file must not cost the user the other recoveries.
-    pub fn pending(&self) -> Vec<(u64, Checkpoint)> {
+    pub fn pending(&self) -> Vec<(Entry, Checkpoint)> {
         let Ok(entries) = std::fs::read_dir(&self.dir) else {
             return Vec::new();
         };
 
-        let mut found: Vec<(u64, Checkpoint)> = entries
+        let mut found: Vec<(Entry, Checkpoint)> = entries
             .filter_map(Result::ok)
             .filter_map(|entry| {
                 let path = entry.path();
                 if path.extension()? != "json" {
                     return None;
                 }
-                let id: u64 = path.file_stem()?.to_str()?.parse().ok()?;
+                let key = Entry::parse(path.file_stem()?.to_str()?)?;
                 let text = std::fs::read_to_string(&path).ok()?;
                 let checkpoint: Checkpoint = serde_json::from_str(&text).ok()?;
-                Some((id, checkpoint))
+                Some((key, checkpoint))
             })
             .collect();
 
@@ -257,22 +346,53 @@ impl Journal {
         found
     }
 
-    /// Remove every checkpoint. Used when the user declines recovery.
-    pub fn discard_all(&self) -> std::io::Result<()> {
-        for (id, _) in self.pending() {
-            self.discard(id)?;
+    /// The checkpoints some other run left: what there is to offer to
+    /// recover. This session's own are live, not left.
+    pub fn left_behind(&self) -> Vec<(Entry, Checkpoint)> {
+        let mut found = self.pending();
+        found.retain(|(entry, _)| entry.session.as_deref() != Some(self.session.as_str()));
+        found
+    }
+
+    /// Remove exactly these entries: the ones the user was asked about and
+    /// declined, or recovered and has now checkpointed again under this
+    /// session.
+    ///
+    /// Named entries rather than "all", because by the time the answer
+    /// arrives this session may have checkpoints of its own, and they are not
+    /// what was declined.
+    pub fn forget(&self, entries: &[Entry]) -> std::io::Result<()> {
+        for entry in entries {
+            match std::fs::remove_file(self.dir.join(format!("{}.json", entry.stem))) {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(e),
+            }
         }
         Ok(())
     }
 
     /// Delete stray temporary files left by a crash mid-checkpoint.
+    ///
+    /// **Only stale ones.** The directory is shared by every run, and another
+    /// instance may be between writing its temporary file and renaming it;
+    /// deleting that would make its rename fail and cost it the checkpoint.
+    /// Nothing reads a `.tmp`, so one left a little longer does no harm.
     pub fn clean_temporaries(&self) {
         let Ok(entries) = std::fs::read_dir(&self.dir) else {
             return;
         };
+        let now = std::time::SystemTime::now();
         for entry in entries.filter_map(Result::ok) {
             let path = entry.path();
-            if path.extension().is_some_and(|e| e == "tmp") {
+            if !path.extension().is_some_and(|e| e == "tmp") {
+                continue;
+            }
+            let stale = entry.metadata().and_then(|m| m.modified()).is_ok_and(|at| {
+                now.duration_since(at)
+                    .is_ok_and(|age| age >= STALE_TEMPORARY)
+            });
+            if stale {
                 let _ = std::fs::remove_file(path);
             }
         }
@@ -317,7 +437,7 @@ mod tests {
 
         let pending = journal.pending();
         assert_eq!(pending.len(), 1);
-        assert_eq!(pending[0].0, 1);
+        assert_eq!(pending[0].0.id(), 1);
         assert_eq!(pending[0].1, entry);
     }
 
@@ -409,6 +529,7 @@ mod tests {
             .unwrap();
         std::fs::write(journal.location().join("2.json"), "{ not json").unwrap();
         std::fs::write(journal.location().join("notanumber.json"), "{}").unwrap();
+        std::fs::write(journal.location().join("-3.json"), "{}").unwrap();
 
         let pending = journal.pending();
         assert_eq!(pending.len(), 1);
@@ -442,8 +563,11 @@ mod tests {
             .checkpoint(1, &checkpoint("survivable"), Recovery::Plaintext)
             .unwrap();
 
-        // Simulate the debris of an interrupted write.
-        std::fs::write(journal.location().join("1.json.tmp"), "{ half writ").unwrap();
+        // Simulate the debris of an interrupted write -- an old one, because
+        // a fresh temporary file may be another instance's write in progress.
+        let debris = journal.location().join("1.json.tmp");
+        std::fs::write(&debris, "{ half writ").unwrap();
+        age(&debris);
 
         let pending = journal.pending();
         assert_eq!(
@@ -458,17 +582,23 @@ mod tests {
     }
 
     #[test]
-    fn discard_all_clears_everything() {
-        let (_dir, journal) = journal();
-        journal
+    fn forgetting_everything_offered_clears_what_the_last_run_left() {
+        let (_dir, crashed) = journal();
+        crashed
             .checkpoint(1, &checkpoint("a"), Recovery::Plaintext)
             .unwrap();
-        journal
+        crashed
             .checkpoint(2, &checkpoint("b"), Recovery::Plaintext)
             .unwrap();
 
-        journal.discard_all().unwrap();
-        assert!(journal.pending().is_empty());
+        let relaunched = next_run(&crashed);
+        let offered: Vec<Entry> = relaunched
+            .left_behind()
+            .into_iter()
+            .map(|(e, _)| e)
+            .collect();
+        relaunched.forget(&offered).unwrap();
+        assert!(relaunched.pending().is_empty());
     }
 
     #[test]
@@ -557,7 +687,169 @@ mod tests {
 
         let pending = journal.pending();
         assert_eq!(pending.len(), 1);
-        assert_eq!(pending[0].0, 1);
+        assert_eq!(pending[0].0.id(), 1);
         assert_eq!(pending[0].1.text, "keep me");
+    }
+
+    /// The next launch: a second journal over the same directory, which is
+    /// what a relaunch is.
+    fn next_run(journal: &Journal) -> Journal {
+        Journal::new(journal.location().to_path_buf())
+    }
+
+    #[test]
+    fn a_clean_document_in_the_next_run_does_not_discard_the_last_runs_checkpoint() {
+        // The defect ADR-0084 found. Every launch opens a clean Untitled as
+        // document 1, and the checkpoint pass discards the journal of every
+        // clean document -- which, with files named by id alone, was the
+        // previous run's unsaved document 1, gone before the recovery
+        // question was answered.
+        let (_dir, crashed) = journal();
+        crashed
+            .checkpoint(
+                1,
+                &checkpoint("work from the crashed run"),
+                Recovery::Plaintext,
+            )
+            .unwrap();
+
+        let relaunched = next_run(&crashed);
+        relaunched.discard(1).unwrap();
+
+        let left = relaunched.left_behind();
+        assert_eq!(left.len(), 1, "the crashed run's checkpoint must survive");
+        assert_eq!(left[0].1.text, "work from the crashed run");
+    }
+
+    #[test]
+    fn what_this_run_wrote_is_live_rather_than_left_behind() {
+        let (_dir, journal) = journal();
+        journal
+            .checkpoint(1, &checkpoint("typing now"), Recovery::Plaintext)
+            .unwrap();
+
+        assert!(
+            journal.left_behind().is_empty(),
+            "a run must not offer to recover its own live work"
+        );
+        assert_eq!(journal.pending().len(), 1, "but it is still on disk");
+        assert_eq!(next_run(&journal).left_behind().len(), 1);
+    }
+
+    #[test]
+    fn a_checkpoint_written_before_sessions_existed_is_still_offered_and_can_be_forgotten() {
+        // Unsaved work already on disk from an earlier build is named
+        // `7.json`. Losing it to a filename change would be the upgrade
+        // deleting somebody's work.
+        let (_dir, journal) = journal();
+        std::fs::create_dir_all(journal.location()).unwrap();
+        let old = serde_json::to_vec(&checkpoint("from an earlier build")).unwrap();
+        std::fs::write(journal.location().join("7.json"), old).unwrap();
+
+        let left = journal.left_behind();
+        assert_eq!(left.len(), 1);
+        assert_eq!(left[0].0.id(), 7);
+
+        journal.forget(&[left[0].0.clone()]).unwrap();
+        assert!(journal.pending().is_empty());
+    }
+
+    #[test]
+    fn forgetting_removes_the_named_entries_and_nothing_else() {
+        // Declining recovery answers for what was offered. By the time the
+        // answer arrives this run may have checkpoints of its own, and a
+        // "forget everything" would take those too.
+        let (_dir, crashed) = journal();
+        crashed
+            .checkpoint(1, &checkpoint("a"), Recovery::Plaintext)
+            .unwrap();
+        crashed
+            .checkpoint(2, &checkpoint("b"), Recovery::Plaintext)
+            .unwrap();
+
+        let relaunched = next_run(&crashed);
+        let offered: Vec<Entry> = relaunched
+            .left_behind()
+            .into_iter()
+            .filter(|(_, c)| c.text == "a")
+            .map(|(e, _)| e)
+            .collect();
+        relaunched
+            .checkpoint(1, &checkpoint("typed since"), Recovery::Plaintext)
+            .unwrap();
+
+        relaunched.forget(&offered).unwrap();
+
+        let mut texts: Vec<String> = relaunched
+            .pending()
+            .into_iter()
+            .map(|(_, c)| c.text)
+            .collect();
+        texts.sort();
+        assert_eq!(texts, ["b", "typed since"]);
+    }
+
+    #[test]
+    fn two_journals_made_in_one_process_are_two_sessions() {
+        // Trap 5: unique must mean unique, including back to back in one
+        // process, where the clock may not have moved.
+        let (_dir, first) = journal();
+        let second = next_run(&first);
+        first
+            .checkpoint(1, &checkpoint("first"), Recovery::Plaintext)
+            .unwrap();
+        second
+            .checkpoint(1, &checkpoint("second"), Recovery::Plaintext)
+            .unwrap();
+
+        assert_eq!(
+            first.pending().len(),
+            2,
+            "document 1 of each run must be two files, not one overwritten"
+        );
+    }
+
+    /// Backdate a file past `STALE_TEMPORARY`.
+    fn age(path: &Path) {
+        let then =
+            std::time::SystemTime::now() - STALE_TEMPORARY - std::time::Duration::from_secs(5);
+        std::fs::File::options()
+            .write(true)
+            .open(path)
+            .and_then(|f| f.set_modified(then))
+            .expect("backdate the file");
+    }
+
+    #[test]
+    fn a_fresh_temporary_file_is_another_runs_write_in_progress_and_is_left_alone() {
+        // Found in review of PR #6. Every run shares the directory, and a
+        // launch that deleted every `.tmp` could take one another instance
+        // was about to rename, failing that checkpoint.
+        let (_dir, journal) = journal();
+        std::fs::create_dir_all(journal.location()).unwrap();
+        let live = journal.location().join("other-run-1.json.tmp");
+        std::fs::write(&live, "{ being written").unwrap();
+
+        next_run(&journal).clean_temporaries();
+
+        assert!(live.exists(), "a write in progress was deleted");
+    }
+
+    #[test]
+    fn a_session_tag_already_on_disk_is_never_reused() {
+        // Found in review of PR #6: a reused process id and a clock that
+        // repeats could draw a tag an earlier run used, and the new run would
+        // overwrite that run's work and call it its own.
+        let (_dir, journal) = journal();
+        journal
+            .checkpoint(1, &checkpoint("earlier"), Recovery::Plaintext)
+            .unwrap();
+
+        assert!(session_in_use(journal.location(), &journal.session));
+        assert!(!session_in_use(journal.location(), "a-tag-nobody-used"));
+        assert!(
+            !session_in_use(&journal.location().join("missing"), &journal.session),
+            "a directory that does not exist holds no sessions"
+        );
     }
 }
