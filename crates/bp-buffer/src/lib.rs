@@ -53,6 +53,21 @@ impl Position {
     }
 }
 
+/// Where another text differs from a buffer: one span, found by
+/// [`Buffer::change_to`].
+///
+/// **The two ranges are in different units, and the names say which.** The
+/// buffer counts characters; the other text is a `&str`, sliced in bytes.
+/// W1-04 was a character offset handed to something that counted bytes, and
+/// a struct with two fields called `start` would invite it again.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Change {
+    /// The characters of the buffer that go.
+    pub removed_chars: Range<usize>,
+    /// The bytes of the other text that replace them.
+    pub inserted_bytes: Range<usize>,
+}
+
 /// A rope-backed text buffer.
 #[derive(Debug, Clone, Default)]
 pub struct Buffer {
@@ -193,6 +208,55 @@ impl Buffer {
     pub fn line_start(&self, line_idx: usize) -> usize {
         let line = line_idx.min(self.len_lines().saturating_sub(1));
         self.rope.line_to_char(line)
+    }
+
+    /// The one span where `text` differs from this buffer, or `None` when
+    /// they are the same.
+    ///
+    /// For a widget that owns the typing and reports its whole text after
+    /// every key. A keystroke changes the text in one place, so what is
+    /// common to both ends is kept and only the middle is replaced: the rope
+    /// takes a small edit instead of being rebuilt, and nothing has to hold a
+    /// copy of the old document to find out what changed.
+    ///
+    /// The span is the *smallest* one, which is not always where the key
+    /// was pressed -- typing "a" into "aa" could have been at any of three
+    /// places, and this reports the end. Every answer produces the same
+    /// text, which is the only thing a mirror needs.
+    pub fn change_to(&self, text: &str) -> Option<Change> {
+        let mut prefix = 0;
+        let mut prefix_bytes = 0;
+        for (ours, theirs) in self.rope.chars().zip(text.chars()) {
+            if ours != theirs {
+                break;
+            }
+            prefix += 1;
+            prefix_bytes += theirs.len_utf8();
+        }
+        let len = self.len_chars();
+        let rest = &text[prefix_bytes..];
+        let text_len = prefix + rest.chars().count();
+        if prefix == len && prefix == text_len {
+            return None;
+        }
+
+        // Matched from the back, but never into the prefix on either side:
+        // a character counted twice would make the span negative.
+        let room = (len - prefix).min(text_len - prefix);
+        let mut suffix = 0;
+        let mut suffix_bytes = 0;
+        let mut ours = self.rope.chars_at(len).reversed();
+        for theirs in rest.chars().rev().take(room) {
+            if ours.next() != Some(theirs) {
+                break;
+            }
+            suffix += 1;
+            suffix_bytes += theirs.len_utf8();
+        }
+        Some(Change {
+            removed_chars: prefix..len - suffix,
+            inserted_bytes: prefix_bytes..text.len() - suffix_bytes,
+        })
     }
 }
 
@@ -381,5 +445,94 @@ mod tests {
         assert_eq!(buffer.byte_to_char(4), 2);
         assert_eq!(buffer.byte_to_char(99), 3, "past the end clamps");
         assert_eq!(buffer.char_to_byte(99), 5, "past the end clamps");
+    }
+
+    /// Apply what `change_to` found, the way a mirror does.
+    fn applied(before: &str, after: &str) -> String {
+        let mut buffer = Buffer::from_text(before);
+        if let Some(change) = buffer.change_to(after) {
+            let start = change.removed_chars.start;
+            buffer.remove(change.removed_chars);
+            buffer.insert(start, &after[change.inserted_bytes]);
+        }
+        buffer.to_string()
+    }
+
+    #[test]
+    fn one_keystroke_is_one_character_of_change() {
+        let buffer = Buffer::from_text("hello world");
+        assert_eq!(
+            buffer.change_to("hello, world"),
+            Some(Change {
+                removed_chars: 5..5,
+                inserted_bytes: 5..6,
+            })
+        );
+        assert_eq!(
+            buffer.change_to("hell world"),
+            Some(Change {
+                removed_chars: 4..5,
+                inserted_bytes: 4..4,
+            })
+        );
+    }
+
+    #[test]
+    fn the_same_text_is_no_change() {
+        assert_eq!(Buffer::from_text("same").change_to("same"), None);
+        assert_eq!(Buffer::new().change_to(""), None);
+    }
+
+    #[test]
+    fn a_change_after_multibyte_text_counts_characters_here_and_bytes_there() {
+        // The removed range indexes the rope and the inserted one slices the
+        // string: after 日本 they are 2 and 6.
+        let buffer = Buffer::from_text("日本語");
+        assert_eq!(
+            buffer.change_to("日本x語"),
+            Some(Change {
+                removed_chars: 2..2,
+                inserted_bytes: 6..7,
+            })
+        );
+    }
+
+    #[test]
+    fn a_repeated_character_is_not_counted_at_both_ends() {
+        // "aa" to "aaa" matches two from the front and, unchecked, two more
+        // from the back -- a span ending before it starts.
+        assert_eq!(
+            Buffer::from_text("aa").change_to("aaa"),
+            Some(Change {
+                removed_chars: 2..2,
+                inserted_bytes: 2..3,
+            })
+        );
+        assert_eq!(
+            Buffer::from_text("aaa").change_to("aa"),
+            Some(Change {
+                removed_chars: 2..3,
+                inserted_bytes: 2..2,
+            })
+        );
+    }
+
+    #[test]
+    fn applying_the_change_always_produces_the_other_text() {
+        let pairs = [
+            ("", "typed"),
+            ("typed", ""),
+            ("abc", "xyz"),
+            ("line one\nline two\n", "line one\nline 2\n"),
+            ("crlf\r\nend", "crlf\nend"),
+            ("日本語 テキスト", "日本 テキスト"),
+            ("aXa", "aa"),
+            ("abab", "ababab"),
+            ("héllo", "hello"),
+        ];
+        for (before, after) in pairs {
+            assert_eq!(applied(before, after), after, "{before:?} to {after:?}");
+            assert_eq!(applied(after, before), before, "{after:?} to {before:?}");
+        }
     }
 }

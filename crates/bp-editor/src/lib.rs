@@ -1133,6 +1133,41 @@ impl Editor {
         true
     }
 
+    /// Make the document hold `text`, as a widget that owns the typing
+    /// reports it, and record **no** undo step.
+    ///
+    /// Under `TextInput` the widget has the undo stack, the caret and the
+    /// keystrokes, and this editor is a copy kept for everything Rust reads:
+    /// saving, Find, the gutter. Recording each report as an undo step --
+    /// which is what [`replace_all_text`](Self::replace_all_text) did here
+    /// until W1-05 -- kept the old document and the new one per key, about
+    /// 200 KB a keystroke at 100 KB, for a stack nothing ever read.
+    ///
+    /// **And it forgets the history it has.** An earlier step's offsets
+    /// describe a document the widget has since changed without telling this
+    /// editor how, so an undo from here would put text back in the wrong
+    /// place. None is better than wrong.
+    ///
+    /// Returns whether anything changed, as `replace_all_text` does.
+    pub fn mirror(&mut self, text: &str) -> bool {
+        let Some(change) = self.buffer.change_to(text) else {
+            return false;
+        };
+        let inserted = &text[change.inserted_bytes];
+        let at = change.removed_chars.start;
+        self.buffer.remove(change.removed_chars);
+        self.buffer.insert(at, inserted);
+        // Where the widget's caret is after a keystroke, which is the best
+        // this editor can know without being told.
+        self.cursor = at + inserted.chars().count();
+        self.anchor = self.cursor;
+        self.undo.clear();
+        self.redo.clear();
+        self.coalesce = Coalesce::Closed;
+        self.goal_column = None;
+        true
+    }
+
     /// Replace the whole document, as loading a file does.
     ///
     /// Clears history: undoing past a file load into the previous document's
@@ -1339,6 +1374,46 @@ mod tests {
 
         while e.redo() {}
         assert_eq!(e.text(), scrambled);
+    }
+
+    #[test]
+    fn a_mirrored_keystroke_records_no_undo_step() {
+        // The widget that sent it has its own; a step here holds two copies
+        // of the document and is never read.
+        let mut e = Editor::new("hello world");
+        assert!(e.mirror("hello, world"));
+        assert_eq!(e.text(), "hello, world");
+        assert!(!e.can_undo());
+    }
+
+    #[test]
+    fn a_mirror_forgets_history_whose_offsets_it_has_moved() {
+        // "abc" inserted at 0 would, undone after the mirror, remove "XYa"
+        // rather than "abc".
+        let mut e = Editor::new("tail");
+        e.insert("abc");
+        assert!(e.can_undo());
+        assert!(e.mirror("XYabctail"));
+        assert!(!e.can_undo(), "an undo from here would cut the wrong text");
+        assert!(!e.can_redo());
+    }
+
+    #[test]
+    fn mirroring_the_same_text_changes_nothing() {
+        let mut e = Editor::new("same");
+        e.insert("!");
+        assert!(!e.mirror("!same"));
+        assert!(
+            e.can_undo(),
+            "a mirror that found no change touches nothing"
+        );
+    }
+
+    #[test]
+    fn a_mirror_leaves_the_caret_after_what_was_typed() {
+        let mut e = Editor::new("日本語");
+        assert!(e.mirror("日本xy語"));
+        assert_eq!(e.cursor(), 4, "characters, after 日本xy");
     }
 
     #[test]

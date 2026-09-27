@@ -3,11 +3,20 @@
 ## Undo and redo
 
 `Ctrl+Z` and `Ctrl+Y`, per document. Each tab has its own history and they do
-not interfere.
+not interfere. `Ctrl+Shift+Z` redoes as well.
 
 Undo entries are grouped the way you would expect: a run of typing is one
 entry rather than one per character, and Replace All is one entry rather than
 one per replacement.
+
+**An operation on the whole document can be undone until you type.** Replace
+All and the line operations in the Edit menu -- the two Sort Lines, Remove
+Duplicate Lines, Reverse Lines and Trim Trailing Whitespace -- each rewrite
+the document as one entry, and `Ctrl+Z` puts it back. In the default surface
+the text box keeps the history of your typing and the program keeps the
+history of those operations, so once you type after one, `Ctrl+Z` undoes the
+typing and then stops: the operation before it can no longer be undone. Under `--editor-view` there is
+one history, and everything undoes in order.
 
 **A no-op does not create an undo entry.** Choosing the encoding a document
 already has, or replacing text with itself, leaves the history alone -- so

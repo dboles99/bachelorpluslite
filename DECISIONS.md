@@ -89,6 +89,7 @@ Adding a decision means adding both.
 | BP-ADR-0079 | 2026-09-10 | **The fuzz harness silences the panic hook, because the hang budget was timing it.** `catch_unwind` does not return until the hook has finished, so with `RUST_BACKTRACE=1` a hosted Windows runner spent the whole 20 second budget symbolising a backtrace and reported an instant panic as a hang, discarding the message. A quiet hook for probe threads only; every other thread keeps the one it had. Raising the budget was rejected -- twenty seconds is not too short, the budget was measuring the wrong thing | Accepted | [ADR-0079](docs/decisions/ADR-0079.md) |
 | BP-ADR-0080 | 2026-09-25 | **The Insert key overtypes, and two surfaces stop mishandling named keys.** Found by driving the window under Xvfb with a marker after every key: Page Up and Page Down did nothing in the default surface, because `TextInput` pages by a `page-height` that defaults to zero and nothing set it; and in `--editor-view` F5, Insert and every unnamed key typed a private-use character into the document. Overtype's rule lives in `bp-editor` and both surfaces ask it -- the line break is never overtyped, a run undoes in one step. Conceded: two Ctrl+Z per character under `TextInput`, and caret offsets Slint marks internal | Accepted | [ADR-0080](docs/decisions/ADR-0080.md) |
 | BP-ADR-0081 | 2026-09-25 | **Two of the three Slint blockers were never blocked.** Checked against both 1.17.1 and 1.18.1 source: input-method composition is still refused by `FocusScope`. But `StyledText` has been public since Slint 1.15, with `StyledText::from_markdown` at runtime, so D14's premise was false the day it was answered; and a dropped file reaches the application through `slint::winit_030::WinitWindowAccessor::on_winit_window_event` without the backend, on Windows and X11 though not native Wayland. The record is corrected, drag and drop is queued, and D14 goes back to Daniel as a question | Accepted | [ADR-0081](docs/decisions/ADR-0081.md) |
+| BP-ADR-0018 | amended 2026-09-26 | Typing from `TextInput` is mirrored into the rope without history: each report was an undo step holding the document twice, 200 KB a key at 100 KB, on a stack no key could reach. Replace All and the line operations -- Sort Lines and the rest -- are undone from the rope instead, which the widget could not do once Slint began clearing its history on an outside change (W1-05) | Accepted, amended | [ADR-0018](docs/decisions/ADR-0018.md) |
 | BP-ADR-0048 | amended 2026-09-25 | Its answer to D14 rested on *"Slint 1.17.1 has no rich-text item"*, which was false -- `StyledText` shipped in 1.15. The answer stands withdrawn and the question is open again ([ADR-0081](docs/decisions/ADR-0081.md)) | Accepted | [ADR-0048](docs/decisions/ADR-0048.md) |
 | BP-ADR-0082 | 2026-09-25 | **Phase 10 is declined, and four policy axes nothing enforced leave with it.** `Cloud` embeddings contradict a product published as having no network, a `Local` model puts weights on a Notepad's startup path, and the need is met by Find ▸ In Folder and Related Notes. Removing `embeddings` meant counting readers: `network`, `temporary_files` and `zeroise` had none but the Security Inspector, which told a Confidential document *"Temporary files: never written"* while every save wrote one. ADR-0059 had decided all four would go; ADR-0064 deferred it on the ground that a doc comment admitted it. `Policy` is two axes, and `zeroize` leaves the graph. Confidential and Maximum are now visibly the same policy, which they always were -- Daniel's question | Accepted | [ADR-0082](docs/decisions/ADR-0082.md) |
 | BP-ADR-0083 | 2026-09-25 | **Slint 1.18.1, because 1.17.1 could not draw past line 2,000.** Answers D21. A debug build overflowed in euclid past about 2,100 lines, or 1,100 at scale 2, under the default software renderer; a release build would have wrapped the coordinate and drawn the document in the wrong place, silently. 1.18.1 passes at 5,000 lines and scale 2, checked by frame as well as log. The software renderer stays the default, ADR-0080's internal caret properties still compile, and the Xvfb harness now fails any run whose log contains a panic | Accepted | [ADR-0083](docs/decisions/ADR-0083.md) |
@@ -140,6 +141,61 @@ Adding a decision means adding both.
 - **specs.md section 22's warm-start target** (75 ms) is still unverified —
   the software renderer's time to first interaction cannot be measured, so
   half of ADR-0017's target has no number behind it.
+
+## What the undo stacks taught, 2026-09-26
+
+Four things, from W1-05, which set out to stop the widget's undo stack
+growing and to fix a panic on Ctrl+Z, and found that neither was quite what
+the plan said.
+
+### Half a defect can be fixed by an upgrade nobody connected to it
+
+The plan asked for the widget's history to be cleared whenever Rust replaced
+its text. **Slint 1.18.1 already does it** -- `TextInput::align_to_text`,
+upstream issue 9024 -- and W1-01 took that version for a different defect.
+Driven at the window, the build before W1-01 panics on Ctrl+Z in a new tab
+and the build after does not. The record went on listing the defect because
+nothing asked. **"Verify first" is the whole of the instruction**, and it
+cost two drive runs; the fix it would have replaced was a workaround for
+something no longer broken.
+
+And the upgrade had a price the record did not name either: with the
+widget's history cleared, **Replace All and every line operation could not
+be undone at all** on the default surface, while the manual said Replace
+All "is a single undo entry". A fix changes what else is true, and the
+sentences about the neighbours are the ones nobody rereads.
+
+### The stack that grew was the one nobody read
+
+ROADMAP named "the widget's own undo stack growing without bound". The
+widget's stack is small; it keeps what was typed. **What grew was
+`bp-editor`'s**, recording every report as an undo step holding the document
+twice -- on the default surface, where Ctrl+Z never reaches it. Memory spent
+on something nothing reads fails no test, because every test reads. **Ask of
+each thing that is kept: what reads it?** If nothing does, it is either dead
+or wrong, and here it was both: an undo from that stack would have replayed
+offsets from a document the widget had since changed.
+
+### A guard that declines must say who goes instead
+
+`focus-editor-soon` declines while the find bar is open, so the caret never
+leaves a find box -- correct, and tested. Closing Replace All's question
+called it, it declined, and nothing else took the caret: every key after the
+answer went nowhere, Ctrl+S included, until a click. **A function that says
+"not me" has handed the decision to nobody** unless it says who. The
+question's close now names the bar behind it. Found only because a drive
+case needed a key after Replace All.
+
+### A probe must prove its input arrived
+
+The first memory probe passed. It typed with `xdotool type`, which never
+reached the window, and measured an editor that had been sent nothing. The
+second typed with `xdotool key` and still passed, because a debug build takes
+about a second per key at 100 KB and the reading was taken while the keys
+were still queued. **A measurement of nothing looks exactly like a good
+result.** The probe now saves and waits until the file holds every key it
+sent, and only then reads the memory -- so the probe that passes is also the
+proof that the typing happened.
 
 ## What the offsets taught, 2026-09-26
 

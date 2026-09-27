@@ -15,13 +15,15 @@
 //! be separated at all.
 //!
 //! So there are two views over one model. Under `TextInput`, still the
-//! default, text arriving from the widget lands in the rope as a single
-//! undoable replacement rather than as keystrokes, undo is Slint's, and the
-//! status bar can offer only a line count. Under `--editor-view` this crate
-//! owns the caret, `bp-editor`'s transactions are the undo, and the status
-//! bar shows Ln/Col; `editor_view.rs` owns that path.
+//! default, text arriving from the widget is mirrored into the rope with no
+//! undo step of its own (`AppState::widget_edited`), typing is undone by
+//! Slint, an operation on the whole document -- Replace All, a line
+//! operation -- is undone from the rope, and the status bar can offer only a
+//! line count. Under `--editor-view` this crate owns the caret,
+//! `bp-editor`'s transactions are the undo, and the status bar shows Ln/Col;
+//! `editor_view.rs` owns that path.
 //!
-//! Both costs are measured. The `TextInput` path copies the document on
+//! Both costs are measured. The `TextInput` path reads the whole document on
 //! every keystroke, so it stays inside a frame budget only to roughly 40 MB;
 //! the rope path does not care how large the document is. See
 //! `--latency-probe`, ADR-0018 and `docs/architecture/ARCHITECTURE.md`.
@@ -602,7 +604,7 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
         let weak = ui.as_weak();
         ui.on_text_edited(move |text| {
             {
-                cell.borrow_mut().edit(text.to_string());
+                cell.borrow_mut().widget_edited(&text);
             }
             if let Some(ui) = weak.upgrade() {
                 // PushText::No -- the widget already holds this text. Pushing
@@ -676,6 +678,17 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
                 refresh(&ui, &mut cell.borrow_mut(), state::PushText::No);
             }
             what.name().into()
+        });
+    }
+    {
+        let cell = Rc::clone(&state);
+        let weak = ui.as_weak();
+        ui.on_step_history(move |redo| {
+            let stepped = cell.borrow_mut().step_operation(redo);
+            if stepped && let Some(ui) = weak.upgrade() {
+                refresh(&ui, &mut cell.borrow_mut(), state::PushText::Yes);
+            }
+            stepped
         });
     }
     {
@@ -1125,7 +1138,7 @@ pub fn latency_probe() {
             .collect();
 
         let mut state = state::AppState::new();
-        state.edit(text.clone());
+        state.widget_edited(&text);
         state.sync_gutter();
 
         let mut timings = Vec::with_capacity(SAMPLES);
@@ -1133,7 +1146,7 @@ pub fn latency_probe() {
             text.push('y');
             let next = text.clone();
             let start = std::time::Instant::now();
-            state.edit(next);
+            state.widget_edited(&next);
             state.sync_gutter();
             timings.push(start.elapsed());
         }

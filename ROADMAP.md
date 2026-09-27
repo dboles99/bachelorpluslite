@@ -145,7 +145,11 @@ rather than decisions, and did not need one:
   **fixed** (W1-04): Find and Go to Line selected the wrong text in any
   document with a character outside ASCII, and the next key typed replaced it;
 - Enter writing `\n` into a CRLF file;
-- the widget's own undo stack growing without bound;
+- ~~the widget's own undo stack growing without bound~~ -- **fixed** (W1-05),
+  and it was not the widget's: `bp-editor` kept every keystroke as an undo
+  step holding the document twice, which nothing read. Replace All and the
+  line operations can be undone on the default surface now, which since
+  Slint 1.18.1 they could not;
 - a second instance being offered the first one's live checkpoints;
 - the dynamic C runtime on Windows;
 - no release existing yet.

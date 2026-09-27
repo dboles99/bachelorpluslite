@@ -45,7 +45,9 @@ Each of these has already cost somebody a debugging session.
    handled on the widget and never reach Rust. Under `--editor-view` they all
    reach Rust. `dispatch()` in `app.slint` branches on `use-editor-view`. If
    you add an editor action, decide which side owns it and check
-   `only_editor_actions_fall_in_slints_window` still passes.
+   `only_editor_actions_fall_in_slints_window` still passes. Undo and redo
+   are the exception on the widget's side: they ask Rust first through
+   `step-history` -- trap 12.
 
 3. **There are two editor views. A wiring change usually needs both.**
    Anything touching the caret, the selection or the clipboard behaves
@@ -116,6 +118,18 @@ Each of these has already cost somebody a debugging session.
    `MenuPopup`'s timer. Then run `scripts/check-accessibility-xvfb.sh`, add a
    line for the new control, and read the tree rather than the markup -- the
    markup review missed four defects the tree showed at once.
+
+12. **Under `TextInput` there are two undo histories, one at a time**
+   ([ADR-0018](../../docs/decisions/ADR-0018.md), amended). Typing is the
+   widget's; an operation that rewrites the document -- Replace All, the
+   line operations -- is the rope's, because Slint clears the widget's
+   history when Rust replaces its text. What keeps them from overlapping is
+   the entry point: the widget's `edited` report goes to
+   `AppState::widget_edited`, which records nothing and **clears** the
+   rope's history, and an operation goes to `AppState::edit`, which records
+   one step. Send typing through `edit` and each key keeps the document
+   twice again; send an operation through `widget_edited` and it cannot be
+   undone. Then run `scripts/drive-undo-xvfb.sh`.
 
 ## Constraints
 

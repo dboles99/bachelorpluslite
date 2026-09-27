@@ -110,9 +110,12 @@ pub struct AppState {
     /// One editor per document: the rope is the storage, and the caret,
     /// selection and undo stack belong to us.
     ///
-    /// True whichever view is drawing. `TextInput` still owns *its* caret and
-    /// undo when it is the one on screen, but the text it hands back lands
-    /// here as a single undoable replacement, so there is one document.
+    /// True whichever view is drawing. `TextInput` still owns *its* caret, and
+    /// the undo of typing, when it is the one on screen; the text it hands
+    /// back is mirrored here with no undo step
+    /// ([`widget_edited`](Self::widget_edited)), so there is one document.
+    /// What this stack holds under `TextInput` is operations -- Replace All,
+    /// the line operations -- and only until the next keystroke.
     editors: HashMap<DocumentId, bp_editor::Editor>,
     /// Draw with the custom surface rather than Slint's `TextInput`.
     pub(crate) editor_view: bool,
@@ -1106,18 +1109,54 @@ impl AppState {
 
     /// Replace the active document's text as a single undoable edit.
     ///
-    /// What a data operation, Replace All or a line operation does, and what
-    /// `TextInput` reports after every keystroke. Unchanged text is not an
-    /// edit: a Format that found nothing to reformat must not mark a saved
-    /// document unsaved.
+    /// What a data operation, Replace All or a line operation does. Unchanged
+    /// text is not an edit: a Format that found nothing to reformat must not
+    /// mark a saved document unsaved.
+    ///
+    /// **Not what a keystroke in `TextInput` does** -- that is
+    /// [`widget_edited`](Self::widget_edited), and until W1-05 it was this,
+    /// which kept two copies of the document per key.
     pub(crate) fn edit(&mut self, text: String) {
+        self.apply_text(&text, bp_editor::Editor::replace_all_text);
+    }
+
+    /// Take the text `TextInput` reports after a keystroke, without an undo
+    /// step: the widget has the undo stack, and this copy is what saving and
+    /// Find read ([`bp_editor::Editor::mirror`]).
+    pub(crate) fn widget_edited(&mut self, text: &str) {
+        self.apply_text(text, bp_editor::Editor::mirror);
+    }
+
+    /// Undo or redo an operation on the whole document, under `TextInput`.
+    /// Returns whether there was one; if not, the widget's own history is
+    /// the one to step.
+    ///
+    /// **The widget cannot undo Replace All or a line operation**: Slint
+    /// clears its history when the text is replaced from outside, as it must,
+    /// since that history's offsets describe the text before. So the step
+    /// comes from here. It can only be the right one because
+    /// [`widget_edited`](Self::widget_edited) forgets this history on every
+    /// keystroke -- whatever is left in it is operations, and nothing has
+    /// been typed since.
+    pub(crate) fn step_operation(&mut self, redo: bool) -> bool {
+        let Some(editor) = self.active_editor_mut() else {
+            return false;
+        };
+        let stepped = if redo { editor.redo() } else { editor.undo() };
+        if stepped {
+            self.mark_edited();
+        }
+        stepped
+    }
+
+    fn apply_text(&mut self, text: &str, how: fn(&mut bp_editor::Editor, &str) -> bool) {
         let Some(id) = self.workspace.active_id() else {
             return;
         };
         let changed = self
             .editors
             .get_mut(&id)
-            .is_some_and(|editor| editor.replace_all_text(&text));
+            .is_some_and(|editor| how(editor, text));
 
         if changed && let Some(doc) = self.workspace.get_mut(id) {
             doc.mark_modified();
@@ -2274,6 +2313,40 @@ mod tests {
         let mut state = AppState::new();
         state.edit("one\ntwo\nthree".to_owned());
         assert_eq!(state.widget_range(&(4..7)), (4, 7));
+    }
+
+    #[test]
+    fn typing_in_the_widget_keeps_no_copies_of_the_document() {
+        // W1-05: each key was an undo step holding the document before and
+        // after it -- 200 MB over a thousand keys at 100 KB.
+        let mut state = AppState::new();
+        let mut text = "x".repeat(1_000);
+        for _ in 0..50 {
+            text.push('y');
+            state.widget_edited(&text);
+        }
+        assert_eq!(state.active_text(), text);
+        assert!(
+            !state
+                .active_editor()
+                .is_some_and(bp_editor::Editor::can_undo)
+        );
+        assert!(
+            state.workspace.active().is_some_and(Document::is_dirty),
+            "no history is not the same as no change"
+        );
+    }
+
+    #[test]
+    fn an_operation_on_the_whole_document_is_still_one_undo_step() {
+        // Replace All and the line operations go through `edit`, and under
+        // the custom surface Ctrl+Z is this editor's.
+        let mut state = AppState::new();
+        state.widget_edited("b\na");
+        state.edit("a\nb".to_owned());
+        let editor = state.active_editor_mut().expect("a document is open");
+        assert!(editor.undo());
+        assert_eq!(editor.text(), "b\na");
     }
 
     // --- tab context menu -------------------------------------------------
