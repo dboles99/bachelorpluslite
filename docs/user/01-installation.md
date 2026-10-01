@@ -3,10 +3,11 @@
 BachelorPad+ Lite runs on **Windows 10, Windows 11 and Linux** (x86-64).
 macOS is not built, and [ADR-0072](../decisions/ADR-0072.md) says why.
 
-**There is no installer, and that is a decision**
-([ADR-0067](../decisions/ADR-0067.md)). You unpack an archive wherever you
-want the program to live and run it. Nothing is written into that folder;
-what the product keeps about itself goes in your user profile, and
+There is an **installer for Windows**, a **package for each family of
+Linux**, and a plain archive for either, for anyone who would rather unpack a
+folder and run it ([ADR-0093](../decisions/ADR-0093.md)). Every one of them
+holds the same program. Wherever it is installed, what the product keeps about
+itself goes in your user profile, and
 [Where it puts things](#where-it-puts-things) lists every directory.
 
 ## What it needs
@@ -22,52 +23,80 @@ rather than hoped. RHEL 8 and 9 and Debian 11 are older than that and are not
 supported.
 
 It also loads the libraries any desktop session already has -- fontconfig,
-xkbcommon (with its X11 half), and Wayland or X11 with EGL. On a minimal
-install that lacks them, on Debian or Ubuntu:
+xkbcommon (with its X11 half), and Wayland or X11. The `.deb` and `.rpm`
+declare them, so your package manager fetches anything missing. For the
+AppImage or the archive on a minimal install, on Debian or Ubuntu:
 
 ```sh
-sudo apt install libfontconfig1 libxkbcommon0 libxkbcommon-x11-0 libwayland-client0 libegl1
+sudo apt install libfontconfig1 libxkbcommon0 libxkbcommon-x11-0 libwayland-client0 libx11-xcb1 libxcursor1 libxi6
 ```
 
 ## Download
 
 From [the releases page](https://github.com/dboles99/bachelorpluslite/releases):
 
-| Platform | File |
+| You have | Download |
 | --- | --- |
-| Windows 10 / 11 | `bachelorpad-lite-<version>-windows-x86_64.zip` |
-| Linux | `bachelorpad-lite-<version>-linux-x86_64.tar.gz` |
+| **Windows 10 or 11** | `bachelorpad-lite-<version>-windows-x86_64-setup.exe` |
+| Windows, no installer | `bachelorpad-lite-<version>-windows-x86_64.zip` |
+| **Ubuntu, Debian, Mint, Pop!_OS** | `bachelorpad-lite_<version>_amd64.deb` |
+| **Fedora, openSUSE** | `bachelorpad-lite-<version>-1.x86_64.rpm` |
+| Any other Linux | `bachelorpad-lite-<version>-x86_64.AppImage` |
+| Linux, no package | `bachelorpad-lite-<version>-linux-x86_64.tar.gz` |
+| Arch | `PKGBUILD`, for `makepkg -si` |
 
-## The archives are unsigned, and you should know that before you click
+## The downloads are unsigned, and you should know that before you click
 
-Windows SmartScreen will warn you when you download and again when you first
-run it. That is deferred code signing
-([ADR-0055](../decisions/ADR-0055.md)) -- a certificate has not been bought.
-Self-signing was refused outright, because a self-signed certificate is only
-satisfied once you install a root certificate you have no reason to trust,
-which is a worse thing to ask of somebody than a warning is.
+Windows SmartScreen will warn you when you download the installer and again
+when you first run it: choose **More info**, then **Run anyway**. On Windows
+11 with **Smart App Control** turned on, it may refuse to run at all -- the
+zip is no different there. That is code signing not yet in place
+([ADR-0094](../decisions/ADR-0094.md)). Self-signing was refused outright,
+because a self-signed certificate is only satisfied once you install a root
+certificate you have no reason to trust, which is a worse thing to ask of
+somebody than a warning is.
 
 What is offered instead is a checksum, and it is not nothing: it answers
 tampering in transit, which is the threat a certificate answers worst.
 
 ```sh
-sha256sum -c SHA256SUMS.txt
+sha256sum -c SHA256SUMS.txt --ignore-missing
 ```
 
 ```powershell
-(Get-FileHash -Algorithm SHA256 .\bachelorpad-lite-0.9.5-windows-x86_64.zip).Hash
+(Get-FileHash -Algorithm SHA256 .\bachelorpad-lite-1.0.0-windows-x86_64-setup.exe).Hash
 ```
 
 Compare it with the line in `SHA256SUMS.txt` beside the download.
 
 ## Windows
 
+### With the installer
+
+Run `bachelorpad-lite-<version>-windows-x86_64-setup.exe`. **It never asks
+for administrator rights**: it installs for you alone, in
+`%LOCALAPPDATA%\Programs\BachelorPad+ Lite`, adds a Start menu entry, and
+appears in **Settings > Apps** with an uninstaller.
+
+It offers two things, both unticked:
+
+- **Open with**, which puts the program in Explorer's *Open with* list and in
+  **Settings > Default apps** for text and Markdown files. It does **not**
+  make itself the default for anything; that stays your choice, made in
+  Windows' own settings ([ADR-0012](../decisions/ADR-0012.md)).
+- **A desktop shortcut.**
+
+### From the zip
+
 ```powershell
-Expand-Archive bachelorpad-lite-0.9.5-windows-x86_64.zip C:\Apps\BachelorPadLite
+Expand-Archive bachelorpad-lite-1.0.0-windows-x86_64.zip C:\Apps\BachelorPadLite
 C:\Apps\BachelorPadLite\bachelorpad.exe
 ```
 
-The archive contains:
+Shortcuts are yours to make, and File > Set as Default Editor registers file
+types for wherever you unpacked it.
+
+Both the installer and the zip contain:
 
 | File | What it is |
 | --- | --- |
@@ -84,19 +113,58 @@ Both icons ship because they are read by different things: Explorer needs a
 real `.ico`, and the toolkit that draws the window can decode only PNG and
 JPEG ([ADR-0068](../decisions/ADR-0068.md)).
 
-**Desktop and Start Menu shortcuts are made by hand.** With no installer there
-is no step that could make them, which is exactly the cost ADR-0067 accepted.
-
 ## Linux
 
+### Ubuntu, Debian, Mint, Pop!_OS
+
 ```sh
-tar xzf bachelorpad-lite-0.9.5-linux-x86_64.tar.gz
-cd bachelorpad-lite-0.9.5-linux-x86_64
+sudo apt install ./bachelorpad-lite_1.0.0_amd64.deb
+```
+
+### Fedora, openSUSE
+
+```sh
+sudo dnf install ./bachelorpad-lite-1.0.0-1.x86_64.rpm      # Fedora
+sudo zypper install ./bachelorpad-lite-1.0.0-1.x86_64.rpm   # openSUSE
+```
+
+Either package puts the program in your applications menu, with its icon,
+and `bachelorpad` and `bpad` on your `PATH`. The program and its help live
+together in `/usr/lib/bachelorpad-lite/`.
+
+### Arch
+
+Build and install from the `PKGBUILD` attached to the release:
+
+```sh
+makepkg -si
+```
+
+### Anything else: the AppImage
+
+```sh
+chmod +x bachelorpad-lite-1.0.0-x86_64.AppImage
+./bachelorpad-lite-1.0.0-x86_64.AppImage
+```
+
+It is one file and installs nothing. To have it in your applications menu,
+run File > Set as Default Editor from it.
+
+### The archive
+
+```sh
+tar xzf bachelorpad-lite-1.0.0-linux-x86_64.tar.gz
+cd bachelorpad-lite-1.0.0-linux-x86_64
 ./bachelorpad
 ```
 
 `bpad` beside it is a symlink to the same binary. The executable bit and the
 symlink are both set inside the archive, so neither needs restoring.
+
+### Flatpak
+
+A manifest for Flathub is written ([ADR-0093](../decisions/ADR-0093.md)) and
+not yet published there. Until it is, use one of the above.
 
 ## First launch
 
@@ -120,8 +188,8 @@ Three things worth doing once:
 
 ## Where it puts things
 
-Nothing goes in the folder you unpacked. Everything the product writes about
-itself goes in the usual per-user locations:
+Wherever the program is installed, everything it writes about itself goes in
+the usual per-user locations:
 
 | | Windows | Linux |
 | --- | --- | --- |
@@ -137,11 +205,22 @@ machine, which is more reliable than this table.
 
 ## Removing it
 
-Delete the folder you unpacked. To remove everything, delete the three
-directories above as well.
+| Installed with | Remove with |
+| --- | --- |
+| The Windows installer | **Settings > Apps**, BachelorPad+ Lite, Uninstall. It removes the program, its shortcuts and the Open with entries it added |
+| The zip or the archive | Delete the folder |
+| The `.deb` | `sudo apt remove bachelorpad-lite` |
+| The `.rpm` | `sudo dnf remove bachelorpad-lite` |
+| The AppImage | Delete the file |
 
-If you registered file types, undo that first through the same File > Set as
-Default Editor screen, or through Windows Settings > Default apps. **This
-product will not delete anything out of your profile on your behalf**, and
-[ADR-0070](../decisions/ADR-0070.md) explains why that is deliberate rather
-than an omission.
+None of them removes your settings, recent files, recovery journal or notes
+index -- the three directories above. Delete those as well to remove
+everything.
+
+If you registered file types with File > Set as Default Editor, undo that
+first: run the `-remove.reg` file it wrote beside the registration on
+Windows, or delete the two files on Linux, as
+[Making it your default editor](../tutorials/02-default-editor.md) says.
+**This product will not delete anything out of your profile on your behalf**,
+and [ADR-0070](../decisions/ADR-0070.md) explains why that is deliberate
+rather than an omission.

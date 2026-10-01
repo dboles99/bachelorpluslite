@@ -69,7 +69,7 @@ Status as of **2026-09-25**. Five words, meaning five different things:
 | 17 | Themes/personality/accessibility | **Started** | `project/tasks/12-themes-brand` | `bp-theme` |
 | 18 | Windows/Linux platform integration | **Started** | `project/tasks/13-platform` | `bp-platform` |
 | 19 | Hardening, fuzzing and benchmarks | **Started** | `project/tasks/14-hardening` | `fuzz/` (standalone, and now gated) |
-| 20 | Packaging, signing, release and upgrade testing | **Done**, less signing | [ADR-0067](docs/decisions/ADR-0067.md), [ADR-0068](docs/decisions/ADR-0068.md) | — |
+| 20 | Packaging, signing, release and upgrade testing | **Done**, less signing | [ADR-0068](docs/decisions/ADR-0068.md), [ADR-0093](docs/decisions/ADR-0093.md), [ADR-0094](docs/decisions/ADR-0094.md) | `packaging/` |
 
 **Phase 20 started on 2026-08-23, and what it found is worth knowing before
 anybody sizes the rest of it.** The inventory came first, as ADR-0048

@@ -73,6 +73,17 @@ ICON=io.github.dboles99.bachelorpluslite.png
 test -f "assets/$ICON" || { echo "assets/$ICON is missing -- the .desktop file would name nothing" >&2; exit 1; }
 cp "assets/$ICON" "$DIR/$ICON"
 
+# The desktop entry and the AppStream metadata, so that every package built
+# from this archive -- .deb, .rpm, AppImage, the AUR's -- installs one copy of
+# each rather than keeping its own (ADR-0093). Set as Default Editor still
+# writes its own entry for an unpacked archive; that one names the absolute
+# path it was run from, which a package's cannot know.
+for f in io.github.dboles99.bachelorpluslite.desktop io.github.dboles99.bachelorpluslite.metainfo.xml; do
+    test -f "packaging/linux/$f" || { echo "packaging/linux/$f is missing" >&2; exit 1; }
+    cp "packaging/linux/$f" "$DIR/$f"
+    chmod 644 "$DIR/$f"
+done
+
 # Asked of the Linux binary rather than assumed from the Windows one. Two
 # builds of one workspace reporting different versions is a thing that should
 # stop a release, not be discovered by whoever downloads the wrong half.

@@ -46,10 +46,11 @@
 <h2 id="installation-and-first-launch">Installation and first launch</h2>
 <p>BachelorPad+ Lite runs on <strong>Windows 10, Windows 11 and Linux</strong> (x86-64).
 macOS is not built, and <a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0072.md">ADR-0072</a> says why.</p>
-<p><strong>There is no installer, and that is a decision</strong>
-(<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0067.md">ADR-0067</a>). You unpack an archive wherever you
-want the program to live and run it. Nothing is written into that folder;
-what the product keeps about itself goes in your user profile, and
+<p>There is an <strong>installer for Windows</strong>, a <strong>package for each family of
+Linux</strong>, and a plain archive for either, for anyone who would rather unpack a
+folder and run it (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0093.md">ADR-0093</a>). Every one of them
+holds the same program. Wherever it is installed, what the product keeps about
+itself goes in your user profile, and
 <a href="#where-it-puts-things">Where it puts things</a> lists every directory.</p>
 <h3 id="what-it-needs">What it needs</h3>
 <p><strong>Windows 10 or 11, x86-64, and nothing else.</strong> The C runtime is built into
@@ -61,49 +62,88 @@ those and refused if it would need anything newer, so the list is checked
 rather than hoped. RHEL 8 and 9 and Debian 11 are older than that and are not
 supported.</p>
 <p>It also loads the libraries any desktop session already has -- fontconfig,
-xkbcommon (with its X11 half), and Wayland or X11 with EGL. On a minimal
-install that lacks them, on Debian or Ubuntu:</p>
-<pre><code class="language-sh">sudo apt install libfontconfig1 libxkbcommon0 libxkbcommon-x11-0 libwayland-client0 libegl1
+xkbcommon (with its X11 half), and Wayland or X11. The <code>.deb</code> and <code>.rpm</code>
+declare them, so your package manager fetches anything missing. For the
+AppImage or the archive on a minimal install, on Debian or Ubuntu:</p>
+<pre><code class="language-sh">sudo apt install libfontconfig1 libxkbcommon0 libxkbcommon-x11-0 libwayland-client0 libx11-xcb1 libxcursor1 libxi6
 </code></pre>
 <h3 id="download">Download</h3>
 <p>From <a href="https://github.com/dboles99/bachelorpluslite/releases">the releases page</a>:</p>
 <table>
 <thead>
 <tr>
-<th>Platform</th>
-<th>File</th>
+<th>You have</th>
+<th>Download</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>Windows 10 / 11</td>
+<td><strong>Windows 10 or 11</strong></td>
+<td><code>bachelorpad-lite-&lt;version&gt;-windows-x86_64-setup.exe</code></td>
+</tr>
+<tr>
+<td>Windows, no installer</td>
 <td><code>bachelorpad-lite-&lt;version&gt;-windows-x86_64.zip</code></td>
 </tr>
 <tr>
-<td>Linux</td>
+<td><strong>Ubuntu, Debian, Mint, Pop!_OS</strong></td>
+<td><code>bachelorpad-lite_&lt;version&gt;_amd64.deb</code></td>
+</tr>
+<tr>
+<td><strong>Fedora, openSUSE</strong></td>
+<td><code>bachelorpad-lite-&lt;version&gt;-1.x86_64.rpm</code></td>
+</tr>
+<tr>
+<td>Any other Linux</td>
+<td><code>bachelorpad-lite-&lt;version&gt;-x86_64.AppImage</code></td>
+</tr>
+<tr>
+<td>Linux, no package</td>
 <td><code>bachelorpad-lite-&lt;version&gt;-linux-x86_64.tar.gz</code></td>
+</tr>
+<tr>
+<td>Arch</td>
+<td><code>PKGBUILD</code>, for <code>makepkg -si</code></td>
 </tr>
 </tbody>
 </table>
-<h3 id="the-archives-are-unsigned-and-you-should-know-that-before-you-click">The archives are unsigned, and you should know that before you click</h3>
-<p>Windows SmartScreen will warn you when you download and again when you first
-run it. That is deferred code signing
-(<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0055.md">ADR-0055</a>) -- a certificate has not been bought.
-Self-signing was refused outright, because a self-signed certificate is only
-satisfied once you install a root certificate you have no reason to trust,
-which is a worse thing to ask of somebody than a warning is.</p>
+<h3 id="the-downloads-are-unsigned-and-you-should-know-that-before-you-click">The downloads are unsigned, and you should know that before you click</h3>
+<p>Windows SmartScreen will warn you when you download the installer and again
+when you first run it: choose <strong>More info</strong>, then <strong>Run anyway</strong>. On Windows
+11 with <strong>Smart App Control</strong> turned on, it may refuse to run at all -- the
+zip is no different there. That is code signing not yet in place
+(<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0094.md">ADR-0094</a>). Self-signing was refused outright,
+because a self-signed certificate is only satisfied once you install a root
+certificate you have no reason to trust, which is a worse thing to ask of
+somebody than a warning is.</p>
 <p>What is offered instead is a checksum, and it is not nothing: it answers
 tampering in transit, which is the threat a certificate answers worst.</p>
-<pre><code class="language-sh">sha256sum -c SHA256SUMS.txt
+<pre><code class="language-sh">sha256sum -c SHA256SUMS.txt --ignore-missing
 </code></pre>
-<pre><code class="language-powershell">(Get-FileHash -Algorithm SHA256 .\bachelorpad-lite-0.9.5-windows-x86_64.zip).Hash
+<pre><code class="language-powershell">(Get-FileHash -Algorithm SHA256 .\bachelorpad-lite-1.0.0-windows-x86_64-setup.exe).Hash
 </code></pre>
 <p>Compare it with the line in <code>SHA256SUMS.txt</code> beside the download.</p>
 <h3 id="windows">Windows</h3>
-<pre><code class="language-powershell">Expand-Archive bachelorpad-lite-0.9.5-windows-x86_64.zip C:\Apps\BachelorPadLite
+<h4 id="with-the-installer">With the installer</h4>
+<p>Run <code>bachelorpad-lite-&lt;version&gt;-windows-x86_64-setup.exe</code>. <strong>It never asks
+for administrator rights</strong>: it installs for you alone, in
+<code>%LOCALAPPDATA%\Programs\BachelorPad+ Lite</code>, adds a Start menu entry, and
+appears in <strong>Settings &gt; Apps</strong> with an uninstaller.</p>
+<p>It offers two things, both unticked:</p>
+<ul>
+<li><strong>Open with</strong>, which puts the program in Explorer's <em>Open with</em> list and in
+<strong>Settings &gt; Default apps</strong> for text and Markdown files. It does <strong>not</strong>
+make itself the default for anything; that stays your choice, made in
+Windows' own settings (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0012.md">ADR-0012</a>).</li>
+<li><strong>A desktop shortcut.</strong></li>
+</ul>
+<h4 id="from-the-zip">From the zip</h4>
+<pre><code class="language-powershell">Expand-Archive bachelorpad-lite-1.0.0-windows-x86_64.zip C:\Apps\BachelorPadLite
 C:\Apps\BachelorPadLite\bachelorpad.exe
 </code></pre>
-<p>The archive contains:</p>
+<p>Shortcuts are yours to make, and File &gt; Set as Default Editor registers file
+types for wherever you unpacked it.</p>
+<p>Both the installer and the zip contain:</p>
 <table>
 <thead>
 <tr>
@@ -149,15 +189,37 @@ C:\Apps\BachelorPadLite\bachelorpad.exe
 <p>Both icons ship because they are read by different things: Explorer needs a
 real <code>.ico</code>, and the toolkit that draws the window can decode only PNG and
 JPEG (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0068.md">ADR-0068</a>).</p>
-<p><strong>Desktop and Start Menu shortcuts are made by hand.</strong> With no installer there
-is no step that could make them, which is exactly the cost ADR-0067 accepted.</p>
 <h3 id="linux">Linux</h3>
-<pre><code class="language-sh">tar xzf bachelorpad-lite-0.9.5-linux-x86_64.tar.gz
-cd bachelorpad-lite-0.9.5-linux-x86_64
+<h4 id="ubuntu-debian-mint-pop_os">Ubuntu, Debian, Mint, Pop!_OS</h4>
+<pre><code class="language-sh">sudo apt install ./bachelorpad-lite_1.0.0_amd64.deb
+</code></pre>
+<h4 id="fedora-opensuse">Fedora, openSUSE</h4>
+<pre><code class="language-sh">sudo dnf install ./bachelorpad-lite-1.0.0-1.x86_64.rpm      # Fedora
+sudo zypper install ./bachelorpad-lite-1.0.0-1.x86_64.rpm   # openSUSE
+</code></pre>
+<p>Either package puts the program in your applications menu, with its icon,
+and <code>bachelorpad</code> and <code>bpad</code> on your <code>PATH</code>. The program and its help live
+together in <code>/usr/lib/bachelorpad-lite/</code>.</p>
+<h4 id="arch">Arch</h4>
+<p>Build and install from the <code>PKGBUILD</code> attached to the release:</p>
+<pre><code class="language-sh">makepkg -si
+</code></pre>
+<h4 id="anything-else-the-appimage">Anything else: the AppImage</h4>
+<pre><code class="language-sh">chmod +x bachelorpad-lite-1.0.0-x86_64.AppImage
+./bachelorpad-lite-1.0.0-x86_64.AppImage
+</code></pre>
+<p>It is one file and installs nothing. To have it in your applications menu,
+run File &gt; Set as Default Editor from it.</p>
+<h4 id="the-archive">The archive</h4>
+<pre><code class="language-sh">tar xzf bachelorpad-lite-1.0.0-linux-x86_64.tar.gz
+cd bachelorpad-lite-1.0.0-linux-x86_64
 ./bachelorpad
 </code></pre>
 <p><code>bpad</code> beside it is a symlink to the same binary. The executable bit and the
 symlink are both set inside the archive, so neither needs restoring.</p>
+<h4 id="flatpak">Flatpak</h4>
+<p>A manifest for Flathub is written (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0093.md">ADR-0093</a>) and
+not yet published there. Until it is, use one of the above.</p>
 <h3 id="first-launch">First launch</h3>
 <p>The window opens on an empty, unsaved document called <em>Untitled</em>. Nothing has
 been written anywhere yet. Once you type, the recovery journal starts keeping
@@ -177,8 +239,8 @@ what it would do and hands you a script to run. See
 <a href="#making-it-your-default-editor">Making it your default editor</a>.</li>
 </ol>
 <h3 id="where-it-puts-things">Where it puts things</h3>
-<p>Nothing goes in the folder you unpacked. Everything the product writes about
-itself goes in the usual per-user locations:</p>
+<p>Wherever the program is installed, everything it writes about itself goes in
+the usual per-user locations:</p>
 <table>
 <thead>
 <tr>
@@ -210,13 +272,46 @@ have no business crossing a network at sign-out.</p>
 <p>Help &gt; Diagnostics prints every one of these paths as resolved on your
 machine, which is more reliable than this table.</p>
 <h3 id="removing-it">Removing it</h3>
-<p>Delete the folder you unpacked. To remove everything, delete the three
-directories above as well.</p>
-<p>If you registered file types, undo that first through the same File &gt; Set as
-Default Editor screen, or through Windows Settings &gt; Default apps. <strong>This
-product will not delete anything out of your profile on your behalf</strong>, and
-<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0070.md">ADR-0070</a> explains why that is deliberate rather
-than an omission.</p>
+<table>
+<thead>
+<tr>
+<th>Installed with</th>
+<th>Remove with</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>The Windows installer</td>
+<td><strong>Settings &gt; Apps</strong>, BachelorPad+ Lite, Uninstall. It removes the program, its shortcuts and the Open with entries it added</td>
+</tr>
+<tr>
+<td>The zip or the archive</td>
+<td>Delete the folder</td>
+</tr>
+<tr>
+<td>The <code>.deb</code></td>
+<td><code>sudo apt remove bachelorpad-lite</code></td>
+</tr>
+<tr>
+<td>The <code>.rpm</code></td>
+<td><code>sudo dnf remove bachelorpad-lite</code></td>
+</tr>
+<tr>
+<td>The AppImage</td>
+<td>Delete the file</td>
+</tr>
+</tbody>
+</table>
+<p>None of them removes your settings, recent files, recovery journal or notes
+index -- the three directories above. Delete those as well to remove
+everything.</p>
+<p>If you registered file types with File &gt; Set as Default Editor, undo that
+first: run the <code>-remove.reg</code> file it wrote beside the registration on
+Windows, or delete the two files on Linux, as
+<a href="#making-it-your-default-editor">Making it your default editor</a> says.
+<strong>This product will not delete anything out of your profile on your behalf</strong>,
+and <a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0070.md">ADR-0070</a> explains why that is deliberate
+rather than an omission.</p>
 <h2 id="your-first-note-start-to-finish">Your first note, start to finish</h2>
 <p>Ten minutes, and it touches most of what makes this product different from
 Notepad.</p>
@@ -2142,13 +2237,18 @@ whose body is <code>panic!()</code> as a hang and threw the message away
 on a finding, which you can get back by dropping the hook locally; the corpus
 entry is checked in and the failure names it.</p>
 <h2 id="cutting-a-release">Cutting a release</h2>
-<p>Two ways, producing the same archives. The scripts are the definition; the
-workflow runs them on a clean machine (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0073.md">ADR-0073</a>).</p>
+<p>Two ways. The scripts are the definition; the workflow runs them on a clean
+machine (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0073.md">ADR-0073</a>) and is the only way that
+builds every package.</p>
 <h3 id="by-hand">By hand</h3>
 <pre><code class="language-powershell">./scripts/Invoke-LocalCI.ps1 -Linux    # green on both legs first
 ./scripts/New-Release.ps1 -Linux
 </code></pre>
-<p>Into <code>artifacts/releases/</code>: a <code>.zip</code>, a <code>.tar.gz</code> and <code>SHA256SUMS.txt</code>.</p>
+<p>Into <code>artifacts/releases/</code>: a <code>.zip</code>, a <code>.tar.gz</code> and <code>SHA256SUMS.txt</code> --
+and the Windows installer too, if Inno Setup 6 is installed
+(<code>winget install JRSoftware.InnoSetup</code>); without it the script says so and
+skips it. The Linux packages are built by the workflow only: they need
+<code>dpkg-deb</code>, <code>rpmbuild</code> and a network to fetch the AppImage tool.</p>
 <p><code>-Linux</code> builds the Linux target through WSL. It is a switch rather than the
 default only because it needs a Rust toolchain inside the distro. <strong>A release
 without it is half a release</strong> -- ADR-0001 makes Linux an equal target.</p>
@@ -2160,8 +2260,40 @@ somebody asks what is in it.</p>
 git push origin v0.9.5
 </code></pre>
 <p><code>.github/workflows/release.yml</code> builds both targets on clean runners, checks
-the tag against what the binary reports, attaches the archives, the checksums
-and the notices, and <strong>creates a draft</strong>.</p>
+the tag against what the binary reports, and <strong>creates a draft</strong> holding every
+download (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0093.md">ADR-0093</a>):</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>Built by</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>-windows-x86_64-setup.exe</code></td>
+<td><code>New-Release.ps1 -RequireInstaller</code>, Inno Setup on <code>packaging/windows/bachelorpad-lite.iss</code></td>
+</tr>
+<tr>
+<td><code>-windows-x86_64.zip</code></td>
+<td><code>New-Release.ps1</code></td>
+</tr>
+<tr>
+<td><code>-linux-x86_64.tar.gz</code></td>
+<td><code>scripts/release-linux.sh</code>, on <code>ubuntu-22.04</code> for the glibc floor</td>
+</tr>
+<tr>
+<td><code>_amd64.deb</code>, <code>-1.x86_64.rpm</code>, <code>-x86_64.AppImage</code>, <code>PKGBUILD</code></td>
+<td><code>packaging/linux/build-packages.sh</code>, from that <code>.tar.gz</code></td>
+</tr>
+<tr>
+<td><code>SHA256SUMS.txt</code></td>
+<td>the publish job, over all of them</td>
+</tr>
+</tbody>
+</table>
+<p>Run it with <strong><code>dry_run</code></strong> from the Actions tab first, against the branch: it
+builds everything and publishes nothing.</p>
 <p><strong>Publishing is a person's job.</strong> It is the act that changes what a stranger
 downloads, which is the same gesture ADR-0053 keeps for clicking merge.</p>
 <h3 id="what-the-version-is-and-where-it-comes-from">What the version is, and where it comes from</h3>
@@ -2186,11 +2318,18 @@ both icons on Windows and the PNG on Linux, <code>app-help/</code>, <code>README
 <p><code>LICENSE</code> is GPL-3.0-only and <code>THIRD-PARTY-NOTICES.md</code> lists the 626 crates
 linked into the binary. Both are obligations rather than courtesies
 (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0071.md">ADR-0071</a>).</p>
+<h3 id="two-things-a-release-does-not-do">Two things a release does not do</h3>
+<p><strong>The Flatpak</strong> is a manifest in <code>packaging/flatpak/</code>; Flathub builds it,
+from a tag, after a pull request to <code>flathub/flathub</code>, which wants
+<code>cargo-sources.json</code> generated beside it and a screenshot. <strong>The AUR</strong> takes
+the rendered <code>PKGBUILD</code> and a <code>.SRCINFO</code>, pushed from an AUR account. Both are
+a person's.</p>
 <h3 id="they-are-unsigned-and-every-run-says-so">They are unsigned, and every run says so</h3>
 <p><a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0055.md">ADR-0055</a> deferred code signing and <strong>refused
 self-signing outright</strong> -- a self-signed Authenticode certificate is only
 satisfied once the user installs a root certificate they have no reason to
-trust.</p>
+trust. 1.0.0 ships unsigned (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0094.md">ADR-0094</a>); SignPath
+or the Store is a 1.x release's.</p>
 <p><code>New-Release.ps1</code> prints it on every run, in the same words, and the release
 notes repeat it. A release that stays quiet about it is asking the user to
 discover SmartScreen themselves.</p>

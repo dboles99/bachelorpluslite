@@ -1,0 +1,55 @@
+# The Flatpak manifest (ADR-0093), for submission to Flathub.
+#
+# **Written, not built by this repository's CI.** Flathub builds it, from a
+# tagged release and with no network, so the crates come from
+# cargo-sources.json -- generated beside this file for each release by
+#
+#   python3 flatpak-cargo-generator.py ../../Cargo.lock -o cargo-sources.json
+#
+# (github.com/flatpak/flatpak-builder-tools, cargo/). Submitting is a pull
+# request to github.com/flathub/flathub, and its build is the first one.
+#
+# **No --share=network**, because the product never touches one (ADR-0006),
+# and no --filesystem: files are opened and saved through the desktop portal,
+# which grants each one as it is chosen.
+
+app-id: io.github.dboles99.bachelorpluslite
+runtime: org.freedesktop.Platform
+runtime-version: '26.08'
+sdk: org.freedesktop.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+command: bachelorpad
+finish-args:
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+build-options:
+  append-path: /usr/lib/sdk/rust-stable/bin
+  env:
+    CARGO_HOME: /run/build/bachelorpad-lite/cargo
+    CARGO_NET_OFFLINE: 'true'
+modules:
+  - name: bachelorpad-lite
+    buildsystem: simple
+    build-commands:
+      - cargo --offline fetch --manifest-path Cargo.toml
+      - cargo --offline build --release --locked -p bachelorpad
+      # Together under /app/lib, because the program reads its help and icon
+      # from beside its own executable -- the same layout the .deb uses.
+      - install -Dm755 target/release/bachelorpad /app/lib/bachelorpad-lite/bachelorpad
+      - cp -r app-help /app/lib/bachelorpad-lite/app-help
+      - install -Dm644 assets/${FLATPAK_ID}.png /app/lib/bachelorpad-lite/${FLATPAK_ID}.png
+      - install -d /app/bin
+      - ln -s ../lib/bachelorpad-lite/bachelorpad /app/bin/bachelorpad
+      - install -Dm644 packaging/linux/${FLATPAK_ID}.desktop /app/share/applications/${FLATPAK_ID}.desktop
+      - install -Dm644 assets/${FLATPAK_ID}.png /app/share/icons/hicolor/256x256/apps/${FLATPAK_ID}.png
+      - install -Dm644 packaging/linux/${FLATPAK_ID}.metainfo.xml /app/share/metainfo/${FLATPAK_ID}.metainfo.xml
+      - install -Dm644 LICENSE /app/share/licenses/${FLATPAK_ID}/LICENSE
+      - install -Dm644 THIRD-PARTY-NOTICES.md /app/share/licenses/${FLATPAK_ID}/THIRD-PARTY-NOTICES.md
+    sources:
+      - type: git
+        url: https://github.com/dboles99/bachelorpluslite.git
+        tag: v1.0.0
+      - cargo-sources.json

@@ -90,29 +90,31 @@ say ([ADR-0018](docs/decisions/ADR-0018.md)).
 
 ## Install
 
-**There is no installer, and that is a decision**
-([ADR-0067](docs/decisions/ADR-0067.md)). Unpack the archive where you want it
-and run it.
+From [the releases page](https://github.com/dboles99/bachelorpluslite/releases/latest)
+([ADR-0093](docs/decisions/ADR-0093.md)):
 
-```powershell
-Expand-Archive bachelorpad-lite-0.9.5-windows-x86_64.zip C:\Apps\BachelorPadLite
-C:\Apps\BachelorPadLite\bachelorpad.exe
-```
+| You have | Download |
+| --- | --- |
+| **Windows 10 or 11** | the `-setup.exe` -- no administrator prompt, installs for you alone |
+| **Ubuntu, Debian, Mint** | the `.deb` -- `sudo apt install ./bachelorpad-lite_*_amd64.deb` |
+| **Fedora, openSUSE** | the `.rpm` -- `sudo dnf install ./bachelorpad-lite-*.x86_64.rpm` |
+| Any other Linux | the `.AppImage` -- `chmod +x` it and run it |
+| Arch | the `PKGBUILD` -- `makepkg -si` |
+| Either, unpacked anywhere | the `.zip` or the `.tar.gz` |
 
-```sh
-tar xzf bachelorpad-lite-0.9.5-linux-x86_64.tar.gz
-cd bachelorpad-lite-0.9.5-linux-x86_64 && ./bachelorpad
-```
+The installer offers, unticked, to put the program in Open with; it never
+makes itself the default for anything ([ADR-0012](docs/decisions/ADR-0012.md)).
 
 Windows needs nothing installed first. Linux needs glibc 2.35 or later --
 Ubuntu 22.04, Debian 12, Mint 21, Fedora 36 or newer
 ([ADR-0087](docs/decisions/ADR-0087.md)).
 
-> **The archives are unsigned.** Windows SmartScreen will warn. A certificate
-> has not been bought and self-signing was **refused outright**, because a
-> self-signed certificate is only satisfied once the user installs a root
-> certificate they have no reason to trust
-> ([ADR-0055](docs/decisions/ADR-0055.md)). `SHA256SUMS.txt` is attached to
+> **The downloads are unsigned.** Windows SmartScreen will warn; choose More
+> info, then Run anyway. Signing is a 1.x release's, through SignPath or the
+> Microsoft Store ([ADR-0094](docs/decisions/ADR-0094.md)), and self-signing
+> was **refused outright**, because a self-signed certificate is only
+> satisfied once the user installs a root certificate they have no reason to
+> trust ([ADR-0055](docs/decisions/ADR-0055.md)). `SHA256SUMS.txt` is attached to
 > every release and answers tampering in transit, which is the threat a
 > certificate answers worst.
 

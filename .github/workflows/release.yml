@@ -112,10 +112,21 @@ jobs:
       # release built by hand and a release built by a runner contain the same
       # files. `New-Release.ps1` drives Windows; `release-linux.sh` is the
       # Linux leg and is runnable on a real Linux box, which is what this is.
+      # Inno Setup is on the windows-latest image today, unpinned, and it has
+      # been missing from it before. Installed if absent rather than assumed;
+      # `-RequireInstaller` below is what refuses a release without it.
+      - name: Inno Setup (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6/ISCC.exe'
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
+          if (-not (Test-Path $iscc)) { throw 'Inno Setup 6 could not be installed' }
+
       - name: stage (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: ./scripts/New-Release.ps1 -AllowDirty
+        run: ./scripts/New-Release.ps1 -AllowDirty -RequireInstaller
 
       - name: stage (Linux)
         if: runner.os == 'Linux'
@@ -129,6 +140,18 @@ jobs:
           test -n "$version" || { echo '--version printed nothing; cannot name an archive' >&2; exit 1; }
           mkdir -p artifacts/releases
           ./scripts/release-linux.sh "$version" "${{ github.sha }}" "$PWD/artifacts/releases"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      # .deb, .rpm, AppImage and the AUR's PKGBUILD, all from the archive just
+      # built (ADR-0093). `rpmbuild` is not on the image by default.
+      - name: packages (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          set -eu
+          sudo apt-get install -y --no-install-recommends rpm
+          sh packaging/linux/build-packages.sh "$VERSION" \
+            "artifacts/releases/bachelorpad-lite-$VERSION-linux-x86_64.tar.gz" \
+            artifacts/releases
 
       # A tag says what it is; the binary says what it is. When they disagree
       # the tag is the thing that was typed, so the build is refused rather
@@ -152,7 +175,12 @@ jobs:
           name: ${{ matrix.target }}
           path: |
             artifacts/releases/*.zip
+            artifacts/releases/*.exe
             artifacts/releases/*.tar.gz
+            artifacts/releases/*.deb
+            artifacts/releases/*.rpm
+            artifacts/releases/*.AppImage
+            artifacts/releases/PKGBUILD
           if-no-files-found: error
 
   publish:
@@ -175,7 +203,7 @@ jobs:
         run: |
           set -eu
           cd staged
-          sha256sum *.zip *.tar.gz > SHA256SUMS.txt
+          sha256sum *.zip *.exe *.tar.gz *.deb *.rpm *.AppImage > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
       # The notes live in .github/release-notes-template.md rather than in a
@@ -195,7 +223,12 @@ jobs:
         with:
           files: |
             staged/*.zip
+            staged/*.exe
             staged/*.tar.gz
+            staged/*.deb
+            staged/*.rpm
+            staged/*.AppImage
+            staged/PKGBUILD
             staged/SHA256SUMS.txt
           body_path: notes.md
           draft: true
