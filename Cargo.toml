@@ -91,6 +91,14 @@ time = { version = "0.3", features = ["local-offset"] }
 tempfile = "3"
 proptest = "1"
 toml = "1"
+# Legacy encodings (ADR-0085). Windows-1252, Shift-JIS, GBK and the rest are
+# what every "ANSI" file a Windows user has saved is in, and Notepad opens
+# them. `encoding_rs` is the Encoding Standard's implementation that Firefox
+# ships, decoding and encoding both; `chardetng`, by the same author, guesses
+# which one an unmarked file is in. Both are build-time-checked by
+# `cargo deny check licenses`.
+encoding_rs = "0.8"
+chardetng = { version = "1", default-features = false }
 
 # --- cryptography (ADR-0021) -------------------------------------------
 # All RustCrypto, all composed rather than reimplemented, which is the line

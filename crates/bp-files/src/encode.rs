@@ -192,12 +192,14 @@ impl LineEndingSurvey {
 /// [`LineEndingSurvey::breaks_rewritten_by`] is zero -- deliberately, and
 /// that asymmetry is pinned by test rather than left to be discovered.
 ///
-/// Infallible, and that is the point of the rewrite. The `Result` this
-/// replaces existed for one reason: UTF-16 was unimplemented, so saving a
-/// UTF-16 document had to fail. Both UTF-16 orders now encode, every `char`
-/// in a `String` has a UTF-16 form, and so there is nothing left to report.
-/// An error type with no reachable variant is a branch every caller must
-/// handle and no test can ever exercise.
+/// **Fallible for exactly one reason** (ADR-0085): a legacy code page cannot
+/// hold every character a document can, and a document opened in
+/// Windows-1252 may since have had an `α` typed into it. That is refused,
+/// naming the character, rather than written as `&#945;` -- which is what
+/// the encoder would do if asked, and a second way to lose text. Every
+/// Unicode encoding still succeeds for every `String`; this was infallible
+/// until there was something to report, and an error with no reachable
+/// variant would have been a branch no test could exercise.
 ///
 /// The byte-order mark is written whenever the encoding carries one, which is
 /// what makes reopening the file report the encoding it was opened with. One
@@ -207,7 +209,11 @@ impl LineEndingSurvey {
 /// character shorter. The bytes are still exact; only the model shifts. That
 /// is a property of BOM sniffing, not of this function, and no encoder can
 /// avoid it.
-pub fn encode(text: &str, encoding: Encoding, line_endings: LineEndingPolicy) -> Vec<u8> {
+pub fn encode(
+    text: &str,
+    encoding: Encoding,
+    line_endings: LineEndingPolicy,
+) -> Result<Vec<u8>, Unencodable> {
     let body = match line_endings {
         LineEndingPolicy::Preserve => Cow::Borrowed(text),
         LineEndingPolicy::ConvertTo(target) => match convert(text, target) {
@@ -218,12 +224,38 @@ pub fn encode(text: &str, encoding: Encoding, line_endings: LineEndingPolicy) ->
         },
     };
 
+    if let Encoding::Legacy(name) = encoding {
+        return crate::legacy::encode(&body, name).map_err(|character| Unencodable {
+            character,
+            line: body
+                .find(character)
+                .map_or(1, |at| body[..at].matches('\n').count() + 1),
+            encoding,
+        });
+    }
+
     let mut out = encoding.bom().to_vec();
     match Endian::of(encoding) {
         Some(endian) => out.extend_from_slice(&utf16::encode(&body, endian)),
         None => out.extend_from_slice(body.as_bytes()),
     }
-    out
+    Ok(out)
+}
+
+/// A character the document's encoding has no form for, found at save.
+///
+/// Carries what a person can act on: which character, where, and that a
+/// Unicode encoding would hold it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error(
+    "'{character}' on line {line} cannot be written in {} -- choose Format > Encoding > UTF-8 to keep it",
+    .encoding.label()
+)]
+pub struct Unencodable {
+    pub character: char,
+    /// One-based, as every line number a person sees in this product is.
+    pub line: usize,
+    pub encoding: Encoding,
 }
 
 /// Rewrite every line break to `target`, or [`None`] if there is nothing to
@@ -267,6 +299,13 @@ fn convert(text: &str, target: LineEnding) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    /// `encode`, for the encodings that cannot fail: every Unicode one holds
+    /// every character a `String` can.
+    fn unicode(text: &str, encoding: Encoding, line_endings: LineEndingPolicy) -> Vec<u8> {
+        super::encode(text, encoding, line_endings)
+            .expect("a Unicode encoding writes every character")
+    }
+
     use super::*;
     use crate::{SaveOptions, atomic_write, load};
     use proptest::prelude::*;
@@ -350,7 +389,7 @@ mod tests {
             // saying so here is cheaper than a reader wondering.
             prop_assume!(!text.starts_with('\u{FEFF}'));
 
-            let bytes = encode(&text, encoding, LineEndingPolicy::Preserve);
+            let bytes = unicode(&text, encoding, LineEndingPolicy::Preserve);
             let (_dir, loaded) = round_trip(&bytes);
 
             prop_assert_eq!(&loaded.text, &text);
@@ -383,7 +422,7 @@ mod tests {
             target in line_ending(),
         ) {
             let before = LineEndingSurvey::of(&text);
-            let bytes = encode(&text, Encoding::Utf8, LineEndingPolicy::ConvertTo(target));
+            let bytes = unicode(&text, Encoding::Utf8, LineEndingPolicy::ConvertTo(target));
             let (_dir, loaded) = round_trip(&bytes);
             let after = LineEndingSurvey::of(&loaded.text);
 
@@ -425,7 +464,7 @@ mod tests {
             target in line_ending(),
         ) {
             let predicted = LineEndingSurvey::of(&text).breaks_rewritten_by(target);
-            let bytes = encode(&text, Encoding::Utf8, LineEndingPolicy::ConvertTo(target));
+            let bytes = unicode(&text, Encoding::Utf8, LineEndingPolicy::ConvertTo(target));
             let (_dir, loaded) = round_trip(&bytes);
 
             prop_assert_eq!(
@@ -454,9 +493,9 @@ mod tests {
             prop_assume!(LineEndingSurvey::of(&text).converges_to(target));
 
             let policy = LineEndingPolicy::ConvertTo(target);
-            let once = encode(&text, Encoding::Utf8, policy);
+            let once = unicode(&text, Encoding::Utf8, policy);
             let text_once = String::from_utf8(once.clone()).expect("utf8");
-            let twice = encode(&text_once, Encoding::Utf8, policy);
+            let twice = unicode(&text_once, Encoding::Utf8, policy);
             prop_assert_eq!(twice, once);
         }
 
@@ -484,7 +523,7 @@ mod tests {
     #[test]
     fn the_empty_document_is_just_the_byte_order_mark() {
         for encoding in ENCODINGS {
-            let bytes = encode("", encoding, LineEndingPolicy::Preserve);
+            let bytes = unicode("", encoding, LineEndingPolicy::Preserve);
             assert_eq!(bytes, encoding.bom(), "{}", encoding.label());
 
             let (_dir, loaded) = round_trip(&bytes);
@@ -497,11 +536,11 @@ mod tests {
     #[test]
     fn utf16_writes_the_byte_order_mark_it_promises() {
         assert_eq!(
-            encode("hi", Encoding::Utf16Le, LineEndingPolicy::Preserve),
+            unicode("hi", Encoding::Utf16Le, LineEndingPolicy::Preserve),
             b"\xFF\xFEh\0i\0"
         );
         assert_eq!(
-            encode("hi", Encoding::Utf16Be, LineEndingPolicy::Preserve),
+            unicode("hi", Encoding::Utf16Be, LineEndingPolicy::Preserve),
             b"\xFE\xFF\0h\0i"
         );
     }
@@ -509,11 +548,11 @@ mod tests {
     #[test]
     fn a_utf8_bom_is_written_back_and_a_plain_utf8_file_gains_nothing() {
         assert_eq!(
-            encode("hi", Encoding::Utf8Bom, LineEndingPolicy::Preserve),
+            unicode("hi", Encoding::Utf8Bom, LineEndingPolicy::Preserve),
             b"\xEF\xBB\xBFhi"
         );
         assert_eq!(
-            encode("hi", Encoding::Utf8, LineEndingPolicy::Preserve),
+            unicode("hi", Encoding::Utf8, LineEndingPolicy::Preserve),
             b"hi"
         );
     }
@@ -523,7 +562,7 @@ mod tests {
         // Three LF, two CRLF: the majority answer must not become an
         // instruction to rewrite the minority.
         let text = "crlf\r\nlf one\nlf two\nlf three\ncrlf\r\n";
-        let bytes = encode(text, Encoding::Utf8, LineEndingPolicy::Preserve);
+        let bytes = unicode(text, Encoding::Utf8, LineEndingPolicy::Preserve);
 
         assert_eq!(bytes, text.as_bytes());
         let survey = LineEndingSurvey::of(text);
@@ -536,7 +575,7 @@ mod tests {
     #[test]
     fn converting_a_mixed_document_rewrites_exactly_the_predicted_breaks() {
         let text = "crlf\r\nlf one\nlf two\nlf three\ncrlf\r\n";
-        let converted = encode(
+        let converted = unicode(
             text,
             Encoding::Utf8,
             LineEndingPolicy::ConvertTo(LineEnding::Lf),
@@ -552,7 +591,7 @@ mod tests {
     fn a_bare_carriage_return_is_data_not_a_line_break() {
         let text = "a\rb\nc";
         for target in [LineEnding::Lf, LineEnding::CrLf] {
-            let out = encode(text, Encoding::Utf8, LineEndingPolicy::ConvertTo(target));
+            let out = unicode(text, Encoding::Utf8, LineEndingPolicy::ConvertTo(target));
             let out = String::from_utf8(out).unwrap();
             assert_eq!(out, format!("a\rb{}c", target.as_str()));
         }
@@ -576,7 +615,7 @@ mod tests {
         assert!(!survey.converges_to(LineEnding::Lf));
         assert!(survey.converges_to(LineEnding::CrLf));
 
-        let out = encode(
+        let out = unicode(
             "a\r\r\nb",
             Encoding::Utf8,
             LineEndingPolicy::ConvertTo(LineEnding::Lf),
@@ -585,7 +624,7 @@ mod tests {
 
         // And the drift a caller heeding `converges_to` avoids: converting
         // again eats the carriage return the first pass left behind.
-        let again = encode(
+        let again = unicode(
             "a\r\nb",
             Encoding::Utf8,
             LineEndingPolicy::ConvertTo(LineEnding::Lf),
@@ -594,7 +633,7 @@ mod tests {
 
         // Converting the same document to CRLF is a clean no-op, which is why
         // `converges_to` answers per target rather than per document.
-        let out = encode(
+        let out = unicode(
             "a\r\r\nb",
             Encoding::Utf8,
             LineEndingPolicy::ConvertTo(LineEnding::CrLf),
@@ -637,7 +676,7 @@ mod tests {
         // surrogate-pair bug splits.
         let text = "😀 é 中\n";
         for encoding in ENCODINGS {
-            let bytes = encode(text, encoding, LineEndingPolicy::Preserve);
+            let bytes = unicode(text, encoding, LineEndingPolicy::Preserve);
             let (_dir, loaded) = round_trip(&bytes);
             assert_eq!(loaded.text, text, "{}", encoding.label());
             assert_eq!(loaded.encoding, encoding);
@@ -649,7 +688,7 @@ mod tests {
         // The documented limitation, tested so it is a known behaviour rather
         // than a surprise. The bytes are exact; the model shifts.
         let text = "\u{FEFF}hi";
-        let bytes = encode(text, Encoding::Utf8, LineEndingPolicy::Preserve);
+        let bytes = unicode(text, Encoding::Utf8, LineEndingPolicy::Preserve);
         assert_eq!(bytes, "\u{FEFF}hi".as_bytes());
 
         let (_dir, loaded) = round_trip(&bytes);
@@ -658,7 +697,7 @@ mod tests {
 
         // In UTF-16 it round-trips exactly, because the mark is not ambiguous
         // with the first character there.
-        let bytes = encode(text, Encoding::Utf16Le, LineEndingPolicy::Preserve);
+        let bytes = unicode(text, Encoding::Utf16Le, LineEndingPolicy::Preserve);
         let (_dir, loaded) = round_trip(&bytes);
         assert_eq!(loaded.encoding, Encoding::Utf16Le);
         assert_eq!(loaded.text, text);

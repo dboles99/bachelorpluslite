@@ -27,12 +27,13 @@ pub(crate) enum Endian {
 }
 
 impl Endian {
-    /// The byte order an encoding implies, or [`None`] for the UTF-8 ones.
+    /// The byte order an encoding implies, or [`None`] for one that is not
+    /// UTF-16.
     pub(crate) const fn of(encoding: Encoding) -> Option<Self> {
         match encoding {
-            Encoding::Utf16Le => Some(Self::Little),
-            Encoding::Utf16Be => Some(Self::Big),
-            Encoding::Utf8 | Encoding::Utf8Bom => None,
+            Encoding::Utf16Le | Encoding::Utf16LeNoBom => Some(Self::Little),
+            Encoding::Utf16Be | Encoding::Utf16BeNoBom => Some(Self::Big),
+            Encoding::Utf8 | Encoding::Utf8Bom | Encoding::Legacy(_) => None,
         }
     }
 

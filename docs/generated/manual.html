@@ -760,19 +760,53 @@ is the trade being made rather than a defect.</p>
 what you had open last time. Open Recent is what remembers.</p>
 <h2 id="encoding-line-endings-and-file-formats">Encoding, line endings and file formats</h2>
 <h3 id="encoding">Encoding</h3>
-<p><strong>Format &gt; Encoding</strong> offers <strong>UTF-8</strong> and <strong>UTF-8 with BOM</strong>.</p>
-<p>A document can also be opened in <strong>UTF-16</strong>, with a byte-order mark, and is
-saved back that way.</p>
-<p><strong>A file in a legacy code page is refused today.</strong> Windows-1252, Shift-JIS
-and GBK text with any accented or non-Latin character stops at <em>not valid
-UTF-8</em>. Notepad opens them.</p>
-<p><strong>UTF-16 with no byte-order mark is worse: it is taken for UTF-8.</strong> Mostly
-Latin text in it is valid UTF-8 byte for byte, so it opens with an invisible
-NUL between every character. Saving writes back exactly what was read, so
-nothing is lost, but it is not readable here.</p>
-<p>Reading both properly, and saving them back in the encoding they came in, is
-decided and not yet built (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0085.md">ADR-0085</a>). Until it is,
-open such a file in Notepad and save it as UTF-8 there.</p>
+<p><strong>A file opens in the encoding it was written in, and is saved back in that
+encoding</strong> (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0085.md">ADR-0085</a>). The status bar always
+shows which.</p>
+<table>
+<thead>
+<tr>
+<th>A file in</th>
+<th>Opens as</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>UTF-8, with or without a byte-order mark</td>
+<td>UTF-8</td>
+</tr>
+<tr>
+<td>UTF-16 with a byte-order mark</td>
+<td>UTF-16 LE or BE</td>
+</tr>
+<tr>
+<td>UTF-16 without one</td>
+<td>UTF-16, found by its pattern -- it has a zero in every other byte</td>
+</tr>
+<tr>
+<td>Anything else -- the &quot;ANSI&quot; files Notepad writes, Shift-JIS, GBK</td>
+<td>the legacy code page it most likely is, by name: <code>windows-1252</code>, <code>Shift_JIS</code>, <code>GBK</code></td>
+</tr>
+</tbody>
+</table>
+<p>The last row is <strong>a guess</strong>, made by looking at the bytes, and on a short file
+it can be wrong -- four bytes of French can look like Czech. When it is, use
+<strong>Format &gt; Reopen As</strong> and choose the right one: Western, Central European,
+Cyrillic, Japanese, Simplified or Traditional Chinese, Korean, or back to
+UTF-8 or UTF-16. Reopening reads the file again, so it asks first if you have
+unsaved changes.</p>
+<p><strong>Format &gt; Encoding</strong> offers <strong>UTF-8</strong>, <strong>UTF-8 with BOM</strong> and <strong>UTF-16 LE</strong>,
+to change how the document is saved. Choosing one converts the file when you
+next save it.</p>
+<p><strong>Saving never changes a character behind your back.</strong> If you type something
+the file's encoding has no form for -- a Greek <code>α</code> into a Windows-1252 file --
+Save refuses, names the character and its line, and suggests UTF-8. Nothing is
+written, and your work stays unsaved rather than lost.</p>
+<p><strong>And a file that would not save back unchanged is not opened.</strong> A few code
+pages have two codes for one character -- Shift-JIS has an NEC and an IBM code
+for some kanji -- and only one can be written. Opening such a file and saving
+it would change bytes you never edited, so it is refused with that reason, and
+nothing in it is touched.</p>
 <p>The BOM variant exists because some Windows tools still want it.</p>
 <p>Choosing the encoding a document already has does nothing, and records no undo
 entry.</p>
@@ -1672,7 +1706,11 @@ because it has to know where the caret is (ADR-0018).</p>
 </thead>
 <tbody>
 <tr>
-<td>LF / CRLF, UTF-8 / UTF-8 with BOM</td>
+<td>LF / CRLF, UTF-8 / UTF-8 with BOM / UTF-16 LE</td>
+<td><strong>live</strong></td>
+</tr>
+<tr>
+<td>Reopen As -- ten encodings, for a guess that was wrong (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0085.md">ADR-0085</a>)</td>
 <td><strong>live</strong></td>
 </tr>
 <tr>

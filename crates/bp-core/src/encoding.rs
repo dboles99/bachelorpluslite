@@ -5,6 +5,11 @@
 //! must not silently convert it to LF.
 
 /// Text encoding of a document as it exists on disk.
+///
+/// **Every value is something a file can be saved back as** (ADR-0085): a
+/// document remembers how it arrived, and Save writes it that way unless the
+/// user chooses otherwise. That is why a byte-order mark's presence is part
+/// of the value rather than a detail of reading.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Encoding {
     #[default]
@@ -14,6 +19,19 @@ pub enum Encoding {
     Utf8Bom,
     Utf16Le,
     Utf16Be,
+    /// UTF-16 found by its pattern rather than by a mark, and saved back
+    /// without one: adding a mark to a file that had none changes its first
+    /// two bytes, which is the kind of change a tool reading it notices.
+    Utf16LeNoBom,
+    Utf16BeNoBom,
+    /// A legacy encoding, by its name in the WHATWG Encoding Standard --
+    /// `windows-1252`, `Shift_JIS`, `GBK` and the rest (ADR-0085).
+    ///
+    /// A name rather than a type, so this crate depends on no encoding
+    /// library: `bp-files` turns the name into an encoder, and the name is
+    /// also what the status bar shows. `'static` because every name comes from
+    /// that standard's own table.
+    Legacy(&'static str),
 }
 
 impl Encoding {
@@ -34,10 +52,10 @@ impl Encoding {
     /// The BOM to write back for this encoding, if any.
     pub const fn bom(self) -> &'static [u8] {
         match self {
-            Self::Utf8 => &[],
             Self::Utf8Bom => &[0xEF, 0xBB, 0xBF],
             Self::Utf16Le => &[0xFF, 0xFE],
             Self::Utf16Be => &[0xFE, 0xFF],
+            Self::Utf8 | Self::Utf16LeNoBom | Self::Utf16BeNoBom | Self::Legacy(_) => &[],
         }
     }
 
@@ -48,7 +66,19 @@ impl Encoding {
             Self::Utf8Bom => "UTF-8 BOM",
             Self::Utf16Le => "UTF-16 LE",
             Self::Utf16Be => "UTF-16 BE",
+            Self::Utf16LeNoBom => "UTF-16 LE (no BOM)",
+            Self::Utf16BeNoBom => "UTF-16 BE (no BOM)",
+            // The standard's own name, which is also what Notepad++ and
+            // every browser call it -- so a person searching for what their
+            // file is in finds the same word.
+            Self::Legacy(name) => name,
         }
+    }
+
+    /// Whether every character a document can hold can be written in this
+    /// encoding. A legacy code page cannot, and Save checks before writing.
+    pub const fn is_unicode(self) -> bool {
+        !matches!(self, Self::Legacy(_))
     }
 }
 

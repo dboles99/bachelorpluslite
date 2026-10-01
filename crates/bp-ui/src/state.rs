@@ -599,6 +599,16 @@ impl AppState {
 
     /// Discard edits and re-read the active document from disk.
     pub(crate) fn reload(&mut self) {
+        self.reload_as(None);
+    }
+
+    /// Read the active document's file again, as `encoding` or as `load`
+    /// would detect it (Format > Reopen As, ADR-0085).
+    ///
+    /// The correction for a guess that was wrong. A refusal leaves the
+    /// document exactly as it was and says why in the status bar: a file the
+    /// chosen encoding cannot read is not opened as something it is not.
+    pub(crate) fn reload_as(&mut self, encoding: Option<Encoding>) {
         self.error = None;
         let Some(id) = self.workspace.active_id() else {
             return;
@@ -611,7 +621,11 @@ impl AppState {
         else {
             return;
         };
-        match load(&path) {
+        let loaded = match encoding {
+            Some(encoding) => bp_files::load_as(&path, encoding),
+            None => load(&path),
+        };
+        match loaded {
             Ok(file) => {
                 if let Some(doc) = self.workspace.get_mut(id) {
                     doc.set_encoding(file.encoding);
@@ -849,7 +863,16 @@ impl AppState {
         // not converting at all is what made every CRLF file anybody pressed
         // Enter in come back mixed.
         let policy = self.line_ending_policy(id, doc.line_ending());
-        let bytes = encode(&self.text_of(id), doc.encoding(), policy);
+        // A character the file's encoding cannot hold refuses the save and
+        // says which (ADR-0085); the document stays unsaved and nothing is
+        // written, so the file on disk is still the one that was opened.
+        let bytes = match encode(&self.text_of(id), doc.encoding(), policy) {
+            Ok(bytes) => bytes,
+            Err(unencodable) => {
+                self.error = Some(unencodable.to_string());
+                return SaveResult::Failed;
+            }
+        };
 
         match atomic_write(&target, &bytes, SaveOptions::default()) {
             Ok(_) => {
@@ -902,7 +925,13 @@ impl AppState {
         // shared: bytes written differently from the original would make the
         // copy a different file.
         let policy = self.line_ending_policy(id, doc.line_ending());
-        let bytes = encode(&self.text_of(id), doc.encoding(), policy);
+        let bytes = match encode(&self.text_of(id), doc.encoding(), policy) {
+            Ok(bytes) => bytes,
+            Err(unencodable) => {
+                self.error = Some(unencodable.to_string());
+                return SaveResult::Failed;
+            }
+        };
 
         match atomic_write(target, &bytes, SaveOptions::default()) {
             Ok(_) => {
@@ -1488,6 +1517,9 @@ fn checkpoint_encoding_of(encoding: Encoding) -> bp_history::CheckpointEncoding 
         Encoding::Utf8Bom => bp_history::CheckpointEncoding::Utf8Bom,
         Encoding::Utf16Le => bp_history::CheckpointEncoding::Utf16Le,
         Encoding::Utf16Be => bp_history::CheckpointEncoding::Utf16Be,
+        Encoding::Utf16LeNoBom => bp_history::CheckpointEncoding::Utf16LeNoBom,
+        Encoding::Utf16BeNoBom => bp_history::CheckpointEncoding::Utf16BeNoBom,
+        Encoding::Legacy(name) => bp_history::CheckpointEncoding::Legacy(name.to_owned()),
     }
 }
 
@@ -1497,6 +1529,15 @@ fn encoding_of_checkpoint(encoding: bp_history::CheckpointEncoding) -> Encoding 
         bp_history::CheckpointEncoding::Utf8Bom => Encoding::Utf8Bom,
         bp_history::CheckpointEncoding::Utf16Le => Encoding::Utf16Le,
         bp_history::CheckpointEncoding::Utf16Be => Encoding::Utf16Be,
+        bp_history::CheckpointEncoding::Utf16LeNoBom => Encoding::Utf16LeNoBom,
+        bp_history::CheckpointEncoding::Utf16BeNoBom => Encoding::Utf16BeNoBom,
+        // The text is already decoded, so the name decides only how the next
+        // save writes it. A name this build does not know -- from a later
+        // one, say -- falls back to UTF-8, which holds every character the
+        // checkpoint can contain, rather than losing the recovery.
+        bp_history::CheckpointEncoding::Legacy(name) => {
+            bp_files::encoding_named(&name).unwrap_or_default()
+        }
     }
 }
 
@@ -2141,6 +2182,63 @@ mod tests {
         state.save_copy(id, &copy);
 
         assert_eq!(std::fs::read(&copy).expect("copied"), NOTEPAD_CRLF_EDITED);
+    }
+
+    // --- legacy encodings (ADR-0085) -------------------------------------
+
+    /// "Café" and a line break, as Windows-1252 writes them.
+    const WESTERN: &[u8] = b"Caf\xe9 au lait, na\xefve gar\xe7on, r\xe9sum\xe9.\r\n";
+
+    #[test]
+    fn saving_a_character_the_files_encoding_cannot_hold_refuses_and_names_it() {
+        // ADR-0085: the encoder would otherwise write `&#945;` into a text
+        // file. The file on disk must be untouched by the refusal.
+        let mut state = AppState::new();
+        let (_dir, path, id) = open_bytes(&mut state, WESTERN);
+        state.reload_as(Some(Encoding::Legacy("windows-1252")));
+        let text = state.active_text();
+        state.widget_edited(&format!("{text}alpha is α\r\n"));
+
+        assert_eq!(state.save_document(id, None), SaveResult::Failed);
+        let error = state.error.clone().unwrap_or_default();
+        assert!(
+            error.contains("'α'") && error.contains("UTF-8"),
+            "got {error}"
+        );
+        assert_eq!(std::fs::read(&path).expect("unchanged"), WESTERN);
+        assert!(state.is_dirty(id), "the work is still unsaved, not lost");
+    }
+
+    #[test]
+    fn reopen_as_reads_the_file_again_in_the_encoding_chosen() {
+        let mut state = AppState::new();
+        let (_dir, _path, id) = open_bytes(&mut state, WESTERN);
+
+        state.reload_as(Some(Encoding::Legacy("windows-1251")));
+        assert_eq!(
+            state.workspace.get(id).map(Document::encoding),
+            Some(Encoding::Legacy("windows-1251"))
+        );
+        assert!(!state.active_text().contains('é'), "read as Cyrillic now");
+
+        state.reload_as(Some(Encoding::Legacy("windows-1252")));
+        assert!(state.active_text().starts_with("Café au lait"));
+    }
+
+    #[test]
+    fn reopen_as_an_encoding_that_cannot_read_the_file_leaves_the_document_alone() {
+        let mut state = AppState::new();
+        let (_dir, _path, id) = open_bytes(&mut state, WESTERN);
+        let before = state.active_text();
+
+        state.reload_as(Some(Encoding::Utf8));
+
+        assert!(state.error.is_some(), "a refusal says why");
+        assert_eq!(state.active_text(), before);
+        assert_ne!(
+            state.workspace.get(id).map(Document::encoding),
+            Some(Encoding::Utf8)
+        );
     }
 
     // --- large files (D29) ------------------------------------------------

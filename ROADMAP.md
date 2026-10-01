@@ -132,7 +132,7 @@ ADR-0083 to ADR-0089. Four are done; the rest are decided and waiting on work.
 | A document past about 2,000 lines overflowed the renderer | [ADR-0083](docs/decisions/ADR-0083.md) | **Done** -- Slint 1.18.1 |
 | The site claimed what does not ship, and a date nobody planned | [ADR-0089](docs/decisions/ADR-0089.md) | **Done** |
 | No `zenity` on Linux deletes the recovery journal | [ADR-0084](docs/decisions/ADR-0084.md) | **Done** -- and the journal was re-keyed per run, because ids restarting at 1 let every launch delete the last one's `1.json` |
-| Windows-1252, Shift-JIS and GBK files are refused | [ADR-0085](docs/decisions/ADR-0085.md) | Decided; W2-04 |
+| Windows-1252, Shift-JIS and GBK files are refused | [ADR-0085](docs/decisions/ADR-0085.md) | **Done** -- read, saved back as they came, and Reopen As for a wrong guess |
 | The Linux binary needs glibc 2.39 | [ADR-0087](docs/decisions/ADR-0087.md) | **Done** -- built on `ubuntu-22.04`, refused above 2.35 |
 | No keyboard route into the menus, no accessible names | [ADR-0088](docs/decisions/ADR-0088.md) | **Done** for the RC -- F10 and named controls, checked by reading the AT-SPI tree. A pass with NVDA and Orca is 1.0's |
 | Signing | [ADR-0086](docs/decisions/ADR-0086.md) | **Not a blocker**: the RC ships unsigned; 1.0 is SignPath or the Store |

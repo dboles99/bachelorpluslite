@@ -72,12 +72,24 @@ pub mod action {
     pub const ENCODING_UTF8_BOM: i32 = 43;
 
     /// Indentation, in the Format block: it is a property of the text, like
-    /// the line ending and the encoding beside it. 48 and 49 are free.
+    /// the line ending and the encoding beside it. The block is full: 49 is
+    /// [`ENCODING_UTF16_LE`].
     pub const INDENT_TABS: i32 = 44;
     pub const INDENT_SPACES: i32 = 45;
     pub const TAB_WIDTH_2: i32 = 46;
     pub const TAB_WIDTH_4: i32 = 47;
     pub const TAB_WIDTH_8: i32 = 48;
+
+    /// Format > Encoding > UTF-16 LE (ADR-0085): the way out of a legacy code
+    /// page into an encoding that holds every character, beside the two UTF-8
+    /// ones. The last id in the Format block, which is why the reopen rows
+    /// below have a block of their own.
+    pub const ENCODING_UTF16_LE: i32 = 49;
+
+    /// Format > Reopen As, one id per [`super::REOPEN_AS`] row, in that order
+    /// (ADR-0085). A block of its own, 240-249, and full: the list is sized to
+    /// it. Bounded by [`super::reopen_end`], for the reason `STAMP_BASE` is.
+    pub const REOPEN_BASE: i32 = 240;
 
     pub const SHORTCUTS: i32 = 50;
     pub const ABOUT: i32 = 51;
@@ -282,6 +294,32 @@ fn toggle(label: &str, on: bool, action: i32) -> MenuItem {
 /// profile extends the window with the menu instead of landing outside it.
 pub(crate) fn profile_end() -> i32 {
     action::PROFILE_BASE + i32::try_from(bp_security::Profile::all().len()).unwrap_or(0)
+}
+
+/// The encodings Format > Reopen As offers: what a row says, and the
+/// Encoding Standard label `bp_files::encoding_named` reads.
+///
+/// **Ten, because the block is ten ids.** The ones a person is likely to
+/// meet in a text file on Windows or Linux -- the three commonest Windows
+/// code pages and the four CJK ones `chardetng` most often confuses -- plus
+/// the two Unicode families, so a file wrongly guessed as legacy can be put
+/// back. A test asserts every label is one the library knows.
+pub const REOPEN_AS: &[(&str, &str)] = &[
+    ("UTF-8", "UTF-8"),
+    ("UTF-16 LE", "UTF-16LE"),
+    ("UTF-16 BE", "UTF-16BE"),
+    ("Western (Windows-1252)", "windows-1252"),
+    ("Central European (Windows-1250)", "windows-1250"),
+    ("Cyrillic (Windows-1251)", "windows-1251"),
+    ("Japanese (Shift-JIS)", "Shift_JIS"),
+    ("Simplified Chinese (GBK)", "GBK"),
+    ("Traditional Chinese (Big5)", "Big5"),
+    ("Korean (EUC-KR)", "EUC-KR"),
+];
+
+/// One past the last id `REOPEN_BASE` can produce.
+pub(crate) fn reopen_end() -> i32 {
+    action::REOPEN_BASE + i32::try_from(REOPEN_AS.len()).unwrap_or(0)
 }
 
 /// One past the last id `STAMP_BASE` can produce.
@@ -500,7 +538,7 @@ pub fn view(
 }
 
 pub fn format(encoding: Encoding, line_ending: LineEnding, indent: Indent) -> Vec<MenuItem> {
-    vec![
+    let mut items = vec![
         toggle("LF", line_ending == LineEnding::Lf, action::LINE_ENDING_LF),
         MenuItem {
             separator_after: true,
@@ -511,12 +549,17 @@ pub fn format(encoding: Encoding, line_ending: LineEnding, indent: Indent) -> Ve
             )
         },
         toggle("UTF-8", encoding == Encoding::Utf8, action::ENCODING_UTF8),
+        toggle(
+            "UTF-8 with BOM",
+            encoding == Encoding::Utf8Bom,
+            action::ENCODING_UTF8_BOM,
+        ),
         MenuItem {
             separator_after: true,
             ..toggle(
-                "UTF-8 with BOM",
-                encoding == Encoding::Utf8Bom,
-                action::ENCODING_UTF8_BOM,
+                "UTF-16 LE",
+                encoding == Encoding::Utf16Le,
+                action::ENCODING_UTF16_LE,
             )
         },
         toggle("Indent with Tabs", !indent.spaces, action::INDENT_TABS),
@@ -535,7 +578,18 @@ pub fn format(encoding: Encoding, line_ending: LineEnding, indent: Indent) -> Ve
         // coming and listed nothing. Line endings, encoding and indentation
         // are the whole of what `MENU_MAP.md` asks of this menu, and all of
         // it works.
-    ]
+    ];
+    // Reopen As, last: it reads the file again rather than changing how the
+    // document is written, so it is a different kind of row from the
+    // encoding toggles above, and it asks before discarding edits.
+    items.extend(REOPEN_AS.iter().enumerate().map(|(index, (label, _))| {
+        row(
+            &format!("Reopen As {label}"),
+            "",
+            action::REOPEN_BASE + i32::try_from(index).unwrap_or(0),
+        )
+    }));
+    items
 }
 
 /// The Privacy menu: what this program may write down about a document.
@@ -885,6 +939,22 @@ pub fn research(has_content: bool) -> Vec<MenuItem> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_reopen_row_names_an_encoding_the_library_can_read() {
+        // A row whose label `bp-files` does not know would be a menu item
+        // that does nothing, which is the thing ADR-0048 removed eleven of.
+        for (label, name) in REOPEN_AS {
+            assert!(
+                bp_files::encoding_named(name).is_some(),
+                "Reopen As {label} names `{name}`, which is not an encoding"
+            );
+        }
+        assert!(
+            reopen_end() <= action::REOPEN_BASE + 10,
+            "the reopen rows have the block 240-249 and no more"
+        );
+    }
 
     /// Every menu, built with a document open and everything available.
     ///

@@ -70,7 +70,8 @@ fn exercise_in(sandbox: &Sandbox, bytes: &[u8]) {
 
     // The promise the crate's documentation makes, checked rather than
     // assumed: whatever loaded must write back byte for byte.
-    let written = bp_files::encode(&loaded.text, loaded.encoding, LineEndingPolicy::Preserve);
+    let written = bp_files::encode(&loaded.text, loaded.encoding, LineEndingPolicy::Preserve)
+        .expect("text that loaded from an encoding can be written back to it");
     assert_eq!(
         written.as_slice(),
         bytes,
@@ -264,7 +265,8 @@ fn anything_encoded_loads_back_to_the_same_bytes() {
                 ][..],
             ),
         )| {
-            let bytes = bp_files::encode(&text, encoding, LineEndingPolicy::Preserve);
+            let bytes = bp_files::encode(&text, encoding, LineEndingPolicy::Preserve)
+                .expect("a Unicode encoding writes every character");
             std::fs::write(&sandbox.path, &bytes).expect("write the sample");
 
             let loaded = bp_files::load(&sandbox.path)
@@ -273,7 +275,8 @@ fn anything_encoded_loads_back_to_the_same_bytes() {
                 &loaded.text,
                 loaded.encoding,
                 LineEndingPolicy::Preserve,
-            );
+            )
+            .expect("what loaded can be written back");
             prop_assert_eq!(
                 again,
                 bytes,
@@ -307,7 +310,8 @@ fn anything_encoded_loads_back_to_the_same_bytes() {
 #[test]
 fn a_leading_zwnbsp_saved_without_a_bom_is_read_back_as_a_bom() {
     let text = "\u{feff}hello";
-    let bytes = bp_files::encode(text, bp_core::Encoding::Utf8, LineEndingPolicy::Preserve);
+    let bytes = bp_files::encode(text, bp_core::Encoding::Utf8, LineEndingPolicy::Preserve)
+        .expect("UTF-8 writes every character");
     assert_eq!(
         bytes, b"\xEF\xBB\xBFhello",
         "written as three bytes and text"
@@ -327,6 +331,7 @@ fn a_leading_zwnbsp_saved_without_a_bom_is_read_back_as_a_bom() {
 
     // The byte-level promise still holds, which is why this is a note rather
     // than a crash.
-    let again = bp_files::encode(&loaded.text, loaded.encoding, LineEndingPolicy::Preserve);
+    let again = bp_files::encode(&loaded.text, loaded.encoding, LineEndingPolicy::Preserve)
+        .expect("UTF-8 writes every character");
     assert_eq!(again, bytes, "the file on disk is unchanged either way");
 }

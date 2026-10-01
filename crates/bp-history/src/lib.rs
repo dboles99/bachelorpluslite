@@ -64,13 +64,23 @@ pub const CRATE_NAME: &str = "bp-history";
 /// This mirrors `bp_core::Encoding` rather than reusing it, so that this
 /// crate's on-disk journal format does not depend on `bp-core`'s type -- the
 /// caller (`bp-ui`, which already depends on both) converts at the boundary.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+///
+/// **Not `Copy` since ADR-0085**, because a legacy encoding is carried by
+/// name. A journal written by this build with one of the three new values
+/// is unreadable to a build before it -- that build skips the checkpoint,
+/// as it skips any it cannot parse -- and every journal an earlier build
+/// wrote still reads here.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum CheckpointEncoding {
     #[default]
     Utf8,
     Utf8Bom,
     Utf16Le,
     Utf16Be,
+    Utf16LeNoBom,
+    Utf16BeNoBom,
+    /// A legacy code page, by its Encoding Standard name.
+    Legacy(String),
 }
 
 /// A document's line-ending convention, as recorded in a [`Checkpoint`].

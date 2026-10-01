@@ -29,7 +29,8 @@ one is still being built; there is [a waitlist](https://bpad.prompt-forge.dev/wa
 ## What works today
 
 **Editing.** Tabs, find and replace, search across a folder, go to line, undo
-and redo, overtype on the Insert key, zoom, UTF-8 and UTF-8 with BOM, LF and CRLF, Light/Dark/Organic/Green
+and redo, overtype on the Insert key, zoom, every encoding Notepad opens -- UTF-8, UTF-16 and the legacy code
+pages, saved back as they came -- LF and CRLF, Light/Dark/Organic/Green
 themes plus System. A rope underneath, so an edit costs what it changes rather
 than what the file weighs.
 
