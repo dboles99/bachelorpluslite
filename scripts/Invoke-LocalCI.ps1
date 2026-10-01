@@ -532,7 +532,7 @@ try {
             # The fuzz workspace on the Linux leg too, and for the reason the
             # leg exists at all: one-leg testing hides defects, and this
             # repository has been caught by that twice -- `PathBuf::join`
-            # standing in for `bp_platform::paths::join` (4390593), and a
+            # standing in for `bp_platform::paths::join` (5785d69), and a
             # device-name rule whose *judgement* took a platform while its
             # *split* used `std::path`. `fuzz/tests/files.rs` drives
             # `bp-files`, which is where the second one lived.

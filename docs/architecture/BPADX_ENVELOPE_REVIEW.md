@@ -12,7 +12,7 @@
 > starts here rather than from nothing -- and it starts by answering them,
 > because they were never answered, only asked.
 >
-> Everything below describes code that existed at commit `3589205` and does
+> Everything below describes code that existed at commit `f238b67` and does
 > not exist now. Read it in the past tense.
 
 **This document existed to make D4 cheap.** ADR-0011 forbids implementing

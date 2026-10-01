@@ -1668,7 +1668,7 @@ All of it, in one pass. What is worth carrying forward:
   housekeeping pass repeated it, several of them calling it "the item most
   likely to hurt and least likely to be noticed".
 
-  It was false. `main` is at `31f6858`, *"Merge phases 1-19 into main
+  It was false. `main` is at `10b7529`, *"Merge phases 1-19 into main
   (PR #1)"* — most of the branch's history is already in `main`, and the
   branch is 48 commits past that merge rather than 111 commits past nothing.
   One `git merge-base --is-ancestor` settles it, and it was never run.
@@ -2041,7 +2041,7 @@ All of it, in one pass. What is worth carrying forward:
 
 - **A name that has sat in a plan long enough starts to read like a
   specification.** `docs/product/MENU_MAP.md` listed five Research rows --
-  research question, evidence, findings, methods, datasets -- from `9f98b8a`,
+  research question, evidence, findings, methods, datasets -- from `c9b6359`,
   the scaffold commit, where they were part of one sentence describing a menu
   nobody had designed. Four sessions of planning treated them as a backlog.
   They are the section headings of a research *paper*, and ADR-0039 had

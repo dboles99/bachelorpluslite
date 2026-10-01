@@ -306,8 +306,8 @@ fn writable_path(platform: Platform, path: &Path) -> Cow<'_, Path> {
     // be tested by prepending a Linux working directory to it.
     //
     // **This is the third time that trap has been sprung in this repository**
-    // -- `PathBuf::join` standing in for `paths::join` (4390593), a device
-    // name split with `Path::file_name` (d3c2040), and now this. The rule is
+    // -- `PathBuf::join` standing in for `paths::join` (5785d69), a device
+    // name split with `Path::file_name` (52158d8), and now this. The rule is
     // in `project/NEXT_SESSION.md`: a function taking a `Platform` must not
     // let `std::path` answer for it.
     //
