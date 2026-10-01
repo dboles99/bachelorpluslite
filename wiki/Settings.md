@@ -59,6 +59,19 @@ bpad --editor-view
 bpad --line 427 server.log
 ```
 
+A value can follow its flag after a space or after `=`: `--line 427` and
+`--line=427` are the same. Until 1.0 only the second worked, and the first
+opened a file called `427`. Everything after `--` is a file name, however it
+begins, which is how to open a file called `-notes.txt`:
+
+```sh
+bpad -- -notes.txt
+```
+
+`tab_width` and `indent_spaces` decide what Tab inserts from the first
+document onwards. Before 1.0 they were read and then ignored, and every run
+began with tabs four columns wide.
+
 The full list is in [the CLI reference](Command-Line), which
 is generated from `--help` -- so it is the binary's own answer rather than a
 copy of it.

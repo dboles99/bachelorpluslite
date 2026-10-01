@@ -868,6 +868,15 @@ has no business crossing a network at sign-out.</p>
 bpad --editor-view
 bpad --line 427 server.log
 </code></pre>
+<p>A value can follow its flag after a space or after <code>=</code>: <code>--line 427</code> and
+<code>--line=427</code> are the same. Until 1.0 only the second worked, and the first
+opened a file called <code>427</code>. Everything after <code>--</code> is a file name, however it
+begins, which is how to open a file called <code>-notes.txt</code>:</p>
+<pre><code class="language-sh">bpad -- -notes.txt
+</code></pre>
+<p><code>tab_width</code> and <code>indent_spaces</code> decide what Tab inserts from the first
+document onwards. Before 1.0 they were read and then ignored, and every run
+began with tabs four columns wide.</p>
 <p>The full list is in <a href="#command-line">the CLI reference</a>, which
 is generated from <code>--help</code> -- so it is the binary's own answer rather than a
 copy of it.</p>
