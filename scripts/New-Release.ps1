@@ -92,6 +92,28 @@ finally { Pop-Location }
 $exe = Join-Path $Root 'target/release/bachelorpad.exe'
 if (-not (Test-Path $exe)) { throw "$exe is missing after a build that reported success" }
 
+# The C runtime must be inside the executable (W2-01, `.cargo/config.toml`).
+# Asked of the import table rather than assumed from the config, because the
+# machine building a release is the one machine guaranteed to have the
+# redistributable installed -- a binary that needs it runs perfectly here.
+# `dumpbin` comes with the MSVC toolchain the build already required.
+Write-Step 'checking the executable carries its own C runtime'
+$vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
+# Every installation, not `-latest`: a machine can hold a newer Build Tools
+# without the C++ workload beside the older one that has it, and `-latest`
+# then finds nothing. The last match is the newest toolset.
+$dumpbin = if (Test-Path $vswhere) {
+    & $vswhere -all -products * -find 'VC\Tools\MSVC\**\bin\Hostx64\x64\dumpbin.exe' | Select-Object -Last 1
+}
+if (-not $dumpbin) { throw 'dumpbin.exe not found; it ships with the MSVC build tools this build already needs' }
+$imports = & $dumpbin /nologo /dependents $exe
+if ($LASTEXITCODE -ne 0) { throw "dumpbin could not read $exe" }
+$runtime = $imports | Where-Object { $_ -match '(?i)^\s*(vcruntime\d+|msvcp\d+|ucrtbase|api-ms-win-crt-[a-z-]+[\d-]*)\.dll\s*$' }
+if ($runtime) {
+    throw "the executable imports the dynamic C runtime, which a clean Windows machine does not have: $(($runtime | ForEach-Object { $_.Trim() }) -join ', ')"
+}
+Write-Note 'no vcruntime, msvcp, ucrtbase or api-ms-win-crt import'
+
 # Ask the binary what it is. Redirected on purpose: a GUI-subsystem executable
 # has no console of its own, so stdout needs a handle handed to it -- see
 # ADR-0054's table for the three cases and which of them drops the text.

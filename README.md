@@ -99,6 +99,10 @@ tar xzf bachelorpad-lite-0.9.5-linux-x86_64.tar.gz
 cd bachelorpad-lite-0.9.5-linux-x86_64 && ./bachelorpad
 ```
 
+Windows needs nothing installed first. Linux needs glibc 2.35 or later --
+Ubuntu 22.04, Debian 12, Mint 21, Fedora 36 or newer
+([ADR-0087](docs/decisions/ADR-0087.md)).
+
 > **The archives are unsigned.** Windows SmartScreen will warn. A certificate
 > has not been bought and self-signing was **refused outright**, because a
 > self-signed certificate is only satisfied once the user installs a root

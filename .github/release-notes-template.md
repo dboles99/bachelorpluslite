@@ -8,6 +8,10 @@
 There is no installer, and that is a decision ([ADR-0067](../docs/decisions/ADR-0067.md)):
 unpack the archive wherever you want it and run `bachelorpad`, or `bpad`.
 
+**Windows** needs nothing installed first: the C runtime is inside the
+executable. **Linux** needs glibc 2.35 or later -- Ubuntu 22.04, Debian 12,
+Linux Mint 21, Fedora 36, or anything newer ([ADR-0087](../docs/decisions/ADR-0087.md)).
+
 macOS is not built. [ADR-0072](../docs/decisions/ADR-0072.md) says why, and
 what it would cost.
 

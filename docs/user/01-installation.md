@@ -9,6 +9,26 @@ want the program to live and run it. Nothing is written into that folder;
 what the product keeps about itself goes in your user profile, and
 [Where it puts things](#where-it-puts-things) lists every directory.
 
+## What it needs
+
+**Windows 10 or 11, x86-64, and nothing else.** The C runtime is built into
+the executable, so there is no Visual C++ redistributable to install first.
+
+**Linux, x86-64, with glibc 2.35 or later**: Ubuntu 22.04 and later, Debian
+12 and later, Linux Mint 21 and later, Fedora 36 and later
+([ADR-0087](../decisions/ADR-0087.md)). The release is built on the oldest of
+those and refused if it would need anything newer, so the list is checked
+rather than hoped. RHEL 8 and 9 and Debian 11 are older than that and are not
+supported.
+
+It also loads the libraries any desktop session already has -- fontconfig,
+xkbcommon (with its X11 half), and Wayland or X11 with EGL. On a minimal
+install that lacks them, on Debian or Ubuntu:
+
+```sh
+sudo apt install libfontconfig1 libxkbcommon0 libxkbcommon-x11-0 libwayland-client0 libegl1
+```
+
 ## Download
 
 From [the releases page](https://github.com/dboles99/bachelorpluslite/releases):

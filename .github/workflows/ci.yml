@@ -49,7 +49,10 @@ jobs:
       # Linux also failed turns one red run into two.
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-latest]
+        # 22.04 rather than -latest for the reason release.yml gives: it is
+        # the image releases are built on, so a dependency that needs a newer
+        # glibc fails a pull request rather than a release (ADR-0087).
+        os: [windows-latest, ubuntu-22.04]
     steps:
       - uses: actions/checkout@v4
 

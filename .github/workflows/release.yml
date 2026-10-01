@@ -48,7 +48,9 @@ jobs:
         include:
           - os: windows-latest
             target: windows-x86_64
-          - os: ubuntu-latest
+          # Pinned, not -latest: the image's glibc is the oldest glibc the
+          # binary will start on (ADR-0087). 22.04 is 2.35.
+          - os: ubuntu-22.04
             target: linux-x86_64
     steps:
       - uses: actions/checkout@v4
@@ -78,6 +80,26 @@ jobs:
 
       - name: build
         run: cargo build --release --locked -p bachelorpad
+
+      # The floor is enforced, not described (ADR-0087). A runner image
+      # update, or a dependency reaching for a newer symbol, would otherwise
+      # move it without anybody changing a line -- and the README would go on
+      # naming distributions the binary no longer starts on.
+      - name: glibc floor (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          set -eu
+          floor=2.35
+          needed=$(objdump -T target/release/bachelorpad | grep -o 'GLIBC_[0-9][0-9.]*' | sed 's/GLIBC_//' | sort -V | tail -1)
+          # Empty means objdump failed: a pipeline's status is its last
+          # stage's, so `set -e` does not see it, and an empty version sorts
+          # below every floor -- the check would pass having read nothing.
+          test -n "$needed" || { echo 'objdump found no glibc symbols; refusing to guess' >&2; exit 1; }
+          echo "highest glibc symbol: $needed (floor $floor)"
+          if [ "$(printf '%s\n%s\n' "$needed" "$floor" | sort -V | tail -1)" != "$floor" ]; then
+            echo "the binary needs glibc $needed, above the $floor floor ADR-0087 promises" >&2
+            exit 1
+          fi
 
       # The staging rules live in the release scripts, not here, so that a
       # release built by hand and a release built by a runner contain the same
