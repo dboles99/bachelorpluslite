@@ -119,9 +119,10 @@ rand_core = { version = "0.6", features = ["getrandom"] }
 
 
 [profile.release]
-# The symbol table, which a shipped binary does not read. The Linux release
-# carried it -- 40 MB against Windows' 21, whose linker leaves symbols in a
-# .pdb that is never shipped (W3-01). A backtrace from a release build names
-# fewer functions; this product reports no crashes anywhere, so the person
-# reading one is a developer with a debug build to hand.
+# The symbol table, which a shipped binary does not read and the Windows
+# linker already leaves in a .pdb nobody ships (W3-01). Measured on the
+# release runner: the Linux binary went from 39.9 MB to 30.4 MB. A backtrace
+# from a release build names fewer functions; this product reports no
+# crashes anywhere, so the person reading one is a developer with a debug
+# build to hand.
 strip = "symbols"
