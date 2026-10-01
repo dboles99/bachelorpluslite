@@ -144,7 +144,9 @@ rather than decisions, and did not need one:
 - ~~offsets passed to the widget in characters where it counts bytes~~ --
   **fixed** (W1-04): Find and Go to Line selected the wrong text in any
   document with a character outside ASCII, and the next key typed replaced it;
-- Enter writing `\n` into a CRLF file;
+- ~~Enter writing `\n` into a CRLF file~~ -- **fixed** (W1-06,
+  [ADR-0090](docs/decisions/ADR-0090.md)): a document is saved in its own
+  line ending, and Format > LF / CRLF, which had converted nothing, converts;
 - ~~the widget's own undo stack growing without bound~~ -- **fixed** (W1-05),
   and it was not the widget's: `bp-editor` kept every keystroke as an undo
   step holding the document twice, which nothing read. Replace All and the

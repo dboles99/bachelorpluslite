@@ -27,7 +27,17 @@ entry.
 
 ## Line endings
 
-**Format > Line Ending** offers **LF** and **CRLF**.
+**Format > Line Ending** offers **LF** and **CRLF**. Choosing one converts the
+whole document when you next save it.
+
+**A document is saved in its own line ending**, the one the status bar shows.
+Press Enter in a file Notepad wrote and the new lines are saved as CRLF, like
+the old ones; paste text with Unix line endings into it and they are saved as
+CRLF too ([ADR-0090](https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0090.md)).
+
+The exception is **a file that already mixed both** when you opened it. Which
+of its line endings is the stray one is not for this program to guess, so it
+is saved exactly as it came, until you choose LF or CRLF from the menu.
 
 A line is `\n` or `\r\n`, and nothing else ([ADR-0029](https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0029.md)).
 That is narrower than Unicode's definition of a line break, which also counts

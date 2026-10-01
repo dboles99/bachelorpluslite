@@ -763,7 +763,15 @@ open such a file in Notepad and save it as UTF-8 there.</p>
 <p>Choosing the encoding a document already has does nothing, and records no undo
 entry.</p>
 <h3 id="line-endings">Line endings</h3>
-<p><strong>Format &gt; Line Ending</strong> offers <strong>LF</strong> and <strong>CRLF</strong>.</p>
+<p><strong>Format &gt; Line Ending</strong> offers <strong>LF</strong> and <strong>CRLF</strong>. Choosing one converts the
+whole document when you next save it.</p>
+<p><strong>A document is saved in its own line ending</strong>, the one the status bar shows.
+Press Enter in a file Notepad wrote and the new lines are saved as CRLF, like
+the old ones; paste text with Unix line endings into it and they are saved as
+CRLF too (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0090.md">ADR-0090</a>).</p>
+<p>The exception is <strong>a file that already mixed both</strong> when you opened it. Which
+of its line endings is the stray one is not for this program to guess, so it
+is saved exactly as it came, until you choose LF or CRLF from the menu.</p>
 <p>A line is <code>\n</code> or <code>\r\n</code>, and nothing else (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0029.md">ADR-0029</a>).
 That is narrower than Unicode's definition of a line break, which also counts
 things like <code>\u{2028}</code> -- treating those as line breaks makes line numbers

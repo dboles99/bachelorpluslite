@@ -30,13 +30,16 @@
 //! closing, the editor and viewer maps, the gutter, and the labels the status
 //! bar reads.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 use bp_config::Recent;
 use bp_core::{Document, DocumentId, Encoding, LineEnding, UNTITLED, Workspace};
-use bp_files::{DiskState, FileStamp, LineEndingPolicy, SaveOptions, atomic_write, encode, load};
+use bp_files::{
+    DiskState, FileStamp, LineEndingPolicy, LineEndingSurvey, SaveOptions, atomic_write, encode,
+    load,
+};
 use bp_formats::Format;
 use bp_naming::SemanticName;
 use bp_theme::ThemeId;
@@ -178,6 +181,17 @@ pub struct AppState {
     /// What each document's file looked like when we last read or wrote it,
     /// so an edit made by another program can be noticed.
     stamps: HashMap<DocumentId, FileStamp>,
+    /// Documents whose file already held both line-ending conventions when
+    /// it was read, and which nobody has since asked to convert.
+    ///
+    /// The one case in which Save writes the text's breaks through
+    /// unchanged (W1-06). Every other document is saved in its own
+    /// convention, because the text widget inserts `\n` for Enter whatever
+    /// the file is, and a paste brings whatever the clipboard held -- so a
+    /// stray break in a CRLF file is this program's doing, not the user's.
+    /// Which of a mixed file's breaks is the stray is not this program's to
+    /// say, so that file is left as it came until Format > LF or CRLF says.
+    arrived_mixed: HashSet<DocumentId>,
     pub(crate) recent: Recent,
     /// Standing warning about the file on disk. Distinct from `error`, which
     /// reports something that just failed; this persists until resolved.
@@ -277,6 +291,7 @@ impl AppState {
             indent: bp_editor::Indent::default(),
             font_size: bp_config::DEFAULT_FONT_SIZE,
             stamps: HashMap::new(),
+            arrived_mixed: HashSet::new(),
             recent: bp_config::load_recent(),
             disk_warning: None,
             matches: Vec::new(),
@@ -604,6 +619,7 @@ impl AppState {
                     // Back in step with disk, so the document is clean again.
                     doc.record_disk_save(now());
                 }
+                self.note_arrival(id, &file.text);
                 self.editors.insert(id, bp_editor::Editor::new(&file.text));
                 self.mark_in_step(id, &path);
             }
@@ -615,12 +631,40 @@ impl AppState {
     ///
     /// The bytes on disk no longer match the intent, which is exactly what
     /// "unsaved" means -- leaving it clean would hide a pending change.
+    ///
+    /// **Choosing is converting.** Save writes every break in the chosen
+    /// convention, in a file that arrived mixed too -- which is the one way to
+    /// ask for that, so choosing the convention its majority already is still
+    /// counts as a change.
     pub(crate) fn set_line_ending(&mut self, line_ending: LineEnding) {
-        if let Some(doc) = self.workspace.active_mut()
-            && doc.line_ending() != line_ending
+        let Some(id) = self.workspace.active_id() else {
+            return;
+        };
+        let was_mixed = self.arrived_mixed.remove(&id);
+        if let Some(doc) = self.workspace.get_mut(id)
+            && (doc.line_ending() != line_ending || was_mixed)
         {
             doc.set_line_ending(line_ending);
             doc.mark_modified();
+        }
+    }
+
+    /// Remember whether a file's text was mixed as it was read.
+    fn note_arrival(&mut self, id: DocumentId, text: &str) {
+        if LineEndingSurvey::of(text).is_mixed() {
+            self.arrived_mixed.insert(id);
+        } else {
+            self.arrived_mixed.remove(&id);
+        }
+    }
+
+    /// How Save and Save a Copy write `id`'s line breaks: see
+    /// [`Self::arrived_mixed`].
+    fn line_ending_policy(&self, id: DocumentId, declared: LineEnding) -> LineEndingPolicy {
+        if self.arrived_mixed.contains(&id) {
+            LineEndingPolicy::Preserve
+        } else {
+            LineEndingPolicy::ConvertTo(declared)
         }
     }
 
@@ -760,6 +804,7 @@ impl AppState {
                     doc.set_encoding(file.encoding);
                     doc.set_line_ending(file.line_ending);
                 }
+                self.note_arrival(id, &file.text);
                 self.editors.insert(id, bp_editor::Editor::new(&file.text));
                 self.sizes.insert(id, file.bytes_on_disk);
                 self.mark_in_step(id, &path2);
@@ -795,16 +840,13 @@ impl AppState {
             return SaveResult::NeedsPath;
         };
 
-        // `Preserve`, not the document's declared line ending: a save must
-        // return the bytes the user was given. Converting here is what made
-        // every save quietly rewrite the minority convention in a mixed
-        // document, with nothing on screen to say it had happened. Format ▸
-        // LF / CRLF is where a conversion is asked for, and it asks first.
-        let bytes = encode(
-            &self.text_of(id),
-            doc.encoding(),
-            LineEndingPolicy::Preserve,
-        );
+        // The document's own convention, unless its file arrived mixed
+        // (W1-06). Converting a mixed file is what made every save quietly
+        // rewrite its minority convention, with nothing on screen to say so;
+        // not converting at all is what made every CRLF file anybody pressed
+        // Enter in come back mixed.
+        let policy = self.line_ending_policy(id, doc.line_ending());
+        let bytes = encode(&self.text_of(id), doc.encoding(), policy);
 
         match atomic_write(&target, &bytes, SaveOptions::default()) {
             Ok(_) => {
@@ -856,11 +898,8 @@ impl AppState {
         // The same policy as a real save, for the same reason the encoding is
         // shared: bytes written differently from the original would make the
         // copy a different file.
-        let bytes = encode(
-            &self.text_of(id),
-            doc.encoding(),
-            LineEndingPolicy::Preserve,
-        );
+        let policy = self.line_ending_policy(id, doc.line_ending());
+        let bytes = encode(&self.text_of(id), doc.encoding(), policy);
 
         match atomic_write(target, &bytes, SaveOptions::default()) {
             Ok(_) => {
@@ -1103,6 +1142,7 @@ impl AppState {
         self.error = None;
         if self.workspace.close(id).is_some() {
             self.editors.remove(&id);
+            self.arrived_mixed.remove(&id);
         }
         // A closed document is either saved, which already discarded its
         // checkpoint, or closed with Don't Save. Left on disk, the next launch
@@ -1610,25 +1650,22 @@ mod tests {
         // on screen said so. `bp-files` owns the encoder now and the shell
         // asks it for `Preserve`; this is the test that goes red if somebody
         // "tidies" that back to the declared ending.
-        let dir = std::env::temp_dir().join(format!("bpad-ui-mixed-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("mixed.txt");
-
+        //
+        // **Narrowed by W1-06 to a file that arrived mixed.** A document that
+        // was uniform is saved in its own convention, because a stray break
+        // in it is this program's (Enter, a paste). This one reaches the
+        // save through an operation rather than typing, which is the other
+        // way text changes.
         let mut state = AppState::new();
-        let id = state.workspace.active_id().unwrap();
+        let (_dir, path, id) = open_bytes(&mut state, b"crlf\r\nlf\n");
         state.edit("crlf\r\nlf\nend".to_owned());
 
-        assert_eq!(
-            state.save_document(id, Some(path.clone())),
-            SaveResult::Saved
-        );
+        assert_eq!(state.save_document(id, None), SaveResult::Saved);
         assert_eq!(
             std::fs::read(&path).unwrap(),
             b"crlf\r\nlf\nend",
             "both conventions survive a save exactly as the user left them"
         );
-
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -1977,6 +2014,105 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "work");
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // --- line endings on save (W1-06) ------------------------------------
+    //
+    // The byte vectors below were committed before the change they test
+    // (trap 7): a round trip through this build says nothing about what a
+    // file written by Notepad, or by the build before, turns into.
+
+    /// A file as Windows Notepad writes it.
+    const NOTEPAD_CRLF: &[u8] = b"first line\r\nsecond line\r\n";
+    /// The same file after Enter twice and two words, saved.
+    const NOTEPAD_CRLF_EDITED: &[u8] = b"first line\r\nsecond line\r\nthird\r\nfourth\r\n";
+    /// A file that was already mixed before this program touched it.
+    const ALREADY_MIXED: &[u8] = b"crlf\r\nlf\ncrlf again\r\n";
+
+    /// Open `bytes` as a file, returning its directory guard, path and id.
+    fn open_bytes(state: &mut AppState, bytes: &[u8]) -> (tempfile::TempDir, PathBuf, DocumentId) {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("note.txt");
+        std::fs::write(&path, bytes).expect("the fixture");
+        state.open(path.clone());
+        let id = state.workspace.active_id().expect("the opened document");
+        (dir, path, id)
+    }
+
+    #[test]
+    fn enter_in_a_notepad_file_is_saved_as_crlf_not_as_a_bare_line_feed() {
+        // W1-06. The text widget inserts `\n` for Enter whatever the file
+        // is, and Save wrote the text through unchanged -- so every CRLF
+        // file anybody edited came back mixed.
+        let mut state = AppState::new();
+        let (_dir, path, id) = open_bytes(&mut state, NOTEPAD_CRLF);
+
+        state.widget_edited("first line\r\nsecond line\r\nthird\nfourth\n");
+        assert_eq!(state.save_document(id, None), SaveResult::Saved);
+
+        assert_eq!(std::fs::read(&path).expect("saved"), NOTEPAD_CRLF_EDITED);
+    }
+
+    #[test]
+    fn a_file_that_was_mixed_when_opened_is_saved_as_it_came() {
+        // Which of a mixed file's breaks is the stray is not this program's
+        // to decide, and rewriting the minority silently is the defect
+        // `LineEndingPolicy::Preserve` exists for.
+        let mut state = AppState::new();
+        let (_dir, path, id) = open_bytes(&mut state, ALREADY_MIXED);
+
+        state.widget_edited("crlf\r\nlf\ncrlf again\r\nmore");
+        state.save_document(id, None);
+
+        assert_eq!(
+            std::fs::read(&path).expect("saved"),
+            b"crlf\r\nlf\ncrlf again\r\nmore"
+        );
+    }
+
+    #[test]
+    fn format_crlf_converts_the_file_when_it_is_saved() {
+        // Format > CRLF used to change the label and mark the document
+        // unsaved, and Save then wrote the LF bytes it already had.
+        let mut state = AppState::new();
+        let (_dir, path, id) = open_bytes(&mut state, b"one\ntwo\n");
+
+        state.set_line_ending(LineEnding::CrLf);
+        state.save_document(id, None);
+
+        assert_eq!(std::fs::read(&path).expect("saved"), b"one\r\ntwo\r\n");
+    }
+
+    #[test]
+    fn choosing_a_convention_for_a_mixed_file_makes_it_uniform() {
+        // The one way to ask for a mixed file to be converted, including to
+        // the convention its majority already is.
+        let mut state = AppState::new();
+        let (_dir, path, id) = open_bytes(&mut state, ALREADY_MIXED);
+
+        state.set_line_ending(LineEnding::CrLf);
+        assert!(
+            state.is_dirty(id),
+            "a conversion still to be written is unsaved"
+        );
+        state.save_document(id, None);
+
+        assert_eq!(
+            std::fs::read(&path).expect("saved"),
+            b"crlf\r\nlf\r\ncrlf again\r\n"
+        );
+    }
+
+    #[test]
+    fn a_copy_is_written_with_the_same_line_endings_as_a_save() {
+        let mut state = AppState::new();
+        let (dir, _path, id) = open_bytes(&mut state, NOTEPAD_CRLF);
+        state.widget_edited("first line\r\nsecond line\r\nthird\nfourth\n");
+
+        let copy = dir.path().join("copy.txt");
+        state.save_copy(id, &copy);
+
+        assert_eq!(std::fs::read(&copy).expect("copied"), NOTEPAD_CRLF_EDITED);
     }
 
     #[test]
