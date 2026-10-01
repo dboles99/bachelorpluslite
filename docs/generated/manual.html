@@ -726,7 +726,15 @@ next launch would offer to recover work you had just chosen to throw away.</p>
 you ever go looking, because such a file matches no filter you might write.
 The file names begin with a tag for the run that wrote them, so two runs of
 the program -- one after a crash, or two open at once -- never write over, or
-tidy away, each other's work.</p>
+tidy away, each other's work. <strong>A window that is still open is not offered to
+another</strong>: opening a second window while the first has unsaved changes does
+not ask you to recover them, because they are not lost. Each run holds a
+<code>.lock</code> file beside its journals for as long as it is running, and the
+operating system lets go of it when the run ends, however it ends.</p>
+<p><strong>If the file changed after the crash</strong>, Restore still brings your work back,
+but the status bar says the file changed on disk and Save asks before writing
+over it.</p>
+<p>On Linux the journal folder and its files are readable by you alone.</p>
 <p><strong>Whether a journal is written at all is a privacy setting.</strong> It is one of the
 two axes the profile model governs; see <a href="#privacy-and-security">Privacy</a>. A profile
 that writes no journal means unsaved work does not survive a crash, and that

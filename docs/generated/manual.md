@@ -697,7 +697,17 @@ Each journal is a small JSON file naming the document it belongs to. An
 you ever go looking, because such a file matches no filter you might write.
 The file names begin with a tag for the run that wrote them, so two runs of
 the program -- one after a crash, or two open at once -- never write over, or
-tidy away, each other's work.
+tidy away, each other's work. **A window that is still open is not offered to
+another**: opening a second window while the first has unsaved changes does
+not ask you to recover them, because they are not lost. Each run holds a
+`.lock` file beside its journals for as long as it is running, and the
+operating system lets go of it when the run ends, however it ends.
+
+**If the file changed after the crash**, Restore still brings your work back,
+but the status bar says the file changed on disk and Save asks before writing
+over it.
+
+On Linux the journal folder and its files are readable by you alone.
 
 **Whether a journal is written at all is a privacy setting.** It is one of the
 two axes the profile model governs; see [Privacy](#privacy-and-security). A profile

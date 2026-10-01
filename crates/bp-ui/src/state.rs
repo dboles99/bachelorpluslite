@@ -366,7 +366,14 @@ impl AppState {
     pub(crate) fn restore(&mut self, entries: impl IntoIterator<Item = bp_history::Checkpoint>) {
         for entry in entries {
             let id = match entry.path {
-                Some(path) => self.workspace.open_path(path, now()),
+                Some(path) => {
+                    let stamp = restored_stamp(&path, entry.written_at);
+                    let id = self.workspace.open_path(path, now());
+                    if let Some(stamp) = stamp {
+                        self.stamps.insert(id, stamp);
+                    }
+                    id
+                }
                 None => self.workspace.open_new(now()),
             };
             self.editors.insert(id, bp_editor::Editor::new(&entry.text));
@@ -1425,6 +1432,36 @@ fn encoding_of_checkpoint(encoding: bp_history::CheckpointEncoding) -> Encoding 
     }
 }
 
+/// What a restored document's file is compared against from now on.
+///
+/// The file as it is, if nothing has written it since the checkpoint -- Save
+/// is then an ordinary save. If something has, a stamp that cannot match it,
+/// so the file reads as *Modified*: the status bar warns and Save asks
+/// before overwriting (W1-03). A restored document used to get no stamp at
+/// all, and `would_overwrite_external_change` answers no without one, so Save
+/// overwrote whatever another program had written since the crash without a
+/// word.
+///
+/// **Strictly before the second the checkpoint was written in**, because
+/// `written_at` has whole seconds and a write in that same second cannot be
+/// placed either side of it. It is read as a change: one question nobody
+/// needed, rather than one overwrite nobody saw. A file with no modification
+/// time has nothing to compare, and is taken as it is.
+fn restored_stamp(path: &Path, written_at: u64) -> Option<FileStamp> {
+    let stamp = FileStamp::of(path)?;
+    let modified = stamp.modified.map(|at| {
+        at.duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |since| since.as_secs())
+    });
+    match modified {
+        Some(secs) if secs >= written_at => Some(FileStamp {
+            modified: None,
+            ..stamp
+        }),
+        _ => Some(stamp),
+    }
+}
+
 fn checkpoint_line_ending_of(line_ending: LineEnding) -> bp_history::CheckpointLineEnding {
     match line_ending {
         LineEnding::Lf => bp_history::CheckpointLineEnding::Lf,
@@ -1705,6 +1742,9 @@ mod tests {
         earlier
             .checkpoint(1, &entry, bp_security::Recovery::Plaintext)
             .expect("the earlier run's checkpoint");
+        // The earlier run has ended; one still holding its journal is a live
+        // instance, whose work is not offered (W1-03).
+        drop(earlier);
 
         let mut state = AppState::new();
         state.journal = bp_history::Journal::new(dir.path().to_path_buf());
@@ -1755,6 +1795,76 @@ mod tests {
             .expect("the recovered document was opened");
         assert_eq!(doc.encoding(), Encoding::Utf16Le);
         assert_eq!(doc.line_ending(), LineEnding::Lf);
+    }
+
+    /// Restore a checkpoint of `path` written `written_at`, returning the
+    /// document it became.
+    fn restore_file_at(state: &mut AppState, path: &Path, written_at: u64) -> DocumentId {
+        state.restore([bp_history::Checkpoint {
+            path: Some(path.to_path_buf()),
+            name: "restored.txt".to_owned(),
+            text: "the work from before the crash".to_owned(),
+            written_at,
+            encoding: bp_history::CheckpointEncoding::Utf8,
+            line_ending: None,
+        }]);
+        state
+            .workspace
+            .iter()
+            .find(|d| d.path() == Some(path))
+            .map(Document::id)
+            .expect("the restored document was opened")
+    }
+
+    #[test]
+    fn saving_restored_work_over_a_file_changed_since_the_checkpoint_asks_first() {
+        // W1-03. A restored document had no stamp, and with none the check
+        // before Save answers "unchanged" -- so whatever another program wrote
+        // after the crash was overwritten without a word.
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("restored.txt");
+        std::fs::write(&path, "written by another program since").expect("the file");
+        let checkpoint_before_that = bp_history::now_unix() - 600;
+
+        let mut state = AppState::new();
+        let id = restore_file_at(&mut state, &path, checkpoint_before_that);
+
+        assert!(
+            state.would_overwrite_external_change(id),
+            "Save must ask before overwriting a change made after the checkpoint"
+        );
+    }
+
+    #[test]
+    fn saving_restored_work_over_the_file_the_checkpoint_knew_does_not_ask() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("restored.txt");
+        std::fs::write(&path, "as it was when the work began").expect("the file");
+        let long_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(600);
+        std::fs::File::options()
+            .write(true)
+            .open(&path)
+            .and_then(|f| f.set_modified(long_ago))
+            .expect("backdate the file");
+
+        let mut state = AppState::new();
+        let id = restore_file_at(&mut state, &path, bp_history::now_unix());
+
+        assert!(
+            !state.would_overwrite_external_change(id),
+            "an unchanged file must save without a question nobody needs"
+        );
+    }
+
+    #[test]
+    fn restoring_work_for_a_file_that_has_gone_leaves_save_to_write_it_again() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("deleted since.txt");
+
+        let mut state = AppState::new();
+        let id = restore_file_at(&mut state, &path, bp_history::now_unix());
+
+        assert!(!state.would_overwrite_external_change(id));
     }
 
     #[test]

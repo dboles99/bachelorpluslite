@@ -39,10 +39,19 @@
 //! discarded the previous run's `1.json` within seconds, before anybody had
 //! answered whether to recover it. A run now discards only what it wrote,
 //! and a previous run's work stays until somebody decides about it.
+//!
+//! **And a session still running is not left behind** (ADR-0084, amended
+//! for W1-03). A journal holds an exclusive lock on `<session>.lock` from its
+//! first checkpoint until it is dropped, and only a session whose lock can be
+//! taken is offered. The operating system drops the lock when the process
+//! ends, however it ends, so a crash is noticed without a process id -- which
+//! a later run could have been given (trap 5).
 
 #![forbid(unsafe_code)]
 
+use std::fs::File;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use bp_security::Recovery;
 use serde::{Deserialize, Serialize};
@@ -156,10 +165,18 @@ impl Refusal {
 }
 
 /// Where checkpoints are kept.
-#[derive(Debug, Clone)]
+///
+/// Not `Clone`: a journal owns its session's lock, and two values each
+/// believing they held it would disagree about when it was released.
+#[derive(Debug)]
 pub struct Journal {
     dir: PathBuf,
     session: String,
+    /// The lock that says this session is alive, taken by the first
+    /// checkpoint rather than by `new`: `new` must not create the directory,
+    /// and a session with nothing on disk has nothing anybody could be
+    /// offered. Retried by every checkpoint until it is held.
+    lock: Mutex<Option<File>>,
 }
 
 /// Which checkpoint on disk an entry is, so a decision about it can name it
@@ -214,14 +231,72 @@ fn new_session() -> String {
     format!("{nanos:x}.{:x}.{count:x}", std::process::id())
 }
 
-/// Whether any file in `dir` was written under `session`.
+/// Whether any file in `dir` was written under `session`, its lock included.
 fn session_in_use(dir: &Path, session: &str) -> bool {
+    has_checkpoints(dir, session) || lock_path(dir, session).exists()
+}
+
+/// Whether `session` has a checkpoint, finished or being written, in `dir`.
+fn has_checkpoints(dir: &Path, session: &str) -> bool {
     let prefix = format!("{session}-");
     std::fs::read_dir(dir).is_ok_and(|entries| {
         entries
             .filter_map(Result::ok)
             .any(|entry| entry.file_name().to_string_lossy().starts_with(&prefix))
     })
+}
+
+fn lock_path(dir: &Path, session: &str) -> PathBuf {
+    dir.join(format!("{session}.lock"))
+}
+
+/// Whether a running journal holds `session`'s lock.
+///
+/// Asked with a *shared* lock, so two instances starting together and each
+/// asking about the same crashed session do not read one another's question
+/// as a live owner. Anything short of a definite "held" is an answer of no:
+/// a session from a build before locks has no lock file, and a filesystem
+/// that cannot lock would otherwise hide somebody's work for ever. Offering a
+/// live session's work is the defect this fixes; hiding a dead one's would
+/// be worse.
+fn is_live(dir: &Path, session: &str) -> bool {
+    File::open(lock_path(dir, session)).is_ok_and(|file| {
+        matches!(
+            file.try_lock_shared(),
+            Err(std::fs::TryLockError::WouldBlock)
+        )
+    })
+}
+
+/// Create the journal directory, readable by its owner alone on Unix.
+///
+/// A checkpoint is a plaintext copy of somebody's unsaved work, and the
+/// directory it sits in would otherwise take the umask -- readable by every
+/// account on the machine, usually. Set on every checkpoint rather than once,
+/// because a directory deleted and recreated underneath a run is recreated
+/// here. Windows needs nothing: a profile's local application data is
+/// already private to its user.
+fn create_private_dir(dir: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dir)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
+    }
+    Ok(())
+}
+
+/// Open a file in the journal for writing, owner-only on Unix for the reason
+/// [`create_private_dir`] gives.
+fn private_file(path: &Path, truncate: bool) -> std::io::Result<File> {
+    let mut options = File::options();
+    options.write(true).create(true).truncate(truncate);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    options.open(path)
 }
 
 /// How old a temporary file must be before it is debris rather than a
@@ -241,7 +316,33 @@ impl Journal {
         while session_in_use(&dir, &session) {
             session = new_session();
         }
-        Self { dir, session }
+        Self {
+            dir,
+            session,
+            lock: Mutex::new(None),
+        }
+    }
+
+    /// Take this session's lock if it is not held yet.
+    ///
+    /// Before the first checkpoint file exists, so no other run ever sees
+    /// this session's work without also seeing that it is alive. A failure
+    /// is not an error: the checkpoint is written anyway, because keeping the
+    /// work matters more than hiding it from a second instance -- which is
+    /// exactly how every run behaved before the lock existed.
+    fn hold_lock(&self) {
+        let Ok(mut held) = self.lock.lock() else {
+            return;
+        };
+        if held.is_some() {
+            return;
+        }
+        let Ok(file) = private_file(&lock_path(&self.dir, &self.session), false) else {
+            return;
+        };
+        if file.try_lock().is_ok() {
+            *held = Some(file);
+        }
     }
 
     /// The directory checkpoints are written to, for showing the user.
@@ -289,13 +390,14 @@ impl Journal {
                 return Ok(Written::Refused(Refusal::ProfileForbidsIt));
             }
         }
-        std::fs::create_dir_all(&self.dir)?;
+        create_private_dir(&self.dir)?;
+        self.hold_lock();
         let json = serde_json::to_vec_pretty(checkpoint)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
         let target = self.file_for(id);
         let temp = target.with_extension("json.tmp");
-        std::fs::write(&temp, &json)?;
+        std::io::Write::write_all(&mut private_file(&temp, true)?, &json)?;
         std::fs::rename(&temp, &target)?;
         Ok(Written::Yes)
     }
@@ -347,10 +449,17 @@ impl Journal {
     }
 
     /// The checkpoints some other run left: what there is to offer to
-    /// recover. This session's own are live, not left.
+    /// recover. This session's own are live, not left -- and so are those of
+    /// another instance still running, whose work is not anybody's to
+    /// recover while it is being typed.
     pub fn left_behind(&self) -> Vec<(Entry, Checkpoint)> {
         let mut found = self.pending();
-        found.retain(|(entry, _)| entry.session.as_deref() != Some(self.session.as_str()));
+        found.retain(|(entry, _)| match entry.session.as_deref() {
+            Some(session) => session != self.session && !is_live(&self.dir, session),
+            // A bare `N.json` is from a build before sessions, which cannot
+            // still be running under this one's lock.
+            None => true,
+        });
         found
     }
 
@@ -369,7 +478,26 @@ impl Journal {
                 Err(e) => return Err(e),
             }
         }
+        for entry in entries {
+            if let Some(session) = entry.session.as_deref() {
+                self.remove_dead_lock(session);
+            }
+        }
         Ok(())
+    }
+
+    /// Remove `session`'s lock file once nothing of it is left and nothing
+    /// holds it.
+    ///
+    /// Never this session's own, and never a live one's: deleting a lock
+    /// another instance holds would let the next launch offer its work.
+    fn remove_dead_lock(&self, session: &str) {
+        if session == self.session || has_checkpoints(&self.dir, session) {
+            return;
+        }
+        if !is_live(&self.dir, session) {
+            let _ = std::fs::remove_file(lock_path(&self.dir, session));
+        }
     }
 
     /// Delete stray temporary files left by a crash mid-checkpoint.
@@ -385,16 +513,43 @@ impl Journal {
         let now = std::time::SystemTime::now();
         for entry in entries.filter_map(Result::ok) {
             let path = entry.path();
-            if !path.extension().is_some_and(|e| e == "tmp") {
+            let temporary = path.extension().is_some_and(|e| e == "tmp");
+            let lock = path.extension().is_some_and(|e| e == "lock");
+            if !temporary && !lock {
                 continue;
             }
             let stale = entry.metadata().and_then(|m| m.modified()).is_ok_and(|at| {
                 now.duration_since(at)
                     .is_ok_and(|age| age >= STALE_TEMPORARY)
             });
-            if stale {
-                let _ = std::fs::remove_file(path);
+            if !stale {
+                continue;
             }
+            if temporary {
+                let _ = std::fs::remove_file(path);
+            } else if let Some(session) = path.file_stem().and_then(|s| s.to_str()) {
+                // A run that saved everything and then crashed leaves a lock
+                // with no checkpoint beside it, which no `forget` will ever
+                // name. Stale as well as unheld, so a run that has only just
+                // created its lock is never caught between creating and
+                // taking it.
+                self.remove_dead_lock(session);
+            }
+        }
+    }
+}
+
+impl Drop for Journal {
+    /// A run that ends holding no unsaved work takes its lock file with it,
+    /// or every launch that ever wrote a checkpoint would leave one behind.
+    /// One that still has checkpoints keeps it: the next launch forgets it
+    /// together with them.
+    fn drop(&mut self) {
+        let held = self.lock.get_mut().ok().and_then(Option::take);
+        if held.is_some() && !has_checkpoints(&self.dir, &self.session) {
+            // Removed while still held, so no other run can find the file
+            // unheld and take this session for a crashed one in between.
+            let _ = std::fs::remove_file(lock_path(&self.dir, &self.session));
         }
     }
 }
@@ -591,7 +746,7 @@ mod tests {
             .checkpoint(2, &checkpoint("b"), Recovery::Plaintext)
             .unwrap();
 
-        let relaunched = next_run(&crashed);
+        let relaunched = next_run(crashed);
         let offered: Vec<Entry> = relaunched
             .left_behind()
             .into_iter()
@@ -693,8 +848,15 @@ mod tests {
 
     /// The next launch: a second journal over the same directory, which is
     /// what a relaunch is.
-    fn next_run(journal: &Journal) -> Journal {
-        Journal::new(journal.location().to_path_buf())
+    ///
+    /// **By value**, because the run before a relaunch has ended. A journal
+    /// still in scope is a live instance holding its lock, and the next run
+    /// is right not to offer its work -- the case
+    /// `a_second_instance_is_not_offered_the_first_ones_live_work` pins.
+    fn next_run(journal: Journal) -> Journal {
+        let dir = journal.location().to_path_buf();
+        drop(journal);
+        Journal::new(dir)
     }
 
     #[test]
@@ -713,7 +875,7 @@ mod tests {
             )
             .unwrap();
 
-        let relaunched = next_run(&crashed);
+        let relaunched = next_run(crashed);
         relaunched.discard(1).unwrap();
 
         let left = relaunched.left_behind();
@@ -733,7 +895,7 @@ mod tests {
             "a run must not offer to recover its own live work"
         );
         assert_eq!(journal.pending().len(), 1, "but it is still on disk");
-        assert_eq!(next_run(&journal).left_behind().len(), 1);
+        assert_eq!(next_run(journal).left_behind().len(), 1);
     }
 
     #[test]
@@ -767,7 +929,7 @@ mod tests {
             .checkpoint(2, &checkpoint("b"), Recovery::Plaintext)
             .unwrap();
 
-        let relaunched = next_run(&crashed);
+        let relaunched = next_run(crashed);
         let offered: Vec<Entry> = relaunched
             .left_behind()
             .into_iter()
@@ -794,7 +956,7 @@ mod tests {
         // Trap 5: unique must mean unique, including back to back in one
         // process, where the clock may not have moved.
         let (_dir, first) = journal();
-        let second = next_run(&first);
+        let second = Journal::new(first.location().to_path_buf());
         first
             .checkpoint(1, &checkpoint("first"), Recovery::Plaintext)
             .unwrap();
@@ -830,7 +992,7 @@ mod tests {
         let live = journal.location().join("other-run-1.json.tmp");
         std::fs::write(&live, "{ being written").unwrap();
 
-        next_run(&journal).clean_temporaries();
+        next_run(journal).clean_temporaries();
 
         assert!(live.exists(), "a write in progress was deleted");
     }
@@ -850,6 +1012,166 @@ mod tests {
         assert!(
             !session_in_use(&journal.location().join("missing"), &journal.session),
             "a directory that does not exist holds no sessions"
+        );
+    }
+
+    // --- a second instance (W1-03) ----------------------------------------
+
+    fn lock_files(journal: &Journal) -> Vec<String> {
+        std::fs::read_dir(journal.location())
+            .map(|entries| {
+                entries
+                    .filter_map(Result::ok)
+                    .map(|e| e.file_name().to_string_lossy().into_owned())
+                    .filter(|name| name.ends_with(".lock"))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn a_second_instance_is_not_offered_the_first_ones_live_work() {
+        // The half of W1-03 per-run sessions left open. Two handles in one
+        // process conflict under both `flock` and `LockFileEx`, so this is
+        // two instances as far as the lock can tell.
+        let (_dir, first) = journal();
+        first
+            .checkpoint(1, &checkpoint("being typed"), Recovery::Plaintext)
+            .unwrap();
+
+        let second = Journal::new(first.location().to_path_buf());
+        assert!(
+            second.left_behind().is_empty(),
+            "a running instance's unsaved work was offered to another to recover"
+        );
+
+        // The first ends without saving -- a crash, as far as the journal can
+        // tell, because the lock goes and the checkpoint stays.
+        drop(first);
+        let left = second.left_behind();
+        assert_eq!(left.len(), 1, "a crashed run's work must be offered");
+        assert_eq!(left[0].1.text, "being typed");
+    }
+
+    #[test]
+    fn a_session_from_a_build_before_locks_is_still_offered() {
+        // Unsaved work written by the W1-02 build has a session tag and no
+        // lock file. No lock to ask means nothing can say it is alive, and
+        // hiding it would lose it to an upgrade.
+        let (_dir, journal) = journal();
+        std::fs::create_dir_all(journal.location()).unwrap();
+        let old = serde_json::to_vec(&checkpoint("from the build before")).unwrap();
+        std::fs::write(journal.location().join("18f0c.1a2.0-3.json"), old).unwrap();
+
+        let left = journal.left_behind();
+        assert_eq!(left.len(), 1);
+        assert_eq!(left[0].0.id(), 3);
+    }
+
+    #[test]
+    fn forgetting_a_crashed_runs_work_takes_its_lock_file_too() {
+        let (_dir, crashed) = journal();
+        crashed
+            .checkpoint(1, &checkpoint("a"), Recovery::Plaintext)
+            .unwrap();
+        crashed
+            .checkpoint(2, &checkpoint("b"), Recovery::Plaintext)
+            .unwrap();
+
+        let relaunched = next_run(crashed);
+        assert_eq!(lock_files(&relaunched).len(), 1, "the crashed run's lock");
+        let offered: Vec<Entry> = relaunched
+            .left_behind()
+            .into_iter()
+            .map(|(e, _)| e)
+            .collect();
+
+        relaunched.forget(&offered[..1]).unwrap();
+        assert_eq!(
+            lock_files(&relaunched).len(),
+            1,
+            "the lock of a session with a checkpoint still on disk must stay"
+        );
+        relaunched.forget(&offered[1..]).unwrap();
+        assert!(lock_files(&relaunched).is_empty());
+    }
+
+    #[test]
+    fn a_run_that_ends_with_nothing_unsaved_leaves_no_lock_file() {
+        let (_dir, journal) = journal();
+        journal
+            .checkpoint(1, &checkpoint("then saved"), Recovery::Plaintext)
+            .unwrap();
+        journal.discard(1).unwrap();
+        let location = journal.location().to_path_buf();
+
+        drop(journal);
+
+        let left: Vec<_> = std::fs::read_dir(&location).unwrap().collect();
+        assert!(left.is_empty(), "a clean exit left files behind");
+    }
+
+    #[test]
+    fn a_stale_lock_nobody_holds_is_swept_and_a_held_one_is_not() {
+        // A run that saved everything and then crashed leaves a lock no
+        // `forget` will name. A long-running instance has a lock just as old.
+        let (_dir, crashed) = journal();
+        crashed
+            .checkpoint(1, &checkpoint("saved, then crashed"), Recovery::Plaintext)
+            .unwrap();
+        crashed.discard(1).unwrap();
+        let dead = lock_path(crashed.location(), &crashed.session);
+        // A crash, so no `Drop`: the lock file stays and the lock goes. This
+        // is the one way to end a run without its destructor.
+        let location = crashed.location().to_path_buf();
+        crashed.lock.lock().unwrap().take();
+        std::mem::forget(crashed);
+        age(&dead);
+
+        let running = Journal::new(location.clone());
+        running
+            .checkpoint(1, &checkpoint("still typing"), Recovery::Plaintext)
+            .unwrap();
+        running.discard(1).unwrap();
+        let held = lock_path(&location, &running.session);
+        age(&held);
+
+        next_run_beside(&location).clean_temporaries();
+
+        assert!(!dead.exists(), "a dead run's stale lock was kept");
+        assert!(held.exists(), "a live run's lock was deleted");
+    }
+
+    /// Another launch while `dir`'s journals are still in scope.
+    fn next_run_beside(dir: &Path) -> Journal {
+        Journal::new(dir.to_path_buf())
+    }
+
+    #[test]
+    fn a_lock_file_alone_marks_a_session_as_used() {
+        let (_dir, journal) = journal();
+        std::fs::create_dir_all(journal.location()).unwrap();
+        std::fs::write(lock_path(journal.location(), "taken"), "").unwrap();
+        assert!(session_in_use(journal.location(), "taken"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_journal_is_readable_by_its_owner_alone() {
+        // A checkpoint is a plaintext copy of somebody's unsaved work.
+        use std::os::unix::fs::PermissionsExt;
+        let (_dir, journal) = journal();
+        journal
+            .checkpoint(1, &checkpoint("private"), Recovery::Plaintext)
+            .unwrap();
+
+        let mode = |path: &Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(journal.location()), 0o700, "the directory");
+        assert_eq!(mode(&journal.file_for(1)), 0o600, "the checkpoint");
+        assert_eq!(
+            mode(&lock_path(journal.location(), &journal.session)),
+            0o600,
+            "the lock"
         );
     }
 }

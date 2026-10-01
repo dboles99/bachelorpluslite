@@ -150,7 +150,10 @@ rather than decisions, and did not need one:
   step holding the document twice, which nothing read. Replace All and the
   line operations can be undone on the default surface now, which since
   Slint 1.18.1 they could not;
-- a second instance being offered the first one's live checkpoints;
+- ~~a second instance being offered the first one's live checkpoints~~ --
+  **fixed** (W1-03): a running instance holds a lock on its session, and only
+  a session nobody holds is offered; a restored document is stamped, so Save
+  asks before overwriting a file changed since the crash;
 - the dynamic C runtime on Windows;
 - no release existing yet.
 
