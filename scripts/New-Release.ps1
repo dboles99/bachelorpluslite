@@ -187,9 +187,9 @@ Copy-Item $icon (Join-Path $staging 'bachelorpad.ico')
 # jpeg only, so it cannot read the .ico Explorer needs -- two files, two
 # readers, and shipping only one of them is a silent failure in whichever was
 # left out.
-$windowIcon = Join-Path $Root 'assets/io.github.dboles99.BachelorPadPlus.png'
-if (-not (Test-Path $windowIcon)) { throw 'assets/io.github.dboles99.BachelorPadPlus.png is missing -- the window would show the toolkit default' }
-Copy-Item $windowIcon (Join-Path $staging 'io.github.dboles99.BachelorPadPlus.png')
+$windowIcon = Join-Path $Root 'assets/io.github.dboles99.bachelorpluslite.png'
+if (-not (Test-Path $windowIcon)) { throw 'assets/io.github.dboles99.bachelorpluslite.png is missing -- the window would show the toolkit default' }
+Copy-Item $windowIcon (Join-Path $staging 'io.github.dboles99.bachelorpluslite.png')
 
 # The in-app help, generated from docs/ (ADR-0075). Help > User Guide opens
 # `app-help/index.md` as a document -- not in a browser, because this product

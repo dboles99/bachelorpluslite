@@ -401,6 +401,16 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
         }
     }
 
+    // The window's Wayland app id and X11 class, which a dock matches against
+    // the `.desktop` file's name to give the window its icon and group it
+    // under the right launcher (W3-03). Unset, winit names it after the
+    // executable, `bachelorpad`, which matches no `.desktop` file this product
+    // writes -- so a registered product still showed a generic icon. Ignored
+    // on Windows, and before the window exists or not at all.
+    if let Err(e) = slint::set_xdg_app_id(bp_platform::APP_ID) {
+        tracing::warn!("could not set the window's application id: {e}");
+    }
+
     let ui = AppWindow::new()?;
 
     // The window title, from the constant rather than from `app.slint`. The

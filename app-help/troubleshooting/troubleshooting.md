@@ -42,7 +42,7 @@ bpad --log debug
 The icons ship **beside** the executable, not inside it
 ([ADR-0068](https://bpad.prompt-forge.dev/docs)). If you moved `bachelorpad.exe` out of
 the unpacked folder and left `bachelorpad.ico` and
-`io.github.dboles99.BachelorPadPlus.png` behind, both break.
+`io.github.dboles99.bachelorpluslite.png` behind, both break.
 
 Move the whole folder, or unpack it again.
 

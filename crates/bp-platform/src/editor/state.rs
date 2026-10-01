@@ -57,7 +57,7 @@ impl AssociationState {
     #[must_use]
     pub fn describe(&self, extension: &str) -> String {
         match self {
-            Self::Ours => format!("BachelorPad+ opens .{extension} files."),
+            Self::Ours => format!("{} opens .{extension} files.", crate::DISPLAY_NAME),
             Self::Other { handler } => format!("{handler} opens .{extension} files."),
             Self::Unclaimed => format!("Nothing is set to open .{extension} files."),
             Self::Unknown { reason } => {
@@ -149,7 +149,8 @@ impl AssociationReport {
             return format!("Cannot tell which application opens the {total} selected file types.");
         }
         format!(
-            "BachelorPad+ opens {} of the {total} selected file types.",
+            "{} opens {} of the {total} selected file types.",
+            crate::DISPLAY_NAME,
             self.ours()
         )
     }

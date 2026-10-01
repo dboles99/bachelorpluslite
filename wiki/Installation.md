@@ -74,7 +74,7 @@ The archive contains:
 | `bachelorpad.exe` | The program |
 | `bpad.cmd` | A short spelling, for the command line |
 | `bachelorpad.ico` | The icon Explorer draws for registered file types |
-| `io.github.dboles99.BachelorPadPlus.png` | The icon the window shows |
+| `io.github.dboles99.bachelorpluslite.png` | The icon the window shows |
 | `app-help/` | The in-app help, opened by Help > User Guide |
 | `LICENSE`, `THIRD-PARTY-NOTICES.md` | GPL-3.0-only, and the crates it links |
 | `BUILD.txt` | Version, commit, target, and that it is unsigned |

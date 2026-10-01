@@ -107,7 +107,7 @@ The archive contains:
 | `bachelorpad.exe` | The program |
 | `bpad.cmd` | A short spelling, for the command line |
 | `bachelorpad.ico` | The icon Explorer draws for registered file types |
-| `io.github.dboles99.BachelorPadPlus.png` | The icon the window shows |
+| `io.github.dboles99.bachelorpluslite.png` | The icon the window shows |
 | `app-help/` | The in-app help, opened by Help > User Guide |
 | `LICENSE`, `THIRD-PARTY-NOTICES.md` | GPL-3.0-only, and the crates it links |
 | `BUILD.txt` | Version, commit, target, and that it is unsigned |
@@ -1033,7 +1033,9 @@ Nothing has happened yet.
 ### Windows
 
 Choose a preset and confirm. You get a **`.reg` file**, written where you can
-find it.
+find it, and beside it a second one that undoes it (see *Undoing it*, below).
+Both are UTF-16, which is what `regedit` expects; open them in this editor or
+in Notepad to read them.
 
 **Read it.** It is a few lines, and it is your machine.
 
@@ -1077,8 +1079,13 @@ system theme.
 
 ### Undoing it
 
-Windows: **Settings > Default apps**, and set the types back. The registry
-entries can be removed by hand if you want them gone entirely.
+Windows: **Settings > Default apps**, and set the types back. Then, to take
+the registration off entirely, double-click the second file written beside
+the first, `io.github.dboles99.bachelorpluslite-remove.reg`. Read it first,
+as before: it deletes this product's own keys, and takes only this product's
+*values* out of the keys other applications share. It also removes what
+builds before 1.0 registered under their earlier names, so it is the one to
+run if you ever registered 0.9.5.
 
 Linux: delete the two files and run the two commands again.
 
@@ -1324,7 +1331,7 @@ bpad --log debug
 The icons ship **beside** the executable, not inside it
 ([ADR-0068](https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0068.md)). If you moved `bachelorpad.exe` out of
 the unpacked folder and left `bachelorpad.ico` and
-`io.github.dboles99.BachelorPadPlus.png` behind, both break.
+`io.github.dboles99.bachelorpluslite.png` behind, both break.
 
 Move the whole folder, or unpack it again.
 

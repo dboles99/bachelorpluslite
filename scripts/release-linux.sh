@@ -69,7 +69,7 @@ find "$DIR/app-help" -type f -exec chmod 644 {} +
 # The icon, beside the binary rather than in an icon theme (ADR-0068). With no
 # installer there is no step that could place it in one, so the `.desktop`
 # file written by Set as Default Editor points at it here.
-ICON=io.github.dboles99.BachelorPadPlus.png
+ICON=io.github.dboles99.bachelorpluslite.png
 test -f "assets/$ICON" || { echo "assets/$ICON is missing -- the .desktop file would name nothing" >&2; exit 1; }
 cp "assets/$ICON" "$DIR/$ICON"
 

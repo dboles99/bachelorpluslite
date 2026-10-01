@@ -125,7 +125,7 @@ C:\Apps\BachelorPadLite\bachelorpad.exe
 <td>The icon Explorer draws for registered file types</td>
 </tr>
 <tr>
-<td><code>io.github.dboles99.BachelorPadPlus.png</code></td>
+<td><code>io.github.dboles99.bachelorpluslite.png</code></td>
 <td>The icon the window shows</td>
 </tr>
 <tr>
@@ -1037,7 +1037,9 @@ than not registering it (<a href="https://github.com/dboles99/bachelorpluslite/b
 </blockquote>
 <h3 id="windows-2">Windows</h3>
 <p>Choose a preset and confirm. You get a <strong><code>.reg</code> file</strong>, written where you can
-find it.</p>
+find it, and beside it a second one that undoes it (see <em>Undoing it</em>, below).
+Both are UTF-16, which is what <code>regedit</code> expects; open them in this editor or
+in Notepad to read them.</p>
 <p><strong>Read it.</strong> It is a few lines, and it is your machine.</p>
 <pre><code>HKEY_CURRENT_USER\Software\Classes\...
 </code></pre>
@@ -1067,8 +1069,13 @@ only where it is convenient.</p>
 as on Windows: with no installer there is no step that could put an icon in a
 system theme.</p>
 <h3 id="undoing-it">Undoing it</h3>
-<p>Windows: <strong>Settings &gt; Default apps</strong>, and set the types back. The registry
-entries can be removed by hand if you want them gone entirely.</p>
+<p>Windows: <strong>Settings &gt; Default apps</strong>, and set the types back. Then, to take
+the registration off entirely, double-click the second file written beside
+the first, <code>io.github.dboles99.bachelorpluslite-remove.reg</code>. Read it first,
+as before: it deletes this product's own keys, and takes only this product's
+<em>values</em> out of the keys other applications share. It also removes what
+builds before 1.0 registered under their earlier names, so it is the one to
+run if you ever registered 0.9.5.</p>
 <p>Linux: delete the two files and run the two commands again.</p>
 <p>This product will not remove them for you, which is the same rule as
 everywhere else (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0070.md">ADR-0070</a>).</p>
@@ -1317,7 +1324,7 @@ why you cannot filter these safely -- open them.</p>
 <p>The icons ship <strong>beside</strong> the executable, not inside it
 (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0068.md">ADR-0068</a>). If you moved <code>bachelorpad.exe</code> out of
 the unpacked folder and left <code>bachelorpad.ico</code> and
-<code>io.github.dboles99.BachelorPadPlus.png</code> behind, both break.</p>
+<code>io.github.dboles99.bachelorpluslite.png</code> behind, both break.</p>
 <p>Move the whole folder, or unpack it again.</p>
 <h3 id="text-looks-wrong-or-the-window-renders-oddly">Text looks wrong, or the window renders oddly</h3>
 <p>Try the other renderer:</p>
