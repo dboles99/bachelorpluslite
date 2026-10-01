@@ -1344,6 +1344,15 @@ it from PowerShell or a command prompt.</p>
 caret is -- and a feature that has to know cannot be built on it
 (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0018.md">ADR-0018</a>). See
 <a href="#the-two-editor-surfaces">Editing</a>.</p>
+<h3 id="typing-is-slow-in-a-large-file">Typing is slow in a large file</h3>
+<p>The default editing view lays out the whole document again on every key, so
+typing slows as the file grows: measured at about 80 ms of processor per key
+at 100 KB, and more above that. From 512 KiB the status bar says so when the
+file opens (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0092.md">ADR-0092</a>).</p>
+<p>Reading, scrolling, Find and saving are not affected. To type in a large
+file, start the program with <code>--editor-view</code>, which draws only the lines on
+screen. It is not the default because it cannot take input-method text, so
+Japanese or Chinese cannot be typed in it.</p>
 <h3 id="dropping-a-file-on-the-window-does-nothing">Dropping a file on the window does nothing</h3>
 <p>Not implemented yet. It is buildable on Windows and on an X11 Linux session,
 and will not work on a native Wayland one, whose window system does not hand

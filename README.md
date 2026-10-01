@@ -79,6 +79,10 @@ reaches the menus and the controls are named for a screen reader, but nobody
 has run NVDA or Orca on it, and until somebody has it does not say so
 ([ADR-0088](docs/decisions/ADR-0088.md)).
 
+Typing slows down in a large file: the default view lays out the whole
+document on every key, and from 512 KiB the status bar says so and names
+`--editor-view`, which does not ([ADR-0092](docs/decisions/ADR-0092.md)).
+
 Duplicate line, move line and the Insert menu need `--editor-view`, because
 they have to know where the caret is and the toolkit's text widget will not
 say ([ADR-0018](docs/decisions/ADR-0018.md)).

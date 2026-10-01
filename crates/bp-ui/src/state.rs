@@ -808,6 +808,9 @@ impl AppState {
                 self.editors.insert(id, bp_editor::Editor::new(&file.text));
                 self.sizes.insert(id, file.bytes_on_disk);
                 self.mark_in_step(id, &path2);
+                if let Some(notice) = slow_typing_notice(file.bytes_on_disk, self.editor_view) {
+                    self.error = Some(notice);
+                }
             }
             // The error types already render a message naming the file and
             // what to do about it, which is exactly what the status bar wants.
@@ -1426,6 +1429,31 @@ pub(crate) fn recovery_dir() -> PathBuf {
 /// thresholds are stated in -- 8 MiB and 192 MiB -- so a status bar reading
 /// "9.4 MB" against a threshold documented as 8 MiB would invite arithmetic
 /// that does not work out.
+/// The size from which typing in the default surface is slow enough to say
+/// so (D29, ADR-0092).
+///
+/// `TextInput` lays the whole document out again on every key: about 80 ms of
+/// processor per key at 100 KB on a release build, and it grows with the
+/// document. Half a megabyte is where that stops being a lag nobody notices.
+const SLOW_TYPING_BYTES: u64 = 512 * 1024;
+
+/// What to say when a document this large opens in the default surface.
+///
+/// Said once, at open, as a notice rather than a refusal: the file opens and
+/// can be edited, and somebody reading a log rather than typing in it never
+/// meets the cost. `--editor-view` draws only the lines on screen and has no
+/// such cost, which is why it is named -- and why it is not the default,
+/// since it has no input-method composition (ADR-0018).
+fn slow_typing_notice(bytes: u64, editor_view: bool) -> Option<String> {
+    (bytes >= SLOW_TYPING_BYTES && !editor_view).then(|| {
+        format!(
+            "Large file ({}) -- typing may lag in this view; --editor-view draws only the lines \
+             on screen",
+            human_bytes(bytes)
+        )
+    })
+}
+
 fn human_bytes(bytes: u64) -> String {
     const KIB: f64 = 1024.0;
     let bytes = bytes as f64;
@@ -2113,6 +2141,44 @@ mod tests {
         state.save_copy(id, &copy);
 
         assert_eq!(std::fs::read(&copy).expect("copied"), NOTEPAD_CRLF_EDITED);
+    }
+
+    // --- large files (D29) ------------------------------------------------
+
+    #[test]
+    fn a_large_file_says_typing_may_lag_and_names_the_view_that_does_not() {
+        assert!(
+            slow_typing_notice(SLOW_TYPING_BYTES, false)
+                .is_some_and(|notice| notice.contains("--editor-view")),
+            "the notice must name the way out, or it is only a complaint"
+        );
+        assert_eq!(slow_typing_notice(SLOW_TYPING_BYTES - 1, false), None);
+        assert_eq!(
+            slow_typing_notice(SLOW_TYPING_BYTES * 4, true),
+            None,
+            "the custom surface draws only what is on screen and has no such cost"
+        );
+    }
+
+    #[test]
+    fn opening_a_large_file_puts_the_notice_in_the_status_bar() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("big.log");
+        let line = "a line of a log that somebody will read rather than type in\n";
+        let body = line.repeat(usize::try_from(SLOW_TYPING_BYTES).unwrap_or(0) / line.len() + 1);
+        std::fs::write(&path, body).expect("the fixture");
+
+        let mut state = AppState::new();
+        state.open(path);
+
+        assert!(
+            state
+                .error
+                .as_deref()
+                .is_some_and(|e| e.contains("typing may lag")),
+            "got {:?}",
+            state.error
+        );
     }
 
     #[test]

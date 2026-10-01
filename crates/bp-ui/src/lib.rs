@@ -438,6 +438,9 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
     }
 
     let mut initial = state::AppState::new();
+    // Before any file opens: opening reads it, to decide whether a large file
+    // needs a warning the custom surface would make untrue (ADR-0092).
+    initial.editor_view = options.editor_view;
     if let Some(theme) = options.theme {
         initial.theme = theme;
     }
@@ -472,7 +475,6 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
     initial.journal.clean_temporaries();
     let left_behind = initial.journal.left_behind();
 
-    initial.editor_view = options.editor_view;
     let state = Rc::new(RefCell::new(initial));
     let dialogs = dialog::Dialogs::new(&ui);
     if !left_behind.is_empty() {

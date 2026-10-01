@@ -76,6 +76,18 @@ caret is -- and a feature that has to know cannot be built on it
 ([ADR-0018](../decisions/ADR-0018.md)). See
 [Editing](03-editing.md#the-two-editor-surfaces).
 
+## Typing is slow in a large file
+
+The default editing view lays out the whole document again on every key, so
+typing slows as the file grows: measured at about 80 ms of processor per key
+at 100 KB, and more above that. From 512 KiB the status bar says so when the
+file opens ([ADR-0092](../decisions/ADR-0092.md)).
+
+Reading, scrolling, Find and saving are not affected. To type in a large
+file, start the program with `--editor-view`, which draws only the lines on
+screen. It is not the default because it cannot take input-method text, so
+Japanese or Chinese cannot be typed in it.
+
 ## Dropping a file on the window does nothing
 
 Not implemented yet. It is buildable on Windows and on an X11 Linux session,
