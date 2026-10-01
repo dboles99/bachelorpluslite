@@ -69,7 +69,14 @@ jobs:
             libwayland-dev
 
       - uses: dtolnay/rust-toolchain@stable
+      # Keyed on the image as well as the OS. The cache key says "Linux",
+      # not which Linux, so moving this job to ubuntu-22.04 restored a target
+      # directory built on 24.04 -- proc-macros needing glibc 2.39, which the
+      # 22.04 runner cannot load, and the build failed before compiling a
+      # line of this repository (ADR-0087).
       - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.os }}
 
       # Regenerated rather than trusted. The committed file is checked by CI,
       # and a release is the one moment where "checked on some other run" is
