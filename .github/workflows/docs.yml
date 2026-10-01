@@ -113,8 +113,12 @@ jobs:
         env:
           GIT_ASKPASS: /bin/true
         run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Committed in the maintainer's name, not the bot's: the wiki is a
+          # repository, and only Daniel Boles appears as an author or
+          # committer in any repository of this project. The noreply address
+          # is the one his commits made through GitHub already carry.
+          git config --global user.name "Daniel Boles"
+          git config --global user.email "dboles99@users.noreply.github.com"
           ./scripts/Sync-GitHubWiki.ps1 -Push `
             -Remote "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.wiki.git"
         continue-on-error: true
