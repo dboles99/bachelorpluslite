@@ -43,7 +43,7 @@
   "applicationCategory": "DeveloperApplication",
   "applicationSubCategory": "Text Editor",
   "operatingSystem": "Windows 10, Windows 11, Linux",
-  "softwareVersion": "0.9.5",
+  "softwareVersion": "{{version}}",
   "inLanguage": "{{lang}}",
   "url": "{{canonical}}",
   "downloadUrl": "{{repo}}/releases/latest",
@@ -224,11 +224,11 @@
     <div class="buttons">
       <a class="btn primary" href="{{repo}}/releases/latest" rel="noopener">
         {{dlWindows}}
-        <span class="sub">bachelorpad-lite-0.9.5-windows-x86_64.zip</span>
+        <span class="sub">bachelorpad-lite-{{version}}-windows-x86_64-setup.exe</span>
       </a>
       <a class="btn primary" href="{{repo}}/releases/latest" rel="noopener">
         {{dlLinux}}
-        <span class="sub">bachelorpad-lite-0.9.5-linux-x86_64.tar.gz</span>
+        <span class="sub">.deb &middot; .rpm &middot; AppImage</span>
       </a>
       <a class="btn" href="{{repo}}/releases" rel="noopener">
         {{dlAll}}
@@ -382,7 +382,7 @@
           <li><a href="{{repo}}/blob/main/DECISIONS.md" rel="noopener">{{footRecord}}</a></li>
           <li><a href="{{repo}}/blob/main/docs/decisions/ADR-0071.md" rel="noopener">{{footWhyGpl}}</a></li>
           <li><a href="{{repo}}/blob/main/docs/decisions/ADR-0055.md" rel="noopener">{{footWhyUnsigned}}</a></li>
-          <li><a href="{{repo}}/blob/main/docs/decisions/ADR-0067.md" rel="noopener">{{footWhyNoInstaller}}</a></li>
+          <li><a href="{{repo}}/blob/main/docs/decisions/ADR-0093.md" rel="noopener">{{footWhyNoInstaller}}</a></li>
         </ul>
       </div>
       <div>

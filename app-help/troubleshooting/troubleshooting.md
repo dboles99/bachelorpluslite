@@ -12,7 +12,7 @@ SmartScreen, because the archives are unsigned
 Verify the download first if you would rather:
 
 ```powershell
-(Get-FileHash -Algorithm SHA256 .\bachelorpad-lite-0.9.5-windows-x86_64.zip).Hash
+(Get-FileHash -Algorithm SHA256 .\bachelorpad-lite-1.0.0-windows-x86_64-setup.exe).Hash
 ```
 
 against the line in `SHA256SUMS.txt` on the releases page.

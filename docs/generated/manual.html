@@ -1433,7 +1433,7 @@ questions below turn out to be about.</p>
 <p>SmartScreen, because the archives are unsigned
 (<a href="https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0055.md">ADR-0055</a>). <em>More info</em> then <em>Run anyway</em>.</p>
 <p>Verify the download first if you would rather:</p>
-<pre><code class="language-powershell">(Get-FileHash -Algorithm SHA256 .\bachelorpad-lite-0.9.5-windows-x86_64.zip).Hash
+<pre><code class="language-powershell">(Get-FileHash -Algorithm SHA256 .\bachelorpad-lite-1.0.0-windows-x86_64-setup.exe).Hash
 </code></pre>
 <p>against the line in <code>SHA256SUMS.txt</code> on the releases page.</p>
 <h3 id="it-will-not-start-at-all">It will not start at all</h3>
@@ -1605,7 +1605,7 @@ edit.</em></p>
 <p>The flag list in <code>bp_config::cli::FLAGS</code> is the one home for this, and
 <code>--help</code> is rendered from it rather than written out -- so a flag that exists
 without a line here is not possible.</p>
-<pre><code class="language-text">BachelorPad+ Lite 0.9.5 -- Text editor for notes and logs
+<pre><code class="language-text">BachelorPad+ Lite 1.0.0 -- Text editor for notes and logs
 
 Usage:
   bachelorpad [options] [file...]
@@ -2256,8 +2256,8 @@ without it is half a release</strong> -- ADR-0001 makes Linux an equal target.</
 out again is not a release, it is a copy, and the difference only shows up when
 somebody asks what is in it.</p>
 <h3 id="by-tag">By tag</h3>
-<pre><code class="language-sh">git tag v0.9.5
-git push origin v0.9.5
+<pre><code class="language-sh">git tag v1.0.0
+git push origin v1.0.0
 </code></pre>
 <p><code>.github/workflows/release.yml</code> builds both targets on clean runners, checks
 the tag against what the binary reports, and <strong>creates a draft</strong> holding every
@@ -2299,7 +2299,7 @@ downloads, which is the same gesture ADR-0053 keeps for clicking merge.</p>
 <h3 id="what-the-version-is-and-where-it-comes-from">What the version is, and where it comes from</h3>
 <p><code>[workspace.package] version</code> in <code>Cargo.toml</code>, and <strong>nowhere else</strong>.</p>
 <p>Both release scripts ask the binary rather than reading a manifest:</p>
-<pre><code>BachelorPad+ Lite 0.9.5
+<pre><code>BachelorPad+ Lite 1.0.0
 Text editor for notes and logs
 GPL-3.0-only
 </code></pre>

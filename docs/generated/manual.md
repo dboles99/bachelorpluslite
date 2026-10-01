@@ -1395,7 +1395,7 @@ SmartScreen, because the archives are unsigned
 Verify the download first if you would rather:
 
 ```powershell
-(Get-FileHash -Algorithm SHA256 .\bachelorpad-lite-0.9.5-windows-x86_64.zip).Hash
+(Get-FileHash -Algorithm SHA256 .\bachelorpad-lite-1.0.0-windows-x86_64-setup.exe).Hash
 ```
 
 against the line in `SHA256SUMS.txt` on the releases page.
@@ -1555,7 +1555,7 @@ The flag list in `bp_config::cli::FLAGS` is the one home for this, and
 without a line here is not possible.
 
 ```text
-BachelorPad+ Lite 0.9.5 -- Text editor for notes and logs
+BachelorPad+ Lite 1.0.0 -- Text editor for notes and logs
 
 Usage:
   bachelorpad [options] [file...]
@@ -1988,8 +1988,8 @@ somebody asks what is in it.
 ### By tag
 
 ```sh
-git tag v0.9.5
-git push origin v0.9.5
+git tag v1.0.0
+git push origin v1.0.0
 ```
 
 `.github/workflows/release.yml` builds both targets on clean runners, checks
@@ -2017,7 +2017,7 @@ downloads, which is the same gesture ADR-0053 keeps for clicking merge.
 Both release scripts ask the binary rather than reading a manifest:
 
 ```
-BachelorPad+ Lite 0.9.5
+BachelorPad+ Lite 1.0.0
 Text editor for notes and logs
 GPL-3.0-only
 ```

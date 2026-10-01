@@ -8,7 +8,7 @@ The flag list in `bp_config::cli::FLAGS` is the one home for this, and
 without a line here is not possible.
 
 ```text
-BachelorPad+ Lite 0.9.5 -- Text editor for notes and logs
+BachelorPad+ Lite 1.0.0 -- Text editor for notes and logs
 
 Usage:
   bachelorpad [options] [file...]

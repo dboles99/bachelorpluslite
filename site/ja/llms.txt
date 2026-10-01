@@ -7,7 +7,8 @@
 BachelorPad+ Lite は Windows と Linux 向けの無料でオープンソースのメモ帳代替エディタです。メモ帳と同じようにプレーンテキストを編集でき、そのうえメモ帳にできないことが一つあります。あなたのどのノートが同じ話題を扱っているかを知っているので、ファイル名を覚えていなくても先月の考えを取り出せます。起動は一瞬、ずっとオフラインで使え、何かを実行することも、どこかへ送ることも決してありません。
 
 Free and open source under GPL-3.0-only. Windows 10, Windows 11 and Linux,
-64-bit. There is no macOS build. Version 0.9.5.
+64-bit. There is no macOS build. Version 1.0.0: an installer for Windows,
+and a .deb, an .rpm and an AppImage for Linux.
 
 Source: https://github.com/dboles99/bachelorpluslite
 Downloads: https://github.com/dboles99/bachelorpluslite/releases/latest

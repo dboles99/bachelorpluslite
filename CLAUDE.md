@@ -3,7 +3,7 @@
 BachelorPad+ Lite — a Rust/Slint text editor. *Notepad when you want it. More
 when you need it.*
 
-**Public since 2026-09-10, GPL-3.0-only, version 0.9.5.** The product name is
+**GPL-3.0-only, version 1.0.0** ([ADR-0094](docs/decisions/ADR-0094.md)). The product name is
 `BachelorPad+ Lite` and lives in one place, `bp_platform::DISPLAY_NAME`
 ([ADR-0074](docs/decisions/ADR-0074.md)) — do not spell it out anywhere, and
 read that ADR before you are tempted to, because the last two renames both

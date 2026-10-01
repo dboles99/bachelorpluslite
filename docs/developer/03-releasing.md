@@ -28,8 +28,8 @@ somebody asks what is in it.
 ## By tag
 
 ```sh
-git tag v0.9.5
-git push origin v0.9.5
+git tag v1.0.0
+git push origin v1.0.0
 ```
 
 `.github/workflows/release.yml` builds both targets on clean runners, checks
@@ -57,7 +57,7 @@ downloads, which is the same gesture ADR-0053 keeps for clicking merge.
 Both release scripts ask the binary rather than reading a manifest:
 
 ```
-BachelorPad+ Lite 0.9.5
+BachelorPad+ Lite 1.0.0
 Text editor for notes and logs
 GPL-3.0-only
 ```

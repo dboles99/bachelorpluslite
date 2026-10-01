@@ -189,7 +189,7 @@ It holds the traps that have each cost somebody a session.
 
 ## How this project works, if you are curious
 
-[`DECISIONS.md`](DECISIONS.md) is the index of 76 architecture decision
+[`DECISIONS.md`](DECISIONS.md) is the index of the architecture decision
 records **and the one home for every lesson learned**. The lessons are the
 interesting part: this repository writes down the *shape* of each mistake, not
 only the fix.
