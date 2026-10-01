@@ -61,7 +61,8 @@ because it has to know where the caret is (ADR-0018).
 
 | Row | State |
 | --- | --- |
-| LF / CRLF, UTF-8 / UTF-8 with BOM | **live** |
+| LF / CRLF, UTF-8 / UTF-8 with BOM / UTF-16 LE | **live** |
+| Reopen As -- ten encodings, for a guess that was wrong ([ADR-0085](https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0085.md)) | **live** |
 | Indent with Tabs / Spaces, Tab Width 2 / 4 / 8 | **live** — one width serves both the Tab key and how wide a tab is drawn; a soft tab goes to the next stop, not a fixed count |
 
 ## Note

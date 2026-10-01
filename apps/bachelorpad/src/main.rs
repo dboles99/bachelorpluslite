@@ -18,7 +18,12 @@ const PACKAGE: bp_config::cli::Package = bp_config::cli::Package {
 };
 
 fn main() -> anyhow::Result<()> {
-    let args: Vec<String> = std::env::args().collect();
+    // `--flag value` becomes `--flag=value` here, once, and files after `--`
+    // are set apart, so every reader below sees one spelling (W2-03).
+    let typed: Vec<String> = std::env::args().collect();
+    let arguments = bp_config::cli::arguments(&typed);
+    let named = arguments.files();
+    let args = arguments.flags;
 
     // Before configuration, deliberately. `--help` is what somebody reaches
     // for when the product is not behaving, and a config file broken badly
@@ -99,14 +104,9 @@ fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    // Anything that is not a flag is a file to open (specs.md §19).
-    // `args[0]` is the executable.
-    let files: Vec<std::path::PathBuf> = args
-        .iter()
-        .skip(1)
-        .filter(|a| !a.starts_with('-'))
-        .map(std::path::PathBuf::from)
-        .collect();
+    // Anything that is not a flag is a file to open (specs.md §19), and so
+    // is everything after `--`.
+    let files: Vec<std::path::PathBuf> = named.into_iter().map(std::path::PathBuf::from).collect();
 
     tracing::info!("starting {}", bp_ui::DISPLAY_NAME);
     bp_ui::run_with(bp_ui::RunOptions {
@@ -125,6 +125,7 @@ fn main() -> anyhow::Result<()> {
             }
         }),
         font_size: Some(loaded.config.font_size),
+        indent: bp_ui::indent_from(&loaded.config),
         measure_exit: args.iter().any(|a| a == "--measure-exit"),
         // Opt-in while the custom editor surface reaches parity with the
         // widget it replaces (word wrap, input-method composition). Parsed

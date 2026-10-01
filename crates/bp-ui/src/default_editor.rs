@@ -342,13 +342,34 @@ pub(crate) fn save_registry_script(
             "nothing was written — this registration has no registry script in it".to_owned(),
         );
     };
-    std::fs::write(target, &artefact.contents)
+    std::fs::write(target, artefact.bytes())
         .map_err(|e| format!("could not write {} — {e}", target.display()))?;
-    Ok(format!(
+    // The undo goes beside it, under the name the plan gives it. Written
+    // second, so a failure here leaves the registration the user asked for
+    // and says the removal script is missing rather than failing the lot.
+    let Some(removal) = plan.artefact(ArtefactKind::RegistryRemoval) else {
+        return Ok(written(target, plan));
+    };
+    let beside = target.with_file_name(&removal.relative_path);
+    match std::fs::write(&beside, removal.bytes()) {
+        Ok(()) => Ok(format!(
+            "{}; {} undoes it",
+            written(target, plan),
+            beside.display()
+        )),
+        Err(e) => Ok(format!(
+            "{}; the removal script was not written — {e}",
+            written(target, plan)
+        )),
+    }
+}
+
+fn written(target: &Path, plan: &RegistrationPlan) -> String {
+    format!(
         "wrote {} — {} values, every one under HKEY_CURRENT_USER; read it before you run it",
         target.display(),
         plan.registry_values.len()
-    ))
+    )
 }
 
 /// The file name to suggest for the `.reg` script.
@@ -571,8 +592,26 @@ mod tests {
         );
     }
 
+    /// A `.reg` file as text. They are UTF-16 with a byte-order mark, which
+    /// is what `regedit` reads without guessing (ADR-0091).
+    fn read_registry_file(path: &Path) -> String {
+        let bytes = std::fs::read(path).expect("the script is readable");
+        assert_eq!(
+            &bytes[..2],
+            &[0xFF, 0xFE],
+            "{} lacks its BOM",
+            path.display()
+        );
+        let (pairs, rest) = bytes[2..].as_chunks::<2>();
+        assert!(rest.is_empty(), "an odd number of bytes is not UTF-16");
+        let units: Vec<u16> = pairs.iter().map(|&pair| u16::from_le_bytes(pair)).collect();
+        String::from_utf16(&units).expect("valid UTF-16")
+    }
+
     #[test]
-    fn the_registry_script_is_written_where_the_user_chose_and_nowhere_else() {
+    fn the_registry_script_is_written_where_the_user_chose_with_its_undo_beside_it() {
+        // "And nowhere else" until 1.0; now its undo is written beside it, and
+        // nothing more (ADR-0091).
         let dir = tempfile::tempdir().expect("a temporary directory");
         let selection = AssociationSelection::preset(PRESET);
         let plan =
@@ -580,25 +619,46 @@ mod tests {
         let target = dir.path().join(registry_script_name(&plan));
 
         let status = save_registry_script(&plan, &target).expect("the script is written");
-        let written = std::fs::read_to_string(&target).expect("the script is readable");
 
-        assert!(
-            written.starts_with("Windows Registry Editor Version 5.00"),
-            "regedit refuses a file without that header"
+        let mut names: Vec<String> = std::fs::read_dir(dir.path())
+            .expect("the directory")
+            .filter_map(Result::ok)
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        assert_eq!(
+            names,
+            [
+                format!("{}-file-types.reg", bp_platform::APP_ID),
+                format!("{}-remove.reg", bp_platform::APP_ID),
+            ]
         );
+
+        for path in [
+            target.clone(),
+            dir.path()
+                .join(format!("{}-remove.reg", bp_platform::APP_ID)),
+        ] {
+            let written = read_registry_file(&path);
+            assert!(
+                written.starts_with("Windows Registry Editor Version 5.00"),
+                "regedit refuses a file without that header"
+            );
+            assert!(
+                !written.to_ascii_lowercase().contains("notepad"),
+                "ADR-0012: this product never names Notepad in a registry script"
+            );
+            assert!(
+                written
+                    .lines()
+                    .filter(|line| line.starts_with('['))
+                    .all(|line| line.starts_with("[HKEY_CURRENT_USER\\")
+                        || line.starts_with("[-HKEY_CURRENT_USER\\")),
+                "every key must be under the user hive"
+            );
+        }
         assert!(
-            !written.to_ascii_lowercase().contains("notepad"),
-            "ADR-0012: this product never names Notepad in a registry script"
-        );
-        assert!(
-            written
-                .lines()
-                .filter(|line| line.starts_with('['))
-                .all(|line| line.starts_with("[HKEY_CURRENT_USER\\")),
-            "every key must be under the user hive"
-        );
-        assert!(
-            status.contains("read it before you run it"),
+            status.contains("read it before you run it") && status.contains("undoes it"),
             "got '{status}'"
         );
     }

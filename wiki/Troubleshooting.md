@@ -12,7 +12,7 @@ SmartScreen, because the archives are unsigned
 Verify the download first if you would rather:
 
 ```powershell
-(Get-FileHash -Algorithm SHA256 .\bachelorpad-lite-0.9.5-windows-x86_64.zip).Hash
+(Get-FileHash -Algorithm SHA256 .\bachelorpad-lite-1.0.0-windows-x86_64-setup.exe).Hash
 ```
 
 against the line in `SHA256SUMS.txt` on the releases page.
@@ -42,7 +42,7 @@ bpad --log debug
 The icons ship **beside** the executable, not inside it
 ([ADR-0068](https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0068.md)). If you moved `bachelorpad.exe` out of
 the unpacked folder and left `bachelorpad.ico` and
-`io.github.dboles99.BachelorPadPlus.png` behind, both break.
+`io.github.dboles99.bachelorpluslite.png` behind, both break.
 
 Move the whole folder, or unpack it again.
 
@@ -75,6 +75,18 @@ The default surface is the toolkit's text widget, which will not say where the
 caret is -- and a feature that has to know cannot be built on it
 ([ADR-0018](https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0018.md)). See
 [Editing](Editing#the-two-editor-surfaces).
+
+## Typing is slow in a large file
+
+The default editing view lays out the whole document again on every key, so
+typing slows as the file grows: measured at about 80 ms of processor per key
+at 100 KB, and more above that. From 512 KiB the status bar says so when the
+file opens ([ADR-0092](https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0092.md)).
+
+Reading, scrolling, Find and saving are not affected. To type in a large
+file, start the program with `--editor-view`, which draws only the lines on
+screen. It is not the default because it cannot take input-method text, so
+Japanese or Chinese cannot be typed in it.
 
 ## Dropping a file on the window does nothing
 

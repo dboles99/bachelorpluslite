@@ -107,15 +107,21 @@ pub const APP_DIR: &str = "bachelorpad";
 ///
 /// `io.github.dboles99` rather than a `com.` domain because it is a namespace
 /// this project demonstrably controls; it is the standard form for a project
-/// without its own domain. The last segment is the application's name in its
-/// own capitalisation, minus the `+`, which is not a character a `.desktop`
-/// file name or a ProgId carries portably.
+/// without its own domain.
 ///
-/// **This value has a compatibility promise attached.** Changing it after
-/// anyone installs orphans every association they have made -- silently, by
-/// the old id simply ceasing to be anything. See [`APP_DIR`] for what it is
-/// deliberately not.
-pub const APP_ID: &str = "io.github.dboles99.BachelorPadPlus";
+/// **The last segment is the repository's name** (ADR-0091), which Flathub
+/// requires -- an `io.github` id must name the repository it is built from
+/// -- and which keeps the Lite edition out of the full BachelorPad+'s way.
+/// ADR-0032 chose `io.github.dboles99.BachelorPadPlus`, the full product's
+/// own name, and ADR-0074 noted the collision and deferred it; it was taken
+/// before 1.0 because after a release every installed copy would hold the
+/// old one.
+///
+/// **This value has a compatibility promise attached from 1.0 on.** Changing
+/// it after anyone installs orphans every association they have made --
+/// silently, by the old id simply ceasing to be anything. See [`APP_DIR`] for
+/// what it is deliberately not: the user's data does not move with it.
+pub const APP_ID: &str = "io.github.dboles99.bachelorpluslite";
 
 /// The product's name as a person reads it.
 ///
@@ -142,8 +148,11 @@ pub const APP_ID: &str = "io.github.dboles99.BachelorPadPlus";
 /// diagnostics report, a log line and two module headers. The pair test
 /// covered the two it was written for and nothing asked about the rest.
 /// Every one of them now reads this constant, and
-/// `every_place_the_product_names_itself_must_read_display_name` is what
-/// asks. A rename that reaches eight of eight is the only kind worth having.
+/// `tests/integration/tests/the_product_names_itself_through_one_constant.rs`
+/// is what asks. **It did not exist when this paragraph first named it**,
+/// under a test name nothing had -- and four registration messages went on
+/// saying "BachelorPad+" until 1.0 wrote it (ADR-0091). A rename that reaches
+/// eight of eight is the only kind worth having.
 pub const DISPLAY_NAME: &str = "BachelorPad+ Lite";
 
 /// One line, wherever the product introduces itself.

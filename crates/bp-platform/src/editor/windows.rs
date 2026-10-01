@@ -10,14 +10,14 @@
 //!
 //! Three places, all of them under `HKEY_CURRENT_USER`:
 //!
-//! * `HKCU\Software\Classes\BachelorPadPlus.<ext>` -- one ProgID per file
+//! * `HKCU\Software\Classes\BachelorPadPlusLite.<ext>` -- one ProgID per file
 //!   type, holding the friendly name, the icon and the open command. These are
 //!   ours; nothing else has a claim on a key with our name in it.
 //! * `HKCU\Software\Classes\.<ext>\OpenWithProgids` -- one *value* per
 //!   extension, naming the ProgID. This is the additive registration: it puts
 //!   the product in the "Open with" list without taking the extension from
 //!   whoever has it.
-//! * `HKCU\Software\BachelorPad+\Capabilities` and one value under
+//! * `HKCU\Software\BachelorPad+ Lite\Capabilities` and one value under
 //!   `HKCU\Software\RegisteredApplications` -- what makes the product appear
 //!   in Settings ▸ Default apps at all.
 //!
@@ -54,10 +54,38 @@ use super::file_type::AssociationSelection;
 /// A prefix rather than one flat ProgID because Windows shows the friendly
 /// name *per ProgID*: one shared ProgID would label every file type "Text
 /// document", including the notebooks and the encrypted documents.
-pub const PROG_ID_PREFIX: &str = "BachelorPadPlus";
+///
+/// **`BachelorPadPlusLite`, not `BachelorPadPlus`** (ADR-0091). The shorter
+/// name is the full BachelorPad+'s, and two products registering the same
+/// ProgID on one machine would each repoint the other's file types. It was
+/// renamed before 1.0, while the only registries holding the old name were
+/// this project's own test machines -- after a release, the rename would mean
+/// migrating every installed copy.
+pub const PROG_ID_PREFIX: &str = "BachelorPadPlusLite";
+
+/// The product's own key under `HKCU\Software`: its display name, because
+/// that is what Settings shows beside it.
+pub const SOFTWARE_KEY: &str = r"HKCU\Software\BachelorPad+ Lite";
 
 /// The key holding the application's declared capabilities.
-pub const CAPABILITIES_KEY: &str = r"HKCU\Software\BachelorPad+\Capabilities";
+pub const CAPABILITIES_KEY: &str = r"HKCU\Software\BachelorPad+ Lite\Capabilities";
+
+/// The ProgID prefix 0.9.5 and earlier wrote, before ADR-0091.
+///
+/// Named so the removal script can take it off a machine that applied an
+/// earlier registration. It is the full BachelorPad+'s name, and
+/// [`key_objection`] treats it as another application's for that reason;
+/// only [`removal_script`] may name it, and only because the full product
+/// has never shipped, so nothing but an earlier build of this one can have
+/// written it.
+pub const LEGACY_PROG_ID_PREFIX: &str = "BachelorPadPlus";
+
+/// The software key 0.9.5 and earlier wrote. See [`LEGACY_PROG_ID_PREFIX`].
+pub const LEGACY_SOFTWARE_KEY: &str = r"HKCU\Software\BachelorPad+";
+
+/// The names earlier builds registered under `RegisteredApplications`, one
+/// per display name the product has had (ADR-0074).
+pub const LEGACY_REGISTERED_NAMES: &[&str] = &["BachelorPad+", "BachelorPlusLite"];
 
 /// The one shared key this registration touches, and it adds a single value to
 /// it under the product's own name.
@@ -128,15 +156,15 @@ impl KeyObjection {
                 "Only per-user registration is supported; this key is outside HKEY_CURRENT_USER."
             }
             Self::AnotherApplication => {
-                "This key belongs to another application. BachelorPad+ registers only its own \
+                "This key belongs to another application. This product registers only its own \
                  ProgIDs and adds itself to the Open With list."
             }
             Self::SeizesTheAssociation => {
-                "This would take the file association rather than offer it. BachelorPad+ registers \
-                 as a handler and leaves the choice to Windows (ADR-0012)."
+                "This would take the file association rather than offer it. This product \
+                 registers as a handler and leaves the choice to Windows (ADR-0012)."
             }
             Self::TouchesNotepad => {
-                "BachelorPad+ never replaces, patches or redirects Notepad (ADR-0012)."
+                "This product never replaces, patches or redirects Notepad (ADR-0012)."
             }
         }
     }
@@ -192,7 +220,15 @@ pub fn key_objection(key: &str) -> Option<KeyObjection> {
     if rest == "software\\registeredapplications" {
         return None;
     }
-    if rest.starts_with("software\\bachelorpad+") {
+    // Exactly the product's own key and what is under it. This was
+    // `starts_with("software\\bachelorpad+")`, which also admitted the full
+    // BachelorPad+'s key -- harmless while that product did not exist, and the
+    // kind of prefix that stops being harmless without anybody noticing.
+    let own = SOFTWARE_KEY
+        .to_ascii_lowercase()
+        .trim_start_matches(r"hkcu\")
+        .to_owned();
+    if rest == own || rest.starts_with(&format!("{own}\\")) {
         return None;
     }
     Some(KeyObjection::AnotherApplication)
@@ -283,7 +319,9 @@ pub fn registry_values(app: &AppInfo, selection: &AssociationSelection) -> Vec<R
     values.push(RegistryValue {
         key: REGISTERED_APPLICATIONS_KEY.to_owned(),
         name: ValueName::Named(app.display_name.clone()),
-        data: r"Software\BachelorPad+\Capabilities".to_owned(),
+        // The capabilities key without its hive: Windows reads this value
+        // relative to the hive it is found in.
+        data: CAPABILITIES_KEY.trim_start_matches(r"HKCU\").to_owned(),
     });
 
     values
@@ -337,6 +375,125 @@ pub fn registry_script(values: &[RegistryValue]) -> String {
         out.push_str("\"\r\n");
     }
     out
+}
+
+/// A `.reg` file that removes what [`registry_values`] would set, and what
+/// earlier builds set under their names.
+///
+/// **The registration's undo**, which the installation page had promised
+/// without anything producing it (W2-05). Every file type the product knows,
+/// not only the selection: what an earlier run registered is not recorded
+/// anywhere, and removing a value that is not there does nothing.
+///
+/// It deletes the product's own ProgID keys and software key outright, and
+/// takes single *values* out of the shared keys -- `OpenWithProgids` and
+/// `RegisteredApplications` -- never the keys themselves, which belong to
+/// every application that has ever registered a file type.
+#[must_use]
+pub fn removal_script(display_name: &str, extensions: &[&str]) -> String {
+    let mut out = String::from("Windows Registry Editor Version 5.00\r\n");
+    for prefix in [PROG_ID_PREFIX, LEGACY_PROG_ID_PREFIX] {
+        for extension in extensions {
+            let extension = extension.trim_start_matches('.');
+            out.push_str(&format!(
+                "\r\n[-{}]\r\n",
+                full_hive(&format!(r"HKCU\Software\Classes\{prefix}.{extension}"))
+            ));
+            out.push_str(&format!(
+                "\r\n[{}]\r\n\"{}\"=-\r\n",
+                full_hive(&format!(
+                    r"HKCU\Software\Classes\.{extension}\OpenWithProgids"
+                )),
+                escape_reg(&format!("{prefix}.{extension}"))
+            ));
+        }
+    }
+    for key in [SOFTWARE_KEY, LEGACY_SOFTWARE_KEY] {
+        out.push_str(&format!("\r\n[-{}]\r\n", full_hive(key)));
+    }
+    out.push_str(&format!(
+        "\r\n[{}]\r\n",
+        full_hive(REGISTERED_APPLICATIONS_KEY)
+    ));
+    let mut names = vec![display_name];
+    names.extend(
+        LEGACY_REGISTERED_NAMES
+            .iter()
+            .copied()
+            .filter(|n| *n != display_name),
+    );
+    for name in names {
+        out.push_str(&format!("\"{}\"=-\r\n", escape_reg(name)));
+    }
+    out
+}
+
+/// `values` as Inno Setup `[Registry]` lines, each under the installer task
+/// `task` (ADR-0093).
+///
+/// **Generated, so the installer and File > Set as Default Editor register
+/// the same keys.** `packaging/windows/registry.iss` is this function's
+/// output, committed so a reviewer can read what the installer writes, and a
+/// test regenerates it and fails when the two differ -- the same arrangement
+/// the generated documentation has (ADR-0075).
+///
+/// The uninstall flags follow ownership, which is [`key_objection`]'s
+/// distinction: a key that is ours is deleted whole; from a key every
+/// application shares -- `OpenWithProgids`, `RegisteredApplications` -- only
+/// our value is.
+///
+/// Inno constants such as `{app}` are written through as they are, so an
+/// `AppInfo` naming `{app}\bachelorpad.exe` produces a path Inno resolves at
+/// install time. A literal brace anywhere else would need doubling; nothing
+/// this product registers contains one.
+#[must_use]
+pub fn inno_registry_section(values: &[RegistryValue], task: &str) -> String {
+    let quote = |text: &str| text.replace('"', "\"\"");
+    let mut out = String::from(
+        "; Generated by bp_platform::editor::windows::inno_registry_section -- do not edit.\n\
+         ; A test regenerates it and fails when it differs; set BLESS=1 to rewrite it.\n\
+         [Registry]\n",
+    );
+    for value in values {
+        let subkey = value.key.strip_prefix(r"HKCU\").unwrap_or(&value.key);
+        let lower = subkey.to_ascii_lowercase();
+        let shared =
+            lower.ends_with(r"\openwithprogids") || lower == r"software\registeredapplications";
+        let name = match &value.name {
+            ValueName::Default => String::new(),
+            ValueName::Named(name) => format!("; ValueName: \"{}\"", quote(name)),
+        };
+        out.push_str(&format!(
+            "Root: HKA; Subkey: \"{}\"; ValueType: string{name}; ValueData: \"{}\"; Flags: {}; Tasks: {task}\n",
+            quote(subkey),
+            quote(&value.data),
+            if shared { "uninsdeletevalue" } else { "uninsdeletekey" },
+        ));
+    }
+    // The product's own key, removed once uninstalling has emptied it: its
+    // `Capabilities` subkey goes by the flag above, and leaving the parent
+    // behind empty would be one more thing in the registry nobody can explain.
+    out.push_str(&format!(
+        "Root: HKA; Subkey: \"{}\"; Flags: uninsdeletekeyifempty; Tasks: {task}\n",
+        quote(SOFTWARE_KEY.trim_start_matches(r"HKCU\")),
+    ));
+    out
+}
+
+/// A `.reg` script as the bytes `regedit` reads without guessing.
+///
+/// **UTF-16LE with a byte-order mark** (W2-05). The "Version 5.00" header
+/// declares a Unicode file, and `regedit` reads a UTF-8 one through the
+/// system code page -- so a path with an `é` in it, a user folder named after
+/// somebody, registered a command pointing at a directory that does not
+/// exist.
+#[must_use]
+pub fn registry_file_bytes(script: &str) -> Vec<u8> {
+    let mut bytes = vec![0xFF, 0xFE];
+    for unit in script.encode_utf16() {
+        bytes.extend_from_slice(&unit.to_le_bytes());
+    }
+    bytes
 }
 
 /// `HKCU\` expanded, because `.reg` files require the long hive name.

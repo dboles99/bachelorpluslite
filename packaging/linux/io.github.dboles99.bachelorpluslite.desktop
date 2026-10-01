@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=BachelorPad+ Lite
+GenericName=Text Editor
+Comment=Text editor for notes and logs
+Exec=bachelorpad %F
+Icon=io.github.dboles99.bachelorpluslite
+Terminal=false
+Categories=Utility;TextEditor;
+MimeType=text/plain;text/markdown;
+Keywords=notepad;text;editor;notes;markdown;
+StartupWMClass=io.github.dboles99.bachelorpluslite

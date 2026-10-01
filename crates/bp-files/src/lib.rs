@@ -21,13 +21,15 @@
 #![forbid(unsafe_code)]
 
 mod encode;
+mod legacy;
 mod load;
 mod save;
 mod utf16;
 mod watch;
 
-pub use encode::{LineEndingPolicy, LineEndingSurvey, encode};
-pub use load::{LoadError, LoadedFile, load};
+pub use encode::{LineEndingPolicy, LineEndingSurvey, Unencodable, encode};
+pub use legacy::named as encoding_named;
+pub use load::{LoadError, LoadedFile, load, load_as};
 pub use save::{Overwrite, SaveError, SaveOptions, SaveOutcome, atomic_write, resolve_in_dir};
 pub use watch::{DiskState, FileStamp, check};
 

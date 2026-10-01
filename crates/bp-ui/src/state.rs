@@ -30,13 +30,16 @@
 //! closing, the editor and viewer maps, the gutter, and the labels the status
 //! bar reads.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 use bp_config::Recent;
 use bp_core::{Document, DocumentId, Encoding, LineEnding, UNTITLED, Workspace};
-use bp_files::{DiskState, FileStamp, LineEndingPolicy, SaveOptions, atomic_write, encode, load};
+use bp_files::{
+    DiskState, FileStamp, LineEndingPolicy, LineEndingSurvey, SaveOptions, atomic_write, encode,
+    load,
+};
 use bp_formats::Format;
 use bp_naming::SemanticName;
 use bp_theme::ThemeId;
@@ -178,6 +181,17 @@ pub struct AppState {
     /// What each document's file looked like when we last read or wrote it,
     /// so an edit made by another program can be noticed.
     stamps: HashMap<DocumentId, FileStamp>,
+    /// Documents whose file already held both line-ending conventions when
+    /// it was read, and which nobody has since asked to convert.
+    ///
+    /// The one case in which Save writes the text's breaks through
+    /// unchanged (W1-06). Every other document is saved in its own
+    /// convention, because the text widget inserts `\n` for Enter whatever
+    /// the file is, and a paste brings whatever the clipboard held -- so a
+    /// stray break in a CRLF file is this program's doing, not the user's.
+    /// Which of a mixed file's breaks is the stray is not this program's to
+    /// say, so that file is left as it came until Format > LF or CRLF says.
+    arrived_mixed: HashSet<DocumentId>,
     pub(crate) recent: Recent,
     /// Standing warning about the file on disk. Distinct from `error`, which
     /// reports something that just failed; this persists until resolved.
@@ -277,6 +291,7 @@ impl AppState {
             indent: bp_editor::Indent::default(),
             font_size: bp_config::DEFAULT_FONT_SIZE,
             stamps: HashMap::new(),
+            arrived_mixed: HashSet::new(),
             recent: bp_config::load_recent(),
             disk_warning: None,
             matches: Vec::new(),
@@ -366,7 +381,14 @@ impl AppState {
     pub(crate) fn restore(&mut self, entries: impl IntoIterator<Item = bp_history::Checkpoint>) {
         for entry in entries {
             let id = match entry.path {
-                Some(path) => self.workspace.open_path(path, now()),
+                Some(path) => {
+                    let stamp = restored_stamp(&path, entry.written_at);
+                    let id = self.workspace.open_path(path, now());
+                    if let Some(stamp) = stamp {
+                        self.stamps.insert(id, stamp);
+                    }
+                    id
+                }
                 None => self.workspace.open_new(now()),
             };
             self.editors.insert(id, bp_editor::Editor::new(&entry.text));
@@ -577,6 +599,16 @@ impl AppState {
 
     /// Discard edits and re-read the active document from disk.
     pub(crate) fn reload(&mut self) {
+        self.reload_as(None);
+    }
+
+    /// Read the active document's file again, as `encoding` or as `load`
+    /// would detect it (Format > Reopen As, ADR-0085).
+    ///
+    /// The correction for a guess that was wrong. A refusal leaves the
+    /// document exactly as it was and says why in the status bar: a file the
+    /// chosen encoding cannot read is not opened as something it is not.
+    pub(crate) fn reload_as(&mut self, encoding: Option<Encoding>) {
         self.error = None;
         let Some(id) = self.workspace.active_id() else {
             return;
@@ -589,7 +621,11 @@ impl AppState {
         else {
             return;
         };
-        match load(&path) {
+        let loaded = match encoding {
+            Some(encoding) => bp_files::load_as(&path, encoding),
+            None => load(&path),
+        };
+        match loaded {
             Ok(file) => {
                 if let Some(doc) = self.workspace.get_mut(id) {
                     doc.set_encoding(file.encoding);
@@ -597,6 +633,7 @@ impl AppState {
                     // Back in step with disk, so the document is clean again.
                     doc.record_disk_save(now());
                 }
+                self.note_arrival(id, &file.text);
                 self.editors.insert(id, bp_editor::Editor::new(&file.text));
                 self.mark_in_step(id, &path);
             }
@@ -608,12 +645,40 @@ impl AppState {
     ///
     /// The bytes on disk no longer match the intent, which is exactly what
     /// "unsaved" means -- leaving it clean would hide a pending change.
+    ///
+    /// **Choosing is converting.** Save writes every break in the chosen
+    /// convention, in a file that arrived mixed too -- which is the one way to
+    /// ask for that, so choosing the convention its majority already is still
+    /// counts as a change.
     pub(crate) fn set_line_ending(&mut self, line_ending: LineEnding) {
-        if let Some(doc) = self.workspace.active_mut()
-            && doc.line_ending() != line_ending
+        let Some(id) = self.workspace.active_id() else {
+            return;
+        };
+        let was_mixed = self.arrived_mixed.remove(&id);
+        if let Some(doc) = self.workspace.get_mut(id)
+            && (doc.line_ending() != line_ending || was_mixed)
         {
             doc.set_line_ending(line_ending);
             doc.mark_modified();
+        }
+    }
+
+    /// Remember whether a file's text was mixed as it was read.
+    fn note_arrival(&mut self, id: DocumentId, text: &str) {
+        if LineEndingSurvey::of(text).is_mixed() {
+            self.arrived_mixed.insert(id);
+        } else {
+            self.arrived_mixed.remove(&id);
+        }
+    }
+
+    /// How Save and Save a Copy write `id`'s line breaks: see
+    /// [`Self::arrived_mixed`].
+    fn line_ending_policy(&self, id: DocumentId, declared: LineEnding) -> LineEndingPolicy {
+        if self.arrived_mixed.contains(&id) {
+            LineEndingPolicy::Preserve
+        } else {
+            LineEndingPolicy::ConvertTo(declared)
         }
     }
 
@@ -753,9 +818,13 @@ impl AppState {
                     doc.set_encoding(file.encoding);
                     doc.set_line_ending(file.line_ending);
                 }
+                self.note_arrival(id, &file.text);
                 self.editors.insert(id, bp_editor::Editor::new(&file.text));
                 self.sizes.insert(id, file.bytes_on_disk);
                 self.mark_in_step(id, &path2);
+                if let Some(notice) = slow_typing_notice(file.bytes_on_disk, self.editor_view) {
+                    self.error = Some(notice);
+                }
             }
             // The error types already render a message naming the file and
             // what to do about it, which is exactly what the status bar wants.
@@ -788,16 +857,22 @@ impl AppState {
             return SaveResult::NeedsPath;
         };
 
-        // `Preserve`, not the document's declared line ending: a save must
-        // return the bytes the user was given. Converting here is what made
-        // every save quietly rewrite the minority convention in a mixed
-        // document, with nothing on screen to say it had happened. Format ▸
-        // LF / CRLF is where a conversion is asked for, and it asks first.
-        let bytes = encode(
-            &self.text_of(id),
-            doc.encoding(),
-            LineEndingPolicy::Preserve,
-        );
+        // The document's own convention, unless its file arrived mixed
+        // (W1-06). Converting a mixed file is what made every save quietly
+        // rewrite its minority convention, with nothing on screen to say so;
+        // not converting at all is what made every CRLF file anybody pressed
+        // Enter in come back mixed.
+        let policy = self.line_ending_policy(id, doc.line_ending());
+        // A character the file's encoding cannot hold refuses the save and
+        // says which (ADR-0085); the document stays unsaved and nothing is
+        // written, so the file on disk is still the one that was opened.
+        let bytes = match encode(&self.text_of(id), doc.encoding(), policy) {
+            Ok(bytes) => bytes,
+            Err(unencodable) => {
+                self.error = Some(unencodable.to_string());
+                return SaveResult::Failed;
+            }
+        };
 
         match atomic_write(&target, &bytes, SaveOptions::default()) {
             Ok(_) => {
@@ -849,11 +924,14 @@ impl AppState {
         // The same policy as a real save, for the same reason the encoding is
         // shared: bytes written differently from the original would make the
         // copy a different file.
-        let bytes = encode(
-            &self.text_of(id),
-            doc.encoding(),
-            LineEndingPolicy::Preserve,
-        );
+        let policy = self.line_ending_policy(id, doc.line_ending());
+        let bytes = match encode(&self.text_of(id), doc.encoding(), policy) {
+            Ok(bytes) => bytes,
+            Err(unencodable) => {
+                self.error = Some(unencodable.to_string());
+                return SaveResult::Failed;
+            }
+        };
 
         match atomic_write(target, &bytes, SaveOptions::default()) {
             Ok(_) => {
@@ -1096,6 +1174,7 @@ impl AppState {
         self.error = None;
         if self.workspace.close(id).is_some() {
             self.editors.remove(&id);
+            self.arrived_mixed.remove(&id);
         }
         // A closed document is either saved, which already discarded its
         // checkpoint, or closed with Don't Save. Left on disk, the next launch
@@ -1379,6 +1458,31 @@ pub(crate) fn recovery_dir() -> PathBuf {
 /// thresholds are stated in -- 8 MiB and 192 MiB -- so a status bar reading
 /// "9.4 MB" against a threshold documented as 8 MiB would invite arithmetic
 /// that does not work out.
+/// The size from which typing in the default surface is slow enough to say
+/// so (D29, ADR-0092).
+///
+/// `TextInput` lays the whole document out again on every key: about 80 ms of
+/// processor per key at 100 KB on a release build, and it grows with the
+/// document. Half a megabyte is where that stops being a lag nobody notices.
+const SLOW_TYPING_BYTES: u64 = 512 * 1024;
+
+/// What to say when a document this large opens in the default surface.
+///
+/// Said once, at open, as a notice rather than a refusal: the file opens and
+/// can be edited, and somebody reading a log rather than typing in it never
+/// meets the cost. `--editor-view` draws only the lines on screen and has no
+/// such cost, which is why it is named -- and why it is not the default,
+/// since it has no input-method composition (ADR-0018).
+fn slow_typing_notice(bytes: u64, editor_view: bool) -> Option<String> {
+    (bytes >= SLOW_TYPING_BYTES && !editor_view).then(|| {
+        format!(
+            "Large file ({}) -- typing may lag in this view; --editor-view draws only the lines \
+             on screen",
+            human_bytes(bytes)
+        )
+    })
+}
+
 fn human_bytes(bytes: u64) -> String {
     const KIB: f64 = 1024.0;
     let bytes = bytes as f64;
@@ -1413,6 +1517,9 @@ fn checkpoint_encoding_of(encoding: Encoding) -> bp_history::CheckpointEncoding 
         Encoding::Utf8Bom => bp_history::CheckpointEncoding::Utf8Bom,
         Encoding::Utf16Le => bp_history::CheckpointEncoding::Utf16Le,
         Encoding::Utf16Be => bp_history::CheckpointEncoding::Utf16Be,
+        Encoding::Utf16LeNoBom => bp_history::CheckpointEncoding::Utf16LeNoBom,
+        Encoding::Utf16BeNoBom => bp_history::CheckpointEncoding::Utf16BeNoBom,
+        Encoding::Legacy(name) => bp_history::CheckpointEncoding::Legacy(name.to_owned()),
     }
 }
 
@@ -1422,6 +1529,45 @@ fn encoding_of_checkpoint(encoding: bp_history::CheckpointEncoding) -> Encoding 
         bp_history::CheckpointEncoding::Utf8Bom => Encoding::Utf8Bom,
         bp_history::CheckpointEncoding::Utf16Le => Encoding::Utf16Le,
         bp_history::CheckpointEncoding::Utf16Be => Encoding::Utf16Be,
+        bp_history::CheckpointEncoding::Utf16LeNoBom => Encoding::Utf16LeNoBom,
+        bp_history::CheckpointEncoding::Utf16BeNoBom => Encoding::Utf16BeNoBom,
+        // The text is already decoded, so the name decides only how the next
+        // save writes it. A name this build does not know -- from a later
+        // one, say -- falls back to UTF-8, which holds every character the
+        // checkpoint can contain, rather than losing the recovery.
+        bp_history::CheckpointEncoding::Legacy(name) => {
+            bp_files::encoding_named(&name).unwrap_or_default()
+        }
+    }
+}
+
+/// What a restored document's file is compared against from now on.
+///
+/// The file as it is, if nothing has written it since the checkpoint -- Save
+/// is then an ordinary save. If something has, a stamp that cannot match it,
+/// so the file reads as *Modified*: the status bar warns and Save asks
+/// before overwriting (W1-03). A restored document used to get no stamp at
+/// all, and `would_overwrite_external_change` answers no without one, so Save
+/// overwrote whatever another program had written since the crash without a
+/// word.
+///
+/// **Strictly before the second the checkpoint was written in**, because
+/// `written_at` has whole seconds and a write in that same second cannot be
+/// placed either side of it. It is read as a change: one question nobody
+/// needed, rather than one overwrite nobody saw. A file with no modification
+/// time has nothing to compare, and is taken as it is.
+fn restored_stamp(path: &Path, written_at: u64) -> Option<FileStamp> {
+    let stamp = FileStamp::of(path)?;
+    let modified = stamp.modified.map(|at| {
+        at.duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |since| since.as_secs())
+    });
+    match modified {
+        Some(secs) if secs >= written_at => Some(FileStamp {
+            modified: None,
+            ..stamp
+        }),
+        _ => Some(stamp),
     }
 }
 
@@ -1573,25 +1719,22 @@ mod tests {
         // on screen said so. `bp-files` owns the encoder now and the shell
         // asks it for `Preserve`; this is the test that goes red if somebody
         // "tidies" that back to the declared ending.
-        let dir = std::env::temp_dir().join(format!("bpad-ui-mixed-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("mixed.txt");
-
+        //
+        // **Narrowed by W1-06 to a file that arrived mixed.** A document that
+        // was uniform is saved in its own convention, because a stray break
+        // in it is this program's (Enter, a paste). This one reaches the
+        // save through an operation rather than typing, which is the other
+        // way text changes.
         let mut state = AppState::new();
-        let id = state.workspace.active_id().unwrap();
+        let (_dir, path, id) = open_bytes(&mut state, b"crlf\r\nlf\n");
         state.edit("crlf\r\nlf\nend".to_owned());
 
-        assert_eq!(
-            state.save_document(id, Some(path.clone())),
-            SaveResult::Saved
-        );
+        assert_eq!(state.save_document(id, None), SaveResult::Saved);
         assert_eq!(
             std::fs::read(&path).unwrap(),
             b"crlf\r\nlf\nend",
             "both conventions survive a save exactly as the user left them"
         );
-
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -1705,6 +1848,9 @@ mod tests {
         earlier
             .checkpoint(1, &entry, bp_security::Recovery::Plaintext)
             .expect("the earlier run's checkpoint");
+        // The earlier run has ended; one still holding its journal is a live
+        // instance, whose work is not offered (W1-03).
+        drop(earlier);
 
         let mut state = AppState::new();
         state.journal = bp_history::Journal::new(dir.path().to_path_buf());
@@ -1755,6 +1901,76 @@ mod tests {
             .expect("the recovered document was opened");
         assert_eq!(doc.encoding(), Encoding::Utf16Le);
         assert_eq!(doc.line_ending(), LineEnding::Lf);
+    }
+
+    /// Restore a checkpoint of `path` written `written_at`, returning the
+    /// document it became.
+    fn restore_file_at(state: &mut AppState, path: &Path, written_at: u64) -> DocumentId {
+        state.restore([bp_history::Checkpoint {
+            path: Some(path.to_path_buf()),
+            name: "restored.txt".to_owned(),
+            text: "the work from before the crash".to_owned(),
+            written_at,
+            encoding: bp_history::CheckpointEncoding::Utf8,
+            line_ending: None,
+        }]);
+        state
+            .workspace
+            .iter()
+            .find(|d| d.path() == Some(path))
+            .map(Document::id)
+            .expect("the restored document was opened")
+    }
+
+    #[test]
+    fn saving_restored_work_over_a_file_changed_since_the_checkpoint_asks_first() {
+        // W1-03. A restored document had no stamp, and with none the check
+        // before Save answers "unchanged" -- so whatever another program wrote
+        // after the crash was overwritten without a word.
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("restored.txt");
+        std::fs::write(&path, "written by another program since").expect("the file");
+        let checkpoint_before_that = bp_history::now_unix() - 600;
+
+        let mut state = AppState::new();
+        let id = restore_file_at(&mut state, &path, checkpoint_before_that);
+
+        assert!(
+            state.would_overwrite_external_change(id),
+            "Save must ask before overwriting a change made after the checkpoint"
+        );
+    }
+
+    #[test]
+    fn saving_restored_work_over_the_file_the_checkpoint_knew_does_not_ask() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("restored.txt");
+        std::fs::write(&path, "as it was when the work began").expect("the file");
+        let long_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(600);
+        std::fs::File::options()
+            .write(true)
+            .open(&path)
+            .and_then(|f| f.set_modified(long_ago))
+            .expect("backdate the file");
+
+        let mut state = AppState::new();
+        let id = restore_file_at(&mut state, &path, bp_history::now_unix());
+
+        assert!(
+            !state.would_overwrite_external_change(id),
+            "an unchanged file must save without a question nobody needs"
+        );
+    }
+
+    #[test]
+    fn restoring_work_for_a_file_that_has_gone_leaves_save_to_write_it_again() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("deleted since.txt");
+
+        let mut state = AppState::new();
+        let id = restore_file_at(&mut state, &path, bp_history::now_unix());
+
+        assert!(!state.would_overwrite_external_change(id));
     }
 
     #[test]
@@ -1867,6 +2083,200 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "work");
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // --- line endings on save (W1-06) ------------------------------------
+    //
+    // The byte vectors below were committed before the change they test
+    // (trap 7): a round trip through this build says nothing about what a
+    // file written by Notepad, or by the build before, turns into.
+
+    /// A file as Windows Notepad writes it.
+    const NOTEPAD_CRLF: &[u8] = b"first line\r\nsecond line\r\n";
+    /// The same file after Enter twice and two words, saved.
+    const NOTEPAD_CRLF_EDITED: &[u8] = b"first line\r\nsecond line\r\nthird\r\nfourth\r\n";
+    /// A file that was already mixed before this program touched it.
+    const ALREADY_MIXED: &[u8] = b"crlf\r\nlf\ncrlf again\r\n";
+
+    /// Open `bytes` as a file, returning its directory guard, path and id.
+    fn open_bytes(state: &mut AppState, bytes: &[u8]) -> (tempfile::TempDir, PathBuf, DocumentId) {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("note.txt");
+        std::fs::write(&path, bytes).expect("the fixture");
+        state.open(path.clone());
+        let id = state.workspace.active_id().expect("the opened document");
+        (dir, path, id)
+    }
+
+    #[test]
+    fn enter_in_a_notepad_file_is_saved_as_crlf_not_as_a_bare_line_feed() {
+        // W1-06. The text widget inserts `\n` for Enter whatever the file
+        // is, and Save wrote the text through unchanged -- so every CRLF
+        // file anybody edited came back mixed.
+        let mut state = AppState::new();
+        let (_dir, path, id) = open_bytes(&mut state, NOTEPAD_CRLF);
+
+        state.widget_edited("first line\r\nsecond line\r\nthird\nfourth\n");
+        assert_eq!(state.save_document(id, None), SaveResult::Saved);
+
+        assert_eq!(std::fs::read(&path).expect("saved"), NOTEPAD_CRLF_EDITED);
+    }
+
+    #[test]
+    fn a_file_that_was_mixed_when_opened_is_saved_as_it_came() {
+        // Which of a mixed file's breaks is the stray is not this program's
+        // to decide, and rewriting the minority silently is the defect
+        // `LineEndingPolicy::Preserve` exists for.
+        let mut state = AppState::new();
+        let (_dir, path, id) = open_bytes(&mut state, ALREADY_MIXED);
+
+        state.widget_edited("crlf\r\nlf\ncrlf again\r\nmore");
+        state.save_document(id, None);
+
+        assert_eq!(
+            std::fs::read(&path).expect("saved"),
+            b"crlf\r\nlf\ncrlf again\r\nmore"
+        );
+    }
+
+    #[test]
+    fn format_crlf_converts_the_file_when_it_is_saved() {
+        // Format > CRLF used to change the label and mark the document
+        // unsaved, and Save then wrote the LF bytes it already had.
+        let mut state = AppState::new();
+        let (_dir, path, id) = open_bytes(&mut state, b"one\ntwo\n");
+
+        state.set_line_ending(LineEnding::CrLf);
+        state.save_document(id, None);
+
+        assert_eq!(std::fs::read(&path).expect("saved"), b"one\r\ntwo\r\n");
+    }
+
+    #[test]
+    fn choosing_a_convention_for_a_mixed_file_makes_it_uniform() {
+        // The one way to ask for a mixed file to be converted, including to
+        // the convention its majority already is.
+        let mut state = AppState::new();
+        let (_dir, path, id) = open_bytes(&mut state, ALREADY_MIXED);
+
+        state.set_line_ending(LineEnding::CrLf);
+        assert!(
+            state.is_dirty(id),
+            "a conversion still to be written is unsaved"
+        );
+        state.save_document(id, None);
+
+        assert_eq!(
+            std::fs::read(&path).expect("saved"),
+            b"crlf\r\nlf\r\ncrlf again\r\n"
+        );
+    }
+
+    #[test]
+    fn a_copy_is_written_with_the_same_line_endings_as_a_save() {
+        let mut state = AppState::new();
+        let (dir, _path, id) = open_bytes(&mut state, NOTEPAD_CRLF);
+        state.widget_edited("first line\r\nsecond line\r\nthird\nfourth\n");
+
+        let copy = dir.path().join("copy.txt");
+        state.save_copy(id, &copy);
+
+        assert_eq!(std::fs::read(&copy).expect("copied"), NOTEPAD_CRLF_EDITED);
+    }
+
+    // --- legacy encodings (ADR-0085) -------------------------------------
+
+    /// "Café" and a line break, as Windows-1252 writes them.
+    const WESTERN: &[u8] = b"Caf\xe9 au lait, na\xefve gar\xe7on, r\xe9sum\xe9.\r\n";
+
+    #[test]
+    fn saving_a_character_the_files_encoding_cannot_hold_refuses_and_names_it() {
+        // ADR-0085: the encoder would otherwise write `&#945;` into a text
+        // file. The file on disk must be untouched by the refusal.
+        let mut state = AppState::new();
+        let (_dir, path, id) = open_bytes(&mut state, WESTERN);
+        state.reload_as(Some(Encoding::Legacy("windows-1252")));
+        let text = state.active_text();
+        state.widget_edited(&format!("{text}alpha is α\r\n"));
+
+        assert_eq!(state.save_document(id, None), SaveResult::Failed);
+        let error = state.error.clone().unwrap_or_default();
+        assert!(
+            error.contains("'α'") && error.contains("UTF-8"),
+            "got {error}"
+        );
+        assert_eq!(std::fs::read(&path).expect("unchanged"), WESTERN);
+        assert!(state.is_dirty(id), "the work is still unsaved, not lost");
+    }
+
+    #[test]
+    fn reopen_as_reads_the_file_again_in_the_encoding_chosen() {
+        let mut state = AppState::new();
+        let (_dir, _path, id) = open_bytes(&mut state, WESTERN);
+
+        state.reload_as(Some(Encoding::Legacy("windows-1251")));
+        assert_eq!(
+            state.workspace.get(id).map(Document::encoding),
+            Some(Encoding::Legacy("windows-1251"))
+        );
+        assert!(!state.active_text().contains('é'), "read as Cyrillic now");
+
+        state.reload_as(Some(Encoding::Legacy("windows-1252")));
+        assert!(state.active_text().starts_with("Café au lait"));
+    }
+
+    #[test]
+    fn reopen_as_an_encoding_that_cannot_read_the_file_leaves_the_document_alone() {
+        let mut state = AppState::new();
+        let (_dir, _path, id) = open_bytes(&mut state, WESTERN);
+        let before = state.active_text();
+
+        state.reload_as(Some(Encoding::Utf8));
+
+        assert!(state.error.is_some(), "a refusal says why");
+        assert_eq!(state.active_text(), before);
+        assert_ne!(
+            state.workspace.get(id).map(Document::encoding),
+            Some(Encoding::Utf8)
+        );
+    }
+
+    // --- large files (D29) ------------------------------------------------
+
+    #[test]
+    fn a_large_file_says_typing_may_lag_and_names_the_view_that_does_not() {
+        assert!(
+            slow_typing_notice(SLOW_TYPING_BYTES, false)
+                .is_some_and(|notice| notice.contains("--editor-view")),
+            "the notice must name the way out, or it is only a complaint"
+        );
+        assert_eq!(slow_typing_notice(SLOW_TYPING_BYTES - 1, false), None);
+        assert_eq!(
+            slow_typing_notice(SLOW_TYPING_BYTES * 4, true),
+            None,
+            "the custom surface draws only what is on screen and has no such cost"
+        );
+    }
+
+    #[test]
+    fn opening_a_large_file_puts_the_notice_in_the_status_bar() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("big.log");
+        let line = "a line of a log that somebody will read rather than type in\n";
+        let body = line.repeat(usize::try_from(SLOW_TYPING_BYTES).unwrap_or(0) / line.len() + 1);
+        std::fs::write(&path, body).expect("the fixture");
+
+        let mut state = AppState::new();
+        state.open(path);
+
+        assert!(
+            state
+                .error
+                .as_deref()
+                .is_some_and(|e| e.contains("typing may lag")),
+            "got {:?}",
+            state.error
+        );
     }
 
     #[test]

@@ -17,6 +17,9 @@ bp-naming = { path = "../bp-naming" }
 bp-platform = { path = "../bp-platform" }
 tempfile.workspace = true
 thiserror.workspace = true
+# Reading and writing the encodings a file arrives in (ADR-0085).
+encoding_rs.workspace = true
+chardetng.workspace = true
 
 [dev-dependencies]
 time = { workspace = true, features = ["macros"] }

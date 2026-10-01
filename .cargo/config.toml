@@ -1,0 +1,16 @@
+# The C runtime is linked into the Windows executable rather than loaded from
+# `vcruntime140.dll` (W2-01).
+#
+# A clean Windows 10 or 11 machine does not have the Visual C++
+# redistributable, and a binary that needs it fails before `main` with a
+# dialog about a missing DLL -- which every developer machine and every CI
+# runner hides, because Visual Studio installed it there long ago. A text
+# editor that asks a stranger to install a runtime first is not one they
+# keep.
+#
+# **Checked, not trusted.** `scripts/New-Release.ps1` refuses a binary whose
+# import table names the dynamic runtime, so a `RUSTFLAGS` in somebody's
+# environment -- which replaces this table rather than adding to it -- fails
+# the release instead of quietly shipping the dependency again.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

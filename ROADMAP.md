@@ -1,7 +1,12 @@
 # BachelorPlusLite Full-Product Roadmap
 
-> **The product is public, GPL-3.0-only, and version 0.9.5** as of
-> 2026-09-10. Six decisions in one session:
+> **Version 1.0.0, 2026-10-01** ([ADR-0094](docs/decisions/ADR-0094.md)):
+> every release-candidate blocker below is closed, with an installer for
+> Windows and a package for each kind of Linux
+> ([ADR-0093](docs/decisions/ADR-0093.md)). It ships unsigned, and nobody has
+> used it with a screen reader yet; both are a 1.x release's.
+>
+> **0.9.5 went public on** 2026-09-10. Six decisions in one session:
 > [ADR-0071](docs/decisions/ADR-0071.md) relicensed it and found the previous
 > claim described a fraction of the binary;
 > [ADR-0072](docs/decisions/ADR-0072.md) declined macOS with what it would
@@ -13,10 +18,9 @@
 > destinations; [ADR-0076](docs/decisions/ADR-0076.md) settled what the
 > website may collect.
 >
-> **What is left before 1.0 is a person's work, not a session's**: the manual
-> pass in `project/NEXT_SESSION.md` section 3, the Azure resource and DNS for
-> `bpad.prompt-forge.dev`, and a native review of the four translated
-> locales.
+> **What was left before 1.0 was a person's work** -- the manual pass, the
+> DNS for `bpad.prompt-forge.dev`, a native review of four locales -- and the
+> manual pass is still the gate on publishing the release.
 
 This is not an MVP roadmap. Each phase contributes to the full v1 target.
 
@@ -69,7 +73,7 @@ Status as of **2026-09-25**. Five words, meaning five different things:
 | 17 | Themes/personality/accessibility | **Started** | `project/tasks/12-themes-brand` | `bp-theme` |
 | 18 | Windows/Linux platform integration | **Started** | `project/tasks/13-platform` | `bp-platform` |
 | 19 | Hardening, fuzzing and benchmarks | **Started** | `project/tasks/14-hardening` | `fuzz/` (standalone, and now gated) |
-| 20 | Packaging, signing, release and upgrade testing | **Done**, less signing | [ADR-0067](docs/decisions/ADR-0067.md), [ADR-0068](docs/decisions/ADR-0068.md) | — |
+| 20 | Packaging, signing, release and upgrade testing | **Done**, less signing | [ADR-0068](docs/decisions/ADR-0068.md), [ADR-0093](docs/decisions/ADR-0093.md), [ADR-0094](docs/decisions/ADR-0094.md) | `packaging/` |
 
 **Phase 20 started on 2026-08-23, and what it found is worth knowing before
 anybody sizes the rest of it.** The inventory came first, as ADR-0048
@@ -132,8 +136,8 @@ ADR-0083 to ADR-0089. Four are done; the rest are decided and waiting on work.
 | A document past about 2,000 lines overflowed the renderer | [ADR-0083](docs/decisions/ADR-0083.md) | **Done** -- Slint 1.18.1 |
 | The site claimed what does not ship, and a date nobody planned | [ADR-0089](docs/decisions/ADR-0089.md) | **Done** |
 | No `zenity` on Linux deletes the recovery journal | [ADR-0084](docs/decisions/ADR-0084.md) | **Done** -- and the journal was re-keyed per run, because ids restarting at 1 let every launch delete the last one's `1.json` |
-| Windows-1252, Shift-JIS and GBK files are refused | [ADR-0085](docs/decisions/ADR-0085.md) | Decided; W2-04 |
-| The Linux binary needs glibc 2.39 | [ADR-0087](docs/decisions/ADR-0087.md) | Decided; W3-01 |
+| Windows-1252, Shift-JIS and GBK files are refused | [ADR-0085](docs/decisions/ADR-0085.md) | **Done** -- read, saved back as they came, and Reopen As for a wrong guess |
+| The Linux binary needs glibc 2.39 | [ADR-0087](docs/decisions/ADR-0087.md) | **Done** -- built on `ubuntu-22.04`, refused above 2.35 |
 | No keyboard route into the menus, no accessible names | [ADR-0088](docs/decisions/ADR-0088.md) | **Done** for the RC -- F10 and named controls, checked by reading the AT-SPI tree. A pass with NVDA and Orca is 1.0's |
 | Signing | [ADR-0086](docs/decisions/ADR-0086.md) | **Not a blocker**: the RC ships unsigned; 1.0 is SignPath or the Store |
 
@@ -144,14 +148,20 @@ rather than decisions, and did not need one:
 - ~~offsets passed to the widget in characters where it counts bytes~~ --
   **fixed** (W1-04): Find and Go to Line selected the wrong text in any
   document with a character outside ASCII, and the next key typed replaced it;
-- Enter writing `\n` into a CRLF file;
+- ~~Enter writing `\n` into a CRLF file~~ -- **fixed** (W1-06,
+  [ADR-0090](docs/decisions/ADR-0090.md)): a document is saved in its own
+  line ending, and Format > LF / CRLF, which had converted nothing, converts;
 - ~~the widget's own undo stack growing without bound~~ -- **fixed** (W1-05),
   and it was not the widget's: `bp-editor` kept every keystroke as an undo
   step holding the document twice, which nothing read. Replace All and the
   line operations can be undone on the default surface now, which since
   Slint 1.18.1 they could not;
-- a second instance being offered the first one's live checkpoints;
-- the dynamic C runtime on Windows;
+- ~~a second instance being offered the first one's live checkpoints~~ --
+  **fixed** (W1-03): a running instance holds a lock on its session, and only
+  a session nobody holds is offered; a restored document is stamped, so Save
+  asks before overwriting a file changed since the crash;
+- ~~the dynamic C runtime on Windows~~ -- **fixed** (W2-01): the runtime is
+  linked in, and `New-Release.ps1` refuses a binary that imports it;
 - no release existing yet.
 
 ## Two numbering schemes, reconciled

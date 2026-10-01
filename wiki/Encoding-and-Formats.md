@@ -2,23 +2,38 @@
 
 ## Encoding
 
-**Format > Encoding** offers **UTF-8** and **UTF-8 with BOM**.
+**A file opens in the encoding it was written in, and is saved back in that
+encoding** ([ADR-0085](https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0085.md)). The status bar always
+shows which.
 
-A document can also be opened in **UTF-16**, with a byte-order mark, and is
-saved back that way.
+| A file in | Opens as |
+| --- | --- |
+| UTF-8, with or without a byte-order mark | UTF-8 |
+| UTF-16 with a byte-order mark | UTF-16 LE or BE |
+| UTF-16 without one | UTF-16, found by its pattern -- it has a zero in every other byte |
+| Anything else -- the "ANSI" files Notepad writes, Shift-JIS, GBK | the legacy code page it most likely is, by name: `windows-1252`, `Shift_JIS`, `GBK` |
 
-**A file in a legacy code page is refused today.** Windows-1252, Shift-JIS
-and GBK text with any accented or non-Latin character stops at *not valid
-UTF-8*. Notepad opens them.
+The last row is **a guess**, made by looking at the bytes, and on a short file
+it can be wrong -- four bytes of French can look like Czech. When it is, use
+**Format > Reopen As** and choose the right one: Western, Central European,
+Cyrillic, Japanese, Simplified or Traditional Chinese, Korean, or back to
+UTF-8 or UTF-16. Reopening reads the file again, so it asks first if you have
+unsaved changes.
 
-**UTF-16 with no byte-order mark is worse: it is taken for UTF-8.** Mostly
-Latin text in it is valid UTF-8 byte for byte, so it opens with an invisible
-NUL between every character. Saving writes back exactly what was read, so
-nothing is lost, but it is not readable here.
+**Format > Encoding** offers **UTF-8**, **UTF-8 with BOM** and **UTF-16 LE**,
+to change how the document is saved. Choosing one converts the file when you
+next save it.
 
-Reading both properly, and saving them back in the encoding they came in, is
-decided and not yet built ([ADR-0085](https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0085.md)). Until it is,
-open such a file in Notepad and save it as UTF-8 there.
+**Saving never changes a character behind your back.** If you type something
+the file's encoding has no form for -- a Greek `α` into a Windows-1252 file --
+Save refuses, names the character and its line, and suggests UTF-8. Nothing is
+written, and your work stays unsaved rather than lost.
+
+**And a file that would not save back unchanged is not opened.** A few code
+pages have two codes for one character -- Shift-JIS has an NEC and an IBM code
+for some kanji -- and only one can be written. Opening such a file and saving
+it would change bytes you never edited, so it is refused with that reason, and
+nothing in it is touched.
 
 The BOM variant exists because some Windows tools still want it.
 
@@ -27,7 +42,17 @@ entry.
 
 ## Line endings
 
-**Format > Line Ending** offers **LF** and **CRLF**.
+**Format > Line Ending** offers **LF** and **CRLF**. Choosing one converts the
+whole document when you next save it.
+
+**A document is saved in its own line ending**, the one the status bar shows.
+Press Enter in a file Notepad wrote and the new lines are saved as CRLF, like
+the old ones; paste text with Unix line endings into it and they are saved as
+CRLF too ([ADR-0090](https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0090.md)).
+
+The exception is **a file that already mixed both** when you opened it. Which
+of its line endings is the stray one is not for this program to guess, so it
+is saved exactly as it came, until you choose LF or CRLF from the menu.
 
 A line is `\n` or `\r\n`, and nothing else ([ADR-0029](https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0029.md)).
 That is narrower than Unicode's definition of a line break, which also counts

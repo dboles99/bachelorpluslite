@@ -51,15 +51,16 @@ todo = "warn"
 unimplemented = "warn"
 
 [workspace.package]
-# 0.9.5, not 0.1.0: the first public release (ADR-0071). The number says
-# what the product is -- feature-complete against what it set out to be,
-# and short of 1.0 by the manual passes `project/NEXT_SESSION.md` section
-# 3 still lists as undone.
+# 1.0.0 (ADR-0094): every blocker the 2026-09-25 release-candidate plan
+# named is closed, so a stranger can download it, edit, save and recover
+# without losing a character. What it is not yet -- signed, heard through a
+# screen reader -- is said in words beside it, not carried in the number.
 #
 # Nothing else needs editing for a version bump: both release scripts ask
 # the binary rather than reading a manifest, so the archive name, BUILD.txt
-# and the About box all follow from this line.
-version = "0.9.5"
+# and the About box all follow from this line -- and since 1.0 so does the
+# website, which reads it from here.
+version = "1.0.0"
 edition = "2024"
 # GPL-3.0-only, and the `-only` is the decision (ADR-0071). Slint is
 # tri-licensed and the branch this product takes is **GPL-3.0-only**; a
@@ -91,6 +92,14 @@ time = { version = "0.3", features = ["local-offset"] }
 tempfile = "3"
 proptest = "1"
 toml = "1"
+# Legacy encodings (ADR-0085). Windows-1252, Shift-JIS, GBK and the rest are
+# what every "ANSI" file a Windows user has saved is in, and Notepad opens
+# them. `encoding_rs` is the Encoding Standard's implementation that Firefox
+# ships, decoding and encoding both; `chardetng`, by the same author, guesses
+# which one an unmarked file is in. Both are build-time-checked by
+# `cargo deny check licenses`.
+encoding_rs = "0.8"
+chardetng = { version = "1", default-features = false }
 
 # --- cryptography (ADR-0021) -------------------------------------------
 # All RustCrypto, all composed rather than reimplemented, which is the line
@@ -108,3 +117,12 @@ sha2 = "0.10"
 ed25519-dalek = { version = "2", features = ["rand_core"] }
 rand_core = { version = "0.6", features = ["getrandom"] }
 
+
+[profile.release]
+# The symbol table, which a shipped binary does not read and the Windows
+# linker already leaves in a .pdb nobody ships (W3-01). Measured on the
+# release runner: the Linux binary went from 39.9 MB to 30.4 MB. A backtrace
+# from a release build names fewer functions; this product reports no
+# crashes anywhere, so the person reading one is a developer with a debug
+# build to hand.
+strip = "symbols"

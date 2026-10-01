@@ -620,6 +620,36 @@ pub fn handle_menu_action(
         action::LINE_ENDING_CRLF => state.borrow_mut().set_line_ending(LineEnding::CrLf),
         action::ENCODING_UTF8 => state.borrow_mut().set_encoding(Encoding::Utf8),
         action::ENCODING_UTF8_BOM => state.borrow_mut().set_encoding(Encoding::Utf8Bom),
+        action::ENCODING_UTF16_LE => state.borrow_mut().set_encoding(Encoding::Utf16Le),
+        id if (action::REOPEN_BASE..menus::reopen_end()).contains(&id) => {
+            let encoding = usize::try_from(id - action::REOPEN_BASE)
+                .ok()
+                .and_then(|index| menus::REOPEN_AS.get(index))
+                .and_then(|(_, label)| bp_files::encoding_named(label))?;
+            let (dirty, name) = {
+                let s = state.borrow();
+                let id = s.workspace.active_id();
+                (
+                    id.is_some_and(|i| s.is_dirty(i)),
+                    id.map(|i| s.display_name(i)).unwrap_or_default(),
+                )
+            };
+            // Reopening reads the file again and discards edits, exactly as
+            // Reload does, so it asks the same question (ADR-0084).
+            if dirty {
+                let (weak, cell) = (ui.as_weak(), Rc::clone(state));
+                dialogs.ask(Question::reload(&name), move |answer| {
+                    if crate::dialog::confirmed(answer) {
+                        cell.borrow_mut().reload_as(Some(encoding));
+                        if let Some(ui) = weak.upgrade() {
+                            refresh(&ui, &mut cell.borrow_mut(), PushText::Yes);
+                        }
+                    }
+                });
+                return None;
+            }
+            state.borrow_mut().reload_as(Some(encoding));
+        }
 
         // Help ▸ User Guide. Opened as a document, which is what makes it
         // possible at all: this product launches nothing, so a browser was

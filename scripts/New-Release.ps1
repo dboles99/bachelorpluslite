@@ -35,6 +35,12 @@
 .PARAMETER Out
     Where the archives and SHA256SUMS.txt are written.
 
+.PARAMETER RequireInstaller
+    Fail when Inno Setup is not installed, instead of skipping the Windows
+    installer with a note. The release workflow passes it, because a release
+    page promising an installer that was quietly not built is worse than a
+    failed run; a local build need not have Inno Setup at all.
+
 .PARAMETER AllowDirty
     Build anyway with uncommitted changes. Off by default: an archive built
     from a tree nobody can check out again is not a release, it is a copy, and
@@ -49,6 +55,7 @@ param(
     [switch]$Linux,
     [string]$Distro = 'Ubuntu-24.04',
     [string]$Out,
+    [switch]$RequireInstaller,
     [switch]$AllowDirty
 )
 
@@ -91,6 +98,28 @@ finally { Pop-Location }
 
 $exe = Join-Path $Root 'target/release/bachelorpad.exe'
 if (-not (Test-Path $exe)) { throw "$exe is missing after a build that reported success" }
+
+# The C runtime must be inside the executable (W2-01, `.cargo/config.toml`).
+# Asked of the import table rather than assumed from the config, because the
+# machine building a release is the one machine guaranteed to have the
+# redistributable installed -- a binary that needs it runs perfectly here.
+# `dumpbin` comes with the MSVC toolchain the build already required.
+Write-Step 'checking the executable carries its own C runtime'
+$vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
+# Every installation, not `-latest`: a machine can hold a newer Build Tools
+# without the C++ workload beside the older one that has it, and `-latest`
+# then finds nothing. The last match is the newest toolset.
+$dumpbin = if (Test-Path $vswhere) {
+    & $vswhere -all -products * -find 'VC\Tools\MSVC\**\bin\Hostx64\x64\dumpbin.exe' | Select-Object -Last 1
+}
+if (-not $dumpbin) { throw 'dumpbin.exe not found; it ships with the MSVC build tools this build already needs' }
+$imports = & $dumpbin /nologo /dependents $exe
+if ($LASTEXITCODE -ne 0) { throw "dumpbin could not read $exe" }
+$runtime = $imports | Where-Object { $_ -match '(?i)^\s*(vcruntime\d+|msvcp\d+|ucrtbase|api-ms-win-crt-[a-z-]+[\d-]*)\.dll\s*$' }
+if ($runtime) {
+    throw "the executable imports the dynamic C runtime, which a clean Windows machine does not have: $(($runtime | ForEach-Object { $_.Trim() }) -join ', ')"
+}
+Write-Note 'no vcruntime, msvcp, ucrtbase or api-ms-win-crt import'
 
 # Ask the binary what it is. Redirected on purpose: a GUI-subsystem executable
 # has no console of its own, so stdout needs a handle handed to it -- see
@@ -165,9 +194,9 @@ Copy-Item $icon (Join-Path $staging 'bachelorpad.ico')
 # jpeg only, so it cannot read the .ico Explorer needs -- two files, two
 # readers, and shipping only one of them is a silent failure in whichever was
 # left out.
-$windowIcon = Join-Path $Root 'assets/io.github.dboles99.BachelorPadPlus.png'
-if (-not (Test-Path $windowIcon)) { throw 'assets/io.github.dboles99.BachelorPadPlus.png is missing -- the window would show the toolkit default' }
-Copy-Item $windowIcon (Join-Path $staging 'io.github.dboles99.BachelorPadPlus.png')
+$windowIcon = Join-Path $Root 'assets/io.github.dboles99.bachelorpluslite.png'
+if (-not (Test-Path $windowIcon)) { throw 'assets/io.github.dboles99.bachelorpluslite.png is missing -- the window would show the toolkit default' }
+Copy-Item $windowIcon (Join-Path $staging 'io.github.dboles99.bachelorpluslite.png')
 
 # The in-app help, generated from docs/ (ADR-0075). Help > User Guide opens
 # `app-help/index.md` as a document -- not in a browser, because this product
@@ -193,8 +222,32 @@ Set-Content -Path (Join-Path $staging 'BUILD.txt') -Encoding utf8 -Value @(
 $windowsArchive = Join-Path $Out "$stem-windows-x86_64.zip"
 if (Test-Path $windowsArchive) { Remove-Item $windowsArchive -Force }
 Compress-Archive -Path (Join-Path $staging '*') -DestinationPath $windowsArchive
-Remove-Item $staging -Recurse -Force
 Write-Note "wrote $([IO.Path]::GetFileName($windowsArchive))"
+
+# The installer, compiled from the directory that was just zipped, so the two
+# hold the same files (ADR-0093). Per-user and unelevated; see the script.
+$installer = $null
+$iscc = @(
+    (Get-Command 'ISCC.exe' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source),
+    (Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6/ISCC.exe'),
+    (Join-Path $env:ProgramFiles 'Inno Setup 6/ISCC.exe'),
+    (Join-Path $env:LOCALAPPDATA 'Programs/Inno Setup 6/ISCC.exe')
+) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+if ($iscc) {
+    Write-Step 'compiling the Windows installer'
+    & $iscc /Q "/DAppVersion=$version" "/DSourceDir=$staging" "/DOutputDir=$Out" (Join-Path $Root 'packaging/windows/bachelorpad-lite.iss')
+    if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed (exit $LASTEXITCODE) -- its output is above" }
+    $installer = Join-Path $Out "$stem-windows-x86_64-setup.exe"
+    if (-not (Test-Path $installer)) { throw "Inno Setup reported success and wrote no $installer" }
+    Write-Note "wrote $([IO.Path]::GetFileName($installer))"
+}
+elseif ($RequireInstaller) {
+    throw 'Inno Setup 6 is not installed, and -RequireInstaller says the installer must be built'
+}
+else {
+    Write-Note 'skipping the installer -- Inno Setup 6 is not installed (winget install JRSoftware.InnoSetup)'
+}
+Remove-Item $staging -Recurse -Force
 
 # --- Linux ---------------------------------------------------------------
 
@@ -245,6 +298,7 @@ else {
 
 Write-Step 'checksums'
 $archives = @($windowsArchive)
+if ($installer) { $archives += $installer }
 if ($linuxArchive) { $archives += $linuxArchive }
 
 $lines = foreach ($archive in $archives) {

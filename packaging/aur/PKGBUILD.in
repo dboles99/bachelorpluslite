@@ -1,0 +1,43 @@
+# Template for the AUR's bachelorpad-lite-bin (ADR-0093).
+# packaging/linux/build-packages.sh renders @VERSION@ and @SHA256@ from the
+# release archive and attaches the result to the release as PKGBUILD.
+# Publishing is a push to aur.archlinux.org from an AUR account, with
+# `makepkg --printsrcinfo > .SRCINFO` beside it.
+#
+# Maintainer: Daniel Boles <daniel.boles@gmail.com>
+
+pkgname=bachelorpad-lite-bin
+pkgver=@VERSION@
+pkgrel=1
+pkgdesc='Text editor for notes and logs'
+arch=('x86_64')
+url='https://bpad.prompt-forge.dev'
+license=('GPL-3.0-only')
+# What the binary links, and what it loads with dlopen to open a window --
+# read from the binary, as packaging/linux/build-packages.sh explains.
+depends=('glibc' 'gcc-libs' 'fontconfig' 'libxkbcommon' 'libxkbcommon-x11'
+         'libx11' 'libxcb' 'libxcursor' 'libxi' 'libxrender' 'wayland')
+optdepends=('libglvnd: the GPU renderer, which the default does not use'
+            'xdg-desktop-portal: native file dialogs')
+provides=('bachelorpad-lite')
+conflicts=('bachelorpad-lite')
+source_x86_64=("bachelorpad-lite-${pkgver}-linux-x86_64.tar.gz::https://github.com/dboles99/bachelorpluslite/releases/download/v${pkgver}/bachelorpad-lite-${pkgver}-linux-x86_64.tar.gz")
+sha256sums_x86_64=('@SHA256@')
+
+package() {
+    local dir="bachelorpad-lite-${pkgver}-linux-x86_64"
+    local id='io.github.dboles99.bachelorpluslite'
+    # Together under /usr/lib, because the program reads its help and icon
+    # from beside its own executable.
+    install -d "${pkgdir}/usr/lib/bachelorpad-lite"
+    cp -a "${dir}/." "${pkgdir}/usr/lib/bachelorpad-lite/"
+    install -d "${pkgdir}/usr/bin"
+    ln -s /usr/lib/bachelorpad-lite/bachelorpad "${pkgdir}/usr/bin/bachelorpad"
+    ln -s /usr/lib/bachelorpad-lite/bachelorpad "${pkgdir}/usr/bin/bpad"
+    install -Dm644 "${dir}/${id}.png" "${pkgdir}/usr/share/icons/hicolor/256x256/apps/${id}.png"
+    install -Dm644 "${dir}/LICENSE" "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+    # The archive carries the .desktop and AppStream files, so there is one
+    # copy of each, shared by every package (packaging/linux/).
+    install -Dm644 "${dir}/${id}.desktop" "${pkgdir}/usr/share/applications/${id}.desktop"
+    install -Dm644 "${dir}/${id}.metainfo.xml" "${pkgdir}/usr/share/metainfo/${id}.metainfo.xml"
+}

@@ -7,7 +7,8 @@
 BachelorPad+ Lite is a free, open source Notepad replacement for Windows and Linux. It edits plain text the way Notepad does, plus one thing Notepad cannot: it knows which of your notes are about the same subject, so you can find last month's thinking without remembering the filename. It opens instantly, works offline forever, and it will never run anything or send anything anywhere.
 
 Free and open source under GPL-3.0-only. Windows 10, Windows 11 and Linux,
-64-bit. There is no macOS build. Version 0.9.5.
+64-bit. There is no macOS build. Version 1.0.0: an installer for Windows,
+and a .deb, an .rpm and an AppImage for Linux.
 
 Source: https://github.com/dboles99/bachelorpluslite
 Downloads: https://github.com/dboles99/bachelorpluslite/releases/latest

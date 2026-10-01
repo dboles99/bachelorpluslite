@@ -42,6 +42,15 @@ else { $SiteSource }
 $Origin = 'https://bpad.prompt-forge.dev'
 $Repo = 'https://github.com/dboles99/bachelorpluslite'
 
+# The version, from `[workspace.package]` in Cargo.toml -- the one home
+# docs/developer/03-releasing.md names for it -- rather than written into the
+# page. It was written in three places and six languages, and the 1.0 release
+# would have had to find all of them (ADR-0074's lesson, about a version).
+$cargoToml = Get-Content -Raw -Path (Join-Path (Split-Path -Parent $PSScriptRoot) 'Cargo.toml')
+$versionMatch = [regex]::Match($cargoToml, '(?m)^version = "(?<v>[^"]+)"')
+if (-not $versionMatch.Success) { throw 'no `version = "..."` line in Cargo.toml' }
+$Version = $versionMatch.Groups['v'].Value
+
 # The donation links, which af-site already established.
 #
 # `paypal.me/DBoles648` with a preset amount, exactly as
@@ -150,6 +159,12 @@ foreach ($l in $locales) {
         $values['home'] = $homePath
         $values['assets'] = $assets
         $values['repo'] = $Repo
+        $values['version'] = $Version
+        # A locale string may name the version too, and strings are values,
+        # so `{{version}}` inside one is expanded here, before the template is.
+        foreach ($key in @($values.Keys)) {
+            if ($values[$key] -is [string]) { $values[$key] = $values[$key].Replace('{{version}}', $Version) }
+        }
         $values['paypal5'] = "$PayPalBase/$($PayPalAmounts[0])"
         $values['paypal10'] = "$PayPalBase/$($PayPalAmounts[1])"
         $values['paypal25'] = "$PayPalBase/$($PayPalAmounts[2])"
@@ -227,7 +242,8 @@ foreach ($l in $locales) {
 $(& $plain $t.lede)
 
 Free and open source under GPL-3.0-only. Windows 10, Windows 11 and Linux,
-64-bit. There is no macOS build. Version 0.9.5.
+64-bit. There is no macOS build. Version ${Version}: an installer for Windows,
+and a .deb, an .rpm and an AppImage for Linux.
 
 Source: $Repo
 Downloads: $Repo/releases/latest

@@ -75,6 +75,7 @@ mod testpaths;
 /// Crate identity used by workspace smoke tests and diagnostics.
 /// The product name, re-exported so the shell's callers need not depend on
 /// `bp-platform` to say it. One home, reached from more places (ADR-0074).
+pub use bp_editor::Indent;
 pub use bp_platform::DISPLAY_NAME;
 
 pub const CRATE_NAME: &str = "bp-ui";
@@ -354,6 +355,27 @@ pub struct RunOptions {
     /// care -- `run()`, and every test -- gets the size the editor has always
     /// drawn at.
     pub font_size: Option<u8>,
+    /// What Tab inserts, from `tab_width` and `indent_spaces` in the
+    /// configuration (W2-06).
+    ///
+    /// Both settings were parsed, bounded and documented, and never reached
+    /// the editor: every run began with the default, whatever the file or
+    /// the command line said. The default here is the editor's own, so a
+    /// caller that does not care gets what it always got.
+    pub indent: Indent,
+}
+
+/// What Tab inserts, as the configuration says.
+///
+/// A function rather than two fields copied in `main`, so the one place the
+/// settings become an [`Indent`] has a test -- the copying is what was
+/// missing for as long as the settings existed (W2-06).
+#[must_use]
+pub fn indent_from(config: &bp_config::Config) -> Indent {
+    Indent {
+        spaces: config.indent_spaces,
+        width: usize::from(config.tab_width),
+    }
 }
 
 /// Run the BachelorPad+ Lite shell.
@@ -377,6 +399,16 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
         {
             tracing::warn!("software renderer unavailable, using platform default: {e}");
         }
+    }
+
+    // The window's Wayland app id and X11 class, which a dock matches against
+    // the `.desktop` file's name to give the window its icon and group it
+    // under the right launcher (W3-03). Unset, winit names it after the
+    // executable, `bachelorpad`, which matches no `.desktop` file this product
+    // writes -- so a registered product still showed a generic icon. Ignored
+    // on Windows, and before the window exists or not at all.
+    if let Err(e) = slint::set_xdg_app_id(bp_platform::APP_ID) {
+        tracing::warn!("could not set the window's application id: {e}");
     }
 
     let ui = AppWindow::new()?;
@@ -406,6 +438,9 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
     }
 
     let mut initial = state::AppState::new();
+    // Before any file opens: opening reads it, to decide whether a large file
+    // needs a warning the custom surface would make untrue (ADR-0092).
+    initial.editor_view = options.editor_view;
     if let Some(theme) = options.theme {
         initial.theme = theme;
     }
@@ -415,6 +450,7 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
         // by another route must not be able to hand the editor a 0 pt font.
         initial.font_size = bp_config::zoom(size, 0);
     }
+    initial.indent = options.indent;
     initial.error = options.startup_notice.clone();
 
     // Files from the command line. The first one replaces the empty document
@@ -439,7 +475,6 @@ pub fn run_with(options: RunOptions) -> Result<(), UiError> {
     initial.journal.clean_temporaries();
     let left_behind = initial.journal.left_behind();
 
-    initial.editor_view = options.editor_view;
     let state = Rc::new(RefCell::new(initial));
     let dialogs = dialog::Dialogs::new(&ui);
     if !left_behind.is_empty() {
@@ -1447,4 +1482,35 @@ fn ask_about_recovery(
             refresh(&ui, &mut cell.borrow_mut(), state::PushText::Yes);
         }
     });
+}
+
+#[cfg(test)]
+mod run_options_tests {
+    use super::*;
+
+    #[test]
+    fn the_configured_tab_width_and_spaces_reach_the_editor() {
+        // W2-06: `tab_width = 2` and `indent_spaces = true` were parsed,
+        // bounded and documented, and every run began with tabs, four wide.
+        let config = bp_config::Config {
+            tab_width: 2,
+            indent_spaces: true,
+            ..bp_config::Config::default()
+        };
+        assert_eq!(
+            indent_from(&config),
+            Indent {
+                spaces: true,
+                width: 2
+            }
+        );
+    }
+
+    #[test]
+    fn an_unconfigured_run_indents_as_the_editor_always_has() {
+        assert_eq!(
+            indent_from(&bp_config::Config::default()),
+            Indent::default()
+        );
+    }
 }

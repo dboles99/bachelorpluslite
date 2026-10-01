@@ -261,7 +261,7 @@ fn registration_offers_the_extension_and_never_takes_it() {
     // OpenWithProgids.
     assert!(values.iter().any(|v| {
         v.key == r"HKCU\Software\Classes\.txt\OpenWithProgids"
-            && v.name == ValueName::Named("BachelorPadPlus.txt".to_owned())
+            && v.name == ValueName::Named("BachelorPadPlusLite.txt".to_owned())
     }));
     // ...and nothing writes the extension key's own default value, which is
     // what taking the association looks like.
@@ -322,14 +322,132 @@ fn the_guard_refuses_what_adr_0012_forbids() {
         None
     );
     assert_eq!(
-        key_objection(r"HKCU\Software\Classes\BachelorPadPlus.md"),
+        key_objection(r"HKCU\Software\Classes\BachelorPadPlusLite.md"),
         None
     );
     assert_eq!(
-        key_objection(r"HKCU\Software\BachelorPad+\Capabilities"),
+        key_objection(r"HKCU\Software\BachelorPad+ Lite\Capabilities"),
         None
     );
     assert_eq!(key_objection(r"HKCU\Software\RegisteredApplications"), None);
+}
+
+#[test]
+fn the_full_products_names_are_another_applications() {
+    use windows::{KeyObjection, key_objection};
+    // ADR-0091. The guard used to admit anything under `Software\BachelorPad+`
+    // and any ProgID beginning `BachelorPadPlus` -- which is the full
+    // BachelorPad+'s territory, and writing there would repoint its file
+    // types the day it shipped.
+    assert_eq!(
+        key_objection(r"HKCU\Software\Classes\BachelorPadPlus.md"),
+        Some(KeyObjection::AnotherApplication)
+    );
+    assert_eq!(
+        key_objection(r"HKCU\Software\BachelorPad+\Capabilities"),
+        Some(KeyObjection::AnotherApplication)
+    );
+    assert_eq!(
+        key_objection(r"HKCU\Software\BachelorPad+ Lite Extra"),
+        Some(KeyObjection::AnotherApplication),
+        "a name that merely begins with ours is not ours"
+    );
+}
+
+#[test]
+fn the_registration_names_follow_the_display_name() {
+    // Trap 4's sharpest form: these are literals because a `const` cannot be
+    // formatted, so this is what asks whether they still agree.
+    assert_eq!(
+        windows::SOFTWARE_KEY,
+        format!(r"HKCU\Software\{}", crate::DISPLAY_NAME)
+    );
+    assert_eq!(
+        windows::CAPABILITIES_KEY,
+        format!(r"{}\Capabilities", windows::SOFTWARE_KEY)
+    );
+    assert_eq!(
+        windows::PROG_ID_PREFIX,
+        crate::DISPLAY_NAME.replace('+', "Plus").replace(' ', "")
+    );
+    assert!(crate::APP_ID.ends_with(".bachelorpluslite"));
+}
+
+#[test]
+fn the_removal_script_takes_off_what_registration_put_on() {
+    let script = windows::removal_script(crate::DISPLAY_NAME, &["txt"]);
+    // Our ProgID key, and the earlier build's, deleted outright.
+    assert!(script.contains(r"[-HKEY_CURRENT_USER\Software\Classes\BachelorPadPlusLite.txt]"));
+    assert!(script.contains(r"[-HKEY_CURRENT_USER\Software\Classes\BachelorPadPlus.txt]"));
+    // From the shared keys, only our *values* -- never the key, which every
+    // other application registered under `.txt` shares.
+    assert!(!script.contains(r"[-HKEY_CURRENT_USER\Software\Classes\.txt"));
+    assert!(script.contains("\"BachelorPadPlusLite.txt\"=-"));
+    assert!(!script.contains(r"[-HKEY_CURRENT_USER\Software\RegisteredApplications]"));
+    assert!(script.contains(&format!("\"{}\"=-", crate::DISPLAY_NAME)));
+    assert!(script.contains(r"[-HKEY_CURRENT_USER\Software\BachelorPad+ Lite]"));
+    assert!(script.contains(r"[-HKEY_CURRENT_USER\Software\BachelorPad+]"));
+    assert!(!script.to_ascii_lowercase().contains("notepad"));
+}
+
+#[test]
+fn every_key_the_removal_script_names_is_ours_or_was_ours() {
+    use windows::key_objection;
+    // The removal is the one place the old names may appear, and only those.
+    let every: Vec<&str> = FILE_TYPES.iter().map(|t| t.extension).collect();
+    let script = windows::removal_script(crate::DISPLAY_NAME, &every);
+    for line in script.lines().filter(|l| l.starts_with('[')) {
+        let key = line
+            .trim_start_matches("[-")
+            .trim_start_matches('[')
+            .trim_end_matches(']')
+            .replace("HKEY_CURRENT_USER", "HKCU");
+        let legacy = key.contains(&format!(r"\{}.", windows::LEGACY_PROG_ID_PREFIX))
+            || key.eq_ignore_ascii_case(windows::LEGACY_SOFTWARE_KEY);
+        assert!(
+            legacy || key_objection(&key).is_none(),
+            "the removal script names a key that is not ours: {key}"
+        );
+    }
+}
+
+#[test]
+fn a_registry_script_is_written_as_utf16_with_a_byte_order_mark() {
+    // regedit reads a UTF-8 .reg through the system code page, so an `é` in
+    // the install path registered a command pointing nowhere (W2-05).
+    let plan = plan(
+        Platform::Windows,
+        &AppInfo::bachelorpad(r"C:\Users\Zoë\Apps\bachelorpad.exe"),
+        &everything(),
+    );
+    for kind in [ArtefactKind::RegistryScript, ArtefactKind::RegistryRemoval] {
+        let bytes = plan
+            .artefact(kind)
+            .expect("both scripts are planned")
+            .bytes();
+        assert_eq!(&bytes[..2], &[0xFF, 0xFE], "{kind:?} lacks the BOM");
+        let units: Vec<u16> = bytes[2..]
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|&pair| u16::from_le_bytes(pair))
+            .collect();
+        let text = String::from_utf16(&units).expect("valid UTF-16");
+        assert!(text.starts_with("Windows Registry Editor Version 5.00\r\n"));
+    }
+    let script = plan
+        .artefact(ArtefactKind::RegistryScript)
+        .expect("planned");
+    let text = String::from_utf16(
+        &script.bytes()[2..]
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|&pair| u16::from_le_bytes(pair))
+            .collect::<Vec<_>>(),
+    )
+    .expect("valid UTF-16");
+    assert!(text.contains("Zoë"), "the é must survive as itself");
 }
 
 #[test]
@@ -509,7 +627,7 @@ fn a_repeated_key_takes_the_first_like_the_desktop_entry_specification() {
 #[test]
 fn the_windows_state_is_read_from_prog_ids_supplied_by_the_caller() {
     let mut prog_ids = BTreeMap::new();
-    prog_ids.insert(".txt".to_owned(), "BachelorPadPlus.txt".to_owned());
+    prog_ids.insert(".txt".to_owned(), "BachelorPadPlusLite.txt".to_owned());
     prog_ids.insert("MD".to_owned(), "Notepad++_file".to_owned());
     let report = state::report_from_prog_ids(&prog_ids, &everything());
     assert_eq!(report.state_of("txt"), Some(&AssociationState::Ours));
@@ -553,7 +671,10 @@ fn the_report_is_read_from_a_directory_the_caller_names() {
     assert!(!report.is_ours("md"));
     assert_eq!(
         report.summary(),
-        "BachelorPad+ opens 1 of the 2 selected file types."
+        format!(
+            "{} opens 1 of the 2 selected file types.",
+            crate::DISPLAY_NAME
+        )
     );
 }
 
@@ -916,7 +1037,7 @@ fn the_icon_path_follows_the_executable_and_the_platform() {
     // is only ever knowable relative to the binary.
     assert_eq!(
         icon_beside(Platform::Linux, "/opt/bp/bachelorpad").as_deref(),
-        Some("/opt/bp/io.github.dboles99.BachelorPadPlus.png")
+        Some("/opt/bp/io.github.dboles99.bachelorpluslite.png")
     );
     assert_eq!(
         icon_beside(Platform::Windows, r"C:\Apps\bp\bachelorpad.exe").as_deref(),
@@ -1011,4 +1132,56 @@ fn the_window_icon_is_a_format_the_toolkit_can_actually_decode() {
          to the toolkit default on every machine",
         window_icon_file_name()
     );
+}
+
+// --- the Windows installer (ADR-0093) ---------------------------------------
+
+#[test]
+fn the_installers_registry_section_is_the_registrations_own() {
+    // The installer's optional Open with task writes what File > Set as
+    // Default Editor would for the Text + Notes preset, generated by the code
+    // that decides what that is -- so the two cannot drift into registering
+    // different things.
+    let executable = r"{app}\bachelorpad.exe";
+    let app = AppInfo {
+        display_name: crate::DISPLAY_NAME.to_owned(),
+        description: crate::DESCRIPTION.to_owned(),
+        executable: executable.to_owned(),
+        app_id: crate::APP_ID.to_owned(),
+        icon: icon_beside(Platform::Windows, executable).expect("the executable has a folder"),
+    };
+    let selection = AssociationSelection::preset(AssociationPreset::TextAndNotes);
+    let rendered =
+        windows::inno_registry_section(&windows::registry_values(&app, &selection), "openwith");
+
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../packaging/windows/registry.iss");
+    if std::env::var_os("BLESS").is_some() {
+        std::fs::write(&path, &rendered).expect("rewrite registry.iss");
+    }
+    let committed = std::fs::read_to_string(&path).expect("packaging/windows/registry.iss");
+    assert_eq!(
+        committed.replace("\r\n", "\n"),
+        rendered,
+        "packaging/windows/registry.iss is not what the registration generates -- \
+         rerun this test with BLESS=1 and review the diff"
+    );
+}
+
+#[test]
+fn the_installer_deletes_our_keys_and_only_our_values_from_shared_ones() {
+    let rendered = windows::inno_registry_section(
+        &windows::registry_values(&windows_app(), &everything()),
+        "openwith",
+    );
+    for line in rendered.lines().filter(|l| l.starts_with("Root:")) {
+        let shared = line.contains(r"\OpenWithProgids") || line.contains("RegisteredApplications");
+        if shared {
+            assert!(line.contains("uninsdeletevalue"), "{line}");
+        } else {
+            assert!(!line.contains("uninsdeletevalue"), "{line}");
+        }
+        assert!(line.starts_with("Root: HKA;"), "per-user only: {line}");
+        assert!(!line.to_ascii_lowercase().contains("notepad"), "{line}");
+    }
 }

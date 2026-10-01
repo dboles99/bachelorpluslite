@@ -29,7 +29,8 @@ one is still being built; there is [a waitlist](https://bpad.prompt-forge.dev/wa
 ## What works today
 
 **Editing.** Tabs, find and replace, search across a folder, go to line, undo
-and redo, overtype on the Insert key, zoom, UTF-8 and UTF-8 with BOM, LF and CRLF, Light/Dark/Organic/Green
+and redo, overtype on the Insert key, zoom, every encoding Notepad opens -- UTF-8, UTF-16 and the legacy code
+pages, saved back as they came -- LF and CRLF, Light/Dark/Organic/Green
 themes plus System. A rope underneath, so an edit costs what it changes rather
 than what the file weighs.
 
@@ -79,31 +80,41 @@ reaches the menus and the controls are named for a screen reader, but nobody
 has run NVDA or Orca on it, and until somebody has it does not say so
 ([ADR-0088](docs/decisions/ADR-0088.md)).
 
+Typing slows down in a large file: the default view lays out the whole
+document on every key, and from 512 KiB the status bar says so and names
+`--editor-view`, which does not ([ADR-0092](docs/decisions/ADR-0092.md)).
+
 Duplicate line, move line and the Insert menu need `--editor-view`, because
 they have to know where the caret is and the toolkit's text widget will not
 say ([ADR-0018](docs/decisions/ADR-0018.md)).
 
 ## Install
 
-**There is no installer, and that is a decision**
-([ADR-0067](docs/decisions/ADR-0067.md)). Unpack the archive where you want it
-and run it.
+From [the releases page](https://github.com/dboles99/bachelorpluslite/releases/latest)
+([ADR-0093](docs/decisions/ADR-0093.md)):
 
-```powershell
-Expand-Archive bachelorpad-lite-0.9.5-windows-x86_64.zip C:\Apps\BachelorPadLite
-C:\Apps\BachelorPadLite\bachelorpad.exe
-```
+| You have | Download |
+| --- | --- |
+| **Windows 10 or 11** | the `-setup.exe` -- no administrator prompt, installs for you alone |
+| **Ubuntu, Debian, Mint** | the `.deb` -- `sudo apt install ./bachelorpad-lite_*_amd64.deb` |
+| **Fedora, openSUSE** | the `.rpm` -- `sudo dnf install ./bachelorpad-lite-*.x86_64.rpm` |
+| Any other Linux | the `.AppImage` -- `chmod +x` it and run it |
+| Arch | the `PKGBUILD` -- `makepkg -si` |
+| Either, unpacked anywhere | the `.zip` or the `.tar.gz` |
 
-```sh
-tar xzf bachelorpad-lite-0.9.5-linux-x86_64.tar.gz
-cd bachelorpad-lite-0.9.5-linux-x86_64 && ./bachelorpad
-```
+The installer offers, unticked, to put the program in Open with; it never
+makes itself the default for anything ([ADR-0012](docs/decisions/ADR-0012.md)).
 
-> **The archives are unsigned.** Windows SmartScreen will warn. A certificate
-> has not been bought and self-signing was **refused outright**, because a
-> self-signed certificate is only satisfied once the user installs a root
-> certificate they have no reason to trust
-> ([ADR-0055](docs/decisions/ADR-0055.md)). `SHA256SUMS.txt` is attached to
+Windows needs nothing installed first. Linux needs glibc 2.35 or later --
+Ubuntu 22.04, Debian 12, Mint 21, Fedora 36 or newer
+([ADR-0087](docs/decisions/ADR-0087.md)).
+
+> **The downloads are unsigned.** Windows SmartScreen will warn; choose More
+> info, then Run anyway. Signing is a 1.x release's, through SignPath or the
+> Microsoft Store ([ADR-0094](docs/decisions/ADR-0094.md)), and self-signing
+> was **refused outright**, because a self-signed certificate is only
+> satisfied once the user installs a root certificate they have no reason to
+> trust ([ADR-0055](docs/decisions/ADR-0055.md)). `SHA256SUMS.txt` is attached to
 > every release and answers tampering in transit, which is the threat a
 > certificate answers worst.
 
@@ -178,7 +189,7 @@ It holds the traps that have each cost somebody a session.
 
 ## How this project works, if you are curious
 
-[`DECISIONS.md`](DECISIONS.md) is the index of 76 architecture decision
+[`DECISIONS.md`](DECISIONS.md) is the index of the architecture decision
 records **and the one home for every lesson learned**. The lessons are the
 interesting part: this repository writes down the *shape* of each mistake, not
 only the fix.

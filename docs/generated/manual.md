@@ -36,58 +36,107 @@ Windows 10, Windows 11 and Linux. GPL-3.0-only.
 BachelorPad+ Lite runs on **Windows 10, Windows 11 and Linux** (x86-64).
 macOS is not built, and [ADR-0072](https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0072.md) says why.
 
-**There is no installer, and that is a decision**
-([ADR-0067](https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0067.md)). You unpack an archive wherever you
-want the program to live and run it. Nothing is written into that folder;
-what the product keeps about itself goes in your user profile, and
+There is an **installer for Windows**, a **package for each family of
+Linux**, and a plain archive for either, for anyone who would rather unpack a
+folder and run it ([ADR-0093](https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0093.md)). Every one of them
+holds the same program. Wherever it is installed, what the product keeps about
+itself goes in your user profile, and
 [Where it puts things](#where-it-puts-things) lists every directory.
+
+### What it needs
+
+**Windows 10 or 11, x86-64, and nothing else.** The C runtime is built into
+the executable, so there is no Visual C++ redistributable to install first.
+
+**Linux, x86-64, with glibc 2.35 or later**: Ubuntu 22.04 and later, Debian
+12 and later, Linux Mint 21 and later, Fedora 36 and later
+([ADR-0087](https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0087.md)). The release is built on the oldest of
+those and refused if it would need anything newer, so the list is checked
+rather than hoped. RHEL 8 and 9 and Debian 11 are older than that and are not
+supported.
+
+It also loads the libraries any desktop session already has -- fontconfig,
+xkbcommon (with its X11 half), and Wayland or X11. The `.deb` and `.rpm`
+declare them, so your package manager fetches anything missing. For the
+AppImage or the archive on a minimal install, on Debian or Ubuntu:
+
+```sh
+sudo apt install libfontconfig1 libxkbcommon0 libxkbcommon-x11-0 libwayland-client0 libx11-xcb1 libxcursor1 libxi6
+```
 
 ### Download
 
 From [the releases page](https://github.com/dboles99/bachelorpluslite/releases):
 
-| Platform | File |
+| You have | Download |
 | --- | --- |
-| Windows 10 / 11 | `bachelorpad-lite-<version>-windows-x86_64.zip` |
-| Linux | `bachelorpad-lite-<version>-linux-x86_64.tar.gz` |
+| **Windows 10 or 11** | `bachelorpad-lite-<version>-windows-x86_64-setup.exe` |
+| Windows, no installer | `bachelorpad-lite-<version>-windows-x86_64.zip` |
+| **Ubuntu, Debian, Mint, Pop!_OS** | `bachelorpad-lite_<version>_amd64.deb` |
+| **Fedora, openSUSE** | `bachelorpad-lite-<version>-1.x86_64.rpm` |
+| Any other Linux | `bachelorpad-lite-<version>-x86_64.AppImage` |
+| Linux, no package | `bachelorpad-lite-<version>-linux-x86_64.tar.gz` |
+| Arch | `PKGBUILD`, for `makepkg -si` |
 
-### The archives are unsigned, and you should know that before you click
+### The downloads are unsigned, and you should know that before you click
 
-Windows SmartScreen will warn you when you download and again when you first
-run it. That is deferred code signing
-([ADR-0055](https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0055.md)) -- a certificate has not been bought.
-Self-signing was refused outright, because a self-signed certificate is only
-satisfied once you install a root certificate you have no reason to trust,
-which is a worse thing to ask of somebody than a warning is.
+Windows SmartScreen will warn you when you download the installer and again
+when you first run it: choose **More info**, then **Run anyway**. On Windows
+11 with **Smart App Control** turned on, it may refuse to run at all -- the
+zip is no different there. That is code signing not yet in place
+([ADR-0094](https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0094.md)). Self-signing was refused outright,
+because a self-signed certificate is only satisfied once you install a root
+certificate you have no reason to trust, which is a worse thing to ask of
+somebody than a warning is.
 
 What is offered instead is a checksum, and it is not nothing: it answers
 tampering in transit, which is the threat a certificate answers worst.
 
 ```sh
-sha256sum -c SHA256SUMS.txt
+sha256sum -c SHA256SUMS.txt --ignore-missing
 ```
 
 ```powershell
-(Get-FileHash -Algorithm SHA256 .\bachelorpad-lite-0.9.5-windows-x86_64.zip).Hash
+(Get-FileHash -Algorithm SHA256 .\bachelorpad-lite-1.0.0-windows-x86_64-setup.exe).Hash
 ```
 
 Compare it with the line in `SHA256SUMS.txt` beside the download.
 
 ### Windows
 
+#### With the installer
+
+Run `bachelorpad-lite-<version>-windows-x86_64-setup.exe`. **It never asks
+for administrator rights**: it installs for you alone, in
+`%LOCALAPPDATA%\Programs\BachelorPad+ Lite`, adds a Start menu entry, and
+appears in **Settings > Apps** with an uninstaller.
+
+It offers two things, both unticked:
+
+- **Open with**, which puts the program in Explorer's *Open with* list and in
+  **Settings > Default apps** for text and Markdown files. It does **not**
+  make itself the default for anything; that stays your choice, made in
+  Windows' own settings ([ADR-0012](https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0012.md)).
+- **A desktop shortcut.**
+
+#### From the zip
+
 ```powershell
-Expand-Archive bachelorpad-lite-0.9.5-windows-x86_64.zip C:\Apps\BachelorPadLite
+Expand-Archive bachelorpad-lite-1.0.0-windows-x86_64.zip C:\Apps\BachelorPadLite
 C:\Apps\BachelorPadLite\bachelorpad.exe
 ```
 
-The archive contains:
+Shortcuts are yours to make, and File > Set as Default Editor registers file
+types for wherever you unpacked it.
+
+Both the installer and the zip contain:
 
 | File | What it is |
 | --- | --- |
 | `bachelorpad.exe` | The program |
 | `bpad.cmd` | A short spelling, for the command line |
 | `bachelorpad.ico` | The icon Explorer draws for registered file types |
-| `io.github.dboles99.BachelorPadPlus.png` | The icon the window shows |
+| `io.github.dboles99.bachelorpluslite.png` | The icon the window shows |
 | `app-help/` | The in-app help, opened by Help > User Guide |
 | `LICENSE`, `THIRD-PARTY-NOTICES.md` | GPL-3.0-only, and the crates it links |
 | `BUILD.txt` | Version, commit, target, and that it is unsigned |
@@ -97,19 +146,58 @@ Both icons ship because they are read by different things: Explorer needs a
 real `.ico`, and the toolkit that draws the window can decode only PNG and
 JPEG ([ADR-0068](https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0068.md)).
 
-**Desktop and Start Menu shortcuts are made by hand.** With no installer there
-is no step that could make them, which is exactly the cost ADR-0067 accepted.
-
 ### Linux
 
+#### Ubuntu, Debian, Mint, Pop!_OS
+
 ```sh
-tar xzf bachelorpad-lite-0.9.5-linux-x86_64.tar.gz
-cd bachelorpad-lite-0.9.5-linux-x86_64
+sudo apt install ./bachelorpad-lite_1.0.0_amd64.deb
+```
+
+#### Fedora, openSUSE
+
+```sh
+sudo dnf install ./bachelorpad-lite-1.0.0-1.x86_64.rpm      # Fedora
+sudo zypper install ./bachelorpad-lite-1.0.0-1.x86_64.rpm   # openSUSE
+```
+
+Either package puts the program in your applications menu, with its icon,
+and `bachelorpad` and `bpad` on your `PATH`. The program and its help live
+together in `/usr/lib/bachelorpad-lite/`.
+
+#### Arch
+
+Build and install from the `PKGBUILD` attached to the release:
+
+```sh
+makepkg -si
+```
+
+#### Anything else: the AppImage
+
+```sh
+chmod +x bachelorpad-lite-1.0.0-x86_64.AppImage
+./bachelorpad-lite-1.0.0-x86_64.AppImage
+```
+
+It is one file and installs nothing. To have it in your applications menu,
+run File > Set as Default Editor from it.
+
+#### The archive
+
+```sh
+tar xzf bachelorpad-lite-1.0.0-linux-x86_64.tar.gz
+cd bachelorpad-lite-1.0.0-linux-x86_64
 ./bachelorpad
 ```
 
 `bpad` beside it is a symlink to the same binary. The executable bit and the
 symlink are both set inside the archive, so neither needs restoring.
+
+#### Flatpak
+
+A manifest for Flathub is written ([ADR-0093](https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0093.md)) and
+not yet published there. Until it is, use one of the above.
 
 ### First launch
 
@@ -133,8 +221,8 @@ Three things worth doing once:
 
 ### Where it puts things
 
-Nothing goes in the folder you unpacked. Everything the product writes about
-itself goes in the usual per-user locations:
+Wherever the program is installed, everything it writes about itself goes in
+the usual per-user locations:
 
 | | Windows | Linux |
 | --- | --- | --- |
@@ -150,14 +238,25 @@ machine, which is more reliable than this table.
 
 ### Removing it
 
-Delete the folder you unpacked. To remove everything, delete the three
-directories above as well.
+| Installed with | Remove with |
+| --- | --- |
+| The Windows installer | **Settings > Apps**, BachelorPad+ Lite, Uninstall. It removes the program, its shortcuts and the Open with entries it added |
+| The zip or the archive | Delete the folder |
+| The `.deb` | `sudo apt remove bachelorpad-lite` |
+| The `.rpm` | `sudo dnf remove bachelorpad-lite` |
+| The AppImage | Delete the file |
 
-If you registered file types, undo that first through the same File > Set as
-Default Editor screen, or through Windows Settings > Default apps. **This
-product will not delete anything out of your profile on your behalf**, and
-[ADR-0070](https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0070.md) explains why that is deliberate rather
-than an omission.
+None of them removes your settings, recent files, recovery journal or notes
+index -- the three directories above. Delete those as well to remove
+everything.
+
+If you registered file types with File > Set as Default Editor, undo that
+first: run the `-remove.reg` file it wrote beside the registration on
+Windows, or delete the two files on Linux, as
+[Making it your default editor](#making-it-your-default-editor) says.
+**This product will not delete anything out of your profile on your behalf**,
+and [ADR-0070](https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0070.md) explains why that is deliberate
+rather than an omission.
 
 ## Your first note, start to finish
 
@@ -697,7 +796,17 @@ Each journal is a small JSON file naming the document it belongs to. An
 you ever go looking, because such a file matches no filter you might write.
 The file names begin with a tag for the run that wrote them, so two runs of
 the program -- one after a crash, or two open at once -- never write over, or
-tidy away, each other's work.
+tidy away, each other's work. **A window that is still open is not offered to
+another**: opening a second window while the first has unsaved changes does
+not ask you to recover them, because they are not lost. Each run holds a
+`.lock` file beside its journals for as long as it is running, and the
+operating system lets go of it when the run ends, however it ends.
+
+**If the file changed after the crash**, Restore still brings your work back,
+but the status bar says the file changed on disk and Save asks before writing
+over it.
+
+On Linux the journal folder and its files are readable by you alone.
 
 **Whether a journal is written at all is a privacy setting.** It is one of the
 two axes the profile model governs; see [Privacy](#privacy-and-security). A profile
@@ -716,23 +825,38 @@ what you had open last time. Open Recent is what remembers.
 
 ### Encoding
 
-**Format > Encoding** offers **UTF-8** and **UTF-8 with BOM**.
+**A file opens in the encoding it was written in, and is saved back in that
+encoding** ([ADR-0085](https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0085.md)). The status bar always
+shows which.
 
-A document can also be opened in **UTF-16**, with a byte-order mark, and is
-saved back that way.
+| A file in | Opens as |
+| --- | --- |
+| UTF-8, with or without a byte-order mark | UTF-8 |
+| UTF-16 with a byte-order mark | UTF-16 LE or BE |
+| UTF-16 without one | UTF-16, found by its pattern -- it has a zero in every other byte |
+| Anything else -- the "ANSI" files Notepad writes, Shift-JIS, GBK | the legacy code page it most likely is, by name: `windows-1252`, `Shift_JIS`, `GBK` |
 
-**A file in a legacy code page is refused today.** Windows-1252, Shift-JIS
-and GBK text with any accented or non-Latin character stops at *not valid
-UTF-8*. Notepad opens them.
+The last row is **a guess**, made by looking at the bytes, and on a short file
+it can be wrong -- four bytes of French can look like Czech. When it is, use
+**Format > Reopen As** and choose the right one: Western, Central European,
+Cyrillic, Japanese, Simplified or Traditional Chinese, Korean, or back to
+UTF-8 or UTF-16. Reopening reads the file again, so it asks first if you have
+unsaved changes.
 
-**UTF-16 with no byte-order mark is worse: it is taken for UTF-8.** Mostly
-Latin text in it is valid UTF-8 byte for byte, so it opens with an invisible
-NUL between every character. Saving writes back exactly what was read, so
-nothing is lost, but it is not readable here.
+**Format > Encoding** offers **UTF-8**, **UTF-8 with BOM** and **UTF-16 LE**,
+to change how the document is saved. Choosing one converts the file when you
+next save it.
 
-Reading both properly, and saving them back in the encoding they came in, is
-decided and not yet built ([ADR-0085](https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0085.md)). Until it is,
-open such a file in Notepad and save it as UTF-8 there.
+**Saving never changes a character behind your back.** If you type something
+the file's encoding has no form for -- a Greek `α` into a Windows-1252 file --
+Save refuses, names the character and its line, and suggests UTF-8. Nothing is
+written, and your work stays unsaved rather than lost.
+
+**And a file that would not save back unchanged is not opened.** A few code
+pages have two codes for one character -- Shift-JIS has an NEC and an IBM code
+for some kanji -- and only one can be written. Opening such a file and saving
+it would change bytes you never edited, so it is refused with that reason, and
+nothing in it is touched.
 
 The BOM variant exists because some Windows tools still want it.
 
@@ -741,7 +865,17 @@ entry.
 
 ### Line endings
 
-**Format > Line Ending** offers **LF** and **CRLF**.
+**Format > Line Ending** offers **LF** and **CRLF**. Choosing one converts the
+whole document when you next save it.
+
+**A document is saved in its own line ending**, the one the status bar shows.
+Press Enter in a file Notepad wrote and the new lines are saved as CRLF, like
+the old ones; paste text with Unix line endings into it and they are saved as
+CRLF too ([ADR-0090](https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0090.md)).
+
+The exception is **a file that already mixed both** when you opened it. Which
+of its line endings is the stray one is not for this program to guess, so it
+is saved exactly as it came, until you choose LF or CRLF from the menu.
 
 A line is `\n` or `\r\n`, and nothing else ([ADR-0029](https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0029.md)).
 That is narrower than Unicode's definition of a line break, which also counts
@@ -844,6 +978,19 @@ bpad --theme Dark --font-size 16 notes.md
 bpad --editor-view
 bpad --line 427 server.log
 ```
+
+A value can follow its flag after a space or after `=`: `--line 427` and
+`--line=427` are the same. Until 1.0 only the second worked, and the first
+opened a file called `427`. Everything after `--` is a file name, however it
+begins, which is how to open a file called `-notes.txt`:
+
+```sh
+bpad -- -notes.txt
+```
+
+`tab_width` and `indent_spaces` decide what Tab inserts from the first
+document onwards. Before 1.0 they were read and then ignored, and every run
+began with tabs four columns wide.
 
 The full list is in [the CLI reference](#command-line), which
 is generated from `--help` -- so it is the binary's own answer rather than a
@@ -980,7 +1127,9 @@ Nothing has happened yet.
 ### Windows
 
 Choose a preset and confirm. You get a **`.reg` file**, written where you can
-find it.
+find it, and beside it a second one that undoes it (see *Undoing it*, below).
+Both are UTF-16, which is what `regedit` expects; open them in this editor or
+in Notepad to read them.
 
 **Read it.** It is a few lines, and it is your machine.
 
@@ -1024,8 +1173,13 @@ system theme.
 
 ### Undoing it
 
-Windows: **Settings > Default apps**, and set the types back. The registry
-entries can be removed by hand if you want them gone entirely.
+Windows: **Settings > Default apps**, and set the types back. Then, to take
+the registration off entirely, double-click the second file written beside
+the first, `io.github.dboles99.bachelorpluslite-remove.reg`. Read it first,
+as before: it deletes this product's own keys, and takes only this product's
+*values* out of the keys other applications share. It also removes what
+builds before 1.0 registered under their earlier names, so it is the one to
+run if you ever registered 0.9.5.
 
 Linux: delete the two files and run the two commands again.
 
@@ -1241,7 +1395,7 @@ SmartScreen, because the archives are unsigned
 Verify the download first if you would rather:
 
 ```powershell
-(Get-FileHash -Algorithm SHA256 .\bachelorpad-lite-0.9.5-windows-x86_64.zip).Hash
+(Get-FileHash -Algorithm SHA256 .\bachelorpad-lite-1.0.0-windows-x86_64-setup.exe).Hash
 ```
 
 against the line in `SHA256SUMS.txt` on the releases page.
@@ -1271,7 +1425,7 @@ bpad --log debug
 The icons ship **beside** the executable, not inside it
 ([ADR-0068](https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0068.md)). If you moved `bachelorpad.exe` out of
 the unpacked folder and left `bachelorpad.ico` and
-`io.github.dboles99.BachelorPadPlus.png` behind, both break.
+`io.github.dboles99.bachelorpluslite.png` behind, both break.
 
 Move the whole folder, or unpack it again.
 
@@ -1304,6 +1458,18 @@ The default surface is the toolkit's text widget, which will not say where the
 caret is -- and a feature that has to know cannot be built on it
 ([ADR-0018](https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0018.md)). See
 [Editing](#the-two-editor-surfaces).
+
+### Typing is slow in a large file
+
+The default editing view lays out the whole document again on every key, so
+typing slows as the file grows: measured at about 80 ms of processor per key
+at 100 KB, and more above that. From 512 KiB the status bar says so when the
+file opens ([ADR-0092](https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0092.md)).
+
+Reading, scrolling, Find and saving are not affected. To type in a large
+file, start the program with `--editor-view`, which draws only the lines on
+screen. It is not the default because it cannot take input-method text, so
+Japanese or Chinese cannot be typed in it.
 
 ### Dropping a file on the window does nothing
 
@@ -1389,7 +1555,7 @@ The flag list in `bp_config::cli::FLAGS` is the one home for this, and
 without a line here is not possible.
 
 ```text
-BachelorPad+ Lite 0.9.5 -- Text editor for notes and logs
+BachelorPad+ Lite 1.0.0 -- Text editor for notes and logs
 
 Usage:
   bachelorpad [options] [file...]
@@ -1500,7 +1666,8 @@ because it has to know where the caret is (ADR-0018).
 
 | Row | State |
 | --- | --- |
-| LF / CRLF, UTF-8 / UTF-8 with BOM | **live** |
+| LF / CRLF, UTF-8 / UTF-8 with BOM / UTF-16 LE | **live** |
+| Reopen As -- ten encodings, for a guess that was wrong ([ADR-0085](https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0085.md)) | **live** |
 | Indent with Tabs / Spaces, Tab Width 2 / 4 / 8 | **live** — one width serves both the Tab key and how wide a tab is drawn; a soft tab goes to the next stop, not a fixed count |
 
 ### Note
@@ -1793,8 +1960,9 @@ entry is checked in and the failure names it.
 
 ## Cutting a release
 
-Two ways, producing the same archives. The scripts are the definition; the
-workflow runs them on a clean machine ([ADR-0073](https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0073.md)).
+Two ways. The scripts are the definition; the workflow runs them on a clean
+machine ([ADR-0073](https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0073.md)) and is the only way that
+builds every package.
 
 ### By hand
 
@@ -1803,7 +1971,11 @@ workflow runs them on a clean machine ([ADR-0073](https://github.com/dboles99/ba
 ./scripts/New-Release.ps1 -Linux
 ```
 
-Into `artifacts/releases/`: a `.zip`, a `.tar.gz` and `SHA256SUMS.txt`.
+Into `artifacts/releases/`: a `.zip`, a `.tar.gz` and `SHA256SUMS.txt` --
+and the Windows installer too, if Inno Setup 6 is installed
+(`winget install JRSoftware.InnoSetup`); without it the script says so and
+skips it. The Linux packages are built by the workflow only: they need
+`dpkg-deb`, `rpmbuild` and a network to fetch the AppImage tool.
 
 `-Linux` builds the Linux target through WSL. It is a switch rather than the
 default only because it needs a Rust toolchain inside the distro. **A release
@@ -1816,13 +1988,24 @@ somebody asks what is in it.
 ### By tag
 
 ```sh
-git tag v0.9.5
-git push origin v0.9.5
+git tag v1.0.0
+git push origin v1.0.0
 ```
 
 `.github/workflows/release.yml` builds both targets on clean runners, checks
-the tag against what the binary reports, attaches the archives, the checksums
-and the notices, and **creates a draft**.
+the tag against what the binary reports, and **creates a draft** holding every
+download ([ADR-0093](https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0093.md)):
+
+| | Built by |
+| --- | --- |
+| `-windows-x86_64-setup.exe` | `New-Release.ps1 -RequireInstaller`, Inno Setup on `packaging/windows/bachelorpad-lite.iss` |
+| `-windows-x86_64.zip` | `New-Release.ps1` |
+| `-linux-x86_64.tar.gz` | `scripts/release-linux.sh`, on `ubuntu-22.04` for the glibc floor |
+| `_amd64.deb`, `-1.x86_64.rpm`, `-x86_64.AppImage`, `PKGBUILD` | `packaging/linux/build-packages.sh`, from that `.tar.gz` |
+| `SHA256SUMS.txt` | the publish job, over all of them |
+
+Run it with **`dry_run`** from the Actions tab first, against the branch: it
+builds everything and publishes nothing.
 
 **Publishing is a person's job.** It is the act that changes what a stranger
 downloads, which is the same gesture ADR-0053 keeps for clicking merge.
@@ -1834,7 +2017,7 @@ downloads, which is the same gesture ADR-0053 keeps for clicking merge.
 Both release scripts ask the binary rather than reading a manifest:
 
 ```
-BachelorPad+ Lite 0.9.5
+BachelorPad+ Lite 1.0.0
 Text editor for notes and logs
 GPL-3.0-only
 ```
@@ -1859,12 +2042,21 @@ both icons on Windows and the PNG on Linux, `app-help/`, `README.md`,
 linked into the binary. Both are obligations rather than courtesies
 ([ADR-0071](https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0071.md)).
 
+### Two things a release does not do
+
+**The Flatpak** is a manifest in `packaging/flatpak/`; Flathub builds it,
+from a tag, after a pull request to `flathub/flathub`, which wants
+`cargo-sources.json` generated beside it and a screenshot. **The AUR** takes
+the rendered `PKGBUILD` and a `.SRCINFO`, pushed from an AUR account. Both are
+a person's.
+
 ### They are unsigned, and every run says so
 
 [ADR-0055](https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0055.md) deferred code signing and **refused
 self-signing outright** -- a self-signed Authenticode certificate is only
 satisfied once the user installs a root certificate they have no reason to
-trust.
+trust. 1.0.0 ships unsigned ([ADR-0094](https://github.com/dboles99/bachelorpluslite/blob/main/docs/decisions/ADR-0094.md)); SignPath
+or the Store is a 1.x release's.
 
 `New-Release.ps1` prints it on every run, in the same words, and the release
 notes repeat it. A release that stays quiet about it is asking the user to

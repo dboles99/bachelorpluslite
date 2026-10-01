@@ -187,6 +187,8 @@ fn several_documents_recover_independently_and_newest_first() {
             )
             .expect("checkpoint");
     }
+    // The run that wrote them ends; one still running is not offered (W1-03).
+    drop(journal);
 
     let pending = fixture.after_a_restart().left_behind();
     assert_eq!(pending.len(), 3);
@@ -266,6 +268,7 @@ fn declining_recovery_removes_every_checkpoint_that_was_offered() {
             )
             .expect("checkpoint");
     }
+    drop(journal);
 
     // Declined in the next run, which is where the question is asked, and
     // for exactly what it was offered (ADR-0084).

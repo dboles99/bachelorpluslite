@@ -230,15 +230,85 @@ pub struct Package {
 /// `--font-size=18` gives `Some("font-size")`, `-h` gives `Some("h")`, and
 /// `notes.txt` gives `None`.
 ///
-/// A bare `-` or `--` also gives `None`: they select nothing, and this
-/// product gives neither a meaning. If `--` ever becomes an end-of-flags
-/// marker -- the way to open a file whose name begins with a dash -- this is
-/// where it starts.
+/// A bare `-` or `--` also gives `None`: they select nothing. `--` ends the
+/// flags, and [`arguments`] is where that is decided, before this is asked.
 #[must_use]
 pub fn selector(arg: &str) -> Option<&str> {
     let rest = arg.strip_prefix("--").or_else(|| arg.strip_prefix('-'))?;
     let name = rest.split('=').next().unwrap_or(rest);
     if name.is_empty() { None } else { Some(name) }
+}
+
+/// The command line, split into what every reader here expects.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Arguments {
+    /// The executable, the flags and any file named before `--`, with every
+    /// flag's value attached by `=`. Everything in this crate that reads a
+    /// flag reads this.
+    pub flags: Vec<String>,
+    /// Files named after `--`, which are files whatever they begin with.
+    pub after_dashes: Vec<String>,
+}
+
+impl Arguments {
+    /// Every file named, in the order typed: the words that are not flags,
+    /// then everything after `--`.
+    #[must_use]
+    pub fn files(&self) -> Vec<String> {
+        self.flags
+            .iter()
+            .skip(1)
+            .filter(|a| !a.starts_with('-'))
+            .chain(&self.after_dashes)
+            .cloned()
+            .collect()
+    }
+}
+
+/// Read the command line the two ways people type it.
+///
+/// `--line 427 server.log` and `--line=427 server.log` mean the same thing,
+/// and the manual had always printed the first. Only the second worked: the
+/// space form opened a file called `427` and then reported `--line` as
+/// missing its value (W2-03). So a flag that takes a value takes the next
+/// word, unless that word is itself a flag -- `--theme --editor-view` is a
+/// missing theme, not a theme called `--editor-view` -- and the result is
+/// written back in the `=` form every other function here already reads.
+///
+/// `--` ends the flags, the usual way to open a file whose name begins with
+/// a dash.
+#[must_use]
+pub fn arguments(args: &[String]) -> Arguments {
+    let mut flags = Vec::with_capacity(args.len());
+    let mut words = args.iter();
+    while let Some(arg) = words.next() {
+        if arg == "--" {
+            return Arguments {
+                flags,
+                after_dashes: words.cloned().collect(),
+            };
+        }
+        let takes_value = !arg.contains('=')
+            && selector(arg)
+                .and_then(find)
+                .is_some_and(|flag| flag.value.is_some());
+        let value = words
+            .as_slice()
+            .first()
+            .filter(|next| takes_value && *next != "--" && selector(next).is_none())
+            .cloned();
+        match value {
+            Some(value) => {
+                flags.push(format!("{arg}={value}"));
+                words.next();
+            }
+            None => flags.push(arg.clone()),
+        }
+    }
+    Arguments {
+        flags,
+        after_dashes: Vec::new(),
+    }
 }
 
 /// The flag `name` selects, if the product accepts one by that spelling.
@@ -440,6 +510,85 @@ mod tests {
         assert_eq!(help.spelling(), "--help, -h");
         let size = find("font-size").expect("--font-size exists");
         assert_eq!(size.spelling(), "--font-size=N");
+    }
+
+    fn words(list: &[&str]) -> Vec<String> {
+        list.iter().map(|s| (*s).to_owned()).collect()
+    }
+
+    #[test]
+    fn a_value_may_follow_its_flag_after_a_space() {
+        // W2-03. The manual printed this form, and it opened a file called
+        // `427` while reporting `--line` as missing its value.
+        let parsed = arguments(&words(&["bpad", "--line", "427", "server.log"]));
+        assert_eq!(parsed.flags, words(&["bpad", "--line=427", "server.log"]));
+        assert_eq!(parsed.files(), words(&["server.log"]));
+        assert_eq!(line(&parsed.flags), Ok(Some(427)));
+    }
+
+    #[test]
+    fn every_invocation_the_manual_prints_means_what_it_says() {
+        // docs/user/08-settings.md, verbatim.
+        let parsed = arguments(&words(&[
+            "bpad",
+            "--theme",
+            "Dark",
+            "--font-size",
+            "16",
+            "notes.md",
+        ]));
+        assert_eq!(
+            parsed.flags,
+            words(&["bpad", "--theme=Dark", "--font-size=16", "notes.md"])
+        );
+        assert_eq!(parsed.files(), words(&["notes.md"]));
+
+        let parsed = arguments(&words(&["bpad", "--editor-view"]));
+        assert_eq!(parsed.flags, words(&["bpad", "--editor-view"]));
+        assert!(parsed.files().is_empty());
+    }
+
+    #[test]
+    fn the_equals_form_is_left_as_it_was_typed() {
+        let typed = words(&["bpad", "--line=9", "a.txt"]);
+        assert_eq!(arguments(&typed).flags, typed);
+    }
+
+    #[test]
+    fn a_switch_does_not_take_the_next_word() {
+        // `--editor-view` takes no value, so the file after it is a file.
+        let parsed = arguments(&words(&["bpad", "--editor-view", "notes.txt"]));
+        assert_eq!(parsed.files(), words(&["notes.txt"]));
+    }
+
+    #[test]
+    fn a_flag_followed_by_a_flag_is_missing_its_value_rather_than_given_one() {
+        let parsed = arguments(&words(&["bpad", "--theme", "--editor-view"]));
+        assert_eq!(parsed.flags, words(&["bpad", "--theme", "--editor-view"]));
+    }
+
+    #[test]
+    fn a_value_flag_at_the_end_is_left_for_resolve_to_report() {
+        let parsed = arguments(&words(&["bpad", "notes.txt", "--line"]));
+        assert_eq!(parsed.flags, words(&["bpad", "notes.txt", "--line"]));
+    }
+
+    #[test]
+    fn everything_after_two_dashes_is_a_file() {
+        let parsed = arguments(&words(&["bpad", "--line", "3", "--", "-odd.txt", "--help"]));
+        assert_eq!(parsed.flags, words(&["bpad", "--line=3"]));
+        assert_eq!(parsed.files(), words(&["-odd.txt", "--help"]));
+        assert!(
+            !asked_for_help(&parsed.flags),
+            "a file called --help is not a request for help"
+        );
+    }
+
+    #[test]
+    fn two_dashes_are_not_taken_as_a_value() {
+        let parsed = arguments(&words(&["bpad", "--theme", "--", "Dark"]));
+        assert_eq!(parsed.flags, words(&["bpad", "--theme"]));
+        assert_eq!(parsed.files(), words(&["Dark"]));
     }
 
     #[test]

@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- AppStream metadata: what a software centre shows. Read by GNOME Software,
+     KDE Discover and Flathub. The id, name and summary agree with
+     bp_platform::{APP_ID, DISPLAY_NAME, DESCRIPTION}, and a test reads this
+     file to say so (ADR-0093). -->
+<component type="desktop-application">
+  <id>io.github.dboles99.bachelorpluslite</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-only</project_license>
+  <name>BachelorPad+ Lite</name>
+  <summary>Text editor for notes and logs</summary>
+  <description>
+    <p>
+      Notepad when you want it, more when you need it. A plain text editor
+      that opens instantly, never touches the network and cannot run
+      anything, with one thing Notepad does not have: a note layer that knows
+      which of your documents are about the same subject.
+    </p>
+    <p>
+      It opens the files Notepad opens -- UTF-8, UTF-16 and the legacy code
+      pages -- and saves them back as they came. Unsaved work survives a crash
+      and is offered back on the next launch.
+    </p>
+  </description>
+  <developer id="io.github.dboles99">
+    <name>Daniel Boles</name>
+  </developer>
+  <launchable type="desktop-id">io.github.dboles99.bachelorpluslite.desktop</launchable>
+  <url type="homepage">https://bpad.prompt-forge.dev</url>
+  <url type="bugtracker">https://github.com/dboles99/bachelorpluslite/issues</url>
+  <url type="vcs-browser">https://github.com/dboles99/bachelorpluslite</url>
+  <provides>
+    <binary>bachelorpad</binary>
+  </provides>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="1.0.0" date="2026-10-01"/>
+  </releases>
+</component>

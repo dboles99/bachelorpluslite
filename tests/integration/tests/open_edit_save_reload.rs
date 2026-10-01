@@ -383,7 +383,8 @@ fn utf16_round_trips_through_the_pipeline_byte_for_byte() {
 
         // Through the rope, then out through the crate's own encoder.
         let text = Buffer::from_text(&opened.text).to_string();
-        let out = bp_files::encode(&text, opened.encoding, LineEndingPolicy::Preserve);
+        let out = bp_files::encode(&text, opened.encoding, LineEndingPolicy::Preserve)
+            .expect("UTF-16 writes every character");
         atomic_write(&path, &out, SaveOptions::default()).expect("atomic_write");
 
         assert_eq!(

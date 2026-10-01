@@ -5,7 +5,7 @@ The gate regenerates it and fails if this file has drifted, so an edit here
 is a change that will be reverted by the next run rather than kept.
 
 BachelorPad+ Lite is distributed under GPL-3.0-only (ADR-0071). It statically
-links the 582 crates below, and this file passes on their terms as that
+links the 586 crates below, and this file passes on their terms as that
 licence requires. Listed here is what is actually shipped: the dependency
 graph walked from the `bachelorpad` binary along normal and build edges only,
 never dev edges -- a test-only crate is in no artefact anybody downloads.
@@ -442,6 +442,7 @@ offering "or later" would be offering terms it has not been granted.
 | `bit-set` | 0.10.0 | https://github.com/contain-rs/bit-set |
 | `bit-vec` | 0.9.1 | https://github.com/contain-rs/bit-vec |
 | `blocking` | 1.6.2 | https://github.com/smol-rs/blocking |
+| `chardetng` | 1.0.0 | https://github.com/hsivonen/chardetng |
 | `concurrent-queue` | 2.5.0 | https://github.com/smol-rs/concurrent-queue |
 | `ctor` | 0.10.1 | https://github.com/mmastrac/rust-ctor |
 | `dtor` | 0.8.1 | https://github.com/mmastrac/rust-ctor |
@@ -456,6 +457,7 @@ offering "or later" would be offering terms it has not been granted.
 | `kurbo` | 0.13.1 | https://github.com/linebender/kurbo |
 | `linebender_resource_handle` | 0.1.1 | https://github.com/linebender/raw_resource_handle |
 | `muda` | 0.19.3 | https://github.com/tauri-apps/muda |
+| `multiversion_no_op` | 1.0.0 | https://github.com/hsivonen/multiversion_no_op |
 | `parking` | 2.2.1 | https://github.com/smol-rs/parking |
 | `parlance` | 0.1.0 | https://github.com/linebender/parley |
 | `parley` | 0.11.1 | https://github.com/linebender/parley |
@@ -516,6 +518,7 @@ offering "or later" would be offering terms it has not been granted.
 | Crate | Version | Source |
 | --- | --- | --- |
 | `bitflags` | 1.3.2 | https://github.com/bitflags/bitflags |
+| `core_detect` | 1.0.0 | https://github.com/thomcc/core_detect |
 | `downcast-rs` | 1.2.1 | https://github.com/marcianx/downcast-rs |
 | `fallible-iterator` | 0.3.0 | https://github.com/sfackler/rust-fallible-iterator |
 | `fallible-streaming-iterator` | 0.1.9 | https://github.com/sfackler/fallible-streaming-iterator |
@@ -693,6 +696,12 @@ offering "or later" would be offering terms it has not been granted.
 | --- | --- | --- |
 | `same-file` | 1.0.6 | https://github.com/BurntSushi/same-file |
 | `walkdir` | 2.5.0 | https://github.com/BurntSushi/walkdir |
+
+### (Apache-2.0 OR MIT) AND BSD-3-Clause
+
+| Crate | Version | Source |
+| --- | --- | --- |
+| `encoding_rs` | 0.8.42 | https://github.com/hsivonen/encoding_rs |
 
 ### (MIT OR Apache-2.0) AND Unicode-3.0
 

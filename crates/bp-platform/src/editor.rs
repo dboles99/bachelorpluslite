@@ -102,7 +102,7 @@ pub struct AppInfo {
 pub const fn icon_file_name(platform: Platform) -> &'static str {
     match platform {
         Platform::Windows => "bachelorpad.ico",
-        Platform::Linux => "io.github.dboles99.BachelorPadPlus.png",
+        Platform::Linux => "io.github.dboles99.bachelorpluslite.png",
     }
 }
 
@@ -139,7 +139,7 @@ pub const fn window_icon_file_name() -> &'static str {
     // Deliberately `icon_file_name(Platform::Linux)`'s value, written out
     // rather than called: these are equal today and for different reasons,
     // and a caller that read one for the other would be right by accident.
-    "io.github.dboles99.BachelorPadPlus.png"
+    "io.github.dboles99.bachelorpluslite.png"
 }
 
 /// Where the window icon sits, given where the executable does.
@@ -224,6 +224,9 @@ pub enum ArtefactKind {
     MimePackage,
     /// A `.reg` script. Generated, never applied -- see the module docs.
     RegistryScript,
+    /// The `.reg` script that undoes [`Self::RegistryScript`], and what
+    /// earlier builds registered under their names (W2-05).
+    RegistryRemoval,
 }
 
 /// A file a registration would consist of.
@@ -240,6 +243,27 @@ pub struct Artefact {
     pub contents: String,
     /// What it is.
     pub kind: ArtefactKind,
+}
+
+impl Artefact {
+    /// The file as it must be written: UTF-8, except a registry script, which
+    /// `regedit` reads correctly only as UTF-16 with a byte-order mark (see
+    /// [`windows::registry_file_bytes`]).
+    ///
+    /// The one place that decision is made, so a caller writing `contents`
+    /// directly is the only way to get it wrong -- which is what every caller
+    /// did until 1.0.
+    #[must_use]
+    pub fn bytes(&self) -> Vec<u8> {
+        match self.kind {
+            ArtefactKind::RegistryScript | ArtefactKind::RegistryRemoval => {
+                windows::registry_file_bytes(&self.contents)
+            }
+            ArtefactKind::DesktopEntry | ArtefactKind::MimePackage => {
+                self.contents.clone().into_bytes()
+            }
+        }
+    }
 }
 
 /// A command that must run before the registration takes effect, named rather
@@ -301,13 +325,14 @@ impl Handoff {
     #[must_use]
     pub fn describe(&self) -> String {
         match self {
-            Self::WindowsDefaultApps { .. } => {
-                "BachelorPad+ now appears in Windows' list of applications. Choose it in \
-                 Settings ▸ Apps ▸ Default apps to make it open these file types."
-                    .to_owned()
-            }
+            Self::WindowsDefaultApps { .. } => format!(
+                "{} now appears in Windows' list of applications. Choose it in \
+                 Settings ▸ Apps ▸ Default apps to make it open these file types.",
+                crate::DISPLAY_NAME
+            ),
             Self::LinuxSetDefault { program, args } => format!(
-                "BachelorPad+ now appears in Open With. To make it the default, run: {program} {}",
+                "{} now appears in Open With. To make it the default, run: {program} {}",
+                crate::DISPLAY_NAME,
                 args.join(" ")
             ),
         }
@@ -415,6 +440,15 @@ pub fn plan(
                 relative_path: format!("{}-file-types.reg", app.app_id),
                 contents: windows::registry_script(&registry_values),
                 kind: ArtefactKind::RegistryScript,
+            });
+            let every_extension: Vec<&str> = file_type::FILE_TYPES
+                .iter()
+                .map(|file_type| file_type.extension)
+                .collect();
+            artefacts.push(Artefact {
+                relative_path: format!("{}-remove.reg", app.app_id),
+                contents: windows::removal_script(&app.display_name, &every_extension),
+                kind: ArtefactKind::RegistryRemoval,
             });
             Handoff::WindowsDefaultApps {
                 uri: "ms-settings:defaultapps",

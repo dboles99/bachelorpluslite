@@ -1,7 +1,8 @@
 # Cutting a release
 
-Two ways, producing the same archives. The scripts are the definition; the
-workflow runs them on a clean machine ([ADR-0073](../decisions/ADR-0073.md)).
+Two ways. The scripts are the definition; the workflow runs them on a clean
+machine ([ADR-0073](../decisions/ADR-0073.md)) and is the only way that
+builds every package.
 
 ## By hand
 
@@ -10,7 +11,11 @@ workflow runs them on a clean machine ([ADR-0073](../decisions/ADR-0073.md)).
 ./scripts/New-Release.ps1 -Linux
 ```
 
-Into `artifacts/releases/`: a `.zip`, a `.tar.gz` and `SHA256SUMS.txt`.
+Into `artifacts/releases/`: a `.zip`, a `.tar.gz` and `SHA256SUMS.txt` --
+and the Windows installer too, if Inno Setup 6 is installed
+(`winget install JRSoftware.InnoSetup`); without it the script says so and
+skips it. The Linux packages are built by the workflow only: they need
+`dpkg-deb`, `rpmbuild` and a network to fetch the AppImage tool.
 
 `-Linux` builds the Linux target through WSL. It is a switch rather than the
 default only because it needs a Rust toolchain inside the distro. **A release
@@ -23,13 +28,24 @@ somebody asks what is in it.
 ## By tag
 
 ```sh
-git tag v0.9.5
-git push origin v0.9.5
+git tag v1.0.0
+git push origin v1.0.0
 ```
 
 `.github/workflows/release.yml` builds both targets on clean runners, checks
-the tag against what the binary reports, attaches the archives, the checksums
-and the notices, and **creates a draft**.
+the tag against what the binary reports, and **creates a draft** holding every
+download ([ADR-0093](../decisions/ADR-0093.md)):
+
+| | Built by |
+| --- | --- |
+| `-windows-x86_64-setup.exe` | `New-Release.ps1 -RequireInstaller`, Inno Setup on `packaging/windows/bachelorpad-lite.iss` |
+| `-windows-x86_64.zip` | `New-Release.ps1` |
+| `-linux-x86_64.tar.gz` | `scripts/release-linux.sh`, on `ubuntu-22.04` for the glibc floor |
+| `_amd64.deb`, `-1.x86_64.rpm`, `-x86_64.AppImage`, `PKGBUILD` | `packaging/linux/build-packages.sh`, from that `.tar.gz` |
+| `SHA256SUMS.txt` | the publish job, over all of them |
+
+Run it with **`dry_run`** from the Actions tab first, against the branch: it
+builds everything and publishes nothing.
 
 **Publishing is a person's job.** It is the act that changes what a stranger
 downloads, which is the same gesture ADR-0053 keeps for clicking merge.
@@ -41,7 +57,7 @@ downloads, which is the same gesture ADR-0053 keeps for clicking merge.
 Both release scripts ask the binary rather than reading a manifest:
 
 ```
-BachelorPad+ Lite 0.9.5
+BachelorPad+ Lite 1.0.0
 Text editor for notes and logs
 GPL-3.0-only
 ```
@@ -66,12 +82,21 @@ both icons on Windows and the PNG on Linux, `app-help/`, `README.md`,
 linked into the binary. Both are obligations rather than courtesies
 ([ADR-0071](../decisions/ADR-0071.md)).
 
+## Two things a release does not do
+
+**The Flatpak** is a manifest in `packaging/flatpak/`; Flathub builds it,
+from a tag, after a pull request to `flathub/flathub`, which wants
+`cargo-sources.json` generated beside it and a screenshot. **The AUR** takes
+the rendered `PKGBUILD` and a `.SRCINFO`, pushed from an AUR account. Both are
+a person's.
+
 ## They are unsigned, and every run says so
 
 [ADR-0055](../decisions/ADR-0055.md) deferred code signing and **refused
 self-signing outright** -- a self-signed Authenticode certificate is only
 satisfied once the user installs a root certificate they have no reason to
-trust.
+trust. 1.0.0 ships unsigned ([ADR-0094](../decisions/ADR-0094.md)); SignPath
+or the Store is a 1.x release's.
 
 `New-Release.ps1` prints it on every run, in the same words, and the release
 notes repeat it. A release that stays quiet about it is asking the user to

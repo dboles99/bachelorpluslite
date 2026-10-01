@@ -49,7 +49,10 @@ jobs:
       # Linux also failed turns one red run into two.
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-latest]
+        # 22.04 rather than -latest for the reason release.yml gives: it is
+        # the image releases are built on, so a dependency that needs a newer
+        # glibc fails a pull request rather than a release (ADR-0087).
+        os: [windows-latest, ubuntu-22.04]
     steps:
       - uses: actions/checkout@v4
 
@@ -73,7 +76,14 @@ jobs:
         with:
           components: rustfmt, clippy
 
+      # Keyed on the image as well as the OS. The cache key says "Linux",
+      # not which Linux, so moving this job to ubuntu-22.04 restored a target
+      # directory built on 24.04 -- proc-macros needing glibc 2.39, which the
+      # 22.04 runner cannot load, and the build failed before compiling a
+      # line of this repository (ADR-0087).
       - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.os }}
 
       # --- the stages, in Invoke-LocalCI.ps1's order and under its names ---
 
